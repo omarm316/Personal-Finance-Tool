@@ -1,0 +1,8 @@
+.env
+finance.db
+*.xlsx
+__pycache__
+.git
+*.pyc
+.claude
+main copy.py

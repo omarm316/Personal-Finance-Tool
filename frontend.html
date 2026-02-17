@@ -1,0 +1,2012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Finance Automation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --sidebar-w:220px;--bg:#f4f5f7;--sidebar-bg:#0f1117;--sidebar-text:#a0a8b8;
+  --card-bg:#ffffff;--border:#e8eaed;--text-primary:#0f1117;--text-secondary:#6b7280;--text-muted:#9ca3af;
+  --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
+  --radius:12px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 12px rgba(0,0,0,0.08);
+}
+html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
+body{overflow:hidden}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid rgba(255,255,255,0.05)}
+.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.07)}
+.sidebar-logo h1{font-size:15px;font-weight:600;color:#fff;letter-spacing:-0.3px}
+.sidebar-logo p{font-size:11px;color:var(--sidebar-text);margin-top:2px}
+.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.nav-section-label{font-size:10px;font-weight:600;color:#3d4450;text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit}
+.nav-item:hover{background:rgba(255,255,255,0.06);color:#d0d5e0}
+.nav-item.active{background:rgba(59,130,246,0.15);color:#fff;font-weight:500}
+.nav-icon{font-size:15px;width:18px;text-align:center}
+.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.07)}
+.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--sidebar-text);display:flex;align-items:center;gap:8px}
+.bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
+.main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
+.content{flex:1;overflow-y:auto;padding:24px 28px}
+.card{background:var(--card-bg);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)}
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.metric-card{padding:20px 22px}
+.metric-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px}
+.metric-value{font-size:28px;font-weight:600;font-family:'DM Mono',monospace;letter-spacing:-1px}
+.metric-sub{font-size:12px;color:var(--text-muted);margin-top:4px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-secondary{background:#f3f4f6;color:var(--text-primary);border:1px solid var(--border)}
+.btn-secondary:hover{background:#e9eaec}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
+.btn-success{background:#f0fdf4;color:var(--green);border:1px solid #bbf7d0}
+.btn-success:hover{background:#dcfce7}
+.btn-ghost{background:transparent;color:var(--text-secondary)}
+.btn-ghost:hover{background:#f3f4f6}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.filters{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;width:200px}
+.search-input:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
+.filter-select{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;cursor:pointer}
+.filter-label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+.date-input{border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa}
+.filter-count{margin-left:auto;font-size:12px;color:var(--text-muted);white-space:nowrap}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;background:#fafafa}
+tbody tr{border-bottom:1px solid #f3f4f6;transition:background 0.1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:#f9faff}
+tbody tr.row-locked{background:#eff6ff}
+tbody tr.row-locked:hover{background:#dbeafe}
+tbody tr.row-review{background:#fffbeb}
+tbody tr.row-review:hover{background:#fef3c7}
+tbody tr.row-transfer{opacity:0.7}
+td{padding:11px 14px;font-size:13.5px}
+.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.badge-transfer{background:#f3f4f6;color:#6b7280}
+.badge-income{background:#f0fdf4;color:#059669}
+.badge-expense{background:#fef2f2;color:#dc2626}
+.badge-category{background:#eff6ff;color:#2563eb}
+.badge-unclassified{background:#fef2f2;color:#dc2626}
+.edit-actions{display:flex;gap:6px;align-items:center}
+.amount-neg{color:var(--red);font-family:'DM Mono',monospace;font-size:13.5px;font-weight:500}
+.amount-pos{color:var(--green);font-family:'DM Mono',monospace;font-size:13.5px;font-weight:500}
+.amount-neutral{color:var(--text-secondary);font-family:'DM Mono',monospace;font-size:13.5px}
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{background:#0f1117;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-md);animation:slideUp 0.2s ease;max-width:320px}
+.toast.success{border-left:3px solid var(--green)}
+.toast.error{border-left:3px solid var(--red)}
+@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.review-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;display:flex;align-items:center;justify-content:center}
+.review-panel{background:#fff;border-radius:16px;padding:28px;width:480px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.review-field{margin-bottom:16px}
+.review-field label{font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px}
+.review-field select,.review-field input{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit;outline:none}
+.review-field select:focus,.review-field input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
+.review-actions{display:flex;gap:8px;margin-top:24px;justify-content:flex-end}
+.loading{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);font-size:14px;gap:10px}
+.spinner{width:18px;height:18px;border:2px solid #e5e7eb;border-top-color:var(--blue);border-radius:50%;animation:spin 0.7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);gap:8px}
+.empty-icon{font-size:36px;opacity:0.4}
+.dash-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+.section-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+.section-title{font-size:14px;font-weight:600}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:none}
+.settings-label{font-size:14px;font-weight:500}
+.settings-desc{font-size:12px;color:var(--text-muted);margin-top:2px}
+.bank-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:20px;padding:3px 10px;font-size:11px;color:#059669}
+.content::-webkit-scrollbar{width:6px}
+.content::-webkit-scrollbar-track{background:transparent}
+.content::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useCallback}=React;
+const API='http://localhost:8000/api';
+const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(n??0));
+const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const monthStart=()=>new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString().slice(0,10);
+const todayStr=()=>new Date().toISOString().slice(0,10);
+
+function useToast(){
+  const[toasts,setToasts]=useState([]);
+  const add=(msg,type='success')=>{
+    const id=Date.now();
+    setToasts(t=>[...t,{id,msg,type}]);
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);
+  };
+  return{toasts,toast:add};
+}
+
+async function apiFetch(path,opts={}){
+  const res=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
+  if(!res.ok)throw new Error(await res.text());
+  return res.json();
+}
+
+function ToastContainer({toasts}){
+  return<div className="toast-container">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>;
+}
+
+function Sidebar({page,setPage,banks,onConnectBank,onSync}){
+  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'balances',icon:'◇',label:'Balances'},{id:'cashflow',icon:'⇄',label:'Cash Flow'},{id:'networth',icon:'△',label:'Net Worth'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
+  const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
+  return(
+    <div className="sidebar">
+      <div className="sidebar-logo"><h1>Finance</h1><p>Personal dashboard</p></div>
+      <nav className="sidebar-nav">
+        <div className="nav-section-label">Menu</div>
+        {nav.map(n=><button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)}><span className="nav-icon">{n.icon}</span>{n.label}</button>)}
+      </nav>
+      <div className="sidebar-footer">
+        <div className="nav-section-label" style={{paddingTop:0,marginBottom:6}}>Connected Banks</div>
+        {uniqueBanks.length===0?<div style={{fontSize:12,color:'#3d4450',padding:'4px 10px'}}>No banks connected</div>
+          :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)}
+        <div style={{display:'flex',gap:6,marginTop:12}}>
+          <button className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank}>+ Bank</button>
+          <button className="btn btn-sm btn-secondary" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Sort categories alphabetically for dropdowns (Section 4D) */
+const sortedCats=(cats)=>[...cats].sort((a,b)=>a.name.localeCompare(b.name));
+
+/* 8 canonical transaction types (Section 4B) */
+const TXN_TYPES=['Expense','Income','Transfer','Investment Gain (Loss)','Purchase','Sale','Depreciation','Other'];
+/* Types that show a category selector — only Expense and Income (Section 4C) */
+const BUDGET_TYPES_SET=new Set(['Expense','Income']);
+/* Category only shown for Expense/Income */
+const showCategoryForType=(t)=>BUDGET_TYPES_SET.has(t);
+
+function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
+  const[category,setCategory]=useState(txn.category_final||'');
+  const[action,setAction]=useState(txn.action||'Expense');
+  const[saving,setSaving]=useState(false);
+  /* When type changes, clear category if new type hides it */
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const handleSave=async()=>{setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setSaving(false);onClose();};
+  return(
+    <div className="review-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="review-panel">
+        <div style={{fontSize:16,fontWeight:600,marginBottom:4}}>Review Transaction</div>
+        <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:20}}>{fmtDate(txn.date)} · {txn.amount<0?'–':'+'}{fmt(txn.amount)}</div>
+        <div className="review-field"><label>Description</label><input value={txn.description_raw} readOnly style={{background:'#fafafa',color:'#6b7280'}}/></div>
+        <div className="review-field"><label>Type</label>
+          <select value={action} onChange={e=>handleTypeChange(e.target.value)}>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+        </div>
+        {showCategoryForType(action)&&<div className="review-field"><label>Category</label>
+          <select value={category} onChange={e=>setCategory(e.target.value)}>
+            <option value="">— Select category —</option>
+            {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>}
+        <div className="review-actions">
+          <button className="btn btn-sm btn-ghost" onClick={onDiscard} title="Close without saving">✕ Discard</button>
+          <button className="btn btn-sm btn-ghost" onClick={()=>{onIgnore(txn.id);onClose();}} title="Remove from review queue without categorizing">○ Ignore</button>
+          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving}>{saving?'…':'✓ Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TxnRow({txn,categories,onSave,onReview,onSplit}){
+  const[locked,setLocked]=useState(txn.is_locked);
+  const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[editing,setEditing]=useState(false);
+  const[category,setCategory]=useState(txn.category_final);
+  const[action,setAction]=useState(txn.action);
+  const[saving,setSaving]=useState(false);
+  const rowClass=locked?'row-locked':txn.needs_review?'row-review':txn.action==='Transfer'?'row-transfer':'';
+  /* When type changes in edit mode, clear category if new type hides it */
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const[showRulePrompt,setShowRulePrompt]=useState(false);
+  const[ruleCreating,setRuleCreating]=useState(false);
+  const save=async()=>{
+    setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setLocked(true);setSaving(false);setEditing(false);
+    /* Section 4E: Show rule creation prompt after save */
+    if(category&&category!=='Unclassified')setShowRulePrompt(true);
+  };
+  const createRuleFromTxn=async()=>{
+    setRuleCreating(true);
+    try{
+      const desc=(txn.description_clean||txn.description_raw||'').toUpperCase().trim();
+      const pattern=desc.substring(0,40).trim();
+      await apiFetch('/rules',{method:'POST',body:JSON.stringify({priority:100,match_type:'contains',pattern,set_action:action||null,set_category:category||null,notes:'Auto-created from transaction edit'})});
+      onSave(txn.id,{});/* Trigger reload */
+    }catch(e){}
+    finally{setRuleCreating(false);setShowRulePrompt(false);}
+  };
+  const cancel=()=>{setCategory(txn.category_final);setAction(txn.action);setEditing(false);};
+  const toggleLock=async()=>{const nl=!locked;await onSave(txn.id,{is_locked:nl});setLocked(nl);};
+  const amtClass=txn.action==='Transfer'?'amount-neutral':txn.amount<0?'amount-neg':'amount-pos';
+  const typeBadge=(a)=>{const l=(a||'').toLowerCase();return l==='income'?'income':l==='transfer'?'transfer':'expense';};
+  return(
+    <tr className={rowClass}>
+      <td style={{color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{fmtDate(txn.date)}</td>
+      <td>
+        <div style={{fontWeight:500,fontSize:13.5}}>{txn.description_raw}</div>
+        <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2}}>
+          {locked&&<span title="Manually edited — protected from sync">🔒</span>}
+          {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
+        </div>
+      </td>
+      <td><span className={amtClass}>{txn.amount<0?'–':'+'}{fmt(txn.amount)}</span></td>
+      <td>
+        {editing
+          ?<select value={action} onChange={e=>handleTypeChange(e.target.value)} className="filter-select" style={{fontSize:12,padding:'4px 8px'}}>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+          :<span className={`badge badge-${typeBadge(action)}`}>{action||'Expense'}</span>
+        }
+      </td>
+      <td>
+        {!showCategoryForType(action)
+          ?<span style={{color:'#d1d5db',fontSize:13}}>—</span>
+          :editing
+            ?<select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{fontSize:12,padding:'4px 8px',width:130}}>
+              <option value="">Unclassified</option>
+              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            :<span className={`badge ${!txn.category_final||txn.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`}>
+              {txn.category_final||'Unclassified'}
+              {txn.category_manual&&<span style={{marginLeft:4,opacity:0.5}}>✎</span>}
+            </span>
+        }
+      </td>
+      <td style={{color:'var(--text-muted)',fontSize:12,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={txn.account_name}>{txn.account_name}</td>
+      <td>
+        {editing
+          ?<div className="edit-actions">
+            <button className="btn btn-sm btn-success" onClick={save} disabled={saving}>{saving?'…':'Save'}</button>
+            <button className="btn btn-sm btn-ghost" onClick={cancel}>Cancel</button>
+          </div>
+          :showRulePrompt
+          ?<div className="edit-actions">
+            <span style={{fontSize:11,color:'var(--text-muted)'}}>Create rule?</span>
+            <button className="btn btn-sm btn-success" onClick={createRuleFromTxn} disabled={ruleCreating} style={{fontSize:11}}>{ruleCreating?'…':'Yes'}</button>
+            <button className="btn btn-sm btn-ghost" onClick={()=>setShowRulePrompt(false)} style={{fontSize:11}}>No</button>
+          </div>
+          :<div className="edit-actions">
+            {txn.needs_review&&!locked&&<button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none'}} onClick={()=>onReview(txn)}>Review</button>}
+            <button className="btn btn-sm btn-secondary" onClick={()=>setEditing(true)}>Edit</button>
+            <button className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)} style={{fontSize:11}}>{txn.is_split?'Splits':'Split'}</button>
+            {locked&&<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13}} onClick={toggleLock} title="Unlock">🔓</button>}
+            <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'#fef9c3':'#f3f4f6',color:gcb?'#854d0e':'var(--text-muted)',border:gcb?'1px solid #fde047':'1px solid var(--border)'}}
+              onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
+              title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
+          </div>
+        }
+      </td>
+    </tr>
+  );
+}
+
+/* Modal for creating manual value-change transactions (Section 2c) */
+function ManualTransactionModal({accounts,onClose,onSaved,toast}){
+  const[date,setDate]=useState(todayStr());
+  const[desc,setDesc]=useState('');
+  const[amount,setAmount]=useState('');
+  const[action,setAction]=useState('Purchase');
+  const[accountId,setAccountId]=useState(accounts[0]?.id||'');
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+  /* Valid manual transaction actions from Section 2c */
+  const actions=['Purchase','Sale','Unrealized Gain/Loss','Transfer','Depreciation','Other'];
+  const handleSave=async()=>{
+    if(!desc||!amount||!accountId){setError('Fill all required fields');return;}
+    setSaving(true);setError('');
+    try{
+      /* Amount sign is caller-controlled: negative = outflow, positive = inflow */
+      await apiFetch('/transactions/manual',{method:'POST',body:JSON.stringify({
+        date,description:desc,amount:parseFloat(amount),action,account_id:parseInt(accountId)
+      })});
+      toast('Manual transaction added');onSaved();onClose();
+    }catch(e){setError('Failed to save transaction');}
+    finally{setSaving(false);}
+  };
+  return(
+    <div className="review-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="review-panel">
+        <div style={{fontSize:16,fontWeight:600,marginBottom:16}}>Add Manual Transaction</div>
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+        <div className="review-field"><label>Account *</label>
+          <select value={accountId} onChange={e=>setAccountId(e.target.value)}>
+            {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
+          </select>
+        </div>
+        <div className="review-field"><label>Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+        <div className="review-field"><label>Description *</label><input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="e.g. Home value update, Loan payment"/></div>
+        <div className="review-field"><label>Amount * (negative = outflow)</label><input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="-500.00 or 1000.00"/></div>
+        <div className="review-field"><label>Action</label>
+          <select value={action} onChange={e=>setAction(e.target.value)}>
+            {actions.map(a=><option key={a}>{a}</option>)}
+          </select>
+        </div>
+        <div className="review-actions">
+          <button className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving}>{saving?'…':'✓ Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Inline split editor modal (Section 2E) */
+function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
+  const[splits,setSplits]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+
+  useEffect(()=>{
+    (async()=>{
+      try{const s=await apiFetch(`/transactions/${txn.id}/splits`);
+        setSplits(s.length?s:[{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
+      }catch(e){setSplits([{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);}
+      finally{setLoading(false);}
+    })();
+  },[txn.id]);
+
+  const addRow=()=>setSplits([...splits,{amount:0,description:'',category:'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
+  const removeRow=(i)=>{if(splits.length>1)setSplits(splits.filter((_,j)=>j!==i));};
+  const updateRow=(i,field,val)=>{const s=[...splits];s[i]={...s[i],[field]:val};setSplits(s);};
+
+  const total=splits.reduce((s,r)=>s+parseFloat(r.amount||0),0);
+  const balanced=Math.abs(Math.round(total*100)-Math.round(txn.amount*100))===0;
+
+  const handleSave=async()=>{
+    if(!balanced){setError(`Splits sum to ${total.toFixed(2)}, need ${txn.amount.toFixed(2)}`);return;}
+    setSaving(true);setError('');
+    try{
+      await apiFetch(`/transactions/${txn.id}/splits`,{method:'POST',body:JSON.stringify({splits:splits.map(s=>({
+        amount:parseFloat(s.amount),description:s.description,category:s.category,action:s.action||null,is_gcb:!!s.is_gcb,notes:s.notes
+      }))})});
+      toast('Splits saved');onSaved();onClose();
+    }catch(e){setError(e.message||'Failed to save splits');}
+    finally{setSaving(false);}
+  };
+
+  const handleUnsplit=async()=>{
+    try{await apiFetch(`/transactions/${txn.id}/splits`,{method:'DELETE'});toast('Splits removed');onSaved();onClose();}
+    catch(e){toast('Failed to remove splits','error');}
+  };
+
+  if(loading)return<div className="review-overlay"><div className="review-panel"><div className="spinner"/></div></div>;
+  return(
+    <div className="review-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="review-panel" style={{maxWidth:700,width:'90vw'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div><div style={{fontSize:16,fontWeight:600}}>Split Transaction</div>
+          <div style={{fontSize:13,color:'var(--text-muted)'}}>{txn.description_raw} · {fmt(txn.amount)}</div></div>
+        </div>
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:8}}>{error}</div>}
+        <table style={{width:'100%',fontSize:13,marginBottom:12}}><thead><tr>
+          <th style={{textAlign:'left',padding:'6px 8px'}}>Amount</th>
+          <th style={{textAlign:'left',padding:'6px 8px'}}>Description</th>
+          <th style={{textAlign:'left',padding:'6px 8px'}}>Type</th>
+          <th style={{textAlign:'left',padding:'6px 8px'}}>Category</th>
+          <th style={{textAlign:'center',padding:'6px 8px'}}>GCB</th>
+          <th style={{width:32}}></th>
+        </tr></thead><tbody>{splits.map((s,i)=>(
+          <tr key={i}><td style={{padding:'4px 8px'}}><input type="number" step="0.01" value={s.amount} onChange={e=>updateRow(i,'amount',e.target.value)} style={{width:90,fontSize:13,padding:'4px 6px'}}/></td>
+          <td style={{padding:'4px 8px'}}><input value={s.description||''} onChange={e=>updateRow(i,'description',e.target.value)} style={{width:'100%',fontSize:13,padding:'4px 6px'}} placeholder="Optional"/></td>
+          <td style={{padding:'4px 8px'}}><select value={s.action||'Expense'} onChange={e=>{updateRow(i,'action',e.target.value);if(!showCategoryForType(e.target.value))updateRow(i,'category','');}} style={{fontSize:12,padding:'4px'}}>
+            {TXN_TYPES.map(t=><option key={t}>{t}</option>)}
+          </select></td>
+          <td style={{padding:'4px 8px'}}>{showCategoryForType(s.action||'Expense')
+            ?<select value={s.category||''} onChange={e=>updateRow(i,'category',e.target.value)} style={{fontSize:12,padding:'4px'}}>
+              <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            :<span style={{color:'#d1d5db',fontSize:12}}>—</span>}
+          </td>
+          <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateRow(i,'is_gcb',e.target.checked)}/></td>
+          <td style={{padding:'4px'}}><button className="btn btn-sm btn-ghost" onClick={()=>removeRow(i)} style={{padding:'2px 6px',fontSize:13}}>×</button></td></tr>
+        ))}</tbody></table>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <button className="btn btn-sm btn-secondary" onClick={addRow}>+ Add Row</button>
+          <div style={{fontSize:13,color:balanced?'var(--green)':'var(--red)',fontWeight:500}}>
+            Total: {total.toFixed(2)} / {txn.amount.toFixed(2)} {balanced?'✓':'✗'}
+          </div>
+        </div>
+        <div className="review-actions">
+          {txn.is_split&&<button className="btn btn-sm btn-ghost" onClick={handleUnsplit} style={{color:'var(--red)'}}>Remove Splits</button>}
+          <button className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving||!balanced}>{saving?'…':'✓ Save Splits'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TransactionsPage({categories,toast}){
+  const[txns,setTxns]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[search,setSearch]=useState('');
+  const[needsReview,setNeedsReview]=useState(false);
+  const[startDate,setStartDate]=useState('');
+  const[endDate,setEndDate]=useState('');
+  const[catFilter,setCatFilter]=useState('');
+  const[actionFilter,setActionFilter]=useState('');
+  const[reviewTxn,setReviewTxn]=useState(null);
+  const[showManual,setShowManual]=useState(false);
+  const[splitTxn,setSplitTxn]=useState(null);
+  const[accounts,setAccounts]=useState([]);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      let q='?limit=500';
+      if(needsReview)q+='&needs_review=true';
+      if(startDate)q+=`&start_date=${startDate}`;
+      if(endDate)q+=`&end_date=${endDate}`;
+      const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
+      setTxns(t);setAccounts(a);
+    }catch(e){toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[needsReview,startDate,endDate]);
+
+  useEffect(()=>{load();},[load]);
+
+  /* Preserve scroll position after save (Section 2C) */
+  const handleSave=async(id,updates)=>{
+    const scrollY=window.scrollY;
+    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();toast('Saved');requestAnimationFrame(()=>window.scrollTo(0,scrollY));}
+    catch(e){toast('Failed to save','error');}
+  };
+  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
+
+  const[showDupes,setShowDupes]=useState(false);
+
+  /* Section 4A: Detect duplicate CC payment "received" records */
+  const isDuplicateCCPayment=(t)=>{
+    if(t.action!=='Transfer')return false;
+    const desc=(t.description_raw||'').toUpperCase();
+    // CC payment received on credit card side (positive amount on credit account = payment received)
+    return t.amount>0&&(desc.includes('PAYMENT')&&(desc.includes('AUTOPAY')||desc.includes('THANK YOU')||desc.includes('AUTOMATIC')||desc.includes('ACH')));
+  };
+
+  let visible=txns;
+  if(!showDupes)visible=visible.filter(t=>!isDuplicateCCPayment(t));
+  if(search)visible=visible.filter(t=>t.description_raw?.toLowerCase().includes(search.toLowerCase()));
+  if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
+  if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
+
+  const exportCSV=()=>{
+    const h=['Date','Description','Amount','Type','Category','Account'];
+    const rows=visible.map(t=>[fmtDate(t.date),t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
+    const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='transactions.csv';a.click();
+  };
+
+  return(
+    <div>
+      {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
+      {showManual&&<ManualTransactionModal accounts={accounts} onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
+      {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
+      <div className="card">
+        <div className="filters">
+          <input className="search-input" placeholder="Search descriptions…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <select className="filter-select" value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
+            <option value="">All types</option>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+          <select className="filter-select" value={catFilter} onChange={e=>setCatFilter(e.target.value)}>
+            <option value="">All categories</option>
+            {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+          <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
+          <label className="filter-label"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show duplicates</label>
+          <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+          <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
+          <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
+          {(startDate||endDate||search||catFilter||actionFilter||needsReview)&&
+            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);}}>Clear</button>}
+          <span className="filter-count">{visible.length} transactions</span>
+          <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
+          <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
+        </div>
+        {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :visible.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
+          :<div className="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th><th>Actions</th></tr></thead>
+            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn}/>)}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+function DashboardPage({categories,toast}){
+  const[stats,setStats]=useState(null);
+  const[recent,setRecent]=useState([]);
+  const[reviewQ,setReviewQ]=useState([]);
+  const[netWorth,setNetWorth]=useState(null);
+  const[topCats,setTopCats]=useState([]);
+  const[period,setPeriod]=useState('month');
+  const[reviewTxn,setReviewTxn]=useState(null);
+  const[loading,setLoading]=useState(true);
+
+  const getDates=()=>{
+    const now=new Date();
+    if(period==='month')return{start:monthStart(),end:todayStr()};
+    if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
+    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:d.toISOString().slice(0,10),end:todayStr()};}
+    return{start:'',end:''};
+  };
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const{start,end}=getDates();
+      const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
+      const[s,r,rv,nw]=await Promise.all([
+        apiFetch(statsQ),
+        apiFetch(`/transactions?limit=5${start?`&start_date=${start}`:''}${end?`&end_date=${end}`:''}`),
+        apiFetch('/transactions?needs_review=true&limit=10'),
+        apiFetch('/net-worth').catch(()=>null),
+      ]);
+      setStats(s);setRecent(r);setReviewQ(rv);setNetWorth(nw);
+
+      /* Top 5 expense categories */
+      const byCat=s?.by_category||{};
+      const sorted=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      setTopCats(sorted);
+    }catch(e){toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[period]);
+
+  useEffect(()=>{load();},[load]);
+
+  const handleSave=async(id,updates)=>{
+    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();toast('Saved');}
+    catch(e){toast('Failed','error');}
+  };
+  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
+
+  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+
+  const income=stats?.total_income??0;
+  const expenses=stats?.total_expenses??0;
+  const hr=new Date().getHours();
+  const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
+
+  return(
+    <div>
+      {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <div>
+          <h2 style={{fontSize:18,fontWeight:600}}>Good {greeting}</h2>
+          <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
+        </div>
+        <div style={{display:'flex',gap:6,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+          {[['month','This Month'],['last30','Last 30 Days'],['ytd','Year to Date']].map(([v,l])=>(
+            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-ghost'}`} onClick={()=>setPeriod(v)} style={{borderRadius:7}}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI row 1: Cash flow */}
+      <div className="metric-grid">
+        <div className="card metric-card">
+          <div className="metric-label">Total Income</div>
+          <div className="metric-value" style={{color:'var(--green)'}}>{fmt(income)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Total Expenses</div>
+          <div className="metric-value" style={{color:'var(--red)'}}>-{fmt(expenses)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Cash Flow</div>
+          <div className="metric-value" style={{color:(income-expenses)>=0?'var(--green)':'var(--red)'}}>{income-expenses>=0?'+':''}{fmt(income-expenses)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Worth</div>
+          <div className="metric-value" style={{color:netWorth&&netWorth.net_worth>=0?'var(--green)':'var(--red)'}}>{netWorth?fmt(netWorth.net_worth):'—'}</div>
+        </div>
+      </div>
+
+      <div className="dash-grid">
+        <div style={{display:'flex',flexDirection:'column',gap:20}}>
+          {/* Recent transactions */}
+          <div className="card">
+            <div className="section-header"><div className="section-title">Recent Transactions</div></div>
+            {recent.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
+              :<table style={{width:'100%'}}><tbody>{recent.map(t=>(
+                <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
+                  <td style={{padding:'11px 16px',color:'var(--text-muted)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
+                  <td style={{padding:'11px 8px',fontSize:13.5,fontWeight:500}}>{t.description_raw}</td>
+                  <td style={{padding:'11px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                    <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+                  </td>
+                  <td style={{padding:'11px 16px'}}>
+                    {showCategoryForType(t.action)&&<span className={`badge ${!t.category_final||t.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{t.category_final||'Unclassified'}</span>}
+                  </td>
+                  <td style={{padding:'11px 12px',fontSize:11,color:'var(--text-muted)',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.account_name}>{t.account_name}</td>
+                </tr>
+              ))}</tbody></table>
+            }
+          </div>
+
+          {/* Top 5 expense categories */}
+          {topCats.length>0&&<div className="card">
+            <div className="section-header"><div className="section-title">Top Expense Categories</div></div>
+            <div style={{padding:'8px 0'}}>{topCats.map(([cat,amt],i)=>{
+              const maxAmt=topCats[0][1]||1;
+              const pct=Math.round(amt/maxAmt*100);
+              return(
+                <div key={cat} style={{padding:'8px 18px',display:'flex',alignItems:'center',gap:12}}>
+                  <span style={{width:20,textAlign:'right',fontSize:12,color:'var(--text-muted)',fontWeight:600}}>{i+1}</span>
+                  <div style={{flex:1}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                      <span style={{fontSize:13,fontWeight:500}}>{cat}</span>
+                      <span style={{fontFamily:'DM Mono',fontSize:12,color:'var(--red)'}}>{fmt(amt)}</span>
+                    </div>
+                    <div style={{background:'#f3f4f6',borderRadius:3,height:5,overflow:'hidden'}}>
+                      <div style={{width:`${pct}%`,height:'100%',background:'var(--red)',borderRadius:3,opacity:0.7}}/>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}</div>
+          </div>}
+        </div>
+
+        <div style={{display:'flex',flexDirection:'column',gap:20}}>
+          {/* Review queue */}
+          <div className="card">
+            <div className="section-header">
+              <div className="section-title">Needs Review</div>
+              {reviewQ.length>0&&<span className="badge" style={{background:'#fef3c7',color:'#92400e'}}>{reviewQ.length}</span>}
+            </div>
+            {reviewQ.length===0
+              ?<div className="empty" style={{padding:40}}><div className="empty-icon">✓</div><span style={{fontSize:13}}>All caught up!</span></div>
+              :<div>{reviewQ.map(t=>(
+                <div key={t.id} style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:10}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description_raw}</div>
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{fmtDate(t.date)}</div>
+                  </div>
+                  <div style={{fontSize:13,fontFamily:'DM Mono',color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</div>
+                  <button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none',flexShrink:0}} onClick={()=>setReviewTxn(t)}>Review</button>
+                </div>
+              ))}</div>
+            }
+          </div>
+
+          {/* Quick net worth breakdown */}
+          {netWorth&&<div className="card">
+            <div className="section-header"><div className="section-title">Net Worth Summary</div></div>
+            {Object.entries(netWorth.buckets||{}).map(([bucket,bData])=>{
+              const total=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
+              return(
+                <div key={bucket} style={{padding:'10px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:13,fontWeight:500}}>{bucket}</span>
+                  <span style={{fontFamily:'DM Mono',fontSize:12,fontWeight:500,color:bData.is_asset?'var(--green)':'var(--red)'}}>{bData.is_asset?'':'-'}{fmt(total)}</span>
+                </div>
+              );
+            })}
+          </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Modal for creating a manual account (Section 2b) */
+function ManualAccountModal({onClose,onSaved,toast}){
+  const[name,setName]=useState('');
+  const[type,setType]=useState('checking');
+  const[balance,setBalance]=useState('0');
+  const[startDate,setStartDate]=useState(todayStr());
+  const[notes,setNotes]=useState('');
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+  const handleSave=async()=>{
+    if(!name){setError('Account name is required');return;}
+    setSaving(true);setError('');
+    try{
+      /* POST /api/accounts — creates manual account with starting balance */
+      await apiFetch('/accounts',{method:'POST',body:JSON.stringify({name,account_type:type,starting_balance:parseFloat(balance)||0,start_date:startDate,notes:notes||null})});
+      toast('Manual account created');onSaved();onClose();
+    }catch(e){setError('Failed to create account');}
+    finally{setSaving(false);}
+  };
+  return(
+    <div className="review-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="review-panel">
+        <div style={{fontSize:16,fontWeight:600,marginBottom:16}}>Add Manual Account</div>
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+        <div className="review-field"><label>Account Name *</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Home, Vehicle, Cash"/></div>
+        <div className="review-field"><label>Account Type</label>
+          <select value={type} onChange={e=>setType(e.target.value)}>
+            {/* All valid types from Section 1 bucket mapping */}
+            {['checking','savings','investment','real_estate','vehicle','business_owned','other','credit','loan'].map(t=><option key={t} value={t}>{t.replace(/_/g,' ')}</option>)}
+          </select>
+        </div>
+        <div className="review-field"><label>Starting Balance ($)</label><input type="number" step="0.01" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0.00"/></div>
+        <div className="review-field"><label>Start Date</label><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></div>
+        <div className="review-field"><label>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional"/></div>
+        <div className="review-actions">
+          <button className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving}>{saving?'…':'✓ Create'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountsPage({banks,onConnectBank,onSync,toast}){
+  const[accounts,setAccounts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showManual,setShowManual]=useState(false);
+  const[editingId,setEditingId]=useState(null);
+  const[editVals,setEditVals]=useState({});
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{setAccounts(await apiFetch('/accounts'));}catch(e){}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load();},[load]);
+
+  const plaidAccounts=accounts.filter(a=>!a.is_manual);
+  const manualAccounts=accounts.filter(a=>a.is_manual);
+
+  const startEdit=(a)=>{setEditingId(a.id);setEditVals({account_name:a.account_name||'',notes:a.notes||''});};
+  const cancelEdit=()=>{setEditingId(null);setEditVals({});};
+  const saveEdit=async(id)=>{
+    try{await apiFetch(`/accounts/${id}`,{method:'PATCH',body:JSON.stringify(editVals)});toast('Account updated');setEditingId(null);await load();}
+    catch(e){toast('Failed to save','error');}
+  };
+
+  const severPlaid=async(a)=>{
+    if(!confirm(`Sever Plaid connection for "${a.account_name}"? This cannot be undone. Transactions will be kept.`))return;
+    try{await apiFetch(`/accounts/${a.id}/sever-plaid`,{method:'POST'});toast('Plaid connection severed');await load();}
+    catch(e){toast('Failed: '+(e.message||'error'),'error');}
+  };
+
+  /* Shared account row */
+  const AccountRow=({a,showSever})=>{
+    const isEditing=editingId===a.id;
+    return(
+      <div key={a.id} style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:12}}>
+        <span style={{width:7,height:7,borderRadius:'50%',background:a.is_manual?(a.is_asset?'var(--blue)':'var(--red)'):'#22c55e',flexShrink:0}}/>
+        <div style={{flex:1}}>
+          {isEditing?<>
+            <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4}}/>
+            <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)'}}/>
+          </>:<>
+            <div style={{fontSize:14,fontWeight:500}}>{a.account_name}</div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
+              {a.account_type}{a.mask?` ····${a.mask}`:''}{a.bucket?` · ${a.bucket}`:''}{a.notes?` · ${a.notes}`:''}
+            </div>
+          </>}
+        </div>
+        {!a.is_manual&&<span className="bank-badge">● Connected</span>}
+        {a.is_manual&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
+        <div style={{display:'flex',gap:6}}>
+          {isEditing?<>
+            <button className="btn btn-sm btn-success" onClick={()=>saveEdit(a.id)}>Save</button>
+            <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>Cancel</button>
+          </>:<>
+            <button className="btn btn-sm btn-secondary" onClick={()=>startEdit(a)}>Edit</button>
+            {showSever&&<button className="btn btn-sm" style={{background:'#fef2f2',color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={()=>severPlaid(a)}>Sever Plaid</button>}
+          </>}
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div>
+      {showManual&&<ManualAccountModal onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
+      <div className="card" style={{marginBottom:20}}>
+        <div className="section-header">
+          <div className="section-title">Plaid Accounts ({plaidAccounts.length})</div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-sm btn-secondary" onClick={onSync}>↻ Sync All</button>
+            <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
+          </div>
+        </div>
+        {plaidAccounts.length===0?<div className="empty"><div className="empty-icon">◫</div><span>No Plaid accounts connected</span></div>
+          :plaidAccounts.map(a=><AccountRow key={a.id} a={a} showSever={true}/>)}
+      </div>
+      <div className="card">
+        <div className="section-header">
+          <div className="section-title">Manual Accounts ({manualAccounts.length})</div>
+          <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
+        </div>
+        {manualAccounts.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No manual accounts yet</span></div>
+          :manualAccounts.map(a=><AccountRow key={a.id} a={a} showSever={false}/>)}
+      </div>
+    </div>
+  );
+}
+
+function SettingsPage({banks,onConnectBank,toast}){
+  const[tab,setTab]=useState('data');
+  const[busy,setBusy]=useState(false);
+  const[items,setItems]=useState([]);
+  /* Rules tab state */
+  const[rules,setRules]=useState([]);
+  const[rulesLoading,setRulesLoading]=useState(false);
+  const[ruleSearch,setRuleSearch]=useState('');
+  const[ruleEditing,setRuleEditing]=useState(null);
+  const[ruleEditVals,setRuleEditVals]=useState({});
+  const[showAddRule,setShowAddRule]=useState(false);
+
+  useEffect(()=>{apiFetch('/plaid/items').then(setItems).catch(()=>{});},[]);
+
+  const run=async(path,msg)=>{setBusy(true);try{const r=await apiFetch(path,{method:'POST'});toast(msg);return r;}catch(e){toast('Failed: '+(e.message||'unknown error'),'error');}finally{setBusy(false);}};
+
+  /* Load rules */
+  const loadRules=useCallback(async()=>{
+    setRulesLoading(true);
+    try{setRules(await apiFetch(`/rules?limit=200${ruleSearch?`&search=${encodeURIComponent(ruleSearch)}`:''}`));}
+    catch(e){toast('Failed to load rules','error');}
+    finally{setRulesLoading(false);}
+  },[ruleSearch]);
+  useEffect(()=>{if(tab==='rules')loadRules();},[tab,loadRules]);
+
+  const startRuleEdit=(r)=>{setRuleEditing(r.id);setRuleEditVals({priority:r.priority,match_type:r.match_type,pattern:r.pattern,set_action:r.set_action||'',set_category:r.set_category||'',set_description:r.set_description||'',clean_description:r.clean_description||'',notes:r.notes||''});};
+  const saveRuleEdit=async(id)=>{
+    try{await apiFetch(`/rules/${id}`,{method:'PATCH',body:JSON.stringify(ruleEditVals)});toast('Rule updated');setRuleEditing(null);await loadRules();}
+    catch(e){toast('Failed to save','error');}
+  };
+  const deleteRule=async(id)=>{
+    if(!confirm('Deactivate this rule?'))return;
+    try{await apiFetch(`/rules/${id}`,{method:'DELETE'});toast('Rule deactivated');await loadRules();}
+    catch(e){toast('Failed','error');}
+  };
+  const addRule=async()=>{
+    try{await apiFetch('/rules',{method:'POST',body:JSON.stringify(ruleEditVals)});toast('Rule created');setShowAddRule(false);setRuleEditVals({});await loadRules();}
+    catch(e){toast('Failed to create','error');}
+  };
+
+  /* Cards file upload */
+  const uploadCards=async(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    setBusy(true);
+    try{
+      const form=new FormData();form.append('file',file);
+      const r=await fetch('/api/cards/upload-and-import',{method:'POST',body:form}).then(r=>r.json());
+      toast(r.message||`Imported ${r.imported} cards`);
+    }catch(err){toast('Upload failed','error');}
+    finally{setBusy(false);e.target.value='';}
+  };
+
+  const tabs=[
+    {id:'data',label:'Data Management'},
+    {id:'rules',label:'Rules'},
+    {id:'bank',label:'Bank Links'},
+    {id:'about',label:'About'},
+  ];
+
+  return(
+    <div>
+      <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4,marginBottom:20,width:'fit-content'}}>
+        {tabs.map(t=>(<button key={t.id} className={`btn btn-sm ${tab===t.id?'btn-primary':'btn-ghost'}`} onClick={()=>setTab(t.id)} style={{borderRadius:7}}>{t.label}</button>))}
+      </div>
+
+      {tab==='data'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Categorization</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Re-categorize All Transactions</div><div className="settings-desc">Re-runs all rules on unlocked transactions</div></div>
+            <button className="btn btn-sm btn-secondary" onClick={()=>run('/init/recategorize','Re-categorized!')} disabled={busy}>{busy?'…':'Run'}</button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Re-import Rules from Excel</div><div className="settings-desc">Reloads categorization rules from your Excel file</div></div>
+            <button className="btn btn-sm btn-secondary" onClick={()=>run('/init/import-rules','Rules imported!')} disabled={busy}>{busy?'…':'Import'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Data Fixes</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Fix Transaction Signs</div><div className="settings-desc">Corrects sign convention (expenses negative, income positive)</div></div>
+            <button className="btn btn-sm btn-secondary" onClick={()=>run('/init/fix-signs','Signs fixed!')} disabled={busy}>{busy?'…':'Fix'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Cards Import</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Import Cards from local file</div><div className="settings-desc">Loads card data from cards.xlsx on server</div></div>
+            <button className="btn btn-sm btn-secondary" onClick={()=>run('/init/import-cards','Cards imported!')} disabled={busy}>{busy?'…':'Import'}</button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Upload cards.xlsx</div><div className="settings-desc">Upload a new cards.xlsx file and import</div></div>
+            <label className="btn btn-sm btn-primary" style={{cursor:'pointer'}}>{busy?'…':'Upload'}<input type="file" accept=".xlsx,.xls" onChange={uploadCards} style={{display:'none'}}/></label>
+          </div>
+        </div>
+      </div>}
+
+      {tab==='rules'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div className="section-title">Categorization Rules ({rules.length})</div>
+            <div style={{display:'flex',gap:8}}>
+              <input className="search-input" placeholder="Search patterns…" value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)} style={{width:200}}/>
+              <button className="btn btn-sm btn-primary" onClick={()=>{setShowAddRule(true);setRuleEditVals({priority:100,match_type:'contains',pattern:'',set_action:'',set_category:'',set_description:'',clean_description:'',notes:''});}}>+ Add Rule</button>
+            </div>
+          </div>
+          {/* Add Rule modal */}
+          {showAddRule&&<div style={{padding:'16px 20px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,margin:'0 16px 16px'}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>New Rule</div>
+            <div style={{display:'grid',gridTemplateColumns:'80px 100px 1fr 100px 100px',gap:8,fontSize:12,marginBottom:8}}>
+              <input type="number" value={ruleEditVals.priority||100} onChange={e=>setRuleEditVals(v=>({...v,priority:parseInt(e.target.value)}))} placeholder="Priority" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <select value={ruleEditVals.match_type||'contains'} onChange={e=>setRuleEditVals(v=>({...v,match_type:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                {['contains','contains_any','contains_all','equals','starts_with','regex'].map(t=><option key={t}>{t}</option>)}
+              </select>
+              <input value={ruleEditVals.pattern||''} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} placeholder="Pattern" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <input value={ruleEditVals.set_action||''} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} placeholder="Action" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <input value={ruleEditVals.set_category||''} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} placeholder="Category" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <input value={ruleEditVals.set_description||''} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} placeholder="Set Description" style={{flex:1,border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <input value={ruleEditVals.notes||''} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes" style={{flex:1,border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <button className="btn btn-sm btn-success" onClick={addRule}>Create</button>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setShowAddRule(false)}>Cancel</button>
+            </div>
+          </div>}
+          {rulesLoading?<div className="loading"><div className="spinner"/></div>
+            :<div className="table-wrap" style={{maxHeight:500,overflowY:'auto'}}><table style={{fontSize:12}}>
+              <thead><tr><th>Pri</th><th>Match</th><th>Pattern</th><th>Action</th><th>Category</th><th>Description</th><th>Notes</th><th>Stats</th><th></th></tr></thead>
+              <tbody>{rules.map(r=>(
+                ruleEditing===r.id?<tr key={r.id} style={{background:'#fffbeb'}}>
+                  <td><input type="number" value={ruleEditVals.priority} onChange={e=>setRuleEditVals(v=>({...v,priority:parseInt(e.target.value)}))} style={{width:50,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><select value={ruleEditVals.match_type} onChange={e=>setRuleEditVals(v=>({...v,match_type:e.target.value}))} style={{fontSize:11}}>
+                    {['contains','contains_any','contains_all','equals','starts_with','regex'].map(t=><option key={t}>{t}</option>)}
+                  </select></td>
+                  <td><input value={ruleEditVals.pattern} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} style={{width:'100%',fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><input value={ruleEditVals.set_action} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{width:70,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><input value={ruleEditVals.set_category} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><input value={ruleEditVals.set_description} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} style={{width:100,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><input value={ruleEditVals.notes} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td></td>
+                  <td><div style={{display:'flex',gap:4}}><button className="btn btn-sm btn-success" onClick={()=>saveRuleEdit(r.id)} style={{fontSize:10,padding:'2px 6px'}}>Save</button><button className="btn btn-sm btn-ghost" onClick={()=>setRuleEditing(null)} style={{fontSize:10,padding:'2px 6px'}}>×</button></div></td>
+                </tr>:<tr key={r.id}>
+                  <td style={{fontFamily:'DM Mono',color:'var(--text-muted)'}}>{r.priority}</td>
+                  <td style={{color:'var(--text-muted)'}}>{r.match_type}</td>
+                  <td style={{fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.pattern}>{r.pattern}</td>
+                  <td>{r.set_action&&<span className="badge badge-income" style={{fontSize:10}}>{r.set_action}</span>}</td>
+                  <td>{r.set_category&&<span className="badge badge-category" style={{fontSize:10}}>{r.set_category}</span>}</td>
+                  <td style={{color:'var(--text-muted)',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.set_description}>{r.set_description||'—'}</td>
+                  <td style={{fontSize:10,color:'var(--text-muted)',maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={r.notes}>{r.notes||''}</td>
+                  <td style={{fontSize:10,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{r.times_matched>0?`${r.times_matched}m ${r.times_accepted}a`:''}</td>
+                  <td><div style={{display:'flex',gap:4}}>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>startRuleEdit(r)} style={{fontSize:10,padding:'2px 6px'}}>Edit</button>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>deleteRule(r.id)} style={{fontSize:10,padding:'2px 6px',color:'var(--red)'}}>×</button>
+                  </div></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          }
+        </div>
+      </div>}
+
+      {tab==='bank'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header">
+            <div className="section-title">Connected Banks ({items.length})</div>
+            <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
+          </div>
+          {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
+            :items.map((item,i)=>(
+              <div key={i} className="settings-row">
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <span className="bank-dot"/>
+                  <div>
+                    <div className="settings-label">{item.institution_name}</div>
+                    <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
+                  </div>
+                </div>
+                <span className="bank-badge">Active</span>
+              </div>
+            ))
+          }
+        </div>
+      </div>}
+
+      {tab==='about'&&<div>
+        <div className="card">
+          <div className="section-header"><div className="section-title">About</div></div>
+          <div style={{padding:'20px',fontSize:13,color:'var(--text-secondary)',lineHeight:1.8}}>
+            <p style={{fontWeight:500,color:'var(--text-primary)'}}>Finance Automation v2.0</p>
+            <p>Plaid sync + rule-based categorization + manual accounts</p>
+            <p style={{marginTop:8}}>Stack: FastAPI + SQLAlchemy + SQLite + React</p>
+            <p>Features: Transactions, Budgets, Balance Timeline, Net Worth, Cards, GCB Tracking</p>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+function usePlaidLink(toast,onSuccess){
+  /* Handle OAuth return — bank redirects back to /plaid/oauth-return */
+  React.useEffect(()=>{
+    if(!window.location.pathname.startsWith('/plaid/oauth-return'))return;
+    (async()=>{
+      try{
+        const{link_token}=await apiFetch('/plaid/link-token');
+        const handler=window.Plaid.create({
+          token:link_token,
+          receivedRedirectUri:window.location.href,
+          onSuccess:async(public_token)=>{
+            try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();window.history.replaceState({},'','/');}
+            catch(e){toast('Failed to link','error');}
+          },
+          onExit:()=>{window.history.replaceState({},'','/');},
+        });
+        handler.open();
+      }catch(e){toast('OAuth return failed','error');}
+    })();
+  },[]);
+
+  return async()=>{
+    try{
+      const{link_token}=await apiFetch('/plaid/link-token');
+      const handler=window.Plaid.create({
+        token:link_token,
+        onSuccess:async(public_token)=>{
+          try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();}
+          catch(e){toast('Failed to link','error');}
+        },
+        onExit:()=>{},
+      });
+      handler.open();
+    }catch(e){toast('Failed to start connection','error');}
+  };
+}
+
+
+function CardsPage({toast}){
+  const[cards,setCards]=useState([]);
+  const[plaidAccounts,setPlaidAccounts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[editing,setEditing]=useState(null);
+  const[editVals,setEditVals]=useState({});
+  const[showInactive,setShowInactive]=useState(false);
+  const[detail,setDetail]=useState(null);
+  const[detailLoading,setDetailLoading]=useState(false);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const[c,a]=await Promise.all([apiFetch('/cards'),apiFetch('/plaid/items')]);
+      setCards(c);setPlaidAccounts(a);
+    }catch(e){toast('Failed to load cards','error');}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  const loadDetail=async(cardId)=>{
+    setDetailLoading(true);
+    try{setDetail(await apiFetch(`/cards/${cardId}/detail`));}catch(e){toast('Failed to load detail','error');}
+    finally{setDetailLoading(false);}
+  };
+
+  const[plaidWarnings,setPlaidWarnings]=useState({});
+
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',plaid_account_id:card.plaid_account_id||'',is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
+  const cancelEdit=()=>{setEditing(null);setEditVals({});};
+  const saveEdit=async(cardId)=>{
+    try{
+      await apiFetch(`/cards/${cardId}`,{method:'PATCH',body:JSON.stringify({...editVals,last_four:editVals.last_four?parseInt(editVals.last_four):null,statement_close_day:editVals.statement_close_day?parseInt(editVals.statement_close_day):null,payment_due_day:editVals.payment_due_day?parseInt(editVals.payment_due_day):null,credit_limit:editVals.credit_limit?parseFloat(editVals.credit_limit):null,annual_fee:editVals.annual_fee?parseFloat(editVals.annual_fee):null})});
+      await load();setEditing(null);toast('Card updated');
+    }catch(e){toast('Failed to save','error');}
+  };
+
+  /* Validate Plaid links on load */
+  useEffect(()=>{
+    apiFetch('/cards/validate-plaid').then(res=>{
+      const w={};res.forEach(r=>{if(r.warning)w[r.card_id]=r.warning;});
+      setPlaidWarnings(w);
+    }).catch(()=>{});
+  },[cards]);
+
+  const visible=cards.filter(c=>showInactive||c.is_active);
+  const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
+
+  /* Summary KPIs */
+  const totalLimit=visible.reduce((s,c)=>s+(c.credit_limit||0),0);
+  const activeCount=cards.filter(c=>c.is_active).length;
+  const totalFees=visible.reduce((s,c)=>s+(c.annual_fee||0),0);
+
+  return(
+    <div>
+      {/* Detail panel overlay */}
+      {detail&&<div className="review-overlay" onClick={e=>e.target===e.currentTarget&&setDetail(null)}>
+        <div className="review-panel" style={{width:560,maxHeight:'80vh',overflowY:'auto'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <div>
+              <div style={{fontSize:16,fontWeight:600}}>{detail.card.card_name||detail.card.card_id}</div>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>{detail.card.issuer} · {detail.card.network}</div>
+            </div>
+            <button className="btn btn-sm btn-ghost" onClick={()=>setDetail(null)}>✕</button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:16}}>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
+              <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Credit Limit</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono'}}>{detail.card.credit_limit?`$${detail.card.credit_limit.toLocaleString()}`:'—'}</div>
+            </div>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
+              <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Stmt Balance</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono',color:detail.statement_balance!=null?'var(--red)':'var(--text-muted)'}}>{detail.statement_balance!=null?fmt(Math.abs(detail.statement_balance)):'—'}</div>
+            </div>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
+              <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Utilization</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono',color:detail.utilization>80?'var(--red)':detail.utilization>50?'var(--amber)':'var(--green)'}}>{detail.utilization!=null?`${detail.utilization}%`:'—'}</div>
+            </div>
+          </div>
+          {detail.linked_account&&<div style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Linked: {detail.linked_account.name} · Balance: {fmt(detail.linked_account.balance||0)}</div>}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>Recent Transactions</div>
+          {detail.recent_transactions.length===0?<div style={{fontSize:12,color:'var(--text-muted)',padding:'12px 0'}}>No transactions found</div>
+            :<div style={{maxHeight:300,overflowY:'auto'}}>{detail.recent_transactions.map(t=>(
+              <div key={t.id} style={{padding:'8px 0',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap',width:70}}>{t.date}</span>
+                <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</span>
+                <span style={{fontFamily:'DM Mono',fontSize:12,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+              </div>
+            ))}</div>
+          }
+        </div>
+      </div>}
+
+      {/* KPI cards */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">Active Cards</div><div className="metric-value">{activeCount}</div></div>
+        <div className="card metric-card"><div className="metric-label">Total Credit Limit</div><div className="metric-value">{fmt(totalLimit)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Annual Fees</div><div className="metric-value" style={{color:totalFees>0?'var(--red)':'var(--text-muted)'}}>{totalFees>0?fmt(totalFees):'$0'}</div></div>
+      </div>
+
+      <div className="card">
+        <div className="section-header">
+          <div className="section-title">Cards ({visible.length}{!showInactive&&cards.filter(c=>!c.is_active).length>0?` + ${cards.filter(c=>!c.is_active).length} inactive`:''})</div>
+          <label className="filter-label" style={{marginRight:8}}>
+            <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
+          </label>
+        </div>
+        {loading?<div className="loading"><div className="spinner"/></div>
+          :<div className="table-wrap"><table>
+            <thead><tr>
+              <th>Card ID</th><th>Card Name</th><th>Issuer</th><th>Network</th><th>Last 4</th>
+              <th>Close Day</th><th>Due Day</th><th>Credit Limit</th><th>Linked</th><th>Actions</th>
+            </tr></thead>
+            <tbody>{visible.map(c=>(
+              <tr key={c.id} style={{opacity:c.is_active?1:0.5,cursor:'pointer'}} onClick={()=>{if(editing!==c.id)loadDetail(c.id);}}>
+                <td><span style={{fontFamily:'DM Mono',fontSize:12,fontWeight:600}}>{c.card_id}</span></td>
+                {editing===c.id?<>
+                  <td onClick={e=>e.stopPropagation()}><input value={editVals.card_name} onChange={e=>setEditVals(v=>({...v,card_name:e.target.value}))} style={{width:120,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                </>:<td style={{fontWeight:500}}>{c.card_name}</td>}
+                <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.issuer}</td>
+                <td><span style={{fontFamily:'DM Mono',fontSize:11,fontWeight:700,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                {editing===c.id?<>
+                  <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.last_four} onChange={e=>setEditVals(v=>({...v,last_four:e.target.value}))} style={{width:60,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}} placeholder="Last 4"/></td>
+                  <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.statement_close_day} onChange={e=>setEditVals(v=>({...v,statement_close_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                  <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.payment_due_day} onChange={e=>setEditVals(v=>({...v,payment_due_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                  <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.credit_limit} onChange={e=>setEditVals(v=>({...v,credit_limit:e.target.value}))} style={{width:80,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}} placeholder="0"/></td>
+                  <td onClick={e=>e.stopPropagation()}>
+                    <select value={editVals.plaid_account_id} onChange={e=>setEditVals(v=>({...v,plaid_account_id:e.target.value}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:150}}>
+                      <option value="">— Not linked —</option>
+                      {plaidAccounts.map(a=><option key={a.item_id} value={a.plaid_account_id}>{a.institution_name}</option>)}
+                    </select>
+                  </td>
+                  <td onClick={e=>e.stopPropagation()}><div className="edit-actions">
+                    <button className="btn btn-sm btn-success" onClick={()=>saveEdit(c.id)}>Save</button>
+                    <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>Cancel</button>
+                  </div></td>
+                </>:<>
+                  <td style={{textAlign:'center',fontSize:12,fontFamily:'DM Mono'}}>{c.last_four||<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{textAlign:'center',fontSize:13}}>{c.statement_close_day?<span style={{fontFamily:'DM Mono'}}>{c.statement_close_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{textAlign:'center',fontSize:13}}>{c.payment_due_day?<span style={{fontFamily:'DM Mono'}}>{c.payment_due_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{fontSize:13,fontFamily:'DM Mono'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{fontSize:12}}>{c.plaid_account_id
+                    ?plaidWarnings[c.id]
+                      ?<span style={{color:'var(--amber)',fontSize:11}} title={plaidWarnings[c.id]}>⚠ Mismatch</span>
+                      :<span className="bank-badge">● Linked</span>
+                    :<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td onClick={e=>e.stopPropagation()}><button className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
+                </>}
+              </tr>
+            ))}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+function GCBPage({toast}){
+  const MO=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();
+  const[txns,setTxns]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[year,setYear]=useState(now.getFullYear());
+  const[month,setMonth]=useState(0); // 0 = all months
+  const[error,setError]=useState('');
+
+  const load=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      let q=`/transactions?limit=500`;
+      if(month>0){
+        const start=`${year}-${String(month).padStart(2,'0')}-01`;
+        const endM=month===12?1:month+1;
+        const endY=month===12?year+1:year;
+        const end=`${endY}-${String(endM).padStart(2,'0')}-01`;
+        q+=`&start_date=${start}&end_date=${end}`;
+      }else{
+        q+=`&start_date=${year}-01-01&end_date=${year}-12-31`;
+      }
+      const data=await apiFetch(q);
+      setTxns(data.filter(t=>t.is_gcb));
+    }catch(e){setError('Failed to load');toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[year,month]);
+  useEffect(()=>{load();},[load]);
+
+  const revenue=txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const costs=txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const net=revenue-costs;
+  const txnCount=txns.length;
+  const margin=revenue>0?Math.round(net/revenue*100):0;
+
+  return(
+    <div>
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {/* Period selector */}
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20}}>
+        <select className="filter-select" value={year} onChange={e=>setYear(parseInt(e.target.value))}>
+          {[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+        <select className="filter-select" value={month} onChange={e=>setMonth(parseInt(e.target.value))}>
+          <option value={0}>All Months</option>
+          {[1,2,3,4,5,6,7,8,9,10,11,12].map(m=><option key={m} value={m}>{MO[m]}</option>)}
+        </select>
+        <span className="filter-count">{txnCount} GCB transactions</span>
+      </div>
+
+      {/* KPI cards */}
+      <div className="metric-grid" style={{marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">GCB Revenue</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(revenue)}</div></div>
+        <div className="card metric-card"><div className="metric-label">GCB Costs</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(costs)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Net P&L</div><div className="metric-value" style={{color:net>=0?'var(--green)':'var(--red)'}}>{net>=0?'+':''}{fmt(net)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Margin</div><div className="metric-value" style={{color:margin>=0?'var(--green)':'var(--red)'}}>{margin}%</div></div>
+      </div>
+
+      <div className="card">
+        <div className="section-header"><div className="section-title">GCB Transactions{month>0?` — ${MO[month]} ${year}`:` — ${year}`}</div></div>
+        {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :txns.length===0?<div className="empty"><div className="empty-icon">$</div><span>No GCB-tagged transactions{month>0?` in ${MO[month]} ${year}`:` in ${year}`}</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Tag transactions as GCB from the Transactions page</span></div>
+          :<div className="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th></tr></thead>
+            <tbody>{txns.map(t=>(
+              <tr key={t.id}>
+                <td style={{color:'var(--text-secondary)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
+                <td style={{fontWeight:500,fontSize:13.5}}>{t.description_raw}</td>
+                <td><span className={t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'–':'+'}{fmt(t.amount)}</span></td>
+                <td><span className={`badge badge-${t.action?.toLowerCase()==='income'?'income':t.action?.toLowerCase()==='transfer'?'transfer':'expense'}`}>{t.action}</span></td>
+                <td>{t.action!=='Transfer'&&<span className="badge badge-category">{t.category_final}</span>}</td>
+                <td style={{fontSize:12,color:'var(--text-muted)'}}>{t.account_name}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+function BudgetsPage({categories,toast}){
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();
+  const curYear=now.getFullYear();
+  const[year,setYear]=useState(curYear);
+  const[editing,setEditing]=useState(false);
+  const[targets,setTargets]=useState({});
+  const[actuals,setActuals]=useState({});
+  const[edits,setEdits]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+
+  const expenseCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name).sort();
+
+  const load=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      const[t,a]=await Promise.all([apiFetch(`/budget/targets?year=${year}`),apiFetch(`/budget/actuals?year=${year}`)]);
+      setTargets(t.categories||{});setActuals(a.categories||{});
+    }catch(e){setError('Failed to load budget data');toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[year]);
+  useEffect(()=>{load();},[load]);
+
+  /* Section 6B: Sort categories by annual total descending */
+  const allCatsUnsorted=[...new Set([...expenseCats,...Object.keys(targets),...Object.keys(actuals)])];
+  const allCats=allCatsUnsorted.sort((a,b)=>{
+    const totalA=(()=>{let s=0;for(let m=1;m<=12;m++){s+=(actuals[a]?.[String(m)]||0)+(targets[a]?.[String(m)]?.amount||0);}return s;})();
+    const totalB=(()=>{let s=0;for(let m=1;m<=12;m++){s+=(actuals[b]?.[String(m)]||0)+(targets[b]?.[String(m)]?.amount||0);}return s;})();
+    return totalB-totalA;
+  });
+
+  const startEdit=()=>{
+    const e={};allCats.forEach(cat=>{e[cat]={};for(let m=1;m<=12;m++)e[cat][String(m)]=targets[cat]?.[String(m)]?.amount?.toString()||'';});
+    setEdits(e);setEditing(true);
+  };
+
+  const saveEdits=async()=>{
+    setSaving(true);setError('');
+    try{
+      const bulk=[];
+      Object.entries(edits).forEach(([cat,months])=>{
+        Object.entries(months).forEach(([m,val])=>{
+          const amt=parseFloat(val);
+          if(!isNaN(amt)&&amt>0)bulk.push({year,month:parseInt(m),category:cat,amount:amt});
+          else if((val===''||val==='0')&&targets[cat]?.[m])bulk.push({year,month:parseInt(m),category:cat,amount:0});
+        });
+      });
+      if(bulk.length>0)await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});
+      toast('Budget targets saved');setEditing(false);await load();
+    }catch(e){setError('Failed to save');toast('Failed to save','error');}
+    finally{setSaving(false);}
+  };
+
+  const copyFromPrior=async()=>{
+    setSaving(true);
+    try{
+      const prior=await apiFetch(`/budget/targets?year=${year-1}`);const priorCats=prior.categories||{};const bulk=[];
+      Object.entries(priorCats).forEach(([cat,months])=>{Object.entries(months).forEach(([m,v])=>{if(v.amount>0)bulk.push({year,month:parseInt(m),category:cat,amount:v.amount});});});
+      if(bulk.length>0){await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});toast(`Copied ${bulk.length} targets from ${year-1}`);await load();}
+      else toast('No prior year targets found','error');
+    }catch(e){toast('Failed to copy','error');}finally{setSaving(false);}
+  };
+
+  /* Helper: get budget target value */
+  const getBudget=(cat,m)=>targets[cat]?.[String(m)]?.amount||0;
+  /* Helper: get actual value */
+  const getActual=(cat,m)=>actuals[cat]?.[String(m)]||0;
+  /* Row/col totals */
+  const budgetRowTotal=(cat)=>{let s=0;for(let m=1;m<=12;m++)s+=getBudget(cat,m);return s;};
+  const actualRowTotal=(cat)=>{let s=0;for(let m=1;m<=12;m++)s+=getActual(cat,m);return s;};
+  const budgetColTotal=(m)=>{let s=0;allCats.forEach(cat=>s+=getBudget(cat,m));return s;};
+  const actualColTotal=(m)=>{let s=0;allCats.forEach(cat=>s+=getActual(cat,m));return s;};
+  const budgetGrand=(()=>{let s=0;for(let m=1;m<=12;m++)s+=budgetColTotal(m);return s;})();
+  const actualGrand=(()=>{let s=0;for(let m=1;m<=12;m++)s+=actualColTotal(m);return s;})();
+
+  /* KPI values */
+  const totalBudgeted=budgetGrand;
+  const totalActual=actualGrand;
+  const totalRemaining=totalBudgeted-totalActual;
+
+  /* Shared table renderer */
+  const renderTable=(title,getVal,rowTotal,colTotal,grand,isBudget)=>(
+    <div className="card" style={{marginBottom:20}}>
+      <div className="section-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div className="section-title">{title} — {year}</div>
+        <div style={{display:'flex',gap:8}}>
+          {isBudget&&!editing&&<button className="btn btn-sm btn-secondary" onClick={copyFromPrior} disabled={saving}>Copy from {year-1}</button>}
+          {isBudget&&!editing&&<button className="btn btn-sm btn-primary" onClick={startEdit}>Edit</button>}
+          {isBudget&&editing&&<button className="btn btn-sm btn-ghost" onClick={()=>setEditing(false)}>Cancel</button>}
+          {isBudget&&editing&&<button className="btn btn-sm btn-success" onClick={saveEdits} disabled={saving}>{saving?'Saving…':'Save All'}</button>}
+        </div>
+      </div>
+      <div className="table-wrap" style={{overflowX:'auto'}}>
+        <table style={{minWidth:900}}>
+          <thead><tr>
+            <th style={{position:'sticky',left:0,background:'#fafafa',zIndex:2,minWidth:140}}>Category</th>
+            {MO.map((m,i)=><th key={i} style={{textAlign:'right',minWidth:70}}>{m}</th>)}
+            <th style={{textAlign:'right',fontWeight:700,minWidth:80}}>Total</th>
+          </tr></thead>
+          <tbody>
+            {allCats.map(cat=>{
+              const total=rowTotal(cat);
+              if(!isBudget&&total===0)return null;
+              return(<tr key={cat}>
+                <td style={{fontWeight:500,position:'sticky',left:0,background:'#fff',zIndex:1,fontSize:13}}>{cat}</td>
+                {MO.map((m,i)=>{
+                  const mo=i+1;const val=getVal(cat,mo);
+                  if(isBudget&&editing){
+                    return<td key={i} style={{padding:'4px 6px'}}>
+                      <input type="number" step="1" min="0" value={edits[cat]?.[String(mo)]||''}
+                        onChange={e=>{const v=e.target.value;setEdits(prev=>({...prev,[cat]:{...prev[cat],[String(mo)]:v}}));}}
+                        style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12,textAlign:'right',fontFamily:'DM Mono'}} placeholder="0"/>
+                    </td>;
+                  }
+                  const color=!isBudget?(val>0?'var(--red)':'var(--text-muted)'):(val>0?'var(--text-primary)':'var(--text-muted)');
+                  return<td key={i} style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,color}}>{val>0?fmt(val):'—'}</td>;
+                })}
+                <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,fontWeight:600,color:total>0?(!isBudget?'var(--red)':'var(--text-primary)'):'var(--text-muted)'}}>{total>0?fmt(total):'—'}</td>
+              </tr>);
+            })}
+            <tr style={{borderTop:'2px solid var(--border)',background:'#fafafa'}}>
+              <td style={{fontWeight:700,position:'sticky',left:0,background:'#fafafa',zIndex:1}}>Total</td>
+              {MO.map((m,i)=>{const val=colTotal(i+1);return<td key={i} style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,fontWeight:600}}>{val>0?fmt(val):'—'}</td>;})}
+              <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:13,fontWeight:700}}>{fmt(grand)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  return(
+    <div>
+      {/* Year selector */}
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20,flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+          {[curYear-1,curYear,curYear+1].map(y=>(
+            <button key={y} className={`btn btn-sm ${year===y?'btn-primary':'btn-ghost'}`} onClick={()=>{setYear(y);setEditing(false);}} style={{borderRadius:7}}>{y}</button>
+          ))}
+        </div>
+      </div>
+
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {/* KPI cards */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">Total Budgeted ({year})</div><div className="metric-value">{fmt(totalBudgeted)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Total Spent</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(totalActual)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Remaining</div><div className="metric-value" style={{color:totalRemaining>=0?'var(--green)':'var(--red)'}}>{totalRemaining>=0?'':'-'}{fmt(Math.abs(totalRemaining))}</div></div>
+        <div className="card metric-card"><div className="metric-label">% Used</div><div className="metric-value" style={{color:totalBudgeted>0&&totalActual/totalBudgeted>1?'var(--red)':totalBudgeted>0&&totalActual/totalBudgeted>0.8?'var(--amber)':'var(--green)'}}>{totalBudgeted>0?Math.round(totalActual/totalBudgeted*100):0}%</div></div>
+      </div>
+
+      {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+        :allCats.length===0?<div className="card"><div className="empty"><div className="empty-icon">◉</div><span>No budget data for {year}</span></div></div>
+        :<>
+          {renderTable('Monthly Budget',getBudget,budgetRowTotal,budgetColTotal,budgetGrand,true)}
+          {renderTable('Rolling Annual Budget',getActual,actualRowTotal,actualColTotal,actualGrand,false)}
+        </>
+      }
+    </div>
+  );
+}
+
+function BalancesPage({toast}){
+  const[accounts,setAccounts]=useState([]);
+  const[selectedId,setSelectedId]=useState(null);
+  const[selectedAccount,setSelectedAccount]=useState(null);
+  const[timeline,setTimeline]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[tlLoading,setTlLoading]=useState(false);
+  const[error,setError]=useState('');
+  /* Section 5C: 4 specific filter dropdowns */
+  const[sideFilter,setSideFilter]=useState('');       // Asset/Liability
+  const[typeFilter,setTypeFilter]=useState('');        // Account Type
+  const[instFilter,setInstFilter]=useState('');        // Institution
+  const[nameFilter,setNameFilter]=useState('');        // Account Name
+
+  const loadAccounts=useCallback(async()=>{
+    setLoading(true);
+    try{setAccounts(await apiFetch('/accounts'));}catch(e){setError('Failed to load accounts');}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{loadAccounts();},[loadAccounts]);
+
+  const loadTimeline=useCallback(async(id)=>{
+    setTlLoading(true);setError('');
+    try{setTimeline(await apiFetch(`/accounts/${id}/balance-timeline`));}
+    catch(e){setError('Failed to load balance timeline');toast('Failed to load','error');}
+    finally{setTlLoading(false);}
+  },[]);
+
+  useEffect(()=>{
+    if(selectedId){
+      const acct=accounts.find(a=>a.id===selectedId);
+      setSelectedAccount(acct||null);
+      loadTimeline(selectedId);
+    }else{setTimeline(null);setSelectedAccount(null);}
+  },[selectedId]);
+
+  /* Section 5C: Compute filter dropdown options */
+  const accountTypeLabels={'checking':'Checking','savings':'Savings','money market':'Money Market','cd':'CD','investment':'Investment','401k':'401(k)','ira':'IRA','brokerage':'Brokerage','real_estate':'Real Estate','vehicle':'Vehicle','credit card':'Credit Card','credit':'Credit Card','loan':'Loan','mortgage':'Mortgage','student':'Student Loan','auto':'Auto Loan','other':'Other','business_owned':'Business'};
+  const accountTypes=[...new Set(accounts.map(a=>a.account_type))].sort();
+  const institutions=[...new Set(accounts.map(a=>(a.plaid_item_id||'Manual')).filter(Boolean))].sort();
+
+  /* Filter accounts — Section 5A: default to "All" */
+  const filteredAccounts=accounts.filter(a=>{
+    if(sideFilter==='asset'&&!a.is_asset)return false;
+    if(sideFilter==='liability'&&!a.is_liability)return false;
+    if(typeFilter&&a.account_type!==typeFilter)return false;
+    if(instFilter){
+      const inst=a.plaid_item_id||'Manual';
+      if(inst!==instFilter)return false;
+    }
+    if(nameFilter&&a.id!==parseInt(nameFilter))return false;
+    return true;
+  });
+
+  const data=timeline?.timeline||[];
+  const startBal=timeline?.starting_balance||0;
+  const currentBal=data.length?data[data.length-1].balance:startBal;
+  const change=currentBal-startBal;
+
+  /* Section 5B: Sign conventions — display as-is (assets positive, liabilities negative) */
+  const fmtBal=(val)=>{
+    if(val===0)return '$0.00';
+    const sign=val<0?'-':'';
+    return sign+fmt(Math.abs(val));
+  };
+
+  const minBal=data.length?Math.min(...data.map(d=>d.balance)):0;
+  const maxBal=data.length?Math.max(...data.map(d=>d.balance)):0;
+  const range=maxBal-minBal||1;
+  const chartW=800;const chartH=200;const pad=40;
+  const points=data.map((d,i)=>{
+    const x=pad+(i/(data.length-1||1))*(chartW-2*pad);
+    const y=pad+(1-(d.balance-minBal)/range)*(chartH-2*pad);
+    return`${x},${y}`;
+  }).join(' ');
+
+  return(
+    <div>
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
+        {/* Section 5C: 4 filter dropdowns */}
+        <select className="filter-select" value={sideFilter} onChange={e=>setSideFilter(e.target.value)}>
+          <option value="">Asset / Liability</option>
+          <option value="asset">Assets</option>
+          <option value="liability">Liabilities</option>
+        </select>
+        <select className="filter-select" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+          <option value="">Account Type</option>
+          {accountTypes.map(t=><option key={t} value={t}>{accountTypeLabels[t]||t}</option>)}
+        </select>
+        <select className="filter-select" value={instFilter} onChange={e=>setInstFilter(e.target.value)}>
+          <option value="">Institution</option>
+          {institutions.map(i=><option key={i} value={i}>{i==='Manual'?'Manual':i}</option>)}
+        </select>
+        <select className="filter-select" value={selectedId||''} onChange={e=>{setSelectedId(parseInt(e.target.value)||null);setTimeline(null);}}>
+          <option value="">Account Name</option>
+          {filteredAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
+        </select>
+        {selectedAccount&&<span style={{fontSize:12,color:'var(--text-muted)'}}>Starting: {fmtBal(selectedAccount.starting_balance||0)}{selectedAccount.start_date?` as of ${selectedAccount.start_date}`:''}</span>}
+      </div>
+
+      {!selectedId?<div className="card"><div className="empty"><div className="empty-icon">◇</div><span>Select an account to view balance timeline</span></div></div>
+        :tlLoading?<div className="loading"><div className="spinner"/><span>Loading timeline…</span></div>
+        :<div>
+          <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+            <div className="card metric-card"><div className="metric-label">Starting Balance</div><div className="metric-value">{fmtBal(startBal)}</div><div className="metric-sub">{timeline?.start_date?`as of ${timeline.start_date}`:''}</div></div>
+            <div className="card metric-card"><div className="metric-label">Current Balance</div><div className="metric-value" style={{color:currentBal>=0?'var(--green)':'var(--red)'}}>{fmtBal(currentBal)}</div></div>
+            <div className="card metric-card"><div className="metric-label">Change</div><div className="metric-value" style={{color:change>=0?'var(--green)':'var(--red)'}}>{change>=0?'+':''}{fmtBal(change)}</div></div>
+          </div>
+
+          {data.length>1&&<div className="card" style={{padding:20,marginBottom:20}}>
+            <div className="section-title" style={{marginBottom:12}}>Balance Over Time</div>
+            <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:200}}>
+              <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={points}/>
+              <polyline fill="url(#balgrad)" stroke="none" points={`${pad},${chartH-pad} ${points} ${pad+(data.length-1)/(data.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
+              <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue)" stopOpacity="0"/></linearGradient></defs>
+              <text x={pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)">{data[0]?.date}</text>
+              <text x={chartW-pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)" textAnchor="end">{data[data.length-1]?.date}</text>
+              <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(maxBal)}</text>
+              <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(minBal)}</text>
+            </svg>
+          </div>}
+
+          <div className="card">
+            <div className="section-header"><div className="section-title">Daily Balances</div><span style={{fontSize:12,color:'var(--text-muted)'}}>{data.length} days</span></div>
+            {data.length===0?<div className="empty"><span>No transaction data in this range</span></div>
+              :<div className="table-wrap" style={{maxHeight:400,overflowY:'auto'}}><table>
+                <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
+                <tbody>{[...data].reverse().map(d=>(
+                  <tr key={d.date}>
+                    <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
+                    <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
+                    <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  );
+}
+
+function NetWorthPage({toast}){
+  const[data,setData]=useState(null);
+  const[timeline,setTimeline]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState('');
+  const[expanded,setExpanded]=useState({});
+
+  const load=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      const[nw,tl]=await Promise.all([
+        apiFetch('/net-worth'),
+        apiFetch('/net-worth/timeline?months=12'),
+      ]);
+      setData(nw);setTimeline(tl.timeline||[]);
+    }catch(e){setError('Failed to load net worth data');toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load();},[load]);
+
+  const toggleBucket=(b)=>setExpanded(prev=>({...prev,[b]:!prev[b]}));
+
+  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+
+  const buckets=data?.buckets||{};
+  const assetBuckets=Object.entries(buckets).filter(([,v])=>v.is_asset);
+  const liabBuckets=Object.entries(buckets).filter(([,v])=>!v.is_asset);
+
+  /* Mini SVG chart for timeline */
+  const tlData=timeline||[];
+  const chartW=800;const chartH=180;const pad=40;
+  const vals=tlData.map(d=>d.net_worth);
+  const minV=vals.length?Math.min(...vals):0;
+  const maxV=vals.length?Math.max(...vals):0;
+  const range=maxV-minV||1;
+  const points=tlData.map((d,i)=>{
+    const x=pad+(i/(tlData.length-1||1))*(chartW-2*pad);
+    const y=pad+(1-(d.net_worth-minV)/range)*(chartH-2*pad);
+    return`${x},${y}`;
+  }).join(' ');
+
+  const BucketSection=({title,bucketList,color})=>(
+    <div className="card" style={{marginBottom:16}}>
+      <div className="section-header"><div className="section-title">{title}</div></div>
+      {bucketList.length===0?<div className="empty" style={{padding:30}}><span>No {title.toLowerCase()}</span></div>
+        :bucketList.map(([bucketName,bData])=>{
+          const bucketTotal=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
+          const isExpanded=expanded[bucketName]!==false;
+          return(
+            <div key={bucketName}>
+              <div onClick={()=>toggleBucket(bucketName)} style={{padding:'12px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',background:'#fafafa'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:11,color:'var(--text-muted)',transition:'transform 0.2s',transform:isExpanded?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
+                  <span style={{fontSize:13,fontWeight:600}}>{bucketName}</span>
+                  <span style={{fontSize:11,color:'var(--text-muted)'}}>({bData.accounts.length})</span>
+                </div>
+                <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:600,color}}>{fmt(bucketTotal)}</span>
+              </div>
+              {isExpanded&&bData.accounts.map(a=>(
+                <div key={a.account_id} style={{padding:'10px 18px 10px 44px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500}}>{a.account_name}</div>
+                    <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}{a.is_manual?' · Manual':''}</div>
+                  </div>
+                  <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color}}>{fmt(bData.is_asset?a.balance:Math.abs(a.balance))}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+
+  return(
+    <div>
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {/* KPI cards */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">Total Assets</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(data?.total_assets||0)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Total Liabilities</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(data?.total_liabilities||0)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Net Worth</div><div className="metric-value" style={{color:(data?.net_worth||0)>=0?'var(--green)':'var(--red)'}}>{(data?.net_worth||0)>=0?'':'-'}{fmt(Math.abs(data?.net_worth||0))}</div></div>
+      </div>
+
+      {/* Timeline chart */}
+      {tlData.length>1&&<div className="card" style={{padding:20,marginBottom:20}}>
+        <div className="section-title" style={{marginBottom:12}}>Net Worth Over Time</div>
+        <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:180}}>
+          <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={points}/>
+          <polyline fill="url(#nwgrad)" stroke="none" points={`${pad},${chartH-pad} ${points} ${pad+(tlData.length-1)/(tlData.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
+          <defs><linearGradient id="nwgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue)" stopOpacity="0"/></linearGradient></defs>
+          <text x={pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)">{tlData[0]?.date}</text>
+          <text x={chartW-pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlData[tlData.length-1]?.date}</text>
+          <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(maxV)}</text>
+          <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(minV)}</text>
+        </svg>
+      </div>}
+
+      {/* Asset and Liability sections */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+        <BucketSection title="Assets" bucketList={assetBuckets} color="var(--green)"/>
+        <BucketSection title="Liabilities" bucketList={liabBuckets} color="var(--red)"/>
+      </div>
+    </div>
+  );
+}
+
+/* ── Loans Page (Section 1) ──────────────────────────────────────────────── */
+function LoansPage({toast}){
+  const[loans,setLoans]=useState([]);
+  const[accounts,setAccounts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showAdd,setShowAdd]=useState(false);
+  const[editing,setEditing]=useState(null);
+  const[editVals,setEditVals]=useState({});
+  const[detail,setDetail]=useState(null);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{const[l,a]=await Promise.all([apiFetch('/loans'),apiFetch('/accounts')]);setLoans(l);setAccounts(a);}
+    catch(e){toast('Failed to load loans','error');}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load();},[load]);
+
+  const loanTypes=['mortgage','auto','student','personal','other'];
+  const blankLoan={lender:'',loan_type:'mortgage',original_principal:'',current_balance:'',interest_rate:'',term_months:'',monthly_payment:'',start_date:'',maturity_date:'',account_id:'',notes:''};
+
+  const saveLoan=async()=>{
+    const body={...editVals,original_principal:parseFloat(editVals.original_principal)||0,current_balance:editVals.current_balance?parseFloat(editVals.current_balance):null,interest_rate:editVals.interest_rate?parseFloat(editVals.interest_rate):null,term_months:editVals.term_months?parseInt(editVals.term_months):null,monthly_payment:editVals.monthly_payment?parseFloat(editVals.monthly_payment):null,account_id:editVals.account_id?parseInt(editVals.account_id):null,start_date:editVals.start_date||null,maturity_date:editVals.maturity_date||null};
+    try{
+      if(editing==='new'){await apiFetch('/loans',{method:'POST',body:JSON.stringify(body)});toast('Loan created');}
+      else{await apiFetch(`/loans/${editing}`,{method:'PATCH',body:JSON.stringify(body)});toast('Loan updated');}
+      setEditing(null);setShowAdd(false);await load();
+    }catch(e){toast('Failed to save','error');}
+  };
+
+  const deleteLoan=async(id)=>{
+    if(!confirm('Deactivate this loan?'))return;
+    try{await apiFetch(`/loans/${id}`,{method:'DELETE'});toast('Loan deactivated');await load();}
+    catch(e){toast('Failed','error');}
+  };
+
+  const loadDetail=async(id)=>{
+    try{setDetail(await apiFetch(`/loans/${id}`));}catch(e){toast('Failed to load detail','error');}
+  };
+
+  const totalPrincipal=loans.reduce((s,l)=>s+l.original_principal,0);
+  const totalBalance=loans.reduce((s,l)=>s+(l.current_balance||0),0);
+  const totalPayment=loans.reduce((s,l)=>s+(l.monthly_payment||0),0);
+
+  const LoanForm=()=>(
+    <div style={{padding:'16px 20px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,margin:'0 16px 16px'}}>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>{editing==='new'?'New Loan':'Edit Loan'}</div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Lender *</label><input value={editVals.lender||''} onChange={e=>setEditVals(v=>({...v,lender:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Type</label><select value={editVals.loan_type||'mortgage'} onChange={e=>setEditVals(v=>({...v,loan_type:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>{loanTypes.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Linked Account</label><select value={editVals.account_id||''} onChange={e=>setEditVals(v=>({...v,account_id:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}><option value="">— None —</option>{accounts.filter(a=>a.is_liability).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}</select></div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Original Principal *</label><input type="number" step="0.01" value={editVals.original_principal||''} onChange={e=>setEditVals(v=>({...v,original_principal:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Current Balance</label><input type="number" step="0.01" value={editVals.current_balance||''} onChange={e=>setEditVals(v=>({...v,current_balance:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Interest Rate (%)</label><input type="number" step="0.01" value={editVals.interest_rate||''} onChange={e=>setEditVals(v=>({...v,interest_rate:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Monthly Payment</label><input type="number" step="0.01" value={editVals.monthly_payment||''} onChange={e=>setEditVals(v=>({...v,monthly_payment:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,fontSize:12,marginBottom:8}}>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Term (months)</label><input type="number" value={editVals.term_months||''} onChange={e=>setEditVals(v=>({...v,term_months:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Start Date</label><input type="date" value={editVals.start_date||''} onChange={e=>setEditVals(v=>({...v,start_date:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text-muted)'}}>Maturity Date</label><input type="date" value={editVals.maturity_date||''} onChange={e=>setEditVals(v=>({...v,maturity_date:e.target.value}))} style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+      </div>
+      <div style={{marginBottom:8}}><label style={{fontSize:11,color:'var(--text-muted)'}}>Notes</label><input value={editVals.notes||''} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Optional" style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/></div>
+      <div style={{display:'flex',gap:8}}>
+        <button className="btn btn-sm btn-success" onClick={saveLoan}>Save</button>
+        <button className="btn btn-sm btn-ghost" onClick={()=>{setEditing(null);setShowAdd(false);}}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  return(
+    <div>
+      {/* Detail panel */}
+      {detail&&<div className="review-overlay" onClick={e=>e.target===e.currentTarget&&setDetail(null)}>
+        <div className="review-panel" style={{width:500}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <div><div style={{fontSize:16,fontWeight:600}}>{detail.lender}</div><div style={{fontSize:12,color:'var(--text-muted)'}}>{detail.loan_type} loan</div></div>
+            <button className="btn btn-sm btn-ghost" onClick={()=>setDetail(null)}>✕</button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}><div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Original</div><div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono'}}>{fmt(detail.original_principal)}</div></div>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}><div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Balance</div><div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono',color:'var(--red)'}}>{detail.current_balance!=null?fmt(detail.current_balance):'—'}</div></div>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}><div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Rate</div><div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono'}}>{detail.interest_rate!=null?`${detail.interest_rate}%`:'—'}</div></div>
+            <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}><div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Payment</div><div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono'}}>{detail.monthly_payment?fmt(detail.monthly_payment):'—'}</div></div>
+          </div>
+          {detail.term_months&&<div style={{fontSize:13,color:'var(--text-muted)',marginBottom:4}}>Term: {detail.term_months} months{detail.start_date?` · Started ${detail.start_date}`:''}{detail.maturity_date?` · Matures ${detail.maturity_date}`:''}</div>}
+          {detail.account_name&&<div style={{fontSize:13,color:'var(--text-muted)',marginBottom:4}}>Linked: {detail.account_name}{detail.account_balance!=null?` · Balance: ${fmt(detail.account_balance)}`:''}</div>}
+          {detail.notes&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:8}}>{detail.notes}</div>}
+        </div>
+      </div>}
+
+      {/* KPIs */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">Total Principal</div><div className="metric-value">{fmt(totalPrincipal)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Total Balance</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(totalBalance)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Monthly Payments</div><div className="metric-value">{fmt(totalPayment)}</div></div>
+      </div>
+
+      <div className="card">
+        <div className="section-header">
+          <div className="section-title">Loans ({loans.length})</div>
+          <button className="btn btn-sm btn-primary" onClick={()=>{setShowAdd(true);setEditing('new');setEditVals({...blankLoan});}}>+ Add Loan</button>
+        </div>
+        {(showAdd||editing==='new')&&<LoanForm/>}
+        {loading?<div className="loading"><div className="spinner"/></div>
+          :loans.length===0&&!showAdd?<div className="empty"><div className="empty-icon">⌂</div><span>No loans yet</span></div>
+          :<div className="table-wrap"><table>
+            <thead><tr><th>Lender</th><th>Type</th><th>Original</th><th>Balance</th><th>Rate</th><th>Payment</th><th>Start</th><th>Actions</th></tr></thead>
+            <tbody>{loans.map(l=>(
+              editing===l.id?<tr key={l.id}><td colSpan={8}><LoanForm/></td></tr>
+              :<tr key={l.id} style={{cursor:'pointer'}} onClick={()=>loadDetail(l.id)}>
+                <td style={{fontWeight:500}}>{l.lender}</td>
+                <td><span className="badge badge-category" style={{fontSize:11}}>{l.loan_type}</span></td>
+                <td style={{fontFamily:'DM Mono',fontSize:13}}>{fmt(l.original_principal)}</td>
+                <td style={{fontFamily:'DM Mono',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(l.current_balance):'—'}</td>
+                <td style={{fontFamily:'DM Mono',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
+                <td style={{fontFamily:'DM Mono',fontSize:13}}>{l.monthly_payment?fmt(l.monthly_payment):'—'}</td>
+                <td style={{fontSize:12,color:'var(--text-muted)'}}>{l.start_date||'—'}</td>
+                <td onClick={e=>e.stopPropagation()}><div className="edit-actions">
+                  <button className="btn btn-sm btn-secondary" onClick={()=>{setEditing(l.id);setEditVals({lender:l.lender,loan_type:l.loan_type,original_principal:l.original_principal,current_balance:l.current_balance||'',interest_rate:l.interest_rate||'',term_months:l.term_months||'',monthly_payment:l.monthly_payment||'',start_date:l.start_date||'',maturity_date:l.maturity_date||'',account_id:l.account_id||'',notes:l.notes||''});}}>Edit</button>
+                  <button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteLoan(l.id)}>×</button>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ── Cash Flow Page (Section 2) ─────────────────────────────────────────── */
+function CashFlowPage({toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[period,setPeriod]=useState('month');
+
+  const getDates=()=>{
+    const now=new Date();
+    if(period==='month')return{start:monthStart(),end:todayStr()};
+    if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
+    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:d.toISOString().slice(0,10),end:todayStr()};}
+    if(period==='last90'){const d=new Date();d.setDate(d.getDate()-90);return{start:d.toISOString().slice(0,10),end:todayStr()};}
+    return{start:'',end:''};
+  };
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const{start,end}=getDates();
+      const r=await apiFetch(`/cash-flow?start_date=${start}&end_date=${end}`);
+      setData(r);
+    }catch(e){toast('Failed to load cash flow','error');}
+    finally{setLoading(false);}
+  },[period]);
+  useEffect(()=>{load();},[load]);
+
+  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+
+  const d=data||{inflows:0,outflows:0,net:0,cc_payments:0,loan_repayments:0,transaction_count:0};
+
+  return(
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <div><h2 style={{fontSize:18,fontWeight:600}}>Cash Flow</h2><p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Depository accounts only (checking & savings)</p></div>
+        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+          {[['month','This Month'],['last30','Last 30 Days'],['last90','Last 90 Days'],['ytd','Year to Date']].map(([v,l])=>(
+            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-ghost'}`} onClick={()=>setPeriod(v)} style={{borderRadius:7}}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(5,1fr)',marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">Inflows</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(d.inflows)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Outflows</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(Math.abs(d.outflows))}</div></div>
+        <div className="card metric-card"><div className="metric-label">Net Cash Flow</div><div className="metric-value" style={{color:d.net>=0?'var(--green)':'var(--red)'}}>{d.net>=0?'+':''}{fmt(d.net)}</div></div>
+        <div className="card metric-card"><div className="metric-label">CC Payments</div><div className="metric-value" style={{color:'var(--text-secondary)'}}>{fmt(d.cc_payments)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Loan Repayments</div><div className="metric-value" style={{color:'var(--text-secondary)'}}>{fmt(d.loan_repayments)}</div></div>
+      </div>
+
+      <div className="card">
+        <div className="section-header">
+          <div className="section-title">Summary</div>
+          <span style={{fontSize:12,color:'var(--text-muted)'}}>{d.transaction_count} transactions · {d.start_date} → {d.end_date}</span>
+        </div>
+        <div style={{padding:20}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>Money In</div>
+              <div style={{background:'#f0fdf4',borderRadius:8,padding:'12px 16px',display:'flex',justifyContent:'space-between'}}>
+                <span style={{fontSize:13}}>Total Inflows</span>
+                <span style={{fontFamily:'DM Mono',fontWeight:600,color:'var(--green)'}}>{fmt(d.inflows)}</span>
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>Money Out</div>
+              <div style={{background:'#fef2f2',borderRadius:8,padding:'12px 16px',marginBottom:8,display:'flex',justifyContent:'space-between'}}>
+                <span style={{fontSize:13}}>Total Outflows</span>
+                <span style={{fontFamily:'DM Mono',fontWeight:600,color:'var(--red)'}}>{fmt(Math.abs(d.outflows))}</span>
+              </div>
+              {d.cc_payments>0&&<div style={{background:'#f3f4f6',borderRadius:8,padding:'10px 16px',marginBottom:4,display:'flex',justifyContent:'space-between'}}>
+                <span style={{fontSize:12,color:'var(--text-muted)'}}>↳ Credit Card Payments</span>
+                <span style={{fontFamily:'DM Mono',fontSize:12}}>{fmt(d.cc_payments)}</span>
+              </div>}
+              {d.loan_repayments>0&&<div style={{background:'#f3f4f6',borderRadius:8,padding:'10px 16px',display:'flex',justifyContent:'space-between'}}>
+                <span style={{fontSize:12,color:'var(--text-muted)'}}>↳ Loan Repayments</span>
+                <span style={{fontFamily:'DM Mono',fontSize:12}}>{fmt(d.loan_repayments)}</span>
+              </div>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const[page,setPage]=useState('dashboard');
+  const[categories,setCategories]=useState([]);
+  const[banks,setBanks]=useState([]);
+  const{toasts,toast}=useToast();
+
+  const loadMeta=useCallback(async()=>{
+    try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
+  },[]);
+
+  useEffect(()=>{
+    loadMeta();
+    if(!document.getElementById('plaid-script')){const s=document.createElement('script');s.id='plaid-script';s.src='https://cdn.plaid.com/link/v2/stable/link-initialize.js';document.head.appendChild(s);}
+  },[]);
+
+  const sync=async()=>{
+    try{const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});toast(`Synced ${r.transactions_synced} new transactions`);loadMeta();}
+    catch(e){toast('Sync failed','error');}
+  };
+
+  const openPlaid=usePlaidLink(toast,loadMeta);
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',balances:'Balances',cashflow:'Cash Flow',networth:'Net Worth',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+
+  return(
+    <div style={{display:'flex',height:'100vh'}}>
+      <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync}/>
+      <div className="main">
+        <div className="topbar">
+          <div className="topbar-title">{titles[page]}</div>
+          <div>{banks.length>0&&<span className="bank-badge">● {banks.length} account{banks.length!==1?'s':''} connected</span>}</div>
+        </div>
+        <div className="content">
+          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
+          {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
+          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
+          {page==='balances'&&<BalancesPage toast={toast}/>}
+          {page==='cashflow'&&<CashFlowPage toast={toast}/>}
+          {page==='networth'&&<NetWorthPage toast={toast}/>}
+          {page==='loans'&&<LoansPage toast={toast}/>}
+          {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}
+          {page==='cards'&&<CardsPage toast={toast}/>}
+          {page==='gcb'&&<GCBPage toast={toast}/>}
+          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast}/>}
+        </div>
+      </div>
+      <ToastContainer toasts={toasts}/>
+    </div>
+  );
+}
+
+ReactDOM.render(<App/>,document.getElementById('root'));
+</script>
+</body>
+</html>

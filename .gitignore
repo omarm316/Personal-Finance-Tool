@@ -1,0 +1,26 @@
+# Environment & secrets
+.env
+
+# Database
+finance.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data files (large, contain personal data)
+*.xlsx
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Backups
+main copy.py
+
+# OS
+.DS_Store
