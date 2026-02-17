@@ -538,7 +538,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         # Normalize sign: Plaid sends expenses as positive, we store as negative
         amount = -txn_data['amount']
 
-        action, category, confidence = categorizer.categorize(
+        action, category, confidence, display_desc = categorizer.categorize(
             txn_data['description_raw'],
             amount,
             txn_data.get('merchant_name'),
@@ -562,7 +562,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             date=txn_date,
             amount=amount,
             description_raw=txn_data['description_raw'],
-            description_clean=categorizer.clean_description(txn_data['description_raw']),
+            description_clean=display_desc or categorizer.clean_description(txn_data['description_raw']),
             merchant_name=txn_data.get('merchant_name'),
             action=action,
             category_auto='' if action == 'Transfer' else category,
@@ -626,6 +626,48 @@ async def list_items(db: Session = Depends(get_db)):
 # Transactions: list
 # ---------------------------------------------------------------------------
 
+def _serialize_txn(t, splits_map=None):
+    """Serialize a Transaction with inline splits and computed display fields."""
+    splits = splits_map.get(t.id, []) if splits_map else []
+    is_split = bool(t.is_split or False)
+
+    # Compute display values for split transactions
+    if is_split and splits:
+        actions = {s.action for s in splits if s.action}
+        cats    = {s.category for s in splits if s.category}
+        action_display   = next(iter(actions)) if len(actions) == 1 else "Multiple"
+        category_display = next(iter(cats))    if len(cats)    == 1 else "Multiple"
+    else:
+        action_display   = t.action
+        category_display = t.category_final
+
+    return {
+        "id": t.id, "date": t.date,
+        "description_raw": t.description_raw,
+        "description_clean": t.description_clean,
+        "description_display": t.description_clean or t.description_raw,
+        "merchant_name": t.merchant_name,
+        "amount": t.amount, "action": t.action,
+        "action_display": action_display,
+        "category_auto": t.category_auto,
+        "category_manual": t.category_manual,
+        "category_final": category_display,
+        "category_confidence": t.category_confidence,
+        "needs_review": t.needs_review,
+        "is_locked": bool(t.is_locked or False),
+        "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
+        "is_split": is_split,
+        "splits": [
+            {"id": s.id, "amount": s.amount, "description": s.description,
+             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb)}
+            for s in splits
+        ] if is_split else [],
+        "points_category": t.points_category,
+        "account_name": t.account.account_name,
+        "account_id": t.account_id,
+    }
+
+
 @app.get("/api/transactions", response_model=List[TransactionResponse])
 async def get_transactions(
     skip: int = 0,
@@ -649,28 +691,19 @@ async def get_transactions(
             (Transaction.category_auto   == category)
         )
 
-    return [
-        {
-            "id": t.id, "date": t.date,
-            "description_raw": t.description_raw,
-            "description_clean": t.description_clean,
-            "merchant_name": t.merchant_name,
-            "amount": t.amount, "action": t.action,
-            "category_auto": t.category_auto,
-            "category_manual": t.category_manual,
-            # Show "Multiple Categories" if split (Section 3a)
-            "category_final": "Multiple Categories" if t.is_split else t.category_final,
-            "category_confidence": t.category_confidence,
-            "needs_review": t.needs_review,
-            "is_locked": bool(t.is_locked or False),
-            "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
-            "is_split": bool(t.is_split or False),
-            "points_category": t.points_category,
-            "account_name": t.account.account_name,
-            "account_id": t.account_id,
-        }
-        for t in query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
-    ]
+    txns = query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
+
+    # Batch-load splits for all split transactions in one query
+    split_ids = [t.id for t in txns if t.is_split]
+    splits_map = {}
+    if split_ids:
+        all_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.parent_transaction_id.in_(split_ids)
+        ).all()
+        for s in all_splits:
+            splits_map.setdefault(s.parent_transaction_id, []).append(s)
+
+    return [_serialize_txn(t, splits_map) for t in txns]
 
 
 # ---------------------------------------------------------------------------
@@ -682,24 +715,8 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     t = db.query(Transaction).filter_by(id=transaction_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return {
-        "id": t.id, "date": t.date,
-        "description_raw": t.description_raw,
-        "description_clean": t.description_clean,
-        "merchant_name": t.merchant_name,
-        "amount": t.amount, "action": t.action,
-        "category_auto": t.category_auto,
-        "category_manual": t.category_manual,
-        "category_final": "Multiple Categories" if t.is_split else t.category_final,
-        "category_confidence": t.category_confidence,
-        "needs_review": t.needs_review,
-        "is_locked": bool(t.is_locked or False),
-        "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
-        "is_split": bool(t.is_split or False),
-        "points_category": t.points_category,
-        "account_name": t.account.account_name,
-        "account_id": t.account_id,
-    }
+    splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all() if t.is_split else []
+    return _serialize_txn(t, {t.id: splits} if splits else {})
 
 
 # ---------------------------------------------------------------------------
@@ -871,7 +888,7 @@ async def get_card_detail(card_id: int, db: Session = Depends(get_db)):
                 .order_by(Transaction.date.desc()).limit(20).all()
             recent_txns = [{
                 'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
-                'description': t.description_raw, 'amount': t.amount,
+                'description': t.description_clean or t.description_raw, 'description_raw': t.description_raw, 'amount': t.amount,
                 'category': t.category_final, 'action': t.action,
             } for t in txns]
 
@@ -994,10 +1011,11 @@ async def recategorize_all(db: Session = Depends(get_db)):
     cat_engine = CategorizationEngine(db)
     transactions = db.query(Transaction).filter(Transaction.is_locked == False).all()
     for t in transactions:
-        action, category, confidence = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
+        action, category, confidence, display_desc = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
         t.action              = action
         t.category_auto       = '' if action == 'Transfer' else category
         t.category_confidence = confidence
+        t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
         t.needs_review        = False if action == 'Transfer' else (confidence < 0.8 or category == 'Unclassified')
     db.commit()
     return {"message": f"Re-categorized {len(transactions)} transactions"}
@@ -1016,7 +1034,7 @@ async def fix_transaction_signs(db: Session = Depends(get_db)):
         )
         if needs_flip:
             t.amount = -t.amount
-            action, category, confidence = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
+            action, category, confidence, display_desc = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
             t.action              = action
             t.category_auto       = '' if action == 'Transfer' else category
             t.category_confidence = confidence

@@ -187,7 +187,9 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
       <div className="review-panel">
         <div style={{fontSize:16,fontWeight:600,marginBottom:4}}>Review Transaction</div>
         <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:20}}>{fmtDate(txn.date)} · {txn.amount<0?'–':'+'}{fmt(txn.amount)}</div>
-        <div className="review-field"><label>Description</label><input value={txn.description_raw} readOnly style={{background:'#fafafa',color:'#6b7280'}}/></div>
+        <div className="review-field"><label>Description</label><input value={txn.description_display||txn.description_raw} readOnly style={{background:'#fafafa',color:'#6b7280'}}/>
+          {txn.description_display&&txn.description_display!==txn.description_raw&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>Raw: {txn.description_raw}</div>}
+        </div>
         <div className="review-field"><label>Type</label>
           <select value={action} onChange={e=>handleTypeChange(e.target.value)}>
             {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
@@ -216,6 +218,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
   const[category,setCategory]=useState(txn.category_final);
   const[action,setAction]=useState(txn.action);
   const[saving,setSaving]=useState(false);
+  const[expanded,setExpanded]=useState(false);
   const rowClass=locked?'row-locked':txn.needs_review?'row-review':txn.action==='Transfer'?'row-transfer':'';
   /* When type changes in edit mode, clear category if new type hides it */
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
@@ -229,7 +232,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
   const createRuleFromTxn=async()=>{
     setRuleCreating(true);
     try{
-      const desc=(txn.description_clean||txn.description_raw||'').toUpperCase().trim();
+      const desc=(txn.description_display||txn.description_raw||'').toUpperCase().trim();
       const pattern=desc.substring(0,40).trim();
       await apiFetch('/rules',{method:'POST',body:JSON.stringify({priority:100,match_type:'contains',pattern,set_action:action||null,set_category:category||null,notes:'Auto-created from transaction edit'})});
       onSave(txn.id,{});/* Trigger reload */
@@ -240,14 +243,22 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
   const toggleLock=async()=>{const nl=!locked;await onSave(txn.id,{is_locked:nl});setLocked(nl);};
   const amtClass=txn.action==='Transfer'?'amount-neutral':txn.amount<0?'amount-neg':'amount-pos';
   const typeBadge=(a)=>{const l=(a||'').toLowerCase();return l==='income'?'income':l==='transfer'?'transfer':'expense';};
+  const displayAction=txn.action_display||txn.action;
   return(
+    <React.Fragment>
     <tr className={rowClass}>
-      <td style={{color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{fmtDate(txn.date)}</td>
+      <td style={{color:'var(--text-secondary)',whiteSpace:'nowrap'}}>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>
+          {txn.is_split&&<span onClick={()=>setExpanded(!expanded)} style={{cursor:'pointer',display:'inline-block',transition:'transform 0.15s',transform:expanded?'rotate(90deg)':'rotate(0deg)',fontSize:10,color:'var(--text-muted)',userSelect:'none'}}>&#9654;</span>}
+          {fmtDate(txn.date)}
+        </div>
+      </td>
       <td>
-        <div style={{fontWeight:500,fontSize:13.5}}>{txn.description_raw}</div>
+        <div style={{fontWeight:500,fontSize:13.5}}>{txn.description_display||txn.description_raw}</div>
         <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2}}>
           {locked&&<span title="Manually edited — protected from sync">🔒</span>}
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
+          {txn.description_display&&txn.description_display!==txn.description_raw&&<span style={{fontSize:10,color:'var(--text-muted)'}} title={txn.description_raw}>raw: {txn.description_raw.substring(0,30)}{txn.description_raw.length>30?'...':''}</span>}
         </div>
       </td>
       <td><span className={amtClass}>{txn.amount<0?'–':'+'}{fmt(txn.amount)}</span></td>
@@ -256,11 +267,11 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
           ?<select value={action} onChange={e=>handleTypeChange(e.target.value)} className="filter-select" style={{fontSize:12,padding:'4px 8px'}}>
             {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
           </select>
-          :<span className={`badge badge-${typeBadge(action)}`}>{action||'Expense'}</span>
+          :<span className={`badge badge-${typeBadge(displayAction)}`}>{displayAction||'Expense'}</span>
         }
       </td>
       <td>
-        {!showCategoryForType(action)
+        {!showCategoryForType(displayAction)
           ?<span style={{color:'#d1d5db',fontSize:13}}>—</span>
           :editing
             ?<select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{fontSize:12,padding:'4px 8px',width:130}}>
@@ -298,6 +309,18 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
         }
       </td>
     </tr>
+    {expanded&&txn.splits&&txn.splits.map((s,i)=>(
+      <tr key={`split-${txn.id}-${i}`} style={{background:'#f9fafb',fontSize:12}}>
+        <td></td>
+        <td style={{paddingLeft:28,color:'var(--text-secondary)'}}>{s.description||<span style={{color:'#d1d5db',fontStyle:'italic'}}>—</span>}</td>
+        <td><span style={{color:'var(--text-secondary)'}}>{s.amount<0?'–':'+'}{fmt(s.amount)}</span></td>
+        <td><span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:11}}>{s.action||'Expense'}</span></td>
+        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{s.category}</span>:<span style={{color:'#d1d5db'}}>—</span>}</td>
+        <td></td>
+        <td></td>
+      </tr>
+    ))}
+    </React.Fragment>
   );
 }
 
@@ -397,7 +420,7 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
       <div className="review-panel" style={{maxWidth:700,width:'90vw'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
           <div><div style={{fontSize:16,fontWeight:600}}>Split Transaction</div>
-          <div style={{fontSize:13,color:'var(--text-muted)'}}>{txn.description_raw} · {fmt(txn.amount)}</div></div>
+          <div style={{fontSize:13,color:'var(--text-muted)'}}>{txn.description_display||txn.description_raw} · {fmt(txn.amount)}</div></div>
         </div>
         {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:8}}>{error}</div>}
         <table style={{width:'100%',fontSize:13,marginBottom:12}}><thead><tr>
@@ -487,13 +510,13 @@ function TransactionsPage({categories,toast}){
 
   let visible=txns;
   if(!showDupes)visible=visible.filter(t=>!isDuplicateCCPayment(t));
-  if(search)visible=visible.filter(t=>t.description_raw?.toLowerCase().includes(search.toLowerCase()));
+  if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
   if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
   if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
 
   const exportCSV=()=>{
     const h=['Date','Description','Amount','Type','Category','Account'];
-    const rows=visible.map(t=>[fmtDate(t.date),t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
+    const rows=visible.map(t=>[fmtDate(t.date),t.description_display||t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
     const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
     const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='transactions.csv';a.click();
   };
@@ -635,7 +658,7 @@ function DashboardPage({categories,toast}){
               :<table style={{width:'100%'}}><tbody>{recent.map(t=>(
                 <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
                   <td style={{padding:'11px 16px',color:'var(--text-muted)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
-                  <td style={{padding:'11px 8px',fontSize:13.5,fontWeight:500}}>{t.description_raw}</td>
+                  <td style={{padding:'11px 8px',fontSize:13.5,fontWeight:500}}>{t.description_display||t.description_raw}</td>
                   <td style={{padding:'11px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
                     <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
                   </td>
@@ -684,7 +707,7 @@ function DashboardPage({categories,toast}){
               :<div>{reviewQ.map(t=>(
                 <div key={t.id} style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:10}}>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description_raw}</div>
+                    <div style={{fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description_display||t.description_raw}</div>
                     <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{fmtDate(t.date)}</div>
                   </div>
                   <div style={{fontSize:13,fontFamily:'DM Mono',color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</div>
@@ -1307,7 +1330,7 @@ function GCBPage({toast}){
             <tbody>{txns.map(t=>(
               <tr key={t.id}>
                 <td style={{color:'var(--text-secondary)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
-                <td style={{fontWeight:500,fontSize:13.5}}>{t.description_raw}</td>
+                <td style={{fontWeight:500,fontSize:13.5}}>{t.description_display||t.description_raw}</td>
                 <td><span className={t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'–':'+'}{fmt(t.amount)}</span></td>
                 <td><span className={`badge badge-${t.action?.toLowerCase()==='income'?'income':t.action?.toLowerCase()==='transfer'?'transfer':'expense'}`}>{t.action}</span></td>
                 <td>{t.action!=='Transfer'&&<span className="badge badge-category">{t.category_final}</span>}</td>

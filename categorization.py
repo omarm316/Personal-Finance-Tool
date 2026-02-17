@@ -181,19 +181,24 @@ class CategorizationEngine:
         # Default based on amount
         return 'Income' if amount > 0 else 'Expense'
     
-    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None) -> Tuple[str, str, float]:
+    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None) -> Tuple[str, str, float, Optional[str]]:
         """
         Two-pass categorization:
         Pass 1 — Match raw description against action/description rules (Groups 1 & 2)
                  to get action + normalized description
         Pass 2 — Match normalized description against category rules (Group 3)
                  to get category
+
+        Returns: (action, category, confidence, display_description)
+            display_description: polished description from a matching rule's
+                                 set_description field, or None if no rule matched.
         """
         desc_clean = self.clean_description(description)
 
         # ── Pass 1: action + description normalization ───────────────────────
         action = None
         normalized_desc = desc_clean
+        display_description = None  # polished name from rules
 
         for rule in self.rules:
             if rule.set_category and not rule.set_action and not rule.set_description:
@@ -220,6 +225,7 @@ class CategorizationEngine:
                     action = rule.set_action
                 if rule.set_description:
                     normalized_desc = rule.set_description.upper()
+                    display_description = rule.set_description  # keep original casing
 
         # ── Pass 2: category lookup ──────────────────────────────────────────
         # Try matching against normalized_desc first (exact), then raw desc (contains)
@@ -254,13 +260,14 @@ class CategorizationEngine:
                     action or self.determine_action(amount, description),
                     learned['category'],
                     learned['confidence'],
+                    display_description,
                 )
 
         action   = action or self.determine_action(amount, description)
         category = category or 'Unclassified'
         confidence = 0.85 if category != 'Unclassified' else 0.3
 
-        return action, category, confidence
+        return action, category, confidence, display_description
     
     def record_correction(self, transaction: Transaction, old_category: str, new_category: str,
                          old_action: Optional[str] = None, new_action: Optional[str] = None):
