@@ -116,7 +116,7 @@ td{padding:11px 14px;font-size:13.5px}
 <div id="root"></div>
 <script type="text/babel">
 const{useState,useEffect,useCallback}=React;
-const API='http://localhost:8000/api';
+const API='/api';
 const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(n??0));
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const monthStart=()=>new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString().slice(0,10);
@@ -133,7 +133,7 @@ function useToast(){
 }
 
 async function apiFetch(path,opts={}){
-  const res=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
+  const res=await fetch(API+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});
   if(!res.ok)throw new Error(await res.text());
   return res.json();
 }
