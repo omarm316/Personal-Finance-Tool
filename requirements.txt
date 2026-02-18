@@ -10,3 +10,4 @@ python-multipart==0.0.9
 cryptography==42.0.8
 psycopg2-binary==2.9.9
 gunicorn==22.0.0
+# LLM enrichment uses Groq API via stdlib urllib — no extra SDK needed

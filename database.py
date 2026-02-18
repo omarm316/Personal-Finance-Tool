@@ -336,6 +336,25 @@ class MerchantPointsMapping(Base):
     points_category = relationship("PointsCategory", back_populates="merchant_mappings")
 
 
+class MerchantOverride(Base):
+    """
+    User-confirmed merchant → category mappings.
+    When a user manually corrects a category, we save it here so future
+    transactions from the same merchant resolve instantly (no LLM call needed).
+    The merchant_key is a normalised version of description_raw so that
+    "STARBUCKS #1234" and "STARBUCKS #9999" both resolve to the same override.
+    """
+    __tablename__ = 'merchant_overrides'
+
+    id = Column(Integer, primary_key=True)
+    merchant_key = Column(String(100), unique=True, nullable=False, index=True)  # Normalised lookup key
+    merchant_name = Column(String(200), nullable=False)      # Clean display name, e.g. "Starbucks"
+    description_clean = Column(String(500), nullable=True)   # Clean description, e.g. "Starbucks Coffee"
+    category = Column(String(100), nullable=False)           # Category from Category table
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 
 def _is_sqlite(engine):
     return str(engine.url).startswith('sqlite')
@@ -372,6 +391,7 @@ def run_migrations(engine):
         'transaction_splits': [
             ('action', 'VARCHAR(50)'),
         ],
+        'merchant_overrides': [],   # No extra columns needed beyond what the model defines
     }
 
     if _is_sqlite(engine):

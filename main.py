@@ -23,8 +23,9 @@ from database import (
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
     seed_points_categories, import_cards_from_excel,
-    TransactionSplit, BudgetTarget, Loan,
+    TransactionSplit, BudgetTarget, Loan, MerchantOverride,
 )
+from llm_service import enrich_transaction, save_override
 from categorization import CategorizationEngine, load_rules_from_excel
 from plaid_integration import setup_plaid_from_env
 
@@ -1826,6 +1827,190 @@ async def get_cash_flow(
 def todayStr_py():
     """Return today's date as YYYY-MM-DD string."""
     return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
+# LLM Merchant Enrichment (Section LLM)
+# ---------------------------------------------------------------------------
+
+class LLMEnrichRequest(BaseModel):
+    limit: int = 50                  # Max transactions to process in one call
+    overwrite_existing: bool = False # Re-process even if already enriched
+
+
+class MerchantOverrideRequest(BaseModel):
+    description_raw: str
+    merchant_name: str
+    description_clean: str
+    category: str
+
+
+@app.post("/api/llm/enrich-transactions")
+async def llm_enrich_transactions(
+    req: LLMEnrichRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Batch-enrich transactions using the LLM.
+
+    Picks transactions where:
+    - description_clean is NULL  OR  category_auto is 'Unclassified' or NULL
+    - is_locked is FALSE (never overwrite user-locked rows)
+    - (unless overwrite_existing=True)
+
+    For each transaction:
+    1. Checks merchant_overrides table (free, instant)
+    2. Falls back to Groq LLM API call
+    3. Writes merchant_name, description_clean, category_auto back to the row
+    """
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    # Build query for transactions that need enrichment
+    query = db.query(Transaction).filter(Transaction.is_locked == False)
+
+    if not req.overwrite_existing:
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                Transaction.description_clean == None,
+                Transaction.description_clean == "",
+                Transaction.category_auto == None,
+                Transaction.category_auto == "Unclassified",
+            )
+        )
+
+    txns = query.order_by(Transaction.date.desc()).limit(req.limit).all()
+
+    results = {"processed": 0, "override_hits": 0, "llm_calls": 0, "errors": 0, "details": []}
+
+    for txn in txns:
+        try:
+            enriched = enrich_transaction(
+                transaction_id=txn.id,
+                description_raw=txn.description_raw,
+                db_session=db,
+                api_key=api_key,
+            )
+
+            txn.merchant_name = enriched["merchant_name"]
+            txn.description_clean = enriched["description_clean"]
+
+            # Only set category_auto if user hasn't manually set one
+            if not txn.category_manual:
+                txn.category_auto = enriched["category"]
+
+            db.add(txn)
+
+            results["processed"] += 1
+            if enriched["source"] == "override":
+                results["override_hits"] += 1
+            elif enriched["source"] == "llm":
+                results["llm_calls"] += 1
+
+            results["details"].append({
+                "id": txn.id,
+                "raw": txn.description_raw,
+                "merchant": enriched["merchant_name"],
+                "description_clean": enriched["description_clean"],
+                "category": enriched["category"],
+                "source": enriched["source"],
+            })
+
+        except Exception as e:
+            results["errors"] += 1
+            logger.error(f"Error enriching transaction {txn.id}: {e}")
+
+    db.commit()
+    return results
+
+
+@app.post("/api/llm/merchant-overrides")
+async def create_merchant_override(
+    req: MerchantOverrideRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Save a user-confirmed merchant → category override.
+    Call this when the user manually corrects a merchant/category so future
+    transactions from the same merchant resolve instantly without an LLM call.
+    """
+    if req.category not in [c.name for c in db.query(Category).all()]:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {req.category}")
+
+    save_override(
+        description_raw=req.description_raw,
+        merchant_name=req.merchant_name,
+        description_clean=req.description_clean,
+        category=req.category,
+        db_session=db,
+    )
+    return {"status": "saved", "merchant_name": req.merchant_name, "category": req.category}
+
+
+@app.get("/api/llm/merchant-overrides")
+async def list_merchant_overrides(db: Session = Depends(get_db)):
+    """List all saved merchant overrides."""
+    overrides = db.query(MerchantOverride).order_by(MerchantOverride.merchant_name).all()
+    return [
+        {
+            "id": o.id,
+            "merchant_key": o.merchant_key,
+            "merchant_name": o.merchant_name,
+            "description_clean": o.description_clean,
+            "category": o.category,
+            "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+        }
+        for o in overrides
+    ]
+
+
+@app.delete("/api/llm/merchant-overrides/{override_id}")
+async def delete_merchant_override(override_id: int, db: Session = Depends(get_db)):
+    """Delete a saved merchant override."""
+    override = db.query(MerchantOverride).filter_by(id=override_id).first()
+    if not override:
+        raise HTTPException(status_code=404, detail="Override not found")
+    db.delete(override)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@app.post("/api/llm/enrich-single/{transaction_id}")
+async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
+    """
+    Enrich a single transaction by ID. Useful for on-demand enrichment
+    when a user opens a transaction detail view.
+    """
+    txn = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    enriched = enrich_transaction(
+        transaction_id=txn.id,
+        description_raw=txn.description_raw,
+        db_session=db,
+        api_key=api_key,
+    )
+
+    txn.merchant_name = enriched["merchant_name"]
+    txn.description_clean = enriched["description_clean"]
+    if not txn.category_manual:
+        txn.category_auto = enriched["category"]
+
+    db.commit()
+    return {
+        "id": txn.id,
+        "merchant_name": enriched["merchant_name"],
+        "description_clean": enriched["description_clean"],
+        "category": enriched["category"],
+        "source": enriched["source"],
+    }
 
 
 # ---------------------------------------------------------------------------
