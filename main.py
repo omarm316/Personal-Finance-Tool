@@ -1058,6 +1058,48 @@ async def import_rules(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/init/upload-rules")
+async def upload_rules(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    Upload an Excel rules file and immediately import + re-categorize all transactions.
+    Use this to load your rules into Railway where the local file is unavailable.
+    """
+    import tempfile
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    try:
+        content = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        rule_count = load_rules_from_excel(tmp_path, db)
+        os.unlink(tmp_path)
+
+        # Re-categorize all unlocked transactions with the new rules
+        cat_engine = CategorizationEngine(db)
+        transactions = db.query(Transaction).filter(Transaction.is_locked == False).all()
+        for t in transactions:
+            action, category, confidence, display_desc = cat_engine.categorize(
+                t.description_raw, t.amount, t.merchant_name
+            )
+            t.action              = action
+            t.category_auto       = '' if action == 'Transfer' else category
+            t.category_confidence = confidence
+            t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
+            t.needs_review        = False if action == 'Transfer' else (confidence < 0.8 or category == 'Unclassified')
+            t.enrichment_source   = 'rule' if confidence >= 0.85 else t.enrichment_source
+        db.commit()
+
+        return {
+            "message": f"Imported {rule_count} rules and re-categorized {len(transactions)} transactions",
+            "rules_imported": rule_count,
+            "transactions_recategorized": len(transactions),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/init/recategorize")
 async def recategorize_all(db: Session = Depends(get_db)):
     cat_engine = CategorizationEngine(db)
