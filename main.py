@@ -25,7 +25,7 @@ from database import (
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
 )
-from llm_service import enrich_transaction, save_override
+from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
 from plaid_integration import setup_plaid_from_env
 
@@ -559,29 +559,30 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         txn_date = txn_data['date']
 
         # ── Auto-LLM when no rule produced a useful result ───────────────────
-        # Condition: no clean description from rules AND category is Unclassified
-        # This runs inline so every transaction arrives fully enriched.
+        # Call Groq directly (not enrich_transaction) to avoid DB session issues
+        # with an in-flight unsaved transaction.
+        # Trigger: non-Transfer AND (missing clean description OR unclassified category)
         llm_source = None
         llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
         llm_merchant = txn_data.get('merchant_name')
         llm_category = '' if action == 'Transfer' else category
 
-        if action != 'Transfer' and (not display_desc or category == 'Unclassified'):
+        needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
+        if needs_llm:
             groq_key = os.getenv("GROQ_API_KEY", "")
             if groq_key:
                 try:
-                    enriched = enrich_transaction(
-                        transaction_id=0,  # Not saved yet — pass 0 as placeholder
-                        description_raw=txn_data['description_raw'],
-                        db_session=db,
-                        api_key=groq_key,
-                    )
-                    if enriched["source"] in ("llm", "override"):
-                        llm_description_clean = enriched["description_clean"]
-                        llm_merchant = enriched["merchant_name"] or llm_merchant
-                        llm_category = enriched["category"]
-                        llm_source = enriched["source"]
+                    result_llm = _call_groq(txn_data['description_raw'], groq_key)
+                    if result_llm:
+                        llm_merchant = str(result_llm.get("merchant_name") or "").strip() or llm_merchant
+                        llm_description_clean = str(result_llm.get("description_clean") or "").strip() or llm_description_clean
+                        raw_cat = str(result_llm.get("category") or "").strip()
+                        llm_category = raw_cat if raw_cat in VALID_CATEGORIES else 'Unclassified'
+                        llm_source = "llm"
                         confidence = 0.75  # LLM enriched but not user-confirmed
+                        print(f"LLM enriched '{txn_data['description_raw']}' → '{llm_merchant}' / {llm_category}")
+                    else:
+                        print(f"LLM returned no result for '{txn_data['description_raw']}'")
                 except Exception as _llm_err:
                     print(f"LLM ingest error for '{txn_data['description_raw']}': {_llm_err}")
 
