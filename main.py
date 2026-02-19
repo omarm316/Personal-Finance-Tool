@@ -1737,6 +1737,59 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     return {'year': year, 'categories': actuals}
 
 
+@app.get("/api/budget/suggestions")
+async def get_budget_suggestions(year: int, month: int, db: Session = Depends(get_db)):
+    """
+    Return trailing 3-month average actual spending per category.
+    Used as hint text in edit mode.
+    For month=1 (Jan), looks at Oct/Nov/Dec of prior year.
+    Returns: {category: avg_amount}
+    """
+    # Build list of (year, month) for the 3 months before the requested month
+    trailing = []
+    y, m = year, month
+    for _ in range(3):
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+        trailing.append((y, m))
+
+    # Fetch actuals for each of those months
+    totals: dict[str, list] = {}
+    for ty, tm in trailing:
+        txns = db.query(Transaction).filter(
+            Transaction.year == ty,
+            Transaction.month == tm,
+            Transaction.action.in_(BUDGET_TYPES),
+        ).all()
+        month_totals: dict[str, float] = {}
+        for t in txns:
+            if t.is_split:
+                splits = db.query(TransactionSplit).filter_by(
+                    parent_transaction_id=t.id
+                ).all()
+                for s in splits:
+                    if s.is_gcb:
+                        continue
+                    cat = s.category or t.category_final or 'Unclassified'
+                    month_totals[cat] = round(month_totals.get(cat, 0) + abs(s.amount), 2)
+            else:
+                if t.is_gcb or t.gcb_tagged:
+                    continue
+                cat = t.category_final or 'Unclassified'
+                month_totals[cat] = round(month_totals.get(cat, 0) + abs(t.amount), 2)
+        for cat, amt in month_totals.items():
+            totals.setdefault(cat, []).append(amt)
+
+    # Average across months that had data
+    suggestions = {}
+    for cat, amounts in totals.items():
+        suggestions[cat] = round(sum(amounts) / 3, 0)  # avg over 3 months (0 for missing)
+
+    return {'year': year, 'month': month, 'suggestions': suggestions}
+
+
 # ---------------------------------------------------------------------------
 # Balance Timeline (Section 5 prerequisite)
 # ---------------------------------------------------------------------------
