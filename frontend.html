@@ -143,7 +143,7 @@ function ToastContainer({toasts}){
 }
 
 function Sidebar({page,setPage,banks,onConnectBank,onSync}){
-  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'balances',icon:'◇',label:'Balances'},{id:'cashflow',icon:'⇄',label:'Cash Flow'},{id:'networth',icon:'△',label:'Net Worth'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
+  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Cash Flow'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
   return(
     <div className="sidebar">
@@ -1929,255 +1929,368 @@ function BudgetsPage({categories,toast}){
   );
 }
 
-function BalancesPage({toast}){
+function NetWorthPage({toast}){
+  /* ── shared "as of" date ─────────────────────────────────────────────── */
+  const todayStr=(()=>{const d=new Date();return d.toISOString().slice(0,10);})();
+  const[asOf,setAsOf]=useState(todayStr);
+  const[subTab,setSubTab]=useState('networth');   // 'networth' | 'balances'
+
+  /* ── Net Worth tab state ─────────────────────────────────────────────── */
+  const[nwData,setNwData]=useState(null);
+  const[tlData,setTlData]=useState([]);
+  const[nwLoading,setNwLoading]=useState(true);
+  const[expanded,setExpanded]=useState({});
+  /* inline edit for starting balance */
+  const[editingAcct,setEditingAcct]=useState(null); // account_id
+  const[editBal,setEditBal]=useState('');
+  const[editDate,setEditDate]=useState('');
+  const[editSaving,setEditSaving]=useState(false);
+
+  /* ── Balances tab state ──────────────────────────────────────────────── */
   const[accounts,setAccounts]=useState([]);
   const[selectedId,setSelectedId]=useState(null);
   const[selectedAccount,setSelectedAccount]=useState(null);
   const[timeline,setTimeline]=useState(null);
-  const[loading,setLoading]=useState(true);
+  const[balLoading,setBalLoading]=useState(true);
   const[tlLoading,setTlLoading]=useState(false);
   const[error,setError]=useState('');
-  /* Section 5C: 4 specific filter dropdowns */
-  const[sideFilter,setSideFilter]=useState('');       // Asset/Liability
-  const[typeFilter,setTypeFilter]=useState('');        // Account Type
-  const[instFilter,setInstFilter]=useState('');        // Institution
-  const[nameFilter,setNameFilter]=useState('');        // Account Name
+  /* filters */
+  const[sideFilter,setSideFilter]=useState('');
+  const[typeFilter,setTypeFilter]=useState('');
+  const[nameFilter,setNameFilter]=useState('');
 
+  /* ── Net Worth: load data ────────────────────────────────────────────── */
+  const loadNW=useCallback(async()=>{
+    setNwLoading(true);setError('');
+    try{
+      const[nw,tl]=await Promise.all([
+        apiFetch(`/net-worth?as_of=${asOf}`),
+        apiFetch('/net-worth/timeline?months=12'),
+      ]);
+      setNwData(nw);setTlData(tl.timeline||[]);
+    }catch(e){setError('Failed to load net worth');toast('Failed to load','error');}
+    finally{setNwLoading(false);}
+  },[asOf]);
+  useEffect(()=>{loadNW();},[loadNW]);
+
+  /* ── Balances: load accounts list ────────────────────────────────────── */
   const loadAccounts=useCallback(async()=>{
-    setLoading(true);
-    try{setAccounts(await apiFetch('/accounts'));}catch(e){setError('Failed to load accounts');}
-    finally{setLoading(false);}
+    setBalLoading(true);
+    try{setAccounts(await apiFetch('/accounts'));}
+    catch(e){setError('Failed to load accounts');}
+    finally{setBalLoading(false);}
   },[]);
   useEffect(()=>{loadAccounts();},[loadAccounts]);
 
+  /* ── Balances: load per-account timeline ─────────────────────────────── */
   const loadTimeline=useCallback(async(id)=>{
     setTlLoading(true);setError('');
-    try{setTimeline(await apiFetch(`/accounts/${id}/balance-timeline`));}
+    try{setTimeline(await apiFetch(`/accounts/${id}/balance-timeline?end=${asOf}`));}
     catch(e){setError('Failed to load balance timeline');toast('Failed to load','error');}
     finally{setTlLoading(false);}
-  },[]);
-
+  },[asOf]);
   useEffect(()=>{
-    if(selectedId){
-      const acct=accounts.find(a=>a.id===selectedId);
-      setSelectedAccount(acct||null);
-      loadTimeline(selectedId);
-    }else{setTimeline(null);setSelectedAccount(null);}
-  },[selectedId]);
+    if(selectedId){setSelectedAccount(accounts.find(a=>a.id===selectedId)||null);loadTimeline(selectedId);}
+    else{setTimeline(null);setSelectedAccount(null);}
+  },[selectedId,asOf]);
 
-  /* Section 5C: Compute filter dropdown options */
-  const accountTypeLabels={'checking':'Checking','savings':'Savings','money market':'Money Market','cd':'CD','investment':'Investment','401k':'401(k)','ira':'IRA','brokerage':'Brokerage','real_estate':'Real Estate','vehicle':'Vehicle','credit card':'Credit Card','credit':'Credit Card','loan':'Loan','mortgage':'Mortgage','student':'Student Loan','auto':'Auto Loan','other':'Other','business_owned':'Business'};
-  const accountTypes=[...new Set(accounts.map(a=>a.account_type))].sort();
-  const institutions=[...new Set(accounts.map(a=>(a.plaid_item_id||'Manual')).filter(Boolean))].sort();
-
-  /* Filter accounts — Section 5A: default to "All" */
-  const filteredAccounts=accounts.filter(a=>{
-    if(sideFilter==='asset'&&!a.is_asset)return false;
-    if(sideFilter==='liability'&&!a.is_liability)return false;
-    if(typeFilter&&a.account_type!==typeFilter)return false;
-    if(instFilter){
-      const inst=a.plaid_item_id||'Manual';
-      if(inst!==instFilter)return false;
-    }
-    if(nameFilter&&a.id!==parseInt(nameFilter))return false;
-    return true;
-  });
-
-  const data=timeline?.timeline||[];
-  const startBal=timeline?.starting_balance||0;
-  const currentBal=data.length?data[data.length-1].balance:startBal;
-  const change=currentBal-startBal;
-
-  /* Section 5B: Sign conventions — display as-is (assets positive, liabilities negative) */
-  const fmtBal=(val)=>{
-    if(val===0)return '$0.00';
-    const sign=val<0?'-':'';
-    return sign+fmt(Math.abs(val));
-  };
-
-  const minBal=data.length?Math.min(...data.map(d=>d.balance)):0;
-  const maxBal=data.length?Math.max(...data.map(d=>d.balance)):0;
-  const range=maxBal-minBal||1;
-  const chartW=800;const chartH=200;const pad=40;
-  const points=data.map((d,i)=>{
-    const x=pad+(i/(data.length-1||1))*(chartW-2*pad);
-    const y=pad+(1-(d.balance-minBal)/range)*(chartH-2*pad);
-    return`${x},${y}`;
-  }).join(' ');
-
-  return(
-    <div>
-      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
-
-      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
-        {/* Section 5C: 4 filter dropdowns */}
-        <select className="filter-select" value={sideFilter} onChange={e=>setSideFilter(e.target.value)}>
-          <option value="">Asset / Liability</option>
-          <option value="asset">Assets</option>
-          <option value="liability">Liabilities</option>
-        </select>
-        <select className="filter-select" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
-          <option value="">Account Type</option>
-          {accountTypes.map(t=><option key={t} value={t}>{accountTypeLabels[t]||t}</option>)}
-        </select>
-        <select className="filter-select" value={instFilter} onChange={e=>setInstFilter(e.target.value)}>
-          <option value="">Institution</option>
-          {institutions.map(i=><option key={i} value={i}>{i==='Manual'?'Manual':i}</option>)}
-        </select>
-        <select className="filter-select" value={selectedId||''} onChange={e=>{setSelectedId(parseInt(e.target.value)||null);setTimeline(null);}}>
-          <option value="">Account Name</option>
-          {filteredAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
-        </select>
-        {selectedAccount&&<span style={{fontSize:12,color:'var(--text-muted)'}}>Starting: {fmtBal(selectedAccount.starting_balance||0)}{selectedAccount.start_date?` as of ${selectedAccount.start_date}`:''}</span>}
-      </div>
-
-      {!selectedId?<div className="card"><div className="empty"><div className="empty-icon">◇</div><span>Select an account to view balance timeline</span></div></div>
-        :tlLoading?<div className="loading"><div className="spinner"/><span>Loading timeline…</span></div>
-        :<div>
-          <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
-            <div className="card metric-card"><div className="metric-label">Starting Balance</div><div className="metric-value">{fmtBal(startBal)}</div><div className="metric-sub">{timeline?.start_date?`as of ${timeline.start_date}`:''}</div></div>
-            <div className="card metric-card"><div className="metric-label">Current Balance</div><div className="metric-value" style={{color:currentBal>=0?'var(--green)':'var(--red)'}}>{fmtBal(currentBal)}</div></div>
-            <div className="card metric-card"><div className="metric-label">Change</div><div className="metric-value" style={{color:change>=0?'var(--green)':'var(--red)'}}>{change>=0?'+':''}{fmtBal(change)}</div></div>
-          </div>
-
-          {data.length>1&&<div className="card" style={{padding:20,marginBottom:20}}>
-            <div className="section-title" style={{marginBottom:12}}>Balance Over Time</div>
-            <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:200}}>
-              <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={points}/>
-              <polyline fill="url(#balgrad)" stroke="none" points={`${pad},${chartH-pad} ${points} ${pad+(data.length-1)/(data.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
-              <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue)" stopOpacity="0"/></linearGradient></defs>
-              <text x={pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)">{data[0]?.date}</text>
-              <text x={chartW-pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)" textAnchor="end">{data[data.length-1]?.date}</text>
-              <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(maxBal)}</text>
-              <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(minBal)}</text>
-            </svg>
-          </div>}
-
-          <div className="card">
-            <div className="section-header"><div className="section-title">Daily Balances</div><span style={{fontSize:12,color:'var(--text-muted)'}}>{data.length} days</span></div>
-            {data.length===0?<div className="empty"><span>No transaction data in this range</span></div>
-              :<div className="table-wrap" style={{maxHeight:400,overflowY:'auto'}}><table>
-                <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
-                <tbody>{[...data].reverse().map(d=>(
-                  <tr key={d.date}>
-                    <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
-                    <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
-                    <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
-                  </tr>
-                ))}</tbody>
-              </table></div>
-            }
-          </div>
-        </div>
-      }
-    </div>
-  );
-}
-
-function NetWorthPage({toast}){
-  const[data,setData]=useState(null);
-  const[timeline,setTimeline]=useState(null);
-  const[loading,setLoading]=useState(true);
-  const[error,setError]=useState('');
-  const[expanded,setExpanded]=useState({});
-
-  const load=useCallback(async()=>{
-    setLoading(true);setError('');
-    try{
-      const[nw,tl]=await Promise.all([
-        apiFetch('/net-worth'),
-        apiFetch('/net-worth/timeline?months=12'),
-      ]);
-      setData(nw);setTimeline(tl.timeline||[]);
-    }catch(e){setError('Failed to load net worth data');toast('Failed to load','error');}
-    finally{setLoading(false);}
-  },[]);
-  useEffect(()=>{load();},[load]);
-
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+  const fmtBal=(v)=>v===0?'$0':(v<0?'-':'')+fmt(Math.abs(v));
   const toggleBucket=(b)=>setExpanded(prev=>({...prev,[b]:!prev[b]}));
 
-  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  /* ── Starting balance inline edit ────────────────────────────────────── */
+  const startEditAcct=(acct)=>{setEditingAcct(acct.account_id);setEditBal(String(Math.abs(acct.balance)));setEditDate(acct.start_date||'2025-12-31');};
+  const cancelEditAcct=()=>{setEditingAcct(null);setEditBal('');setEditDate('');};
+  const saveEditAcct=async(acct)=>{
+    setEditSaving(true);
+    try{
+      // For liabilities the stored balance should be negative; user enters positive
+      const isAsset=nwData?.buckets?.[Object.keys(nwData.buckets).find(k=>nwData.buckets[k].accounts.some(a=>a.account_id===acct.account_id))]?.is_asset??true;
+      const amt=parseFloat(editBal)||0;
+      const storedAmt=isAsset?amt:-amt;
+      await apiFetch(`/accounts/${acct.account_id}`,{method:'PATCH',body:JSON.stringify({starting_balance:storedAmt,start_date:editDate})});
+      toast('Starting balance saved');cancelEditAcct();loadNW();
+    }catch(e){toast('Failed to save','error');}
+    finally{setEditSaving(false);}
+  };
 
-  const buckets=data?.buckets||{};
-  const assetBuckets=Object.entries(buckets).filter(([,v])=>v.is_asset);
-  const liabBuckets=Object.entries(buckets).filter(([,v])=>!v.is_asset);
+  /* ══════════════════════════════════════════════════════════════════════
+     NET WORTH TAB
+  ══════════════════════════════════════════════════════════════════════ */
+  const NW_ASSET_ORDER=['Cash & Savings','Investments','Real Estate','Other Assets'];
+  const NW_LIAB_ORDER=['Mortgage','Credit Cards','Personal Loans','Business Loans','Other Liabilities'];
 
-  /* Mini SVG chart for timeline */
-  const tlData=timeline||[];
-  const chartW=800;const chartH=180;const pad=40;
-  const vals=tlData.map(d=>d.net_worth);
-  const minV=vals.length?Math.min(...vals):0;
-  const maxV=vals.length?Math.max(...vals):0;
-  const range=maxV-minV||1;
-  const points=tlData.map((d,i)=>{
-    const x=pad+(i/(tlData.length-1||1))*(chartW-2*pad);
-    const y=pad+(1-(d.net_worth-minV)/range)*(chartH-2*pad);
-    return`${x},${y}`;
-  }).join(' ');
+  const renderNWTab=()=>{
+    if(nwLoading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+    const buckets=nwData?.buckets||{};
+    const assetBuckets=NW_ASSET_ORDER.map(name=>[name,buckets[name]]).filter(([,v])=>v);
+    // also include any unknown asset buckets
+    Object.entries(buckets).forEach(([k,v])=>{if(v.is_asset&&!NW_ASSET_ORDER.includes(k))assetBuckets.push([k,v]);});
+    const liabBuckets=NW_LIAB_ORDER.map(name=>[name,buckets[name]]).filter(([,v])=>v);
+    Object.entries(buckets).forEach(([k,v])=>{if(!v.is_asset&&!NW_LIAB_ORDER.includes(k))liabBuckets.push([k,v]);});
 
-  const BucketSection=({title,bucketList,color})=>(
-    <div className="card" style={{marginBottom:16}}>
-      <div className="section-header"><div className="section-title">{title}</div></div>
-      {bucketList.length===0?<div className="empty" style={{padding:30}}><span>No {title.toLowerCase()}</span></div>
-        :bucketList.map(([bucketName,bData])=>{
-          const bucketTotal=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
-          const isExpanded=expanded[bucketName]!==false;
+    /* SVG timeline chart */
+    const chartW=800;const chartH=160;const pad=36;
+    const vals=tlData.map(d=>d.net_worth);
+    const minV=vals.length?Math.min(...vals):0;const maxV=vals.length?Math.max(...vals):0;
+    const rng=maxV-minV||1;
+    const tlPts=tlData.map((d,i)=>{
+      const x=pad+(i/(tlData.length-1||1))*(chartW-2*pad);
+      const y=pad+(1-(d.net_worth-minV)/rng)*(chartH-2*pad);
+      return`${x},${y}`;
+    }).join(' ');
+
+    const BucketPanel=({bucketList,isAsset})=>(
+      <div>
+        {bucketList.length===0&&<div className="empty" style={{padding:24}}><span>None</span></div>}
+        {bucketList.map(([bucketName,bData])=>{
+          const bucketTotal=bData.accounts.reduce((s,a)=>s+Math.abs(a.balance),0);
+          const isExp=expanded[bucketName]!==false;
           return(
-            <div key={bucketName}>
-              <div onClick={()=>toggleBucket(bucketName)} style={{padding:'12px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',background:'#fafafa'}}>
+            <div key={bucketName} style={{borderBottom:'1px solid var(--border)'}}>
+              {/* Bucket header row */}
+              <div onClick={()=>toggleBucket(bucketName)}
+                style={{padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',background:'var(--sidebar-bg)'}}>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:11,color:'var(--text-muted)',transition:'transform 0.2s',transform:isExpanded?'rotate(90deg)':'rotate(0deg)'}}>▶</span>
+                  <span style={{fontSize:10,color:'var(--text-muted)',transform:isExp?'rotate(90deg)':'none',display:'inline-block',transition:'transform 0.15s'}}>▶</span>
                   <span style={{fontSize:13,fontWeight:600}}>{bucketName}</span>
                   <span style={{fontSize:11,color:'var(--text-muted)'}}>({bData.accounts.length})</span>
                 </div>
-                <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:600,color}}>{fmt(bucketTotal)}</span>
+                <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:700,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
               </div>
-              {isExpanded&&bData.accounts.map(a=>(
-                <div key={a.account_id} style={{padding:'10px 18px 10px 44px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:500}}>{a.account_name}</div>
-                    <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}{a.is_manual?' · Manual':''}</div>
+              {/* Account rows */}
+              {isExp&&bData.accounts.map(a=>{
+                const isEditing=editingAcct===a.account_id;
+                const dispBal=Math.abs(a.balance);
+                return(
+                  <div key={a.account_id} style={{padding:'8px 16px 8px 40px',borderTop:'1px solid var(--border)',background:'var(--card-bg)'}}>
+                    {isEditing?(
+                      /* ── Inline edit form ── */
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:12,fontWeight:500,marginBottom:2}}>{a.account_name}{a.mask?` ···${a.mask}`:''}</div>
+                          <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}</div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <span style={{fontSize:11,color:'var(--text-muted)'}}>Balance $</span>
+                          <input type="number" step="0.01" min="0" value={editBal} onChange={e=>setEditBal(e.target.value)}
+                            style={{width:110,border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',fontSize:12,fontFamily:'DM Mono',textAlign:'right'}}/>
+                          <span style={{fontSize:11,color:'var(--text-muted)'}}>as of</span>
+                          <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)}
+                            style={{border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',fontSize:12}}/>
+                          <button className="btn btn-sm btn-success" onClick={()=>saveEditAcct(a)} disabled={editSaving}>{editSaving?'…':'Save'}</button>
+                          <button className="btn btn-sm btn-ghost" onClick={cancelEditAcct}>✕</button>
+                        </div>
+                      </div>
+                    ):(
+                      /* ── Read-only row ── */
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div>
+                          <span style={{fontSize:13,fontWeight:500}}>{a.account_name}{a.mask?<span style={{fontSize:11,color:'var(--text-muted)',marginLeft:4}}>···{a.mask}</span>:null}</span>
+                          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                            {a.account_type}{a.is_manual?' · Manual':''}
+                            {a.start_date?<span style={{marginLeft:8}}>Anchor: {fmtBal(a.starting_balance)} as of {a.start_date}</span>:
+                              <span style={{marginLeft:8,color:'var(--amber)'}}>⚠ No starting balance set</span>}
+                          </div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:600,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
+                          <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>startEditAcct(a)}>Edit anchor</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color}}>{fmt(bData.is_asset?a.balance:Math.abs(a.balance))}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
-        })
-      }
-    </div>
-  );
+        })}
+      </div>
+    );
 
-  return(
-    <div>
-      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
-
-      {/* KPI cards */}
-      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
-        <div className="card metric-card"><div className="metric-label">Total Assets</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(data?.total_assets||0)}</div></div>
-        <div className="card metric-card"><div className="metric-label">Total Liabilities</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(data?.total_liabilities||0)}</div></div>
-        <div className="card metric-card"><div className="metric-label">Net Worth</div><div className="metric-value" style={{color:(data?.net_worth||0)>=0?'var(--green)':'var(--red)'}}>{(data?.net_worth||0)>=0?'':'-'}{fmt(Math.abs(data?.net_worth||0))}</div></div>
+    return(<>
+      {/* KPI strip */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
+        <div className="card metric-card">
+          <div className="metric-label">Total Assets</div>
+          <div className="metric-value" style={{color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Total Liabilities</div>
+          <div className="metric-value" style={{color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Worth</div>
+          <div className="metric-value" style={{color:(nwData?.net_worth||0)>=0?'var(--green)':'var(--red)'}}>
+            {(nwData?.net_worth||0)<0?'-':''}{fmt(Math.abs(nwData?.net_worth||0))}
+          </div>
+        </div>
       </div>
 
       {/* Timeline chart */}
-      {tlData.length>1&&<div className="card" style={{padding:20,marginBottom:20}}>
-        <div className="section-title" style={{marginBottom:12}}>Net Worth Over Time</div>
-        <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:180}}>
-          <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={points}/>
-          <polyline fill="url(#nwgrad)" stroke="none" points={`${pad},${chartH-pad} ${points} ${pad+(tlData.length-1)/(tlData.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
+      {tlData.length>1&&<div className="card" style={{padding:16,marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:'var(--text-muted)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Net Worth Over Time (12 months)</div>
+        <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:160}}>
+          <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={tlPts}/>
+          <polyline fill="url(#nwgrad)" stroke="none" points={`${pad},${chartH-pad} ${tlPts} ${pad+(tlData.length-1)/(tlData.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
           <defs><linearGradient id="nwgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue)" stopOpacity="0"/></linearGradient></defs>
-          <text x={pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)">{tlData[0]?.date}</text>
-          <text x={chartW-pad} y={chartH-pad+16} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlData[tlData.length-1]?.date}</text>
+          <text x={pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)">{tlData[0]?.date}</text>
+          <text x={chartW-pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlData[tlData.length-1]?.date}</text>
           <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(maxV)}</text>
           <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(minV)}</text>
         </svg>
       </div>}
 
-      {/* Asset and Liability sections */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
-        <BucketSection title="Assets" bucketList={assetBuckets} color="var(--green)"/>
-        <BucketSection title="Liabilities" bucketList={liabBuckets} color="var(--red)"/>
+      {/* Assets | Liabilities two-column */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{padding:'12px 16px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontWeight:700,fontSize:14}}>Assets</span>
+            <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:700,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
+          </div>
+          <BucketPanel bucketList={assetBuckets} isAsset={true}/>
+        </div>
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{padding:'12px 16px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontWeight:700,fontSize:14}}>Liabilities</span>
+            <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:700,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
+          </div>
+          <BucketPanel bucketList={liabBuckets} isAsset={false}/>
+        </div>
       </div>
+    </>);
+  };
+
+  /* ══════════════════════════════════════════════════════════════════════
+     BALANCES TAB
+  ══════════════════════════════════════════════════════════════════════ */
+  const renderBalancesTab=()=>{
+    const tlItems=timeline?.timeline||[];
+    const startBal=timeline?.starting_balance||0;
+    const asOfBal=tlItems.length?tlItems[tlItems.length-1].balance:startBal;
+    const change=asOfBal-startBal;
+
+    const chartW=800;const chartH=180;const pad=36;
+    const minBal=tlItems.length?Math.min(...tlItems.map(d=>d.balance)):0;
+    const maxBal=tlItems.length?Math.max(...tlItems.map(d=>d.balance)):0;
+    const rng=maxBal-minBal||1;
+    const balPts=tlItems.map((d,i)=>{
+      const x=pad+(i/(tlItems.length-1||1))*(chartW-2*pad);
+      const y=pad+(1-(d.balance-minBal)/rng)*(chartH-2*pad);
+      return`${x},${y}`;
+    }).join(' ');
+
+    const accountTypes=[...new Set(accounts.map(a=>a.account_type))].sort();
+    const filteredAccounts=accounts.filter(a=>{
+      if(sideFilter==='asset'&&!a.is_asset)return false;
+      if(sideFilter==='liability'&&!a.is_liability)return false;
+      if(typeFilter&&a.account_type!==typeFilter)return false;
+      if(nameFilter&&a.id!==parseInt(nameFilter))return false;
+      return true;
+    });
+
+    return(<>
+      {/* Filters */}
+      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <select className="filter-select" value={sideFilter} onChange={e=>setSideFilter(e.target.value)}>
+          <option value="">Asset / Liability</option>
+          <option value="asset">Assets only</option>
+          <option value="liability">Liabilities only</option>
+        </select>
+        <select className="filter-select" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+          <option value="">All types</option>
+          {accountTypes.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+        <select className="filter-select" value={selectedId||''} onChange={e=>{setSelectedId(parseInt(e.target.value)||null);setTimeline(null);}}>
+          <option value="">— Select account —</option>
+          {filteredAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.mask?` ···${a.mask}`:''}{a.is_manual?' (Manual)':''}</option>)}
+        </select>
+        {(sideFilter||typeFilter)&&<button className="btn btn-sm btn-ghost" onClick={()=>{setSideFilter('');setTypeFilter('');}}>Clear filters</button>}
+      </div>
+
+      {!selectedId
+        ?<div className="card"><div className="empty"><div className="empty-icon">◇</div><span>Select an account to view its balance as of {asOf}</span></div></div>
+        :tlLoading
+          ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :<>
+            {/* KPI strip */}
+            <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
+              <div className="card metric-card">
+                <div className="metric-label">Starting Balance</div>
+                <div className="metric-value">{fmtBal(startBal)}</div>
+                <div className="metric-sub">{timeline?.start_date?`as of ${timeline.start_date}`:''}</div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Balance as of {asOf}</div>
+                <div className="metric-value" style={{color:asOfBal>=0?'var(--green)':'var(--red)'}}>{fmtBal(asOfBal)}</div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Change</div>
+                <div className="metric-value" style={{color:change>=0?'var(--green)':'var(--red)'}}>{change>=0?'+':''}{fmtBal(change)}</div>
+              </div>
+            </div>
+
+            {/* Balance chart */}
+            {tlItems.length>1&&<div className="card" style={{padding:16,marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--text-muted)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Balance Over Time</div>
+              <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:180}}>
+                <polyline fill="none" stroke="var(--blue)" strokeWidth="2" points={balPts}/>
+                <polyline fill="url(#balgrad)" stroke="none" points={`${pad},${chartH-pad} ${balPts} ${pad+(tlItems.length-1)/(tlItems.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
+                <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue)" stopOpacity="0"/></linearGradient></defs>
+                <text x={pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)">{tlItems[0]?.date}</text>
+                <text x={chartW-pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlItems[tlItems.length-1]?.date}</text>
+                <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(maxBal)}</text>
+                <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(minBal)}</text>
+              </svg>
+            </div>}
+
+            {/* Daily table */}
+            <div className="card">
+              <div className="section-header">
+                <div className="section-title">Daily Balances</div>
+                <span style={{fontSize:12,color:'var(--text-muted)'}}>{tlItems.length} days</span>
+              </div>
+              {tlItems.length===0
+                ?<div className="empty"><span>No transaction data in this range</span></div>
+                :<div className="table-wrap" style={{maxHeight:380,overflowY:'auto'}}>
+                  <table>
+                    <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
+                    <tbody>{[...tlItems].reverse().map(d=>(
+                      <tr key={d.date}>
+                        <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
+                        <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
+                        <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              }
+            </div>
+          </>
+      }
+    </>);
+  };
+
+  /* ── Main render ─────────────────────────────────────────────────────── */
+  return(
+    <div>
+      {/* Top bar: As Of date + sub-tabs */}
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16,flexWrap:'wrap'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:12,color:'var(--text-muted)',fontWeight:500}}>As of</span>
+          <input type="date" value={asOf} onChange={e=>{setAsOf(e.target.value);setTimeline(null);}}
+            style={{border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',fontSize:13,background:'var(--card-bg)'}}/>
+          <button className="btn btn-sm btn-ghost" onClick={()=>{setAsOf(todayStr);setTimeline(null);}}>Today</button>
+        </div>
+        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+          <button className={`btn btn-sm ${subTab==='networth'?'btn-primary':'btn-ghost'}`} style={{borderRadius:7}} onClick={()=>setSubTab('networth')}>Net Worth</button>
+          <button className={`btn btn-sm ${subTab==='balances'?'btn-primary':'btn-ghost'}`} style={{borderRadius:7}} onClick={()=>setSubTab('balances')}>Account Balances</button>
+        </div>
+      </div>
+
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {subTab==='networth'?renderNWTab():renderBalancesTab()}
     </div>
   );
 }
@@ -2420,7 +2533,7 @@ function App(){
   };
 
   const openPlaid=usePlaidLink(toast,loadMeta);
-  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',balances:'Balances',cashflow:'Cash Flow',networth:'Net Worth',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Cash Flow',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
     <div style={{display:'flex',height:'100vh'}}>
@@ -2434,7 +2547,6 @@ function App(){
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
-          {page==='balances'&&<BalancesPage toast={toast}/>}
           {page==='cashflow'&&<CashFlowPage toast={toast}/>}
           {page==='networth'&&<NetWorthPage toast={toast}/>}
           {page==='loans'&&<LoansPage toast={toast}/>}

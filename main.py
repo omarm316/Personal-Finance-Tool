@@ -36,24 +36,27 @@ from plaid_integration import setup_plaid_from_env
 # Bucket mapping: account_type → (bucket_name, is_asset, is_liability)
 # Keys match Plaid subtypes (checking, savings, credit card) and manual types
 ACCOUNT_TYPE_MAP = {
-    'checking':       ('Cash & Cash Equivalents', True, False),
-    'savings':        ('Cash & Cash Equivalents', True, False),
-    'money market':   ('Cash & Cash Equivalents', True, False),
-    'cd':             ('Cash & Cash Equivalents', True, False),
+    # Assets
+    'checking':       ('Cash & Savings', True, False),
+    'savings':        ('Cash & Savings', True, False),
+    'money market':   ('Cash & Savings', True, False),
+    'cd':             ('Cash & Savings', True, False),
     'investment':     ('Investments', True, False),
     '401k':           ('Investments', True, False),
     'ira':            ('Investments', True, False),
     'brokerage':      ('Investments', True, False),
-    'real_estate':    ('Other Assets', True, False),
+    'real_estate':    ('Real Estate', True, False),
     'vehicle':        ('Other Assets', True, False),
     'business_owned': ('Other Assets', True, False),
     'other':          ('Other Assets', True, False),
+    # Liabilities
     'credit card':    ('Credit Cards', False, True),
     'credit':         ('Credit Cards', False, True),
-    'loan':           ('Loans / Other Liabilities', False, True),
-    'mortgage':       ('Loans / Other Liabilities', False, True),
-    'student':        ('Loans / Other Liabilities', False, True),
-    'auto':           ('Loans / Other Liabilities', False, True),
+    'mortgage':       ('Mortgage', False, True),
+    'loan':           ('Personal Loans', False, True),
+    'student':        ('Personal Loans', False, True),
+    'auto':           ('Personal Loans', False, True),
+    'business_loan':  ('Business Loans', False, True),
 }
 
 # Map Plaid top-level types to our types (fallback when subtype is missing)
@@ -1865,19 +1868,22 @@ async def get_balance_timeline(
 # ---------------------------------------------------------------------------
 
 @app.get("/api/net-worth")
-async def get_net_worth(db: Session = Depends(get_db)):
+async def get_net_worth(as_of: Optional[str] = None, db: Session = Depends(get_db)):
     """
-    Compute full net worth snapshot from all active accounts.
-    Each account's current balance = starting_balance + SUM(transactions).
-    Groups accounts by bucket (Cash, Investments, Other Assets, Credit Cards, Loans).
+    Compute full net worth snapshot from all active accounts as of a given date.
+    Each account's balance = starting_balance + SUM(transactions up to as_of date).
+    Groups accounts by Net Worth bucket category.
+    as_of: ISO date string YYYY-MM-DD (defaults to today)
     """
+    as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if as_of else datetime.utcnow()
+
     accounts = db.query(Account).filter_by(is_active=True).all()
     buckets = {}
     total_assets = 0.0
     total_liabilities = 0.0
 
     for a in accounts:
-        balance = get_account_balance(db, a.id)
+        balance = get_account_balance(db, a.id, as_of_date=as_of_dt)
         flags = classify_account(a.account_type)
         bucket = flags['bucket']
 
@@ -1888,20 +1894,24 @@ async def get_net_worth(db: Session = Depends(get_db)):
             'account_id': a.id,
             'account_name': a.account_name,
             'account_type': a.account_type,
+            'mask': a.mask,
             'is_manual': bool(a.is_manual),
+            'starting_balance': a.starting_balance or 0,
+            'start_date': a.start_date.strftime('%Y-%m-%d') if a.start_date else None,
             'balance': balance,
         })
 
         if flags['is_asset']:
             total_assets += balance
         else:
-            # Liabilities are already negative (e.g. credit card balance = -500)
+            # Liabilities stored negative (e.g. credit card balance = -500)
             total_liabilities += balance
 
     return {
+        'as_of': as_of_dt.strftime('%Y-%m-%d'),
         'total_assets': round(total_assets, 2),
         'total_liabilities': round(total_liabilities, 2),
-        'net_worth': round(total_assets + total_liabilities, 2),  # Assets + Liabilities (liabilities already negative)
+        'net_worth': round(total_assets + total_liabilities, 2),
         'buckets': buckets,
     }
 
