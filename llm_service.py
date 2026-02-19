@@ -37,23 +37,35 @@ VALID_CATEGORIES = [
 ]
 
 # ── System prompt ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = f"""You are a financial transaction classifier. Given a raw bank transaction description, you will:
-1. Identify the merchant name (clean, human-readable, e.g. "Starbucks" not "STARBUCKS #1234 PPD ID:...")
-2. Write a clean short description (e.g. "Starbucks Coffee" or "Netflix Subscription")
-3. Assign the best category from the list below
+SYSTEM_PROMPT = f"""You are an expert at decoding raw bank transaction strings into clean merchant names and categories.
 
-Valid categories (pick EXACTLY one, spelling must match):
+STEP 1 — IDENTIFY THE MERCHANT
+Raw bank descriptions are garbled: uppercase, full of codes, store numbers, terminal IDs, dates, and noise.
+Your first job is to identify the real-world business behind the string. Use your knowledge of:
+- Domain names: "SAMSCLUB.COM" → "Sam's Club", "WHOLEFDS" → "Whole Foods", "AMZN" → "Amazon"
+- Common prefixes: "SQ *" → Square (small business POS), "TST*" → Toast (restaurant POS), "PP*" → PayPal
+- Abbreviations: "WHOLEFDS" → "Whole Foods", "TGT" → "Target", "WMT" → "Walmart", "CSTCO" → "Costco"
+- Suffixes to strip: store numbers (#1234), state codes (CA, NY), terminal IDs, dates, PPD ID, ACH codes
+- Financial institutions: "UNFCU" → "UN Federal Credit Union", "BOFA" → "Bank of America"
+- If it's a transfer/payment between accounts (AUTOPAY, ACH, ZELLE, WIRE, XFER), the merchant is the counterparty institution
+
+STEP 2 — WRITE A CLEAN DESCRIPTION
+A short, human-readable label a person would write in their own budget spreadsheet.
+Examples: "Sam's Club Groceries", "Netflix Subscription", "Verizon Bill", "Zelle Transfer"
+
+STEP 3 — ASSIGN A CATEGORY
+Pick the single best category from this list (spelling must match exactly):
 {json.dumps(VALID_CATEGORIES, indent=2)}
 
-Rules:
-- merchant_name: proper-case brand name only, no location/store numbers/IDs (max 50 chars)
-- description_clean: short human-readable label (max 80 chars)
-- category: must be one of the valid categories above, spelled exactly
-- If it looks like a bank transfer/payment between accounts, use "Transfer"
-- If you cannot determine the category, use "Unclassified"
+OUTPUT RULES:
+- merchant_name: proper-case real business name, no codes/numbers/locations (max 50 chars)
+- description_clean: short human label (max 80 chars)
+- category: exactly one from the list above
+- Transfers/payments between accounts → category "Transfer"
+- Truly unidentifiable → category "Unclassified" (last resort)
 
-Always respond with valid JSON only, no explanation, no markdown. Example:
-{{"merchant_name": "Whole Foods", "description_clean": "Whole Foods Grocery", "category": "Groceries"}}"""
+Respond with valid JSON only, no explanation, no markdown:
+{{"merchant_name": "Sam's Club", "description_clean": "Sam's Club Groceries", "category": "Groceries"}}"""
 
 
 def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
@@ -64,10 +76,10 @@ def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
     """
     payload = json.dumps({
         "model": ANTHROPIC_MODEL,
-        "max_tokens": 150,
+        "max_tokens": 200,
         "system": SYSTEM_PROMPT,
         "messages": [
-            {"role": "user", "content": f"Transaction description: {description_raw}"}
+            {"role": "user", "content": f"Decode this raw bank transaction string: {description_raw}"}
         ],
     }).encode("utf-8")
 
