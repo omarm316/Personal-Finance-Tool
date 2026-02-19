@@ -1896,6 +1896,41 @@ class MerchantOverrideRequest(BaseModel):
     category: str
 
 
+@app.get("/api/llm/test-groq")
+async def test_groq():
+    """Diagnostic: test Groq API key and make one real call. Shows raw error if any."""
+    import urllib.request, urllib.error, json as _json
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        return {"status": "error", "detail": "GROQ_API_KEY env var is empty or not set"}
+    key_preview = api_key[:8] + "..." + api_key[-4:]
+    payload = _json.dumps({
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant. Reply with valid JSON only."},
+            {"role": "user", "content": "Transaction description: Walmart. Reply with: {\"merchant_name\":\"Walmart\",\"category\":\"Groceries\"}"}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 50,
+        "response_format": {"type": "json_object"},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = _json.loads(resp.read().decode("utf-8"))
+            return {"status": "ok", "key_preview": key_preview, "response": body}
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8")
+        return {"status": "http_error", "key_preview": key_preview, "code": e.code, "detail": error_body}
+    except Exception as e:
+        return {"status": "exception", "key_preview": key_preview, "detail": str(e)}
+
+
 @app.post("/api/llm/enrich-transactions")
 async def llm_enrich_transactions(
     req: LLMEnrichRequest,
