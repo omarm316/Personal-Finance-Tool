@@ -112,6 +112,11 @@ class Transaction(Base):
     is_split = Column(Boolean, default=False)
     parent_transaction_id = Column(Integer, ForeignKey('transactions.id'), nullable=True)
 
+    # Enrichment source — how this transaction got its category/description
+    # Values: 'rule' (matched a categorization rule), 'llm' (Groq LLM),
+    #         'fallback' (LLM unavailable), 'manual' (user-created), None (not yet enriched)
+    enrichment_source = Column(String(20), nullable=True)
+
     # GCB (Gift Card Business) tagging
     gcb_tagged = Column(Boolean, default=False, index=True)  # Legacy — kept for backward compat
     is_gcb = Column(Boolean, default=False, index=True)       # New canonical GCB flag (Section 3b)
@@ -375,7 +380,8 @@ def run_migrations(engine):
             ('is_gcb',          'BOOLEAN DEFAULT FALSE'),
             ('points_category', 'VARCHAR(100)'),
             ('card_id',         'INTEGER'),
-            ('reviewed_at',     'TIMESTAMP'),
+            ('reviewed_at',       'TIMESTAMP'),
+            ('enrichment_source', 'VARCHAR(20)'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),

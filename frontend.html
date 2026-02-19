@@ -224,17 +224,17 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
   const[showRulePrompt,setShowRulePrompt]=useState(false);
   const[ruleCreating,setRuleCreating]=useState(false);
+  const isLlmSource=txn.enrichment_source==='llm'||txn.enrichment_source==='override';
   const save=async()=>{
     setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setLocked(true);setSaving(false);setEditing(false);
-    /* Section 4E: Show rule creation prompt after save */
-    if(category&&category!=='Unclassified')setShowRulePrompt(true);
+    /* Only offer rule creation when enrichment came from LLM (not already a rule) */
+    if(isLlmSource&&category&&category!=='Unclassified')setShowRulePrompt(true);
   };
   const createRuleFromTxn=async()=>{
     setRuleCreating(true);
     try{
-      const desc=(txn.description_display||txn.description_raw||'').toUpperCase().trim();
-      const pattern=desc.substring(0,40).trim();
-      await apiFetch('/rules',{method:'POST',body:JSON.stringify({priority:100,match_type:'contains',pattern,set_action:action||null,set_category:category||null,notes:'Auto-created from transaction edit'})});
+      /* Use new smart rule API — uses clean merchant name, deduplicates, priority 200 */
+      await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});
       onSave(txn.id,{});/* Trigger reload */
     }catch(e){}
     finally{setRuleCreating(false);setShowRulePrompt(false);}
@@ -255,10 +255,16 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
       </td>
       <td>
         <div style={{fontWeight:500,fontSize:13.5}}>{txn.description_display||txn.description_raw}</div>
-        <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2}}>
+        <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2,flexWrap:'wrap'}}>
           {locked&&<span title="Manually edited — protected from sync">🔒</span>}
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
           {txn.description_display&&txn.description_display!==txn.description_raw&&<span style={{fontSize:10,color:'var(--text-muted)'}} title={txn.description_raw}>raw: {txn.description_raw.substring(0,30)}{txn.description_raw.length>30?'...':''}</span>}
+          {txn.enrichment_source&&txn.enrichment_source!=='rule'&&(()=>{
+            const src=txn.enrichment_source;
+            const cfg={llm:{bg:'#dbeafe',color:'#1d4ed8',label:'AI'},override:{bg:'#dcfce7',color:'#15803d',label:'saved'},fallback:{bg:'#f3f4f6',color:'var(--text-muted)',label:'fallback'}};
+            const c=cfg[src]||cfg.fallback;
+            return<span style={{fontSize:10,padding:'1px 6px',borderRadius:10,background:c.bg,color:c.color,fontWeight:500,flexShrink:0}} title={`Enriched by: ${src}`}>{c.label}</span>;
+          })()}
         </div>
       </td>
       <td><span className={amtClass}>{txn.amount<0?'–':'+'}{fmt(txn.amount)}</span></td>
@@ -474,6 +480,7 @@ function TransactionsPage({categories,toast}){
   const[showManual,setShowManual]=useState(false);
   const[splitTxn,setSplitTxn]=useState(null);
   const[accounts,setAccounts]=useState([]);
+  const[accountFilter,setAccountFilter]=useState('');
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -482,11 +489,12 @@ function TransactionsPage({categories,toast}){
       if(needsReview)q+='&needs_review=true';
       if(startDate)q+=`&start_date=${startDate}`;
       if(endDate)q+=`&end_date=${endDate}`;
+      if(accountFilter)q+=`&account_id=${accountFilter}`;
       const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
       setTxns(t);setAccounts(a);
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
-  },[needsReview,startDate,endDate]);
+  },[needsReview,startDate,endDate,accountFilter]);
 
   useEffect(()=>{load();},[load]);
 
@@ -537,13 +545,17 @@ function TransactionsPage({categories,toast}){
             <option value="">All categories</option>
             {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
+          <select className="filter-select" value={accountFilter} onChange={e=>setAccountFilter(e.target.value)}>
+            <option value="">All accounts</option>
+            {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
+          </select>
           <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
           <label className="filter-label"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show duplicates</label>
           <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
           <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
-          {(startDate||endDate||search||catFilter||actionFilter||needsReview)&&
-            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);}}>Clear</button>}
+          {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter)&&
+            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');}}>Clear</button>}
           <span className="filter-count">{visible.length} transactions</span>
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>

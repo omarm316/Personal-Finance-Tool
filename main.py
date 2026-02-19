@@ -557,18 +557,64 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                     points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
         txn_date = txn_data['date']
+
+        # ── Auto-LLM when no rule produced a useful result ───────────────────
+        # Condition: no clean description from rules AND category is Unclassified
+        # This runs inline so every transaction arrives fully enriched.
+        llm_source = None
+        llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
+        llm_merchant = txn_data.get('merchant_name')
+        llm_category = '' if action == 'Transfer' else category
+
+        if action != 'Transfer' and (not display_desc or category == 'Unclassified'):
+            groq_key = os.getenv("GROQ_API_KEY", "")
+            if groq_key:
+                try:
+                    enriched = enrich_transaction(
+                        transaction_id=0,  # Not saved yet — pass 0 as placeholder
+                        description_raw=txn_data['description_raw'],
+                        db_session=db,
+                        api_key=groq_key,
+                    )
+                    if enriched["source"] in ("llm", "override"):
+                        llm_description_clean = enriched["description_clean"]
+                        llm_merchant = enriched["merchant_name"] or llm_merchant
+                        llm_category = enriched["category"]
+                        llm_source = enriched["source"]
+                        confidence = 0.75  # LLM enriched but not user-confirmed
+                except Exception as _llm_err:
+                    print(f"LLM ingest error for '{txn_data['description_raw']}': {_llm_err}")
+
+        # Determine final enrichment source
+        if llm_source:
+            final_source = llm_source
+        elif display_desc or (category and category != 'Unclassified'):
+            final_source = 'rule'
+        else:
+            final_source = 'fallback'
+
+        # needs_review: Transfers never need review; LLM results always do;
+        # rule results only if confidence < 0.85
+        if action == 'Transfer':
+            needs_review_flag = False
+        elif final_source in ('llm', 'fallback', 'override'):
+            needs_review_flag = True
+        else:
+            needs_review_flag = confidence < 0.85
+
         db.add(Transaction(
             plaid_transaction_id=txn_data['plaid_transaction_id'],
             account_id=account.id,
             date=txn_date,
             amount=amount,
             description_raw=txn_data['description_raw'],
-            description_clean=display_desc or categorizer.clean_description(txn_data['description_raw']),
-            merchant_name=txn_data.get('merchant_name'),
+            description_clean=llm_description_clean,
+            merchant_name=llm_merchant,
             action=action,
-            category_auto='' if action == 'Transfer' else category,
+            category_auto=llm_category,
             category_confidence=confidence,
-            needs_review=False if action == 'Transfer' else confidence < 0.8,
+            needs_review=needs_review_flag,
+            enrichment_source=final_source,
             gcb_tagged=gcb_auto,
             points_category=points_cat,
             year=txn_date.year,
@@ -664,6 +710,7 @@ def _serialize_txn(t, splits_map=None):
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,
+        "enrichment_source": t.enrichment_source,
         "account_name": t.account.account_name,
         "account_id": t.account_id,
     }
@@ -677,6 +724,7 @@ async def get_transactions(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     category: Optional[str] = None,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Transaction).join(Account)
@@ -691,6 +739,8 @@ async def get_transactions(
             (Transaction.category_manual == category) |
             (Transaction.category_auto   == category)
         )
+    if account_id is not None:
+        query = query.filter(Transaction.account_id == account_id)
 
     txns = query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
 
@@ -1924,6 +1974,61 @@ async def llm_enrich_transactions(
 
     db.commit()
     return results
+
+
+@app.post("/api/llm/create-rule-from-transaction/{transaction_id}")
+async def create_rule_from_transaction(
+    transaction_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Create a categorization rule from an LLM-enriched transaction that the
+    user has accepted. Uses the clean merchant name as the pattern so future
+    transactions from the same merchant are handled by rules (free, instant)
+    instead of the LLM.
+
+    Only useful when enrichment_source is 'llm' or 'override'.
+    Safe to call multiple times — checks for duplicate patterns first.
+    """
+    txn = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Use cleaned merchant name as pattern; fall back to description_clean
+    pattern = (txn.merchant_name or txn.description_clean or txn.description_raw or "").strip()
+    if not pattern:
+        raise HTTPException(status_code=400, detail="Transaction has no usable pattern")
+
+    category = txn.category_final
+    action = txn.action
+
+    if not category or category == "Unclassified":
+        raise HTTPException(status_code=400, detail="Transaction must have a valid category before creating a rule")
+
+    # Avoid creating duplicate rules for the same pattern
+    existing = db.query(CategorizationRule).filter(
+        CategorizationRule.pattern.ilike(pattern),
+        CategorizationRule.is_active == True,
+        CategorizationRule.set_category == category,
+    ).first()
+    if existing:
+        return {"status": "exists", "rule_id": existing.id, "message": f"Rule for '{pattern}' already exists"}
+
+    rule = CategorizationRule(
+        priority=200,           # Below Excel rules (100) so manual rules override them
+        priority_order=0,
+        match_type="contains",
+        pattern=pattern,
+        set_action=action,
+        set_category=category,
+        set_description=txn.description_clean or pattern,
+        is_active=True,
+        notes=f"Auto-created from LLM enrichment (txn #{transaction_id})",
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category, "action": action}
 
 
 @app.post("/api/llm/merchant-overrides")
