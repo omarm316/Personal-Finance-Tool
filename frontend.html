@@ -179,9 +179,20 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   const[category,setCategory]=useState(txn.category_final||'');
   const[action,setAction]=useState(txn.action||'Expense');
   const[saving,setSaving]=useState(false);
+  const[createRule,setCreateRule]=useState(txn.enrichment_source==='llm'||txn.enrichment_source==='fallback');
   /* When type changes, clear category if new type hides it */
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
-  const handleSave=async()=>{setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setSaving(false);onClose();};
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave(txn.id,{category,action,needs_review:false});
+    /* If checkbox is ticked and it's an LLM/fallback-sourced txn, create a rule */
+    if(createRule&&showCategoryForType(action)&&category&&category!=='Unclassified'){
+      try{await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});}
+      catch(e){/* Non-fatal — rule creation failure shouldn't block the save */}
+    }
+    setSaving(false);onClose();
+  };
+  const isLlmOrFallback=txn.enrichment_source==='llm'||txn.enrichment_source==='fallback';
   return(
     <div className="review-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="review-panel">
@@ -201,6 +212,11 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
             {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </div>}
+        {isLlmOrFallback&&showCategoryForType(action)&&
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-secondary)',marginTop:4,cursor:'pointer'}}>
+            <input type="checkbox" checked={createRule} onChange={e=>setCreateRule(e.target.checked)}/>
+            Save as rule for future transactions
+          </label>}
         <div className="review-actions">
           <button className="btn btn-sm btn-ghost" onClick={onDiscard} title="Close without saving">✕ Discard</button>
           <button className="btn btn-sm btn-ghost" onClick={()=>{onIgnore(txn.id);onClose();}} title="Remove from review queue without categorizing">○ Ignore</button>
