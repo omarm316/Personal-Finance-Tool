@@ -1134,6 +1134,7 @@ function usePlaidLink(toast,onSuccess){
 
 function CardsPage({toast}){
   const[cards,setCards]=useState([]);
+  const[accounts,setAccounts]=useState([]);
   const[plaidAccounts,setPlaidAccounts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[editing,setEditing]=useState(null);
@@ -1141,15 +1142,42 @@ function CardsPage({toast}){
   const[showInactive,setShowInactive]=useState(false);
   const[detail,setDetail]=useState(null);
   const[detailLoading,setDetailLoading]=useState(false);
+  const[matchSuggestions,setMatchSuggestions]=useState(null); // null=hidden, []=shown
+  const[matching,setMatching]=useState(false);
+  const[linking,setLinking]=useState({}); // {card_db_id: true} while confirming
 
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const[c,a]=await Promise.all([apiFetch('/cards'),apiFetch('/plaid/items')]);
-      setCards(c);setPlaidAccounts(a);
+      const[c,a,accts]=await Promise.all([apiFetch('/cards'),apiFetch('/plaid/items'),apiFetch('/accounts')]);
+      setCards(c);setPlaidAccounts(a);setAccounts(accts);
     }catch(e){toast('Failed to load cards','error');}
     finally{setLoading(false);}
   },[]);
+
+  const runMatch=async()=>{
+    setMatching(true);setMatchSuggestions(null);
+    try{
+      const r=await apiFetch('/cards/match-accounts',{method:'POST'});
+      setMatchSuggestions(r.suggestions||[]);
+      if((r.suggestions||[]).length===0)toast('No confident matches found — link cards manually','error');
+      else toast(`Found ${r.suggestions.length} suggested match${r.suggestions.length!==1?'es':''}`);
+    }catch(e){toast('Matching failed','error');}
+    finally{setMatching(false);}
+  };
+
+  const confirmLink=async(cardDbId,accountDbId)=>{
+    setLinking(l=>({...l,[cardDbId]:true}));
+    try{
+      const r=await apiFetch(`/cards/${cardDbId}/link-account`,{method:'POST',body:JSON.stringify({account_id:accountDbId})});
+      toast(`Linked — ${r.transactions_updated} transactions updated`);
+      setMatchSuggestions(s=>s.filter(x=>x.card_db_id!==cardDbId));
+      await load();
+    }catch(e){toast('Link failed','error');}
+    finally{setLinking(l=>({...l,[cardDbId]:false}));}
+  };
+
+  const dismissSuggestion=(cardDbId)=>setMatchSuggestions(s=>s.filter(x=>x.card_db_id!==cardDbId));
 
   useEffect(()=>{load();},[load]);
 
@@ -1161,7 +1189,7 @@ function CardsPage({toast}){
 
   const[plaidWarnings,setPlaidWarnings]=useState({});
 
-  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',plaid_account_id:card.plaid_account_id||'',is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
     try{
@@ -1233,18 +1261,45 @@ function CardsPage({toast}){
         <div className="card metric-card"><div className="metric-label">Annual Fees</div><div className="metric-value" style={{color:totalFees>0?'var(--red)':'var(--text-muted)'}}>{totalFees>0?fmt(totalFees):'$0'}</div></div>
       </div>
 
+      {/* Account match suggestions panel */}
+      {matchSuggestions&&matchSuggestions.length>0&&(
+        <div className="card" style={{marginBottom:16,border:'2px solid #dbeafe'}}>
+          <div className="section-header" style={{paddingBottom:8}}>
+            <div className="section-title" style={{color:'#1d4ed8'}}>🔗 Suggested Account Links</div>
+            <button className="btn btn-sm btn-ghost" onClick={()=>setMatchSuggestions(null)}>Dismiss all</button>
+          </div>
+          <div style={{padding:'0 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
+            {matchSuggestions.map(s=>(
+              <div key={s.card_db_id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600}}>{s.card_display}</div>
+                  <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>→ {s.account_display}</div>
+                  <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontStyle:'italic'}}>{s.reason}</div>
+                </div>
+                <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':s.confidence==='medium'?'#fef9c3':'#f3f4f6',color:s.confidence==='high'?'#15803d':s.confidence==='medium'?'#854d0e':'var(--text-muted)',fontWeight:600}}>{s.confidence}</span>
+                <button className="btn btn-sm btn-success" disabled={linking[s.card_db_id]} onClick={()=>confirmLink(s.card_db_id,s.account_db_id)}>{linking[s.card_db_id]?'…':'✓ Link'}</button>
+                <button className="btn btn-sm btn-ghost" onClick={()=>dismissSuggestion(s.card_db_id)}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="section-header">
           <div className="section-title">Cards ({visible.length}{!showInactive&&cards.filter(c=>!c.is_active).length>0?` + ${cards.filter(c=>!c.is_active).length} inactive`:''})</div>
-          <label className="filter-label" style={{marginRight:8}}>
-            <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
-          </label>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <label className="filter-label">
+              <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
+            </label>
+            <button className="btn btn-sm btn-primary" onClick={runMatch} disabled={matching}>{matching?'Matching…':'🔗 Match Accounts'}</button>
+          </div>
         </div>
         {loading?<div className="loading"><div className="spinner"/></div>
           :<div className="table-wrap"><table>
             <thead><tr>
               <th>Card ID</th><th>Card Name</th><th>Issuer</th><th>Network</th><th>Last 4</th>
-              <th>Close Day</th><th>Due Day</th><th>Credit Limit</th><th>Linked</th><th>Actions</th>
+              <th>Close Day</th><th>Due Day</th><th>Credit Limit</th><th>Linked Account</th><th>Actions</th>
             </tr></thead>
             <tbody>{visible.map(c=>(
               <tr key={c.id} style={{opacity:c.is_active?1:0.5,cursor:'pointer'}} onClick={()=>{if(editing!==c.id)loadDetail(c.id);}}>
@@ -1260,9 +1315,9 @@ function CardsPage({toast}){
                   <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.payment_due_day} onChange={e=>setEditVals(v=>({...v,payment_due_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                   <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.credit_limit} onChange={e=>setEditVals(v=>({...v,credit_limit:e.target.value}))} style={{width:80,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}} placeholder="0"/></td>
                   <td onClick={e=>e.stopPropagation()}>
-                    <select value={editVals.plaid_account_id} onChange={e=>setEditVals(v=>({...v,plaid_account_id:e.target.value}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:150}}>
+                    <select value={editVals.account_id||''} onChange={e=>setEditVals(v=>({...v,account_id:e.target.value?parseInt(e.target.value):null}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:160}}>
                       <option value="">— Not linked —</option>
-                      {plaidAccounts.map(a=><option key={a.item_id} value={a.plaid_account_id}>{a.institution_name}</option>)}
+                      {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
                     </select>
                   </td>
                   <td onClick={e=>e.stopPropagation()}><div className="edit-actions">
@@ -1274,11 +1329,14 @@ function CardsPage({toast}){
                   <td style={{textAlign:'center',fontSize:13}}>{c.statement_close_day?<span style={{fontFamily:'DM Mono'}}>{c.statement_close_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
                   <td style={{textAlign:'center',fontSize:13}}>{c.payment_due_day?<span style={{fontFamily:'DM Mono'}}>{c.payment_due_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
                   <td style={{fontSize:13,fontFamily:'DM Mono'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                  <td style={{fontSize:12}}>{c.plaid_account_id
-                    ?plaidWarnings[c.id]
-                      ?<span style={{color:'var(--amber)',fontSize:11}} title={plaidWarnings[c.id]}>⚠ Mismatch</span>
-                      :<span className="bank-badge">● Linked</span>
-                    :<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{fontSize:12}}>
+                    {c.account_id
+                      ?<span style={{display:'flex',alignItems:'center',gap:4}}>
+                          <span style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',display:'inline-block',flexShrink:0}}/>
+                          <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}} title={c.linked_account_name}>{c.linked_account_name}</span>
+                        </span>
+                      :<span style={{color:'var(--text-muted)',fontSize:11}}>Not linked</span>}
+                  </td>
                   <td onClick={e=>e.stopPropagation()}><button className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
                 </>}
               </tr>

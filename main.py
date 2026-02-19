@@ -536,6 +536,9 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         if not account:
             continue
 
+        # Resolve card_id from account→card FK (set via match-accounts flow)
+        linked_card_id = account.card.id if account.card else None
+
         # Normalize sign: Plaid sends expenses as positive, we store as negative
         amount = -txn_data['amount']
 
@@ -616,6 +619,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             category_confidence=confidence,
             needs_review=needs_review_flag,
             enrichment_source=final_source,
+            card_id=linked_card_id,
             gcb_tagged=gcb_auto,
             points_category=points_cat,
             year=txn_date.year,
@@ -886,22 +890,32 @@ async def get_stats(
 # Cards
 # ---------------------------------------------------------------------------
 
+def _serialize_card(c: Card) -> dict:
+    """Standard card serialization including linked account info."""
+    linked_account_name = None
+    if c.account_id and c.account:
+        linked_account_name = c.account.account_name
+    elif c.plaid_account_id:
+        # Legacy fallback
+        linked_account_name = c.plaid_account_id
+    return {
+        "id": c.id, "card_id": c.card_id, "last_four": c.last_four,
+        "issuer": c.issuer, "brand": c.brand, "card_name": c.card_name,
+        "network": c.network, "issue_date": c.issue_date,
+        "annual_fee": c.annual_fee, "credit_limit": c.credit_limit,
+        "statement_close_day": c.statement_close_day,
+        "payment_due_day": c.payment_due_day,
+        "plaid_account_id": c.plaid_account_id,
+        "account_id": c.account_id,
+        "linked_account_name": linked_account_name,
+        "is_active": c.is_active, "notes": c.notes,
+    }
+
+
 @app.get("/api/cards")
 async def get_cards(db: Session = Depends(get_db)):
     cards = db.query(Card).order_by(Card.issuer, Card.card_name).all()
-    return [
-        {
-            "id": c.id, "card_id": c.card_id, "last_four": c.last_four,
-            "issuer": c.issuer, "brand": c.brand, "card_name": c.card_name,
-            "network": c.network, "issue_date": c.issue_date,
-            "annual_fee": c.annual_fee, "credit_limit": c.credit_limit,
-            "statement_close_day": c.statement_close_day,
-            "payment_due_day": c.payment_due_day,
-            "plaid_account_id": c.plaid_account_id,
-            "is_active": c.is_active, "notes": c.notes,
-        }
-        for c in cards
-    ]
+    return [_serialize_card(c) for c in cards]
 
 
 @app.patch("/api/cards/{card_id}")
@@ -910,12 +924,173 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     allowed = ["card_name", "last_four", "statement_close_day", "payment_due_day",
-               "credit_limit", "plaid_account_id", "is_active", "notes", "annual_fee"]
+               "credit_limit", "plaid_account_id", "account_id", "is_active", "notes", "annual_fee"]
     for k, v in updates.items():
         if k in allowed:
             setattr(card, k, v)
     db.commit()
     return {"message": "Updated"}
+
+
+@app.post("/api/cards/match-accounts")
+async def match_cards_to_accounts(db: Session = Depends(get_db)):
+    """
+    Use Claude to suggest Account↔Card matches based on name, last 4 digits,
+    issuer, and institution. Returns suggestions — does NOT auto-apply them.
+    User confirms each match via POST /api/cards/{id}/link-account.
+    """
+    import urllib.request as _ur
+    import json as _json
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    cards    = db.query(Card).filter_by(is_active=True).all()
+    accounts = db.query(Account).filter_by(is_active=True).all()
+
+    # Build compact representations for Claude
+    cards_list = [
+        {
+            "card_db_id": c.id,
+            "card_id": c.card_id,
+            "issuer": c.issuer,
+            "brand": c.brand,
+            "card_name": c.card_name,
+            "network": c.network,
+            "last_four": c.last_four,
+            "already_linked": c.account_id is not None,
+        }
+        for c in cards
+    ]
+    accounts_list = [
+        {
+            "account_db_id": a.id,
+            "account_name": a.account_name,
+            "official_name": a.official_name,
+            "account_type": a.account_type,
+            "mask": a.mask,   # Last 4 digits from Plaid
+            "is_manual": a.is_manual,
+        }
+        for a in accounts
+    ]
+
+    prompt = f"""You are a financial data assistant. Match each credit/debit card to the most likely bank account.
+
+CARDS (from user's card list):
+{_json.dumps(cards_list, indent=2)}
+
+ACCOUNTS (from Plaid/bank connections):
+{_json.dumps(accounts_list, indent=2)}
+
+Matching rules:
+- last_four on card should match mask on account (both are last 4 digits of the card number)
+- issuer/brand on card should match institution in account_name or official_name
+- account_type 'credit' matches credit cards; 'checking'/'savings' matches debit cards
+- Skip cards where already_linked is true — they are already matched
+- Only suggest matches you are confident about (last_four+issuer agreement)
+- A card can only match ONE account; an account can only match ONE card
+
+Respond with a JSON array only, no explanation:
+[
+  {{
+    "card_db_id": <int>,
+    "account_db_id": <int>,
+    "confidence": "high" | "medium" | "low",
+    "reason": "<short explanation>"
+  }},
+  ...
+]
+
+If no confident matches exist, return an empty array: []"""
+
+    payload = _json.dumps({
+        "model": "claude-haiku-4-5",
+        "max_tokens": 1000,
+        "system": "You are a financial data assistant. Always respond with valid JSON only, no markdown.",
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+
+    req = _ur.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _ur.urlopen(req, timeout=20) as resp:
+            body = _json.loads(resp.read().decode("utf-8"))
+            text = body["content"][0]["text"].strip()
+            # Strip markdown fences if present
+            import re as _re
+            text = _re.sub(r"^```[a-z]*\n?", "", text)
+            text = _re.sub(r"\n?```$", "", text.strip())
+            suggestions = _json.loads(text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Claude matching failed: {e}")
+
+    # Enrich suggestions with display info
+    card_map    = {c.id: c for c in cards}
+    account_map = {a.id: a for a in accounts}
+    result = []
+    for s in suggestions:
+        c = card_map.get(s.get("card_db_id"))
+        a = account_map.get(s.get("account_db_id"))
+        if not c or not a:
+            continue
+        result.append({
+            "card_db_id":      c.id,
+            "card_display":    f"{c.issuer} {c.card_name} (…{c.last_four})",
+            "account_db_id":   a.id,
+            "account_display": a.account_name,
+            "confidence":      s.get("confidence", "low"),
+            "reason":          s.get("reason", ""),
+        })
+
+    return {"suggestions": result, "total": len(result)}
+
+
+@app.post("/api/cards/{card_id}/link-account")
+async def link_card_to_account(card_id: int, body: dict, db: Session = Depends(get_db)):
+    """
+    Confirm a card↔account link. Sets Card.account_id and back-fills
+    Transaction.card_id for all transactions on that account.
+    Pass account_id=null to unlink.
+    """
+    card = db.query(Card).filter_by(id=card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    account_id = body.get("account_id")  # None to unlink
+
+    if account_id is not None:
+        account = db.query(Account).filter_by(id=account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        card.account_id      = account_id
+        card.plaid_account_id = account.plaid_account_id  # Keep legacy field in sync
+
+        # Back-fill card_id on all existing transactions for this account
+        txn_count = db.query(Transaction).filter_by(account_id=account_id).update(
+            {"card_id": card_id}, synchronize_session=False
+        )
+    else:
+        # Unlink
+        old_account_id  = card.account_id
+        card.account_id = None
+        txn_count = 0
+        if old_account_id:
+            txn_count = db.query(Transaction).filter_by(
+                account_id=old_account_id, card_id=card_id
+            ).update({"card_id": None}, synchronize_session=False)
+
+    db.commit()
+    return {
+        "status": "linked" if account_id else "unlinked",
+        "card_id": card_id,
+        "account_id": account_id,
+        "transactions_updated": txn_count,
+    }
 
 
 @app.get("/api/cards/{card_id}/detail")

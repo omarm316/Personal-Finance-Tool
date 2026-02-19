@@ -83,6 +83,7 @@ class Account(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     transactions = relationship("Transaction", back_populates="account")
+    card = relationship("Card", back_populates="account", uselist=False, foreign_keys="Card.account_id")
 
 
 class Transaction(Base):
@@ -317,12 +318,14 @@ class Card(Base):
     credit_limit = Column(Float, nullable=True)
     statement_close_day = Column(Integer, nullable=True)   # Day of month (1-31)
     payment_due_day = Column(Integer, nullable=True)       # Day of month (1-31)
-    plaid_account_id = Column(String(100), nullable=True)  # Links to Account
+    plaid_account_id = Column(String(100), nullable=True)  # Legacy string link — prefer account_id
+    account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True, index=True)  # Proper FK to Account
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    account = relationship("Account", back_populates="card", foreign_keys=[account_id])
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="card")
 
 
@@ -389,7 +392,9 @@ def run_migrations(engine):
             ('start_date', 'DATE'),
             ('notes', 'TEXT'),
         ],
-        'cards': [],
+        'cards': [
+            ('account_id', 'INTEGER'),
+        ],
         'categorization_rules': [
             ('clean_description', 'VARCHAR(500)'),
             ('priority_order', 'INTEGER DEFAULT 0'),
