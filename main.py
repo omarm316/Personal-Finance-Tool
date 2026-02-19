@@ -9,7 +9,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, Response
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -1929,85 +1929,105 @@ async def test_groq():
         return {"status": "exception", "key_preview": key_preview, "detail": str(e)}
 
 
+import threading as _threading
+import uuid as _uuid
+
+# In-memory job status store (resets on redeploy, which is fine)
+_enrich_jobs: dict = {}
+
+def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
+    """Background worker — runs in a thread, uses its own DB session."""
+    db = SessionLocal()
+    job = _enrich_jobs[job_id]
+    try:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            job["status"] = "error"
+            job["error"] = "ANTHROPIC_API_KEY not configured"
+            return
+
+        from sqlalchemy import or_
+        query = db.query(Transaction).filter(Transaction.is_locked == False)
+        if not overwrite_existing:
+            query = query.filter(or_(
+                Transaction.description_clean == None,
+                Transaction.description_clean == "",
+                Transaction.category_auto == None,
+                Transaction.category_auto == "Unclassified",
+            ))
+        txns = query.order_by(Transaction.date.desc()).limit(limit).all()
+        job["total"] = len(txns)
+
+        for txn in txns:
+            try:
+                enriched = enrich_transaction(
+                    transaction_id=txn.id,
+                    description_raw=txn.description_raw,
+                    db_session=db,
+                    api_key=api_key,
+                )
+                txn.merchant_name     = enriched["merchant_name"]
+                txn.description_clean = enriched["description_clean"]
+                if not txn.category_manual:
+                    txn.category_auto = enriched["category"]
+                txn.enrichment_source = enriched["source"]
+                db.add(txn)
+                db.commit()
+
+                job["processed"] += 1
+                if enriched["source"] == "override":
+                    job["override_hits"] += 1
+                elif enriched["source"] == "llm":
+                    job["llm_calls"] += 1
+                job["last"] = {"id": txn.id, "raw": txn.description_raw,
+                               "merchant": enriched["merchant_name"],
+                               "category": enriched["category"], "source": enriched["source"]}
+            except Exception as e:
+                job["errors"] += 1
+                logger.error(f"Enrich error txn {txn.id}: {e}")
+
+        job["status"] = "done"
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)
+    finally:
+        db.close()
+
+
 @app.post("/api/llm/enrich-transactions")
 async def llm_enrich_transactions(
     req: LLMEnrichRequest,
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
 ):
     """
-    Batch-enrich transactions using the LLM.
-
-    Picks transactions where:
-    - description_clean is NULL  OR  category_auto is 'Unclassified' or NULL
-    - is_locked is FALSE (never overwrite user-locked rows)
-    - (unless overwrite_existing=True)
-
-    For each transaction:
-    1. Checks merchant_overrides table (free, instant)
-    2. Falls back to Groq LLM API call
-    3. Writes merchant_name, description_clean, category_auto back to the row
+    Start a background enrichment job. Returns a job_id immediately.
+    Poll GET /api/llm/enrich-status/{job_id} to check progress.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
-    # Build query for transactions that need enrichment
-    query = db.query(Transaction).filter(Transaction.is_locked == False)
+    job_id = str(_uuid.uuid4())[:8]
+    _enrich_jobs[job_id] = {
+        "status": "running", "processed": 0, "total": 0,
+        "llm_calls": 0, "override_hits": 0, "errors": 0, "last": None,
+    }
 
-    if not req.overwrite_existing:
-        from sqlalchemy import or_
-        query = query.filter(
-            or_(
-                Transaction.description_clean == None,
-                Transaction.description_clean == "",
-                Transaction.category_auto == None,
-                Transaction.category_auto == "Unclassified",
-            )
-        )
+    t = _threading.Thread(target=_run_enrich_job,
+                          args=(job_id, req.overwrite_existing, req.limit),
+                          daemon=True)
+    t.start()
 
-    txns = query.order_by(Transaction.date.desc()).limit(req.limit).all()
+    return {"job_id": job_id, "message": f"Enrichment started for up to {req.limit} transactions. Poll /api/llm/enrich-status/{job_id}"}
 
-    results = {"processed": 0, "override_hits": 0, "llm_calls": 0, "errors": 0, "details": []}
 
-    for txn in txns:
-        try:
-            enriched = enrich_transaction(
-                transaction_id=txn.id,
-                description_raw=txn.description_raw,
-                db_session=db,
-                api_key=api_key,
-            )
-
-            txn.merchant_name = enriched["merchant_name"]
-            txn.description_clean = enriched["description_clean"]
-
-            # Only set category_auto if user hasn't manually set one
-            if not txn.category_manual:
-                txn.category_auto = enriched["category"]
-
-            db.add(txn)
-
-            results["processed"] += 1
-            if enriched["source"] == "override":
-                results["override_hits"] += 1
-            elif enriched["source"] == "llm":
-                results["llm_calls"] += 1
-
-            results["details"].append({
-                "id": txn.id,
-                "raw": txn.description_raw,
-                "merchant": enriched["merchant_name"],
-                "description_clean": enriched["description_clean"],
-                "category": enriched["category"],
-                "source": enriched["source"],
-            })
-
-        except Exception as e:
-            results["errors"] += 1
-            logger.error(f"Error enriching transaction {txn.id}: {e}")
-
-    db.commit()
-    return results
+@app.get("/api/llm/enrich-status/{job_id}")
+async def llm_enrich_status(job_id: str):
+    """Poll enrichment job status."""
+    job = _enrich_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
 
 
 @app.post("/api/llm/create-rule-from-transaction/{transaction_id}")
