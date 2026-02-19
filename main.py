@@ -569,10 +569,10 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
         needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
         if needs_llm:
-            groq_key = os.getenv("GROQ_API_KEY", "")
-            if groq_key:
+            llm_key = os.getenv("ANTHROPIC_API_KEY", "")
+            if llm_key:
                 try:
-                    result_llm = _call_groq(txn_data['description_raw'], groq_key)
+                    result_llm = _call_groq(txn_data['description_raw'], llm_key)
                     if result_llm:
                         llm_merchant = str(result_llm.get("merchant_name") or "").strip() or llm_merchant
                         llm_description_clean = str(result_llm.get("description_clean") or "").strip() or llm_description_clean
@@ -1898,26 +1898,24 @@ class MerchantOverrideRequest(BaseModel):
 
 @app.get("/api/llm/test-groq")
 async def test_groq():
-    """Diagnostic: test Groq API key and make one real call. Shows raw error if any."""
+    """Diagnostic: test Anthropic API key with one real Claude call. Shows raw error if any."""
     import urllib.request, urllib.error, json as _json
-    api_key = os.getenv("GROQ_API_KEY", "")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
-        return {"status": "error", "detail": "GROQ_API_KEY env var is empty or not set"}
+        return {"status": "error", "detail": "ANTHROPIC_API_KEY env var is empty or not set"}
     key_preview = api_key[:8] + "..." + api_key[-4:]
     payload = _json.dumps({
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {"role": "system", "content": "You are a helpful assistant. Reply with valid JSON only."},
-            {"role": "user", "content": "Transaction description: Walmart. Reply with: {\"merchant_name\":\"Walmart\",\"category\":\"Groceries\"}"}
-        ],
-        "temperature": 0.1,
+        "model": "claude-haiku-4-5",
         "max_tokens": 50,
-        "response_format": {"type": "json_object"},
+        "system": "You are a helpful assistant. Reply with valid JSON only.",
+        "messages": [
+            {"role": "user", "content": "Transaction: Walmart. Reply with JSON: {\"merchant_name\":\"Walmart\",\"category\":\"Groceries\"}"}
+        ],
     }).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
+        "https://api.anthropic.com/v1/messages",
         data=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -1949,9 +1947,9 @@ async def llm_enrich_transactions(
     2. Falls back to Groq LLM API call
     3. Writes merchant_name, description_clean, category_auto back to the row
     """
-    api_key = os.getenv("GROQ_API_KEY", "")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
     # Build query for transactions that need enrichment
     query = db.query(Transaction).filter(Transaction.is_locked == False)
@@ -2128,9 +2126,9 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    api_key = os.getenv("GROQ_API_KEY", "")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
     enriched = enrich_transaction(
         transaction_id=txn.id,
