@@ -118,6 +118,13 @@ class Transaction(Base):
     #         'fallback' (LLM unavailable), 'manual' (user-created), None (not yet enriched)
     enrichment_source = Column(String(20), nullable=True)
 
+    # Import tracking — for CSV/OFX imported transactions (NULL for Plaid)
+    # import_hash: SHA-256 of (account_id + date + amount + description + occurrence_index)
+    #              used for deduplication on re-import; unique constraint allows NULL (Plaid txns)
+    import_hash = Column(String(64), unique=True, nullable=True, index=True)
+    # import_source: 'plaid' | 'csv' | 'ofx' | 'manual'
+    import_source = Column(String(20), nullable=True)
+
     # GCB (Gift Card Business) tagging
     gcb_tagged = Column(Boolean, default=False, index=True)  # Legacy — kept for backward compat
     is_gcb = Column(Boolean, default=False, index=True)       # New canonical GCB flag (Section 3b)
@@ -385,6 +392,8 @@ def run_migrations(engine):
             ('card_id',         'INTEGER'),
             ('reviewed_at',       'TIMESTAMP'),
             ('enrichment_source', 'VARCHAR(20)'),
+            ('import_hash',       'VARCHAR(64)'),
+            ('import_source',     'VARCHAR(20)'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),
