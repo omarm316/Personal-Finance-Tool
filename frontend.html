@@ -12,25 +12,26 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;--bg:#f4f5f7;--sidebar-bg:#0f1117;--sidebar-text:#a0a8b8;
-  --card-bg:#ffffff;--border:#e8eaed;--text-primary:#0f1117;--text-secondary:#6b7280;--text-muted:#9ca3af;
-  --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
+  --sidebar-w:220px;--bg:#f0f3f8;--sidebar-bg:#00245d;--sidebar-text:#a8bcd8;
+  --sidebar-hover-bg:rgba(255,255,255,0.09);--sidebar-active-bg:rgba(255,255,255,0.15);
+  --card-bg:#ffffff;--border:#dde3ee;--text-primary:#0d1b2e;--text-secondary:#6b7280;--text-muted:#9ca3af;
+  --blue:#0070d2;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
   --radius:12px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 12px rgba(0,0,0,0.08);
 }
 html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
 body{overflow:hidden}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid rgba(255,255,255,0.05)}
-.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.07)}
-.sidebar-logo h1{font-size:15px;font-weight:600;color:#fff;letter-spacing:-0.3px}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:none;box-shadow:2px 0 12px rgba(0,36,93,0.18)}
+.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.sidebar-logo h1{font-size:15px;font-weight:700;color:#fff;letter-spacing:-0.3px}
 .sidebar-logo p{font-size:11px;color:var(--sidebar-text);margin-top:2px}
 .sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
-.nav-section-label{font-size:10px;font-weight:600;color:#3d4450;text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px}
+.nav-section-label{font-size:10px;font-weight:600;color:rgba(168,188,216,0.55);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit}
-.nav-item:hover{background:rgba(255,255,255,0.06);color:#d0d5e0}
-.nav-item.active{background:rgba(59,130,246,0.15);color:#fff;font-weight:500}
+.nav-item:hover{background:var(--sidebar-hover-bg);color:#e8eef8}
+.nav-item.active{background:var(--sidebar-active-bg);color:#ffffff;font-weight:600;box-shadow:inset 3px 0 0 rgba(255,255,255,0.6)}
 .nav-icon{font-size:15px;width:18px;text-align:center}
-.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.07)}
-.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--sidebar-text);display:flex;align-items:center;gap:8px}
+.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.1)}
+.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:#c8d8ee;display:flex;align-items:center;gap:8px}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 .topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -44,7 +45,7 @@ body{overflow:hidden}
 .metric-sub{font-size:12px;color:var(--text-muted);margin-top:4px}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
 .btn-primary{background:var(--blue);color:#fff}
-.btn-primary:hover{background:#2563eb}
+.btn-primary:hover{background:#005bb5}
 .btn-secondary{background:#f3f4f6;color:var(--text-primary);border:1px solid var(--border)}
 .btn-secondary:hover{background:#e9eaec}
 .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
@@ -53,6 +54,8 @@ body{overflow:hidden}
 .btn-ghost{background:transparent;color:var(--text-secondary)}
 .btn-ghost:hover{background:#f3f4f6}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
+.btn-outline-white{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.35)}
+.btn-outline-white:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.6)}
 .filters{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;width:200px}
 .search-input:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
@@ -154,11 +157,11 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync}){
       </nav>
       <div className="sidebar-footer">
         <div className="nav-section-label" style={{paddingTop:0,marginBottom:6}}>Connected Banks</div>
-        {uniqueBanks.length===0?<div style={{fontSize:12,color:'#3d4450',padding:'4px 10px'}}>No banks connected</div>
+        {uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
           :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)}
         <div style={{display:'flex',gap:6,marginTop:12}}>
           <button className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank}>+ Bank</button>
-          <button className="btn btn-sm btn-secondary" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
+          <button className="btn btn-sm btn-outline-white" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
         </div>
       </div>
     </div>
