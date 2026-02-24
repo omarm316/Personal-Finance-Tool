@@ -2,6 +2,7 @@
 Finance Automation — FastAPI backend
 Clean consolidated version — all features included
 """
+import asyncio
 import io
 import os
 
@@ -519,9 +520,12 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
     # Pass None if cursor is empty/missing — Plaid requires None for initial sync
     cursor = plaid_item.cursor if plaid_item.cursor else None
-    result = plaid.sync_transactions(
-        access_token=plaid_item.access_token,
-        cursor=cursor,
+    # Run blocking Plaid I/O in a thread pool so the uvicorn event loop
+    # stays responsive — without this, Gunicorn kills the worker after 30s.
+    result = await asyncio.to_thread(
+        plaid.sync_transactions,
+        plaid_item.access_token,
+        cursor,
     )
 
     # Pre-load rules with notes for GCB/points tagging
