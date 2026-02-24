@@ -1059,6 +1059,41 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
   );
 }
 
+function BankRow({item,toast,onRenamed}){
+  const[editing,setEditing]=useState(false);
+  const[nameVal,setNameVal]=useState(item.institution_name);
+  const save=async()=>{
+    try{
+      const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
+      onRenamed(item.item_id,r.institution_name);
+      setEditing(false);
+      toast('Name updated');
+    }catch(e){toast('Failed to update: '+(e.message||e),'error');}
+  };
+  return(
+    <div className="settings-row">
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <span className="bank-dot"/>
+        <div>
+          {editing
+            ?<div style={{display:'flex',gap:6,alignItems:'center'}}>
+                <input className="form-input" style={{padding:'3px 8px',fontSize:13,width:180}} value={nameVal} onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();if(e.key==='Escape')setEditing(false);}} autoFocus/>
+                <button className="btn btn-sm btn-primary" onClick={save}>Save</button>
+                <button className="btn btn-sm btn-ghost" onClick={()=>{setNameVal(item.institution_name);setEditing(false);}}>Cancel</button>
+              </div>
+            :<div style={{display:'flex',alignItems:'center',gap:6}}>
+                <div className="settings-label">{item.institution_name}</div>
+                <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>{setNameVal(item.institution_name);setEditing(true);}}>Edit</button>
+              </div>
+          }
+          <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
+        </div>
+      </div>
+      <span className="bank-badge">Active</span>
+    </div>
+  );
+}
+
 function SettingsPage({banks,onConnectBank,toast}){
   const[tab,setTab]=useState('data');
   const[busy,setBusy]=useState(false);
@@ -1227,40 +1262,7 @@ function SettingsPage({banks,onConnectBank,toast}){
             <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
           </div>
           {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
-            :items.map((item,i)=>{
-              const[editing,setEditing]=useState(false);
-              const[nameVal,setNameVal]=useState(item.institution_name);
-              const save=async()=>{
-                try{
-                  const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
-                  item.institution_name=r.institution_name;
-                  setEditing(false);
-                  toast('Name updated');
-                }catch(e){toast('Failed to update: '+(e.message||e),'error');}
-              };
-              return(
-                <div key={i} className="settings-row">
-                  <div style={{display:'flex',alignItems:'center',gap:10}}>
-                    <span className="bank-dot"/>
-                    <div>
-                      {editing
-                        ?<div style={{display:'flex',gap:6,alignItems:'center'}}>
-                            <input className="form-input" style={{padding:'3px 8px',fontSize:13,width:180}} value={nameVal} onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();if(e.key==='Escape')setEditing(false);}} autoFocus/>
-                            <button className="btn btn-sm btn-primary" onClick={save}>Save</button>
-                            <button className="btn btn-sm btn-ghost" onClick={()=>{setNameVal(item.institution_name);setEditing(false);}}>Cancel</button>
-                          </div>
-                        :<div style={{display:'flex',alignItems:'center',gap:6}}>
-                            <div className="settings-label">{item.institution_name}</div>
-                            <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>{setNameVal(item.institution_name);setEditing(true);}}>Edit</button>
-                          </div>
-                      }
-                      <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
-                    </div>
-                  </div>
-                  <span className="bank-badge">Active</span>
-                </div>
-              );
-            })
+            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it))}/>)
           }
         </div>
       </div>}
