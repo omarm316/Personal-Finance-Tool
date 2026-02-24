@@ -544,6 +544,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             plaid_account_id=txn_data['plaid_account_id']
         ).first()
         if not account:
+            print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
             continue
 
         # Resolve card_id from account→card FK (set via match-accounts flow)
@@ -658,6 +659,30 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
         if not item:
             return
         if clear_cursor:
+            # Re-fetch accounts from Plaid so nothing gets silently skipped
+            try:
+                accounts = plaid.get_accounts(item.access_token)
+                for a in accounts:
+                    existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
+                    if existing:
+                        existing.is_active = True
+                    else:
+                        raw_subtype = (a.get('subtype') or '').lower().strip()
+                        raw_type    = (a.get('type') or '').lower().strip()
+                        account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
+                        db.add(Account(
+                            plaid_account_id=a['account_id'],
+                            plaid_item_id=item_id,
+                            account_name=f"{a['name']} {a.get('mask','') or ''}".strip(),
+                            account_type=account_type,
+                            official_name=a.get('official_name'),
+                            mask=a.get('mask'),
+                            is_active=True,
+                        ))
+                db.commit()
+                print(f"[sync] {item.institution_name}: {len(accounts)} account(s) reconciled")
+            except Exception as acc_err:
+                print(f"[sync] account refresh failed for {item_id}: {acc_err}")
             item.cursor = None
             db.commit()
         added = await _sync_item(item, plaid, db)
@@ -681,6 +706,34 @@ async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session =
         "items_synced": len(items),
         "items_failed": 0,
         "transactions_added": 0,
+        "status": "started",
+    }
+
+
+@app.post("/api/plaid/reset-and-resync")
+async def reset_and_resync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Wipe all Plaid-sourced transactions and accounts, clear cursors, then resync from scratch."""
+    # 1. Delete splits belonging to Plaid transactions
+    plaid_txn_ids = [r[0] for r in db.query(Transaction.id).filter(Transaction.plaid_transaction_id != None).all()]
+    if plaid_txn_ids:
+        db.query(TransactionSplit).filter(TransactionSplit.parent_transaction_id.in_(plaid_txn_ids)).delete(synchronize_session=False)
+    # 2. Delete Plaid transactions (keep manually-entered ones)
+    deleted_txns = db.query(Transaction).filter(Transaction.plaid_transaction_id != None).delete(synchronize_session=False)
+    # 3. Delete Plaid-linked accounts (keep manual accounts)
+    db.query(Account).filter(Account.plaid_account_id != None).delete(synchronize_session=False)
+    # 4. Clear all cursors
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    for item in items:
+        item.cursor = None
+    db.commit()
+    print(f"[reset] deleted {deleted_txns} Plaid transactions; starting fresh sync for {len(items)} item(s)")
+    # 5. Resync all items (re-fetches accounts + transactions)
+    for item in items:
+        background_tasks.add_task(_sync_item_background, item.item_id, True)
+    return {
+        "message": f"Reset complete — deleted {deleted_txns} transactions. Resync started for {len(items)} bank(s).",
+        "transactions_deleted": deleted_txns,
+        "items": len(items),
         "status": "started",
     }
 
