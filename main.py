@@ -587,21 +587,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             llm_merchant = txn_data.get('merchant_name')
             llm_category = '' if action == 'Transfer' else category
 
-            needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
-            if needs_llm:
-                llm_key = os.getenv("ANTHROPIC_API_KEY", "")
-                if llm_key:
-                    try:
-                        result_llm = _call_groq(txn_data['description_raw'], llm_key)
-                        if result_llm:
-                            llm_merchant = str(result_llm.get("merchant_name") or "").strip() or llm_merchant
-                            llm_description_clean = str(result_llm.get("description_clean") or "").strip() or llm_description_clean
-                            raw_cat = str(result_llm.get("category") or "").strip()
-                            llm_category = raw_cat if raw_cat in VALID_CATEGORIES else 'Unclassified'
-                            llm_source = "llm"
-                            confidence = 0.75
-                    except Exception as _llm_err:
-                        print(f"LLM ingest error for '{txn_data['description_raw']}': {_llm_err}")
+            # Skip LLM during background sync — each Claude call is 1-3s synchronous HTTP,
+            # so 100 transactions × 2s = 3+ minutes, which kills the Gunicorn worker.
+            # Transactions flagged needs_review=True will surface in the review queue
+            # where the user (or a dedicated enrichment job) can enrich them on-demand.
+            needs_llm = False
 
             if llm_source:
                 final_source = llm_source
