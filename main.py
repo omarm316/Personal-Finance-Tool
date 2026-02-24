@@ -738,6 +738,66 @@ async def reset_and_resync(background_tasks: BackgroundTasks, db: Session = Depe
     }
 
 
+@app.get("/api/plaid/debug/{item_id}")
+async def debug_plaid_item(item_id: str, db: Session = Depends(get_db)):
+    """
+    Diagnostic: calls Plaid directly and reports raw counts without writing anything to the DB.
+    Tells you whether 0 transactions is a Plaid issue or a processing issue.
+    """
+    item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        plaid = setup_plaid_from_env()
+
+        # Raw account IDs from Plaid
+        plaid_accounts = plaid.get_accounts(item.access_token)
+        plaid_account_ids = [a['account_id'] for a in plaid_accounts]
+
+        # Account IDs we have in the DB for this item
+        db_accounts = db.query(Account).filter_by(plaid_item_id=item_id, is_active=True).all()
+        db_account_ids = [a.plaid_account_id for a in db_accounts]
+
+        # One raw call to transactions/sync (no cursor = full history, read-only — cursor NOT saved)
+        from plaid.model.transactions_sync_request import TransactionsSyncRequest
+        response = plaid.client.transactions_sync(
+            TransactionsSyncRequest(access_token=item.access_token)
+        )
+        raw_added    = len(response['added'])
+        raw_modified = len(response['modified'])
+        raw_removed  = len(response['removed'])
+        has_more     = response['has_more']
+
+        # Which transaction account IDs from Plaid match our DB accounts
+        sample_txn_account_ids = list({t['account_id'] for t in response['added'][:50]})
+        matched = [aid for aid in sample_txn_account_ids if aid in db_account_ids]
+        unmatched = [aid for aid in sample_txn_account_ids if aid not in db_account_ids]
+
+        return {
+            "institution":         item.institution_name,
+            "environment":         os.getenv('PLAID_ENV', 'sandbox'),
+            "cursor_stored":       bool(item.cursor),
+            "plaid_accounts":      plaid_account_ids,
+            "db_accounts":         db_account_ids,
+            "accounts_matched":    matched,
+            "accounts_unmatched":  unmatched,
+            "raw_added":           raw_added,
+            "raw_modified":        raw_modified,
+            "raw_removed":         raw_removed,
+            "has_more_pages":      has_more,
+            "diagnosis": (
+                "Plaid returned 0 transactions — data may not be ready yet (normal for new OAuth connections; wait a few minutes and retry)"
+                if raw_added == 0
+                else f"Plaid has {raw_added} transactions but {len(unmatched)} account ID(s) in those transactions don't match the DB — those will be skipped"
+                if unmatched
+                else f"Plaid has {raw_added} transactions and all account IDs match — processing should work"
+            ),
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/plaid/items")
 async def list_items(db: Session = Depends(get_db)):
     items = db.query(PlaidItem).filter_by(is_active=True).all()
