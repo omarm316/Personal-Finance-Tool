@@ -1062,6 +1062,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
 function BankRow({item,toast,onRenamed}){
   const[editing,setEditing]=useState(false);
   const[nameVal,setNameVal]=useState(item.institution_name);
+  const[resyncing,setResyncing]=useState(false);
   const save=async()=>{
     try{
       const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
@@ -1069,6 +1070,14 @@ function BankRow({item,toast,onRenamed}){
       setEditing(false);
       toast('Name updated');
     }catch(e){toast('Failed to update: '+(e.message||e),'error');}
+  };
+  const forceResync=async()=>{
+    setResyncing(true);
+    try{
+      const r=await apiFetch(`/plaid/items/${item.item_id}/force-resync`,{method:'POST'});
+      toast(`${item.institution_name}: ${r.transactions_added} transaction${r.transactions_added!==1?'s':''} added`);
+    }catch(e){toast(`Resync failed: ${e.message||e}`,'error');}
+    finally{setResyncing(false);}
   };
   return(
     <div className="settings-row">
@@ -1089,7 +1098,10 @@ function BankRow({item,toast,onRenamed}){
           <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
         </div>
       </div>
-      <span className="bank-badge">Active</span>
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        <button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing} title="Clear cursor and re-fetch all historical transactions">{resyncing?'Syncing…':'↺ Full Resync'}</button>
+        <span className="bank-badge">Active</span>
+      </div>
     </div>
   );
 }
@@ -2716,8 +2728,8 @@ function App(){
   },[]);
 
   const sync=async()=>{
-    try{const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});toast(`Synced ${r.transactions_synced} new transactions`);loadMeta();}
-    catch(e){toast('Sync failed','error');}
+    try{const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});toast(`Synced ${r.transactions_added} new transaction${r.transactions_added!==1?'s':''}${r.items_failed>0?` (${r.items_failed} bank${r.items_failed!==1?'s':''} failed)`:''}`,r.items_failed>0?'error':'success');loadMeta();}
+    catch(e){toast('Sync failed: '+(e.message||e),'error');}
   };
 
   const openPlaid=usePlaidLink(toast,loadMeta);
