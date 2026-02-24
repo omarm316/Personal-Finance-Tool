@@ -646,39 +646,43 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Plaid: sync all + list items
+# Plaid: background sync helper + sync endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/api/plaid/sync-transactions")
-async def sync_all_transactions(db: Session = Depends(get_db)):
+async def _sync_item_background(item_id: str, clear_cursor: bool = False):
+    """Run a sync for a single item in the background with its own DB session."""
+    db = SessionLocal()
     try:
         plaid = setup_plaid_from_env()
-        items = db.query(PlaidItem).filter_by(is_active=True).all()
-        if not items:
-            return {"message": "No connected accounts.", "transactions_added": 0, "items_synced": 0, "items_failed": 0, "details": []}
-        total_added = 0
-        details = []
-        for item in items:
-            try:
-                added = await _sync_item(item, plaid, db)
-                total_added += added
-                details.append({"institution": item.institution_name, "added": added, "status": "ok"})
-            except Exception as item_err:
-                import traceback; traceback.print_exc()
-                db.rollback()
-                details.append({"institution": item.institution_name, "added": 0, "status": "error", "error": str(item_err)})
-        items_failed = sum(1 for d in details if d["status"] == "error")
-        return {
-            "message": f"Sync complete — {total_added} new transaction(s) added",
-            "items_synced": len(items) - items_failed,
-            "items_failed": items_failed,
-            "transactions_added": total_added,
-            "details": details,
-        }
+        item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+        if not item:
+            return
+        if clear_cursor:
+            item.cursor = None
+            db.commit()
+        added = await _sync_item(item, plaid, db)
+        print(f"[sync] {item.institution_name}: {added} transaction(s) added")
     except Exception as e:
         import traceback; traceback.print_exc()
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[sync] background sync failed for {item_id}: {e}")
+    finally:
+        db.close()
+
+
+@app.post("/api/plaid/sync-transactions")
+async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    if not items:
+        return {"message": "No connected accounts.", "items_synced": 0, "status": "idle"}
+    for item in items:
+        background_tasks.add_task(_sync_item_background, item.item_id, False)
+    return {
+        "message": f"Sync started for {len(items)} bank(s) — transactions will appear shortly",
+        "items_synced": len(items),
+        "items_failed": 0,
+        "transactions_added": 0,
+        "status": "started",
+    }
 
 
 @app.get("/api/plaid/items")
@@ -720,21 +724,13 @@ async def update_item(item_id: str, body: dict, db: Session = Depends(get_db)):
 
 
 @app.post("/api/plaid/items/{item_id}/force-resync")
-async def force_resync_item(item_id: str, db: Session = Depends(get_db)):
-    """Clear the stored cursor for an item so the next sync re-fetches all historical transactions."""
+async def force_resync_item(item_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Clear the stored cursor and re-fetch all historical transactions in the background."""
     item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    try:
-        plaid = setup_plaid_from_env()
-        item.cursor = None
-        db.commit()
-        added = await _sync_item(item, plaid, db)
-        return {"message": f"Resync complete — {added} transaction(s) added", "transactions_added": added}
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(_sync_item_background, item_id, True)
+    return {"message": f"Resync started for {item.institution_name}", "status": "started"}
 
 
 # ---------------------------------------------------------------------------

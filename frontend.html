@@ -1075,8 +1075,9 @@ function BankRow({item,toast,onRenamed}){
   const forceResync=async()=>{
     setResyncing(true);
     try{
-      const r=await apiFetch(`/plaid/items/${item.item_id}/force-resync`,{method:'POST'});
-      toast(`${item.institution_name}: ${r.transactions_added} transaction${r.transactions_added!==1?'s':''} added`);
+      await apiFetch(`/plaid/items/${item.item_id}/force-resync`,{method:'POST'});
+      toast(`${item.institution_name}: sync started — refreshing in 15s`);
+      setTimeout(()=>onSynced&&onSynced(),15000);
     }catch(e){toast(`Resync failed: ${e.message||e}`,'error');}
     finally{setResyncing(false);}
   };
@@ -1296,7 +1297,7 @@ function SettingsPage({banks,onConnectBank,toast}){
             <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
           </div>
           {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
-            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it))}/>)
+            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it))} onSynced={()=>apiFetch('/plaid/items').then(setItems).catch(()=>{})}/>)
           }
         </div>
       </div>}
@@ -2750,8 +2751,12 @@ function App(){
   },[]);
 
   const sync=async()=>{
-    try{const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});toast(`Synced ${r.transactions_added} new transaction${r.transactions_added!==1?'s':''}${r.items_failed>0?` (${r.items_failed} bank${r.items_failed!==1?'s':''} failed)`:''}`,r.items_failed>0?'error':'success');loadMeta();}
-    catch(e){toast('Sync failed: '+(e.message||e),'error');}
+    try{
+      const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});
+      toast(`Sync started for ${r.items_synced} bank${r.items_synced!==1?'s':''} — transactions will appear shortly`);
+      loadMeta();
+      setTimeout(loadMeta,15000);
+    }catch(e){toast('Sync failed: '+(e.message||e),'error');}
   };
 
   const openPlaid=usePlaidLink(toast,loadMeta);
