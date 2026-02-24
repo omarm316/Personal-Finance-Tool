@@ -14,6 +14,8 @@ from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+from plaid.model.item_get_request import ItemGetRequest
+from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 import plaid
 from plaid.api_client import ApiClient
 from plaid.configuration import Configuration
@@ -80,6 +82,27 @@ class PlaidClient:
         response = self.client.link_token_create(request)
         return response['link_token']
     
+    def get_institution_name(self, access_token: str) -> Optional[str]:
+        """
+        Look up the proper institution name (e.g. "Chase", "American Express")
+        via /item/get → institution_id → /institutions/get_by_id.
+        Returns None on any failure so callers can fall back gracefully.
+        """
+        try:
+            item_resp = self.client.item_get(ItemGetRequest(access_token=access_token))
+            institution_id = item_resp['item']['institution_id']
+            if institution_id:
+                inst_resp = self.client.institutions_get_by_id(
+                    InstitutionsGetByIdRequest(
+                        institution_id=institution_id,
+                        country_codes=[CountryCode('US')],
+                    )
+                )
+                return inst_resp['institution']['name']
+        except Exception:
+            pass
+        return None
+
     def exchange_public_token(self, public_token: str) -> Dict[str, str]:
         """
         Exchange a public token for an access token
@@ -154,9 +177,9 @@ class PlaidClient:
             response = self.client.transactions_sync(request)
             
             # Add this page of results
-            added_transactions.extend(response.get('added', []))
-            modified_transactions.extend(response.get('modified', []))
-            removed_transactions.extend(response.get('removed', []))
+            added_transactions.extend(response['added'] or [])
+            modified_transactions.extend(response['modified'] or [])
+            removed_transactions.extend(response['removed'] or [])
             
             has_more = response['has_more']
             cursor = response['next_cursor']

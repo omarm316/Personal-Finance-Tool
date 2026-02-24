@@ -442,9 +442,16 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
             plaid_item.access_token = access_token
             plaid_item.is_active    = True
             plaid_item.updated_at   = datetime.utcnow()
+            # Refresh institution name in case it was set incorrectly before
+            refreshed = plaid.get_institution_name(access_token)
+            if refreshed:
+                plaid_item.institution_name = refreshed
         else:
-            # Derive institution name from the account names (e.g. "Chase Checking" → "Chase")
-            institution_name = accounts[0]['name'].split(' ')[0] if accounts else 'Unknown'
+            # Fetch the proper institution name from Plaid; fall back to first word of account name
+            institution_name = (
+                plaid.get_institution_name(access_token)
+                or (accounts[0]['name'].split(' ')[0] if accounts else 'Unknown')
+            )
             plaid_item = PlaidItem(item_id=item_id, institution_name=institution_name, is_active=True)
             plaid_item.access_token = access_token
             db.add(plaid_item)
@@ -491,7 +498,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         return {
             "message": msg,
             "item_id": item_id,
-            "accounts": len(accounts),
+            "accounts_linked": len(accounts),
             "transactions_synced": synced,
         }
 
@@ -675,6 +682,20 @@ async def list_items(db: Session = Depends(get_db)):
         }
         for item in items
     ]
+
+
+@app.patch("/api/plaid/items/{item_id}")
+async def update_item(item_id: str, body: dict, db: Session = Depends(get_db)):
+    item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if "institution_name" in body:
+        name = str(body["institution_name"]).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        item.institution_name = name
+    db.commit()
+    return {"item_id": item.item_id, "institution_name": item.institution_name}
 
 
 # ---------------------------------------------------------------------------

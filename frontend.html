@@ -137,7 +137,7 @@ function useToast(){
 
 async function apiFetch(path,opts={}){
   const res=await fetch(API+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});
-  if(!res.ok)throw new Error(await res.text());
+  if(!res.ok){const text=await res.text();let msg=text;try{const j=JSON.parse(text);if(j.detail)msg=j.detail;}catch{}throw new Error(msg);}
   return res.json();
 }
 
@@ -1227,18 +1227,40 @@ function SettingsPage({banks,onConnectBank,toast}){
             <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
           </div>
           {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
-            :items.map((item,i)=>(
-              <div key={i} className="settings-row">
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  <span className="bank-dot"/>
-                  <div>
-                    <div className="settings-label">{item.institution_name}</div>
-                    <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
+            :items.map((item,i)=>{
+              const[editing,setEditing]=useState(false);
+              const[nameVal,setNameVal]=useState(item.institution_name);
+              const save=async()=>{
+                try{
+                  const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
+                  item.institution_name=r.institution_name;
+                  setEditing(false);
+                  toast('Name updated');
+                }catch(e){toast('Failed to update: '+(e.message||e),'error');}
+              };
+              return(
+                <div key={i} className="settings-row">
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <span className="bank-dot"/>
+                    <div>
+                      {editing
+                        ?<div style={{display:'flex',gap:6,alignItems:'center'}}>
+                            <input className="form-input" style={{padding:'3px 8px',fontSize:13,width:180}} value={nameVal} onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();if(e.key==='Escape')setEditing(false);}} autoFocus/>
+                            <button className="btn btn-sm btn-primary" onClick={save}>Save</button>
+                            <button className="btn btn-sm btn-ghost" onClick={()=>{setNameVal(item.institution_name);setEditing(false);}}>Cancel</button>
+                          </div>
+                        :<div style={{display:'flex',alignItems:'center',gap:6}}>
+                            <div className="settings-label">{item.institution_name}</div>
+                            <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>{setNameVal(item.institution_name);setEditing(true);}}>Edit</button>
+                          </div>
+                      }
+                      <div className="settings-desc">Connected {item.created_at?fmtDate(item.created_at):''}{item.last_synced_at?` · Last sync: ${fmtDate(item.last_synced_at)}`:''}</div>
+                    </div>
                   </div>
+                  <span className="bank-badge">Active</span>
                 </div>
-                <span className="bank-badge">Active</span>
-              </div>
-            ))
+              );
+            })
           }
         </div>
       </div>}
@@ -1270,12 +1292,12 @@ function usePlaidLink(toast,onSuccess){
           receivedRedirectUri:window.location.href,
           onSuccess:async(public_token)=>{
             try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();window.history.replaceState({},'','/');}
-            catch(e){toast('Failed to link','error');}
+            catch(e){toast('Failed to link: '+(e.message||e),'error');}
           },
           onExit:()=>{window.history.replaceState({},'','/');},
         });
         handler.open();
-      }catch(e){toast('OAuth return failed','error');}
+      }catch(e){toast('OAuth return failed: '+(e.message||e),'error');}
     })();
   },[]);
 
@@ -1286,12 +1308,12 @@ function usePlaidLink(toast,onSuccess){
         token:link_token,
         onSuccess:async(public_token)=>{
           try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();}
-          catch(e){toast('Failed to link','error');}
+          catch(e){toast('Failed to link: '+(e.message||e),'error');}
         },
         onExit:()=>{},
       });
       handler.open();
-    }catch(e){toast('Failed to start connection','error');}
+    }catch(e){toast('Failed to start connection: '+(e.message||e),'error');}
   };
 }
 
