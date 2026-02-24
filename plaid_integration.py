@@ -185,8 +185,8 @@ class PlaidClient:
             cursor = response['next_cursor']
         
         return {
-            'added': [self._format_transaction(t) for t in added_transactions],
-            'modified': [self._format_transaction(t) for t in modified_transactions],
+            'added': [f for f in (self._safe_format(t) for t in added_transactions) if f is not None],
+            'modified': [f for f in (self._safe_format(t) for t in modified_transactions) if f is not None],
             'removed': [t['transaction_id'] for t in removed_transactions],
             'next_cursor': cursor,
             'has_more': False
@@ -231,16 +231,43 @@ class PlaidClient:
         except (KeyError, TypeError, AttributeError):
             return default
 
+    def _safe_format(self, transaction) -> Optional[Dict]:
+        """
+        Wrap _format_transaction so one bad record doesn't crash the entire batch.
+        Returns None (and logs) if the transaction cannot be parsed.
+        """
+        try:
+            return self._format_transaction(transaction)
+        except Exception as e:
+            tid = '?'
+            try:
+                tid = transaction['transaction_id']
+            except Exception:
+                pass
+            print(f"[plaid] skipping malformed transaction {tid}: {e}")
+            return None
+
     def _format_transaction(self, transaction: Dict) -> Dict:
         """
-        Format a Plaid transaction into our standard format
+        Format a Plaid transaction into our standard format.
+        Handles both date and datetime objects returned by the Plaid SDK —
+        str(datetime(...)) produces '2024-01-15 00:00:00' which breaks strptime('%Y-%m-%d').
         """
+        date_raw = transaction['date']
+        if hasattr(date_raw, 'year'):
+            # Already a date or datetime object — construct datetime directly
+            txn_date = datetime(date_raw.year, date_raw.month, date_raw.day)
+        else:
+            # String — strip any time/timezone portion (e.g. '2024-01-15 00:00:00' or '2024-01-15T00:00:00Z')
+            date_str = str(date_raw).split(' ')[0].split('T')[0]
+            txn_date = datetime.strptime(date_str, '%Y-%m-%d')
+
         return {
             'plaid_transaction_id': transaction['transaction_id'],
             'plaid_account_id': transaction['account_id'],
-            'date': datetime.strptime(str(transaction['date']), '%Y-%m-%d'),
+            'date': txn_date,
             'amount': float(transaction['amount']),  # Keep Plaid's sign as-is; categorization engine handles interpretation
-            'description_raw': transaction['name'],
+            'description_raw': transaction['name'] or '',
             'merchant_name': self._plaid_get(transaction, 'merchant_name'),
             'category': self._plaid_get(transaction, 'category', []),
             'pending': self._plaid_get(transaction, 'pending', False),

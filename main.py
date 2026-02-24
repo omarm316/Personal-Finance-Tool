@@ -534,6 +534,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     skipped = 0
     errors  = 0
     for txn_data in result['added']:
+        sp = db.begin_nested()  # savepoint — so a single-row failure only rolls back that row
         try:
             existing = db.query(Transaction).filter_by(
                 plaid_transaction_id=txn_data['plaid_transaction_id']
@@ -633,10 +634,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 day=txn_date.day,
             ))
             db.flush()   # catch constraint errors per-transaction, not at batch commit
+            sp.commit()  # release savepoint — this row is now safe in the outer transaction
             total_added += 1
 
         except Exception as txn_err:
-            db.rollback()
+            sp.rollback()  # roll back only THIS row — previously flushed rows are unaffected
             errors += 1
             print(f"[sync] failed txn {txn_data.get('plaid_transaction_id','?')}: {txn_err}")
 
