@@ -222,6 +222,15 @@ class PlaidClient:
         
         return [self._format_transaction(t) for t in transactions]
     
+    @staticmethod
+    def _plaid_get(obj, key, default=None):
+        """Safe field access for Plaid SDK objects — they support [] but not .get()."""
+        try:
+            val = obj[key]
+            return val if val is not None else default
+        except (KeyError, TypeError, AttributeError):
+            return default
+
     def _format_transaction(self, transaction: Dict) -> Dict:
         """
         Format a Plaid transaction into our standard format
@@ -232,10 +241,10 @@ class PlaidClient:
             'date': datetime.strptime(str(transaction['date']), '%Y-%m-%d'),
             'amount': float(transaction['amount']),  # Keep Plaid's sign as-is; categorization engine handles interpretation
             'description_raw': transaction['name'],
-            'merchant_name': transaction.get('merchant_name'),
-            'category': transaction.get('category', []),
-            'pending': transaction.get('pending', False),
-            'payment_channel': transaction.get('payment_channel'),
+            'merchant_name': self._plaid_get(transaction, 'merchant_name'),
+            'category': self._plaid_get(transaction, 'category', []),
+            'pending': self._plaid_get(transaction, 'pending', False),
+            'payment_channel': self._plaid_get(transaction, 'payment_channel'),
         }
 
 
