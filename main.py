@@ -531,113 +531,119 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         CategorizationRule.notes != '',
     ).all()
 
+    skipped = 0
+    errors  = 0
     for txn_data in result['added']:
-        existing = db.query(Transaction).filter_by(
-            plaid_transaction_id=txn_data['plaid_transaction_id']
-        ).first()
-        if existing:
-            if not existing.is_locked:
-                existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
-            continue
+        try:
+            existing = db.query(Transaction).filter_by(
+                plaid_transaction_id=txn_data['plaid_transaction_id']
+            ).first()
+            if existing:
+                if not existing.is_locked:
+                    existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+                continue
 
-        account = db.query(Account).filter_by(
-            plaid_account_id=txn_data['plaid_account_id']
-        ).first()
-        if not account:
-            print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
-            continue
+            account = db.query(Account).filter_by(
+                plaid_account_id=txn_data['plaid_account_id']
+            ).first()
+            if not account:
+                print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
+                skipped += 1
+                continue
 
-        # Resolve card_id from account→card FK (set via match-accounts flow)
-        linked_card_id = account.card.id if account.card else None
+            # Resolve card_id from account→card FK (set via match-accounts flow)
+            linked_card_id = account.card.id if account.card else None
 
-        # Normalize sign: Plaid sends expenses as positive, we store as negative
-        amount = -txn_data['amount']
+            # Normalize sign: Plaid sends expenses as positive, we store as negative
+            amount = -txn_data['amount']
 
-        action, category, confidence, display_desc = categorizer.categorize(
-            txn_data['description_raw'],
-            amount,
-            txn_data.get('merchant_name'),
-        )
+            action, category, confidence, display_desc = categorizer.categorize(
+                txn_data['description_raw'],
+                amount,
+                txn_data.get('merchant_name'),
+            )
 
-        # Apply GCB auto-tag and points category from rule notes
-        desc_upper = txn_data['description_raw'].upper()
-        gcb_auto   = False
-        points_cat = None
-        for rule in rules_with_notes:
-            if rule.pattern and rule.pattern.upper() in desc_upper:
-                if 'gcb:true' in rule.notes:
-                    gcb_auto = True
-                if 'points:' in rule.notes:
-                    points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
+            # Apply GCB auto-tag and points category from rule notes
+            desc_upper = txn_data['description_raw'].upper()
+            gcb_auto   = False
+            points_cat = None
+            for rule in rules_with_notes:
+                if rule.pattern and rule.pattern.upper() in desc_upper:
+                    if 'gcb:true' in rule.notes:
+                        gcb_auto = True
+                    if 'points:' in rule.notes:
+                        points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
-        txn_date = txn_data['date']
+            txn_date = txn_data['date']
 
-        # ── Auto-LLM when no rule produced a useful result ───────────────────
-        # Call Groq directly (not enrich_transaction) to avoid DB session issues
-        # with an in-flight unsaved transaction.
-        # Trigger: non-Transfer AND (missing clean description OR unclassified category)
-        llm_source = None
-        llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
-        llm_merchant = txn_data.get('merchant_name')
-        llm_category = '' if action == 'Transfer' else category
+            # ── Auto-LLM when no rule produced a useful result ───────────────────
+            llm_source = None
+            llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
+            llm_merchant = txn_data.get('merchant_name')
+            llm_category = '' if action == 'Transfer' else category
 
-        needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
-        if needs_llm:
-            llm_key = os.getenv("ANTHROPIC_API_KEY", "")
-            if llm_key:
-                try:
-                    result_llm = _call_groq(txn_data['description_raw'], llm_key)
-                    if result_llm:
-                        llm_merchant = str(result_llm.get("merchant_name") or "").strip() or llm_merchant
-                        llm_description_clean = str(result_llm.get("description_clean") or "").strip() or llm_description_clean
-                        raw_cat = str(result_llm.get("category") or "").strip()
-                        llm_category = raw_cat if raw_cat in VALID_CATEGORIES else 'Unclassified'
-                        llm_source = "llm"
-                        confidence = 0.75  # LLM enriched but not user-confirmed
-                        print(f"LLM enriched '{txn_data['description_raw']}' → '{llm_merchant}' / {llm_category}")
-                    else:
-                        print(f"LLM returned no result for '{txn_data['description_raw']}'")
-                except Exception as _llm_err:
-                    print(f"LLM ingest error for '{txn_data['description_raw']}': {_llm_err}")
+            needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
+            if needs_llm:
+                llm_key = os.getenv("ANTHROPIC_API_KEY", "")
+                if llm_key:
+                    try:
+                        result_llm = _call_groq(txn_data['description_raw'], llm_key)
+                        if result_llm:
+                            llm_merchant = str(result_llm.get("merchant_name") or "").strip() or llm_merchant
+                            llm_description_clean = str(result_llm.get("description_clean") or "").strip() or llm_description_clean
+                            raw_cat = str(result_llm.get("category") or "").strip()
+                            llm_category = raw_cat if raw_cat in VALID_CATEGORIES else 'Unclassified'
+                            llm_source = "llm"
+                            confidence = 0.75
+                    except Exception as _llm_err:
+                        print(f"LLM ingest error for '{txn_data['description_raw']}': {_llm_err}")
 
-        # Determine final enrichment source
-        if llm_source:
-            final_source = llm_source
-        elif display_desc or (category and category != 'Unclassified'):
-            final_source = 'rule'
-        else:
-            final_source = 'fallback'
+            if llm_source:
+                final_source = llm_source
+            elif display_desc or (category and category != 'Unclassified'):
+                final_source = 'rule'
+            else:
+                final_source = 'fallback'
 
-        # needs_review: Transfers never need review; LLM results always do;
-        # rule results only if confidence < 0.85
-        if action == 'Transfer':
-            needs_review_flag = False
-        elif final_source in ('llm', 'fallback', 'override'):
-            needs_review_flag = True
-        else:
-            needs_review_flag = confidence < 0.85
+            if action == 'Transfer':
+                needs_review_flag = False
+            elif final_source in ('llm', 'fallback', 'override'):
+                needs_review_flag = True
+            else:
+                needs_review_flag = confidence < 0.85
 
-        db.add(Transaction(
-            plaid_transaction_id=txn_data['plaid_transaction_id'],
-            account_id=account.id,
-            date=txn_date,
-            amount=amount,
-            description_raw=txn_data['description_raw'],
-            description_clean=llm_description_clean,
-            merchant_name=llm_merchant,
-            action=action,
-            category_auto=llm_category,
-            category_confidence=confidence,
-            needs_review=needs_review_flag,
-            enrichment_source=final_source,
-            card_id=linked_card_id,
-            gcb_tagged=gcb_auto,
-            points_category=points_cat,
-            year=txn_date.year,
-            month=txn_date.month,
-            day=txn_date.day,
-        ))
-        total_added += 1
+            db.add(Transaction(
+                plaid_transaction_id=txn_data['plaid_transaction_id'],
+                account_id=account.id,
+                date=txn_date,
+                amount=amount,
+                description_raw=txn_data['description_raw'],
+                description_clean=llm_description_clean,
+                merchant_name=llm_merchant,
+                action=action,
+                category_auto=llm_category,
+                category_confidence=confidence,
+                needs_review=needs_review_flag,
+                enrichment_source=final_source,
+                card_id=linked_card_id,
+                gcb_tagged=gcb_auto,
+                points_category=points_cat,
+                year=txn_date.year,
+                month=txn_date.month,
+                day=txn_date.day,
+            ))
+            db.flush()   # catch constraint errors per-transaction, not at batch commit
+            total_added += 1
+
+        except Exception as txn_err:
+            db.rollback()
+            errors += 1
+            print(f"[sync] failed txn {txn_data.get('plaid_transaction_id','?')}: {txn_err}")
+
+    if skipped:
+        print(f"[sync] {plaid_item.institution_name}: {skipped} transaction(s) skipped — no matching account")
+    if errors:
+        print(f"[sync] {plaid_item.institution_name}: {errors} transaction(s) failed to write")
 
     # Store cursor — use None instead of empty string for clean state
     plaid_item.cursor         = result['next_cursor'] or None
@@ -708,6 +714,17 @@ async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session =
         "transactions_added": 0,
         "status": "started",
     }
+
+
+@app.post("/api/plaid/items/{item_id}/deactivate")
+async def deactivate_item(item_id: str, db: Session = Depends(get_db)):
+    """Mark a stale PlaidItem as inactive so it no longer participates in syncs."""
+    item = db.query(PlaidItem).filter_by(item_id=item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.is_active = False
+    db.commit()
+    return {"message": f"Deactivated {item.institution_name} ({item_id})"}
 
 
 @app.post("/api/plaid/reset-and-resync")
@@ -800,24 +817,25 @@ async def debug_plaid_item(item_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/plaid/items")
 async def list_items(db: Session = Depends(get_db)):
-    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    all_items = db.query(PlaidItem).order_by(PlaidItem.created_at.desc()).all()
     env = os.getenv('PLAID_ENV', 'sandbox')
     result = []
-    for item in items:
+    for item in all_items:
         accounts = db.query(Account).filter_by(plaid_item_id=item.item_id, is_active=True).all()
         txn_count = db.query(Transaction).filter(
             Transaction.account_id.in_([a.id for a in accounts])
         ).count() if accounts else 0
         result.append({
-            "item_id":          item.item_id,
-            "institution_name": item.institution_name,
-            "last_synced_at":   item.last_synced_at,
-            "created_at":       item.created_at,
-            "account_count":    len(accounts),
-            "accounts":         [{"name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
+            "item_id":           item.item_id,
+            "institution_name":  item.institution_name,
+            "last_synced_at":    item.last_synced_at,
+            "created_at":        item.created_at,
+            "is_active":         item.is_active,
+            "account_count":     len(accounts),
+            "accounts":          [{"name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
             "transaction_count": txn_count,
-            "has_cursor":       bool(item.cursor),
-            "environment":      env,
+            "has_cursor":        bool(item.cursor),
+            "environment":       env,
         })
     return result
 

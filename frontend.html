@@ -1132,10 +1132,14 @@ function BankRow({item,toast,onRenamed,onSynced}){
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em',color:envColor,background:`${envColor}18`,border:`1px solid ${envColor}40`,borderRadius:20,padding:'2px 8px'}}>{item.environment}</span>
-          <span className="bank-badge">Active</span>
+          {item.is_active
+            ?<span className="bank-badge">Active</span>
+            :<span style={{fontSize:11,fontWeight:600,color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:20,padding:'2px 8px'}}>Stale</span>}
           <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>setExpanded(x=>!x)}>{expanded?'▲':'▼'}</button>
-          <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={runDebug} disabled={debugging}>{debugging?'…':'🔍 Debug'}</button>
-          <button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing} title="Clear cursor and re-fetch all historical transactions">{resyncing?'Syncing…':'↺ Full Resync'}</button>
+          {item.is_active&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={runDebug} disabled={debugging}>{debugging?'…':'🔍 Debug'}</button>}
+          {item.is_active
+            ?<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Full Resync'}</button>
+            :<button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={async()=>{if(!confirm('Remove this stale connection?'))return;try{await apiFetch(`/plaid/items/${item.item_id}/deactivate`,{method:'POST'});onSynced&&onSynced();toast('Removed');}catch(e){toast('Failed: '+(e.message||e),'error');}}}>Remove</button>}
         </div>
       </div>
       {expanded&&item.accounts&&item.accounts.length>0&&(
