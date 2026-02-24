@@ -684,15 +684,25 @@ async def sync_all_transactions(db: Session = Depends(get_db)):
 @app.get("/api/plaid/items")
 async def list_items(db: Session = Depends(get_db)):
     items = db.query(PlaidItem).filter_by(is_active=True).all()
-    return [
-        {
+    env = os.getenv('PLAID_ENV', 'sandbox')
+    result = []
+    for item in items:
+        accounts = db.query(Account).filter_by(plaid_item_id=item.item_id, is_active=True).all()
+        txn_count = db.query(Transaction).filter(
+            Transaction.account_id.in_([a.id for a in accounts])
+        ).count() if accounts else 0
+        result.append({
             "item_id":          item.item_id,
             "institution_name": item.institution_name,
             "last_synced_at":   item.last_synced_at,
             "created_at":       item.created_at,
-        }
-        for item in items
-    ]
+            "account_count":    len(accounts),
+            "accounts":         [{"name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
+            "transaction_count": txn_count,
+            "has_cursor":       bool(item.cursor),
+            "environment":      env,
+        })
+    return result
 
 
 @app.patch("/api/plaid/items/{item_id}")
