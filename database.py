@@ -327,12 +327,14 @@ class Card(Base):
     payment_due_day = Column(Integer, nullable=True)       # Day of month (1-31)
     plaid_account_id = Column(String(100), nullable=True)  # Legacy string link — prefer account_id
     account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True, index=True)  # Proper FK to Account
+    payment_account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Checking account that pays this card
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     account = relationship("Account", back_populates="card", foreign_keys=[account_id])
+    payment_account = relationship("Account", foreign_keys=[payment_account_id])
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="card")
 
 
@@ -403,6 +405,7 @@ def run_migrations(engine):
         ],
         'cards': [
             ('account_id', 'INTEGER'),
+            ('payment_account_id', 'INTEGER'),
         ],
         'categorization_rules': [
             ('clean_description', 'VARCHAR(500)'),
@@ -448,6 +451,26 @@ def _run_migrations_sqlite(engine, required_columns):
                 print('  Migration: dropped old budget_targets table (will be recreated)')
         except Exception:
             pass
+        # Normalize account_type to Title Case
+        try:
+            type_map = [
+                ('checking',    'Checking'),
+                ('savings',     'Savings'),
+                ('brokerage',   'Brokerage'),
+                ('investment',  'Investment'),
+                ('credit card', 'Credit Card'),
+                ('credit',      'Credit Card'),
+                ('loan',        'Loan'),
+                ('other',       'Other'),
+            ]
+            for old_val, new_val in type_map:
+                conn.execute(
+                    "UPDATE accounts SET account_type = ? WHERE LOWER(account_type) = ?",
+                    (new_val, old_val)
+                )
+            print('  Migration: normalized account_type casing')
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -472,6 +495,23 @@ def _run_migrations_pg(engine, required_columns):
                     'UPDATE transactions SET is_gcb = gcb_tagged WHERE is_gcb = FALSE AND gcb_tagged = TRUE'
                 ))
                 print('  Migration: copied gcb_tagged → is_gcb')
+        # Normalize account_type to Title Case
+        if insp.has_table('accounts'):
+            type_map = [
+                ('checking',    'Checking'),
+                ('savings',     'Savings'),
+                ('brokerage',   'Brokerage'),
+                ('investment',  'Investment'),
+                ('credit card', 'Credit Card'),
+                ('credit',      'Credit Card'),
+                ('loan',        'Loan'),
+                ('other',       'Other'),
+            ]
+            for old_val, new_val in type_map:
+                conn.execute(text(
+                    "UPDATE accounts SET account_type = :new WHERE LOWER(account_type) = :old"
+                ), {'new': new_val, 'old': old_val})
+            print('  Migration: normalized account_type casing')
 
 # Database initialization
 def init_db(database_url=None):

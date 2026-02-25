@@ -1086,6 +1086,9 @@ def _serialize_card(c: Card) -> dict:
     elif c.plaid_account_id:
         # Legacy fallback
         linked_account_name = c.plaid_account_id
+    payment_account_name = None
+    if c.payment_account_id and c.payment_account:
+        payment_account_name = c.payment_account.account_name
     return {
         "id": c.id, "card_id": c.card_id, "last_four": c.last_four,
         "issuer": c.issuer, "brand": c.brand, "card_name": c.card_name,
@@ -1096,6 +1099,8 @@ def _serialize_card(c: Card) -> dict:
         "plaid_account_id": c.plaid_account_id,
         "account_id": c.account_id,
         "linked_account_name": linked_account_name,
+        "payment_account_id": c.payment_account_id,
+        "payment_account_name": payment_account_name,
         "is_active": c.is_active, "notes": c.notes,
     }
 
@@ -1112,7 +1117,8 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     allowed = ["card_name", "last_four", "statement_close_day", "payment_due_day",
-               "credit_limit", "plaid_account_id", "account_id", "is_active", "notes", "annual_fee"]
+               "credit_limit", "plaid_account_id", "account_id", "payment_account_id",
+               "is_active", "notes", "annual_fee"]
     for k, v in updates.items():
         if k in allowed:
             setattr(card, k, v)
@@ -2742,6 +2748,229 @@ async def get_cash_flow(
 def todayStr_py():
     """Return today's date as YYYY-MM-DD string."""
     return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
+# Daily Balances
+# ---------------------------------------------------------------------------
+
+@app.get("/api/daily-balances")
+async def get_daily_balances(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Daily end-of-day balance table for all active accounts.
+
+    Returns accounts grouped by type (Checking & Savings, Investments,
+    Other Assets, Credit Cards, Loans, Other Liabilities) with a balance
+    value for each day in the requested range.
+
+    CC payment projections are injected for future payment_due_day dates
+    when a card has payment_account_id, statement_close_day, and payment_due_day set.
+    """
+    from datetime import date, timedelta
+    import calendar as _cal
+    from sqlalchemy import func
+
+    today = datetime.utcnow().date()
+
+    if not start_date:
+        start_date = f"{today.year}-{today.month:02d}-01"
+    if not end_date:
+        last = _cal.monthrange(today.year, today.month)[1]
+        end_date = f"{today.year}-{today.month:02d}-{last:02d}"
+
+    start_dt = date.fromisoformat(start_date)
+    end_dt = date.fromisoformat(end_date)
+    num_days = (end_dt - start_dt).days + 1
+    dates = [(start_dt + timedelta(days=i)).isoformat() for i in range(num_days)]
+    dates_set = set(dates)
+
+    accounts = db.query(Account).filter(Account.is_active == True).all()
+    if not accounts:
+        return {"start_date": start_date, "end_date": end_date,
+                "today": today.isoformat(), "dates": dates, "groups": []}
+
+    # ── Per-account daily balances ─────────────────────────────────────────
+    acct_balances = {}  # {account_id: [float per day]}
+
+    for acct in accounts:
+        anchor_balance = acct.starting_balance or 0.0
+        anchor_date = acct.start_date.date() if acct.start_date else date(2000, 1, 1)
+        range_start_dt = datetime.combine(start_dt, datetime.min.time())
+        range_end_dt = datetime.combine(end_dt, datetime.max.time())
+        anchor_dt = datetime.combine(anchor_date, datetime.min.time())
+
+        # Sum all transactions from anchor up to day before range start
+        pre_sum = (
+            db.query(func.sum(Transaction.amount))
+            .filter(
+                Transaction.account_id == acct.id,
+                Transaction.date >= anchor_dt,
+                Transaction.date < range_start_dt,
+            )
+            .scalar()
+        ) or 0.0
+
+        # Fetch all transactions within the range
+        txns = (
+            db.query(Transaction.date, Transaction.amount)
+            .filter(
+                Transaction.account_id == acct.id,
+                Transaction.date >= range_start_dt,
+                Transaction.date <= range_end_dt,
+            )
+            .all()
+        )
+
+        # Group by date string (EOD balance: sum all txns on that day)
+        daily_delta: dict[str, float] = {}
+        for txn_date, txn_amount in txns:
+            d_obj = txn_date.date() if hasattr(txn_date, 'date') else txn_date
+            d_str = d_obj.isoformat()
+            daily_delta[d_str] = daily_delta.get(d_str, 0.0) + txn_amount
+
+        running = anchor_balance + pre_sum
+        daily: list[float] = []
+        for d in dates:
+            running += daily_delta.get(d, 0.0)
+            daily.append(round(running, 2))
+
+        acct_balances[acct.id] = daily
+
+    # ── CC Payment Projections ────────────────────────────────────────────
+    # For each future payment_due_day in range: project CC balance payment
+    projected_dates: dict[int, set] = {}  # {account_id: set of projected date strings}
+
+    cards_with_payment = (
+        db.query(Card)
+        .filter(
+            Card.is_active == True,
+            Card.account_id.isnot(None),
+            Card.payment_account_id.isnot(None),
+            Card.payment_due_day.isnot(None),
+        )
+        .all()
+    )
+
+    # Collect all months touched by the date range
+    months_in_range: set[tuple] = set()
+    tmp = start_dt.replace(day=1)
+    while tmp <= end_dt:
+        months_in_range.add((tmp.year, tmp.month))
+        m2, y2 = tmp.month + 1, tmp.year
+        if m2 > 12:
+            m2, y2 = 1, y2 + 1
+        tmp = date(y2, m2, 1)
+
+    for card in cards_with_payment:
+        cc_id = card.account_id
+        chk_id = card.payment_account_id
+        due_day = card.payment_due_day
+        close_day = card.statement_close_day
+
+        if cc_id not in acct_balances or chk_id not in acct_balances:
+            continue
+
+        for y, m in months_in_range:
+            # Compute payment_due_date for this month
+            max_day = _cal.monthrange(y, m)[1]
+            payment_date = date(y, m, min(due_day, max_day))
+            pdate_str = payment_date.isoformat()
+
+            if pdate_str not in dates_set:
+                continue
+            if payment_date <= today:
+                continue  # Real transaction should already exist
+
+            # Statement close date = previous calendar month
+            close_y, close_m = y, m - 1
+            if close_m <= 0:
+                close_y -= 1
+                close_m = 12
+            if close_day:
+                max_close = _cal.monthrange(close_y, close_m)[1]
+                close_date = date(close_y, close_m, min(close_day, max_close))
+            else:
+                close_date = date(close_y, close_m, _cal.monthrange(close_y, close_m)[1])
+
+            balance_at_close = get_account_balance(
+                db, cc_id,
+                as_of_date=datetime.combine(close_date, datetime.max.time()),
+            )
+
+            if balance_at_close >= -1.0:
+                continue  # No meaningful debt to project
+
+            payment_amount = abs(balance_at_close)
+            date_idx = dates.index(pdate_str)
+
+            # CC account: +payment_amount from payment date forward (reduces debt)
+            for i in range(date_idx, num_days):
+                acct_balances[cc_id][i] = round(acct_balances[cc_id][i] + payment_amount, 2)
+            projected_dates.setdefault(cc_id, set()).add(pdate_str)
+
+            # Checking account: -payment_amount from payment date forward
+            for i in range(date_idx, num_days):
+                acct_balances[chk_id][i] = round(acct_balances[chk_id][i] - payment_amount, 2)
+            projected_dates.setdefault(chk_id, set()).add(pdate_str)
+
+    # ── Group by account type ─────────────────────────────────────────────
+    GROUP_ORDER = [
+        ("Checking & Savings", {"Checking", "Savings", "checking", "savings",
+                                 "money market", "Money Market", "cd", "CD"}),
+        ("Investments",        {"Brokerage", "Investment", "brokerage", "investment",
+                                 "401k", "401K", "ira", "IRA"}),
+        ("Other Assets",       {"vehicle", "Vehicle", "real_estate", "business_owned", "Other"}),
+        ("Credit Cards",       {"Credit Card", "credit card", "credit"}),
+        ("Loans",              {"Loan", "loan", "mortgage", "Mortgage", "student", "auto"}),
+        ("Other Liabilities",  set()),
+    ]
+
+    def _get_group(acct_type: str) -> str:
+        t = (acct_type or 'other').strip()
+        t_lower = t.lower()
+        for grp_name, types in GROUP_ORDER:
+            if t in types or t_lower in {x.lower() for x in types}:
+                return grp_name
+        flags = classify_account(t)
+        return "Other Liabilities" if flags['is_liability'] else "Other Assets"
+
+    groups_map: dict[str, list] = {grp: [] for grp, _ in GROUP_ORDER}
+
+    for acct in accounts:
+        grp = _get_group(acct.account_type)
+        p_dates = projected_dates.get(acct.id, set())
+        groups_map[grp].append({
+            "id": acct.id,
+            "account_name": acct.account_name,
+            "account_type": acct.account_type,
+            "mask": acct.mask,
+            "balances": acct_balances[acct.id],
+            "projected_dates": sorted(p_dates),
+        })
+
+    result_groups = []
+    for grp_name, _ in GROUP_ORDER:
+        accts = groups_map.get(grp_name, [])
+        if not accts:
+            continue
+        totals = [round(sum(a["balances"][i] for a in accts), 2) for i in range(num_days)]
+        result_groups.append({
+            "group": grp_name,
+            "accounts": accts,
+            "totals": totals,
+        })
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "today": today.isoformat(),
+        "dates": dates,
+        "groups": result_groups,
+    }
 
 
 # ---------------------------------------------------------------------------

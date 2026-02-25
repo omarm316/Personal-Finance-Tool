@@ -146,7 +146,7 @@ function ToastContainer({toasts}){
 }
 
 function Sidebar({page,setPage,banks,onConnectBank,onSync}){
-  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Cash Flow'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
+  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
   return(
     <div className="sidebar">
@@ -1499,11 +1499,11 @@ function CardsPage({toast}){
 
   const[plaidWarnings,setPlaidWarnings]=useState({});
 
-  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
     try{
-      await apiFetch(`/cards/${cardId}`,{method:'PATCH',body:JSON.stringify({...editVals,last_four:editVals.last_four?parseInt(editVals.last_four):null,statement_close_day:editVals.statement_close_day?parseInt(editVals.statement_close_day):null,payment_due_day:editVals.payment_due_day?parseInt(editVals.payment_due_day):null,credit_limit:editVals.credit_limit?parseFloat(editVals.credit_limit):null,annual_fee:editVals.annual_fee?parseFloat(editVals.annual_fee):null})});
+      await apiFetch(`/cards/${cardId}`,{method:'PATCH',body:JSON.stringify({...editVals,last_four:editVals.last_four?parseInt(editVals.last_four):null,statement_close_day:editVals.statement_close_day?parseInt(editVals.statement_close_day):null,payment_due_day:editVals.payment_due_day?parseInt(editVals.payment_due_day):null,credit_limit:editVals.credit_limit?parseFloat(editVals.credit_limit):null,annual_fee:editVals.annual_fee?parseFloat(editVals.annual_fee):null,payment_account_id:editVals.payment_account_id?parseInt(editVals.payment_account_id):null})});
       await load();setEditing(null);toast('Card updated');
     }catch(e){toast('Failed to save','error');}
   };
@@ -1609,7 +1609,7 @@ function CardsPage({toast}){
           :<div className="table-wrap"><table>
             <thead><tr>
               <th>Card ID</th><th>Card Name</th><th>Issuer</th><th>Network</th><th>Last 4</th>
-              <th>Close Day</th><th>Due Day</th><th>Credit Limit</th><th>Linked Account</th><th>Actions</th>
+              <th>Close Day</th><th>Due Day</th><th>Credit Limit</th><th>Linked Account</th><th>Pay Account</th><th>Actions</th>
             </tr></thead>
             <tbody>{visible.map(c=>(
               <tr key={c.id} style={{opacity:c.is_active?1:0.5,cursor:'pointer'}} onClick={()=>{if(editing!==c.id)loadDetail(c.id);}}>
@@ -1630,6 +1630,12 @@ function CardsPage({toast}){
                       {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
                     </select>
                   </td>
+                  <td onClick={e=>e.stopPropagation()}>
+                    <select value={editVals.payment_account_id||''} onChange={e=>setEditVals(v=>({...v,payment_account_id:e.target.value?parseInt(e.target.value):null}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:160}}>
+                      <option value="">— None —</option>
+                      {accounts.filter(a=>['Checking','Savings','checking','savings'].includes(a.account_type)).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+                    </select>
+                  </td>
                   <td onClick={e=>e.stopPropagation()}><div className="edit-actions">
                     <button className="btn btn-sm btn-success" onClick={()=>saveEdit(c.id)}>Save</button>
                     <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>Cancel</button>
@@ -1646,6 +1652,11 @@ function CardsPage({toast}){
                           <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}} title={c.linked_account_name}>{c.linked_account_name}</span>
                         </span>
                       :<span style={{color:'var(--text-muted)',fontSize:11}}>Not linked</span>}
+                  </td>
+                  <td style={{fontSize:12}}>
+                    {c.payment_account_id
+                      ?<span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130,display:'block'}} title={c.payment_account_name}>{c.payment_account_name}</span>
+                      :<span style={{color:'var(--text-muted)',fontSize:11}}>—</span>}
                   </td>
                   <td onClick={e=>e.stopPropagation()}><button className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
                 </>}
@@ -2737,86 +2748,137 @@ function LoansPage({toast}){
   );
 }
 
-/* ── Cash Flow Page (Section 2) ─────────────────────────────────────────── */
-function CashFlowPage({toast}){
+/* ── Daily Balances Page ─────────────────────────────────────────────────── */
+function DailyBalancesPage({toast}){
   const[data,setData]=useState(null);
   const[loading,setLoading]=useState(true);
-  const[period,setPeriod]=useState('month');
+  const[rangeMode,setRangeMode]=useState('month');
+  const[customStart,setCustomStart]=useState('');
+  const[customEnd,setCustomEnd]=useState('');
+  // All groups expanded by default; collapse Others that are less common
+  const[collapsed,setCollapsed]=useState({'Other Assets':true,'Other Liabilities':true});
 
-  const getDates=()=>{
-    const now=new Date();
-    if(period==='month')return{start:monthStart(),end:todayStr()};
-    if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
-    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:d.toISOString().slice(0,10),end:todayStr()};}
-    if(period==='last90'){const d=new Date();d.setDate(d.getDate()-90);return{start:d.toISOString().slice(0,10),end:todayStr()};}
-    return{start:'',end:''};
+  const getRange=()=>{
+    const n=new Date();
+    if(rangeMode==='month'){
+      const y=n.getFullYear(),m=n.getMonth()+1;
+      const s=`${y}-${String(m).padStart(2,'0')}-01`;
+      const last=new Date(y,m,0).getDate();
+      return{s,e:`${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    }
+    if(rangeMode==='quarter'){
+      const y=n.getFullYear(),m=n.getMonth()+1;
+      const qs=Math.floor((m-1)/3)*3+1,qe=qs+2;
+      const last=new Date(y,qe,0).getDate();
+      return{s:`${y}-${String(qs).padStart(2,'0')}-01`,e:`${y}-${String(qe).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    }
+    return{s:customStart,e:customEnd};
   };
 
   const load=useCallback(async()=>{
+    const{s,e}=getRange();
+    if(rangeMode==='custom'&&(!s||!e))return;
     setLoading(true);
     try{
-      const{start,end}=getDates();
-      const r=await apiFetch(`/cash-flow?start_date=${start}&end_date=${end}`);
-      setData(r);
-    }catch(e){toast('Failed to load cash flow','error');}
+      const q=(s&&e)?`?start_date=${s}&end_date=${e}`:'';
+      setData(await apiFetch(`/daily-balances${q}`));
+    }catch(err){toast('Failed to load daily balances','error');}
     finally{setLoading(false);}
-  },[period]);
+  },[rangeMode,customStart,customEnd]);
+
   useEffect(()=>{load();},[load]);
 
-  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
 
-  const d=data||{inflows:0,outflows:0,net:0,cc_payments:0,loan_repayments:0,transaction_count:0};
+  const fmtBal=v=>{
+    if(v==null)return'—';
+    const abs=Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+    return v<0?`(${abs})`:abs;
+  };
+
+  const GRP_COLORS={'Checking & Savings':'#f0fdf4','Investments':'#eff6ff','Other Assets':'#f5f3ff','Credit Cards':'#fff7ed','Loans':'#fef2f2','Other Liabilities':'#fef2f2'};
+
+  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  if(!data||!data.dates)return<div style={{padding:20,color:'var(--text-muted)'}}>No data</div>;
+
+  const{dates,groups,today}=data;
+  const numDays=dates.length;
 
   return(
     <div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
-        <div><h2 style={{fontSize:18,fontWeight:600}}>Cash Flow</h2><p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Depository accounts only (checking & savings)</p></div>
-        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
-          {[['month','This Month'],['last30','Last 30 Days'],['last90','Last 90 Days'],['ytd','Year to Date']].map(([v,l])=>(
-            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-ghost'}`} onClick={()=>setPeriod(v)} style={{borderRadius:7}}>{l}</button>
-          ))}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:8}}>
+        <div><h2 style={{fontSize:18,fontWeight:600}}>Daily Balances</h2>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{numDays} days · end-of-day · italic = projected CC payment</p>
         </div>
-      </div>
-
-      <div className="metric-grid" style={{gridTemplateColumns:'repeat(5,1fr)',marginBottom:20}}>
-        <div className="card metric-card"><div className="metric-label">Inflows</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(d.inflows)}</div></div>
-        <div className="card metric-card"><div className="metric-label">Outflows</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(Math.abs(d.outflows))}</div></div>
-        <div className="card metric-card"><div className="metric-label">Net Cash Flow</div><div className="metric-value" style={{color:d.net>=0?'var(--green)':'var(--red)'}}>{d.net>=0?'+':''}{fmt(d.net)}</div></div>
-        <div className="card metric-card"><div className="metric-label">CC Payments</div><div className="metric-value" style={{color:'var(--text-secondary)'}}>{fmt(d.cc_payments)}</div></div>
-        <div className="card metric-card"><div className="metric-label">Loan Repayments</div><div className="metric-value" style={{color:'var(--text-secondary)'}}>{fmt(d.loan_repayments)}</div></div>
-      </div>
-
-      <div className="card">
-        <div className="section-header">
-          <div className="section-title">Summary</div>
-          <span style={{fontSize:12,color:'var(--text-muted)'}}>{d.transaction_count} transactions · {d.start_date} → {d.end_date}</span>
-        </div>
-        <div style={{padding:20}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>Money In</div>
-              <div style={{background:'#f0fdf4',borderRadius:8,padding:'12px 16px',display:'flex',justifyContent:'space-between'}}>
-                <span style={{fontSize:13}}>Total Inflows</span>
-                <span style={{fontFamily:'DM Mono',fontWeight:600,color:'var(--green)'}}>{fmt(d.inflows)}</span>
-              </div>
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>Money Out</div>
-              <div style={{background:'#fef2f2',borderRadius:8,padding:'12px 16px',marginBottom:8,display:'flex',justifyContent:'space-between'}}>
-                <span style={{fontSize:13}}>Total Outflows</span>
-                <span style={{fontFamily:'DM Mono',fontWeight:600,color:'var(--red)'}}>{fmt(Math.abs(d.outflows))}</span>
-              </div>
-              {d.cc_payments>0&&<div style={{background:'#f3f4f6',borderRadius:8,padding:'10px 16px',marginBottom:4,display:'flex',justifyContent:'space-between'}}>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>↳ Credit Card Payments</span>
-                <span style={{fontFamily:'DM Mono',fontSize:12}}>{fmt(d.cc_payments)}</span>
-              </div>}
-              {d.loan_repayments>0&&<div style={{background:'#f3f4f6',borderRadius:8,padding:'10px 16px',display:'flex',justifyContent:'space-between'}}>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>↳ Loan Repayments</span>
-                <span style={{fontFamily:'DM Mono',fontSize:12}}>{fmt(d.loan_repayments)}</span>
-              </div>}
-            </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+            {[['month','This Month'],['quarter','This Quarter'],['custom','Custom']].map(([v,l])=>(
+              <button key={v} className={`btn btn-sm ${rangeMode===v?'btn-primary':'btn-ghost'}`} onClick={()=>setRangeMode(v)} style={{borderRadius:7}}>{l}</button>
+            ))}
           </div>
+          {rangeMode==='custom'&&<>
+            <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px'}}/>
+            <span style={{fontSize:12}}>–</span>
+            <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px'}}/>
+            <button className="btn btn-sm btn-primary" onClick={load}>Go</button>
+          </>}
         </div>
+      </div>
+
+      <div style={{overflowX:'auto',borderRadius:10,border:'1px solid var(--border)',background:'var(--card-bg)',maxHeight:'75vh',overflowY:'auto'}}>
+        <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
+          <thead style={{position:'sticky',top:0,zIndex:10}}>
+            {/* Row 1: Group headers */}
+            <tr>
+              <th rowSpan={2} style={{position:'sticky',left:0,zIndex:12,background:'#f8fafc',padding:'8px 12px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:'2px solid var(--border)',borderRight:'2px solid var(--border)',whiteSpace:'nowrap',minWidth:70}}>Date</th>
+              {groups.map(grp=>{
+                const span=collapsed[grp.group]?1:1+grp.accounts.length;
+                return(
+                  <th key={grp.group} colSpan={span} style={{padding:'6px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px',borderBottom:'1px solid var(--border)',borderLeft:'2px solid var(--border)',background:GRP_COLORS[grp.group]||'#f9fafb',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}
+                    onClick={()=>toggle(grp.group)}>
+                    {grp.group} {collapsed[grp.group]?'▶':'▼'}
+                  </th>
+                );
+              })}
+            </tr>
+            {/* Row 2: Account name sub-headers */}
+            <tr style={{background:'var(--card-bg)'}}>
+              {groups.map(grp=>[
+                <th key={grp.group+'-t'} style={{padding:'5px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:'2px solid var(--border)',borderLeft:'2px solid var(--border)',background:GRP_COLORS[grp.group]||'#f9fafb',whiteSpace:'nowrap',color:'#374151'}}>Total</th>,
+                ...(!collapsed[grp.group]?grp.accounts.map(acct=>(
+                  <th key={acct.id} style={{padding:'5px 8px',textAlign:'right',fontSize:10,fontWeight:500,borderBottom:'2px solid var(--border)',borderLeft:'1px solid var(--border)',background:'var(--card-bg)',whiteSpace:'nowrap',maxWidth:110,overflow:'hidden',textOverflow:'ellipsis'}} title={acct.account_name}>{acct.account_name}</th>
+                )):[])
+              ])}
+            </tr>
+          </thead>
+          <tbody>
+            {dates.map((d,di)=>{
+              const isToday=d===today;
+              const isFuture=d>today;
+              const rowBg=isToday?'#fef9c3':isFuture?'#fafafa':'transparent';
+              return(
+                <tr key={d} style={{background:rowBg}}>
+                  <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'#fef9c3':isFuture?'#fafafa':'var(--card-bg)',padding:'3px 10px',fontFamily:'DM Mono',fontSize:11,borderRight:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap',color:isToday?'#92400e':isFuture?'var(--text-muted)':'var(--text-secondary)',fontWeight:isToday?700:400}}>
+                    {d.slice(5)}{isToday&&<span style={{marginLeft:5,fontSize:9,fontWeight:800,background:'#fbbf24',color:'#fff',borderRadius:3,padding:'1px 4px'}}>TODAY</span>}
+                  </td>
+                  {groups.map(grp=>{
+                    const tot=grp.totals[di];
+                    return[
+                      <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontWeight:600,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:tot<0?'var(--red)':'inherit',background:tot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(tot)}</td>,
+                      ...(!collapsed[grp.group]?grp.accounts.map(acct=>{
+                        const val=acct.balances[di];
+                        const isProj=acct.projected_dates&&acct.projected_dates.length>0&&d>=acct.projected_dates[0];
+                        return(
+                          <td key={acct.id} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:val<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap'}}>{fmtBal(val)}</td>
+                        );
+                      }):[])
+                    ];
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -2847,7 +2909,7 @@ function App(){
   };
 
   const openPlaid=usePlaidLink(toast,loadMeta);
-  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Cash Flow',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
     <div style={{display:'flex',height:'100vh'}}>
@@ -2861,7 +2923,7 @@ function App(){
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
-          {page==='cashflow'&&<CashFlowPage toast={toast}/>}
+          {page==='cashflow'&&<DailyBalancesPage toast={toast}/>}
           {page==='networth'&&<NetWorthPage toast={toast}/>}
           {page==='loans'&&<LoansPage toast={toast}/>}
           {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}
