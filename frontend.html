@@ -659,6 +659,7 @@ function TransactionsPage({categories,toast}){
   const[accounts,setAccounts]=useState([]);
   const[accountFilter,setAccountFilter]=useState('');
   const[showImport,setShowImport]=useState(false);
+  const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -707,6 +708,31 @@ function TransactionsPage({categories,toast}){
     const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='transactions.csv';a.click();
   };
 
+  /* Batch LLM enrichment — starts a background job, polls until done */
+  const startEnrich=async()=>{
+    try{
+      const r=await apiFetch('/llm/enrich-transactions',{method:'POST',body:JSON.stringify({limit:300,overwrite_existing:false})});
+      setEnrichJob({job_id:r.job_id,status:'running',processed:0,total:0,llm_calls:0,override_hits:0,errors:0});
+    }catch(e){toast('Failed to start enrichment: '+e.message,'error');}
+  };
+
+  /* Poll job status every 2s while running */
+  useEffect(()=>{
+    if(!enrichJob||enrichJob.status!=='running')return;
+    const id=setInterval(async()=>{
+      try{
+        const s=await apiFetch(`/llm/enrich-status/${enrichJob.job_id}`);
+        setEnrichJob(s);
+        if(s.status==='done'||s.status==='error'){
+          clearInterval(id);
+          if(s.status==='done'){load();toast(`Enriched ${s.processed} transactions`);}
+          else toast('Enrichment failed: '+(s.error||'unknown error'),'error');
+        }
+      }catch(e){clearInterval(id);}
+    },2000);
+    return()=>clearInterval(id);
+  },[enrichJob?.job_id,enrichJob?.status]);
+
   return(
     <div>
       {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
@@ -739,7 +765,22 @@ function TransactionsPage({categories,toast}){
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
+          <button className="btn btn-sm btn-secondary" onClick={startEnrich} disabled={enrichJob?.status==='running'} title="Run AI enrichment on unclassified transactions">{enrichJob?.status==='running'?'Enriching…':'✨ Enrich'}</button>
         </div>
+        {enrichJob&&(
+          <div style={{padding:'8px 16px',background:enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+            {enrichJob.status==='running'&&<div className="spinner" style={{width:14,height:14,flexShrink:0}}/>}
+            {enrichJob.status==='done'&&<span style={{color:'#15803d',fontWeight:600}}>✓</span>}
+            {enrichJob.status==='error'&&<span style={{color:'#dc2626',fontWeight:600}}>✗</span>}
+            <span>
+              {enrichJob.status==='running'&&`Enriching… ${enrichJob.processed}/${enrichJob.total||'?'} transactions`}
+              {enrichJob.status==='done'&&`Enrichment complete — ${enrichJob.processed} enriched · ${enrichJob.llm_calls} AI calls · ${enrichJob.override_hits} from saved rules`}
+              {enrichJob.status==='error'&&`Enrichment failed: ${enrichJob.error||'unknown error'}`}
+            </span>
+            {enrichJob.status==='running'&&enrichJob.last&&<span style={{color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}}>last: {enrichJob.last.merchant||enrichJob.last.raw}</span>}
+            {(enrichJob.status==='done'||enrichJob.status==='error')&&<button className="btn btn-sm btn-ghost" style={{marginLeft:'auto'}} onClick={()=>setEnrichJob(null)}>Dismiss</button>}
+          </div>
+        )}
         {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
           :visible.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
           :<div className="table-wrap"><table>

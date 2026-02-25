@@ -74,10 +74,19 @@ def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
     Returns None on any failure (network, API error, bad JSON).
     Uses only stdlib urllib — no extra dependencies.
     """
+    # System prompt is identical for every transaction — mark it for caching.
+    # Anthropic caches the prompt for 5 minutes; cache hits are ~85% faster and
+    # ~90% cheaper on input tokens. Batches of 10+ calls see meaningful savings.
     payload = json.dumps({
         "model": ANTHROPIC_MODEL,
         "max_tokens": 200,
-        "system": SYSTEM_PROMPT,
+        "system": [
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
         "messages": [
             {"role": "user", "content": f"Decode this raw bank transaction string: {description_raw}"}
         ],
@@ -89,6 +98,7 @@ def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
         headers={
             "x-api-key": api_key,
             "anthropic-version": ANTHROPIC_VERSION,
+            "anthropic-beta": "prompt-caching-2024-07-31",
             "Content-Type": "application/json",
         },
         method="POST",
