@@ -778,16 +778,18 @@ function TransactionsPage({categories,toast}){
   /* Clear selection whenever the visible set changes (filter applied) */
   useEffect(()=>{setSelectedIds(new Set());},[search,catFilter,actionFilter,needsReview,accountFilter,startDate,endDate,showDupes]);
 
-  /* Section 4A: Detect duplicate CC payment "received" records */
-  const isDuplicateCCPayment=(t)=>{
-    if(t.action!=='Transfer')return false;
-    const desc=(t.description_raw||'').toUpperCase();
-    // CC payment received on credit card side (positive amount on credit account = payment received)
-    return t.amount>0&&(desc.includes('PAYMENT')&&(desc.includes('AUTOPAY')||desc.includes('THANK YOU')||desc.includes('AUTOMATIC')||desc.includes('ACH')));
+  /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
+     A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
+     positive Transfer on the credit card account (hide by default — it's the duplicate).
+     Refunds/credits are NOT Transfers so they pass through unaffected. */
+  const isCCPaymentDuplicate=(t)=>{
+    if(t.action!=='Transfer'||t.amount<=0)return false;
+    const type=(t.account_type||'').toLowerCase();
+    return type==='credit'||type==='credit card';
   };
 
   let visible=txns;
-  if(!showDupes)visible=visible.filter(t=>!isDuplicateCCPayment(t));
+  if(!showDupes)visible=visible.filter(t=>!isCCPaymentDuplicate(t));
   if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
   if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
   if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
@@ -847,7 +849,7 @@ function TransactionsPage({categories,toast}){
             {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
           </select>
           <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
-          <label className="filter-label"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show duplicates</label>
+          <label className="filter-label" title="CC payments appear on both the checking account (kept) and the credit card account (hidden by default)"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show CC payment credits</label>
           <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
           <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>

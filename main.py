@@ -912,6 +912,7 @@ def _serialize_txn(t, splits_map=None):
         "import_hash": t.import_hash,
         "account_name": t.account.account_name,
         "account_id": t.account_id,
+        "account_type": t.account.account_type,
     }
 
 
