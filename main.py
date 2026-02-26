@@ -280,6 +280,12 @@ class TransactionUpdate(BaseModel):
     points_category: Optional[str] = None
 
 
+class BatchTransactionUpdate(BaseModel):
+    """Batch-update payload: a list of IDs and the fields to set on all of them."""
+    ids: List[int]
+    updates: TransactionUpdate
+
+
 class SplitCreate(BaseModel):
     """A single split line item."""
     amount: float
@@ -1013,6 +1019,63 @@ async def update_transaction(
 
     db.commit()
     return {"message": "Transaction updated"}
+
+
+@app.post("/api/transactions/batch-update")
+async def batch_update_transactions(
+    payload: BatchTransactionUpdate,
+    db: Session = Depends(get_db),
+):
+    """Apply the same classification changes to multiple transactions at once."""
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="No transaction IDs provided")
+
+    update = payload.updates
+    categorizer = CategorizationEngine(db)
+    updated = 0
+
+    for txn_id in payload.ids:
+        t = db.query(Transaction).filter_by(id=txn_id).first()
+        if not t:
+            continue
+
+        old_category = t.category_final
+        old_action = t.action
+
+        if update.category is not None:
+            if update.category != t.category_manual:
+                t.category_manual = update.category
+                t.updated_at = datetime.utcnow()
+                t.is_locked = True
+                if old_category != update.category:
+                    categorizer.record_correction(t, old_category, update.category,
+                                                  old_action, update.action)
+
+        if update.action is not None:
+            t.action = update.action
+            t.updated_at = datetime.utcnow()
+            t.is_locked = True
+            # Clear category when type doesn't support it
+            if update.action not in BUDGET_TYPES:
+                t.category_manual = ''
+                t.category_auto = ''
+
+        if update.needs_review is not None:
+            t.needs_review = update.needs_review
+            if not update.needs_review:
+                t.reviewed_at = datetime.utcnow()
+
+        if update.is_locked is not None:
+            t.is_locked = update.is_locked
+
+        if update.is_gcb is not None:
+            t.is_gcb = update.is_gcb
+            t.gcb_tagged = update.is_gcb
+
+        updated += 1
+
+    db.commit()
+    return {"updated": updated}
 
 
 # ---------------------------------------------------------------------------

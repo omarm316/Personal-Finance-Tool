@@ -230,7 +230,7 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   );
 }
 
-function TxnRow({txn,categories,onSave,onReview,onSplit}){
+function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit}){
   const[locked,setLocked]=useState(txn.is_locked);
   const[gcb,setGcb]=useState(txn.is_gcb||false);
   const[editing,setEditing]=useState(false);
@@ -265,7 +265,10 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
   const displayAction=txn.action_display||txn.action;
   return(
     <React.Fragment>
-    <tr className={rowClass}>
+    <tr className={rowClass} style={selected?{background:'#eff6ff'}:{}}>
+      <td style={{width:28,paddingLeft:12,paddingRight:4,verticalAlign:'middle'}}>
+        <input type="checkbox" checked={!!selected} onChange={()=>onToggleSelect(txn.id)} onClick={e=>e.stopPropagation()} style={{cursor:'pointer'}}/>
+      </td>
       <td style={{color:'var(--text-secondary)',whiteSpace:'nowrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:4}}>
           {txn.is_split&&<span onClick={()=>setExpanded(!expanded)} style={{cursor:'pointer',display:'inline-block',transition:'transform 0.15s',transform:expanded?'rotate(90deg)':'rotate(0deg)',fontSize:10,color:'var(--text-muted)',userSelect:'none'}}>&#9654;</span>}
@@ -329,7 +332,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
           </div>
           :<div className="edit-actions">
             {txn.needs_review&&!locked&&<button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none'}} onClick={()=>onReview(txn)}>Review</button>}
-            <button className="btn btn-sm btn-secondary" onClick={()=>setEditing(true)}>Edit</button>
+            <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)} style={{fontSize:11}}>{txn.is_split?'Splits':'Split'}</button>
             {locked&&<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13}} onClick={toggleLock} title="Unlock">🔓</button>}
             <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'#fef9c3':'#f3f4f6',color:gcb?'#854d0e':'var(--text-muted)',border:gcb?'1px solid #fde047':'1px solid var(--border)'}}
@@ -341,6 +344,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit}){
     </tr>
     {expanded&&txn.splits&&txn.splits.map((s,i)=>(
       <tr key={`split-${txn.id}-${i}`} style={{background:'#f9fafb',fontSize:12}}>
+        <td></td>
         <td></td>
         <td style={{paddingLeft:28,color:'var(--text-secondary)'}}>{s.description||<span style={{color:'#d1d5db',fontStyle:'italic'}}>—</span>}</td>
         <td><span style={{color:'var(--text-secondary)'}}>{s.amount<0?'–':'+'}{fmt(s.amount)}</span></td>
@@ -644,6 +648,66 @@ function ImportModal({accounts,onClose,onImported,toast}){
   );
 }
 
+/* ── Batch Edit Modal ────────────────────────────────────────────────────────
+   Allows editing Type + Category (and optionally "mark reviewed") across all
+   selected transactions in one shot. Leave a field at "— keep —" to skip it. */
+function BatchEditModal({count,categories,onSave,onClose}){
+  const[action,setAction]=useState('');      // '' = keep existing
+  const[category,setCategory]=useState(''); // '' = keep existing
+  const[markReviewed,setMarkReviewed]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const save=async()=>{
+    const updates={};
+    if(action) updates.action=action;
+    if(category) updates.category=category;
+    if(markReviewed) updates.needs_review=false;
+    if(!Object.keys(updates).length){toast('No changes selected','error');return;}
+    setSaving(true);
+    try{await onSave(updates);}
+    catch(e){}
+    finally{setSaving(false);}
+  };
+  const label={fontSize:12,fontWeight:600,color:'var(--text-secondary)',marginBottom:4,display:'block'};
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e=>e.stopPropagation()} style={{maxWidth:420}}>
+        <div className="modal-header">
+          <h3 style={{margin:0}}>Edit {count} Transaction{count!==1?'s':''}</h3>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:14,padding:'16px 20px'}}>
+          <p style={{margin:0,color:'var(--text-muted)',fontSize:13}}>Leave a field at <em>— keep —</em> to leave existing values unchanged.</p>
+          <div>
+            <label style={label}>Type</label>
+            <select value={action} onChange={e=>setAction(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={label}>Category</label>
+            <select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              <option value="Unclassified">Unclassified</option>
+              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>
+            <input type="checkbox" checked={markReviewed} onChange={e=>setMarkReviewed(e.target.checked)}/>
+            Mark all as reviewed
+          </label>
+        </div>
+        <div className="modal-footer" style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving?'Saving…':`Apply to ${count} transaction${count!==1?'s':''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TransactionsPage({categories,toast}){
   const[txns,setTxns]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -660,6 +724,9 @@ function TransactionsPage({categories,toast}){
   const[accountFilter,setAccountFilter]=useState('');
   const[showImport,setShowImport]=useState(false);
   const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
+  const[selectedIds,setSelectedIds]=useState(new Set());
+  const[showBatchEdit,setShowBatchEdit]=useState(false);
+  const[showDupes,setShowDupes]=useState(false);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -685,7 +752,20 @@ function TransactionsPage({categories,toast}){
   };
   const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
 
-  const[showDupes,setShowDupes]=useState(false);
+  /* ── Multi-select helpers ─────────────────────────────────────── */
+  const toggleSelect=(id)=>setSelectedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const selectAll=()=>setSelectedIds(new Set(visible.map(t=>t.id)));
+  const handleBatchSave=async(updates)=>{
+    const count=selectedIds.size;
+    try{
+      await apiFetch('/transactions/batch-update',{method:'POST',body:JSON.stringify({ids:[...selectedIds],updates})});
+      await load();
+      setSelectedIds(new Set());setShowBatchEdit(false);
+      toast(`Updated ${count} transaction${count!==1?'s':''}`);
+    }catch(e){toast('Batch update failed: '+e.message,'error');}
+  };
+  /* Clear selection whenever the visible set changes (filter applied) */
+  useEffect(()=>{setSelectedIds(new Set());},[search,catFilter,actionFilter,needsReview,accountFilter,startDate,endDate,showDupes]);
 
   /* Section 4A: Detect duplicate CC payment "received" records */
   const isDuplicateCCPayment=(t)=>{
@@ -739,6 +819,7 @@ function TransactionsPage({categories,toast}){
       {showManual&&<ManualTransactionModal accounts={accounts} onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
       {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
       {showImport&&<ImportModal accounts={accounts} onClose={()=>setShowImport(false)} onImported={load} toast={toast}/>}
+      {showBatchEdit&&<BatchEditModal count={selectedIds.size} categories={categories} onSave={handleBatchSave} onClose={()=>setShowBatchEdit(false)}/>}
       <div className="card">
         <div className="filters">
           <input className="search-input" placeholder="Search descriptions…" value={search} onChange={e=>setSearch(e.target.value)}/>
@@ -762,6 +843,7 @@ function TransactionsPage({categories,toast}){
           {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter)&&
             <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');}}>Clear</button>}
           <span className="filter-count">{visible.length} transactions</span>
+          {visible.length>0&&<button className="btn btn-sm btn-ghost" onClick={selectAll} title="Select all visible transactions">☑ Select All</button>}
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
@@ -781,11 +863,26 @@ function TransactionsPage({categories,toast}){
             {(enrichJob.status==='done'||enrichJob.status==='error')&&<button className="btn btn-sm btn-ghost" style={{marginLeft:'auto'}} onClick={()=>setEnrichJob(null)}>Dismiss</button>}
           </div>
         )}
+        {selectedIds.size>0&&(
+          <div style={{padding:'8px 16px',background:'#eff6ff',borderBottom:'1px solid #bfdbfe',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+            <span style={{fontWeight:600,color:'#1d4ed8'}}>{selectedIds.size} selected</span>
+            <button className="btn btn-sm btn-primary" onClick={()=>setShowBatchEdit(true)}>✎ Edit Selected</button>
+            <button className="btn btn-sm btn-ghost" onClick={()=>setSelectedIds(new Set())}>✕ Deselect All</button>
+          </div>
+        )}
         {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
           :visible.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
           :<div className="table-wrap"><table>
-            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th><th>Actions</th></tr></thead>
-            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn}/>)}</tbody>
+            <thead><tr>
+              <th style={{width:28,paddingLeft:12,paddingRight:4}}>
+                <input type="checkbox" title="Select / deselect all visible"
+                  checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
+                  onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
+                  style={{cursor:'pointer'}}/>
+              </th>
+              <th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th><th>Actions</th>
+            </tr></thead>
+            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)}/>)}</tbody>
           </table></div>
         }
       </div>
