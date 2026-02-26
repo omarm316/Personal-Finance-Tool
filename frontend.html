@@ -654,12 +654,15 @@ function ImportModal({accounts,onClose,onImported,toast}){
 function BatchEditModal({count,categories,onSave,onClose}){
   const[action,setAction]=useState('');      // '' = keep existing
   const[category,setCategory]=useState(''); // '' = keep existing
+  const[gcbAction,setGcbAction]=useState(''); // '' | 'tag' | 'untag'
   const[markReviewed,setMarkReviewed]=useState(false);
   const[saving,setSaving]=useState(false);
   const save=async()=>{
     const updates={};
     if(action) updates.action=action;
     if(category) updates.category=category;
+    if(gcbAction==='tag') updates.is_gcb=true;
+    if(gcbAction==='untag') updates.is_gcb=false;
     if(markReviewed) updates.needs_review=false;
     if(!Object.keys(updates).length){toast('No changes selected','error');return;}
     setSaving(true);
@@ -690,6 +693,14 @@ function BatchEditModal({count,categories,onSave,onClose}){
               <option value="">— keep existing —</option>
               <option value="Unclassified">Unclassified</option>
               {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={label}>GCB Tag</label>
+            <select value={gcbAction} onChange={e=>setGcbAction(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              <option value="tag">🟡 Tag as GCB</option>
+              <option value="untag">Remove GCB tag</option>
             </select>
           </div>
           <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>
