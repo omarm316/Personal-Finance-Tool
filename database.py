@@ -132,6 +132,9 @@ class Transaction(Base):
     # Points tracking
     points_category = Column(String(100), nullable=True)   # From PointsCategory table
     card_id = Column(Integer, ForeignKey('cards.id'), nullable=True)  # Which card was used
+
+    # Loan payment tracking — set when this transaction is linked to a loan payment
+    loan_id = Column(Integer, ForeignKey('loans.id'), nullable=True, index=True)
     
     # Metadata
     year = Column(Integer, index=True)
@@ -260,14 +263,20 @@ class Loan(Base):
     __tablename__ = 'loans'
 
     id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Linked account
+    account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Linked liability account
     lender = Column(String(200), nullable=False)
     loan_type = Column(String(50), nullable=False)  # mortgage, auto, student, personal, other
     original_principal = Column(Float, nullable=False)
-    current_balance = Column(Float, nullable=True)
-    interest_rate = Column(Float, nullable=True)  # Annual rate as percentage (e.g. 6.5)
-    term_months = Column(Integer, nullable=True)  # Total term in months
-    monthly_payment = Column(Float, nullable=True)
+    current_balance = Column(Float, nullable=True)   # Known balance as of balance_date
+    balance_date = Column(DateTime, nullable=True)   # Date when current_balance was recorded
+    remaining_term_months = Column(Integer, nullable=True)  # Remaining months as of balance_date
+    interest_rate = Column(Float, nullable=True)     # Annual rate as percentage (e.g. 6.5)
+    term_months = Column(Integer, nullable=True)     # Original total term in months
+    monthly_payment = Column(Float, nullable=True)   # Total monthly payment (PITI)
+    property_tax_monthly = Column(Float, nullable=True)   # Escrow: monthly property tax portion
+    insurance_monthly = Column(Float, nullable=True)      # Escrow: monthly insurance portion
+    payment_account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Checking account that pays
+    payment_due_day = Column(Integer, nullable=True)      # Day of month payment is due (1-31)
     start_date = Column(DateTime, nullable=True)
     maturity_date = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -396,6 +405,7 @@ def run_migrations(engine):
             ('enrichment_source', 'VARCHAR(20)'),
             ('import_hash',       'VARCHAR(64)'),
             ('import_source',     'VARCHAR(20)'),
+            ('loan_id',           'INTEGER'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),
@@ -406,6 +416,14 @@ def run_migrations(engine):
         'cards': [
             ('account_id', 'INTEGER'),
             ('payment_account_id', 'INTEGER'),
+        ],
+        'loans': [
+            ('balance_date',          'DATE'),
+            ('remaining_term_months', 'INTEGER'),
+            ('property_tax_monthly',  'FLOAT'),
+            ('insurance_monthly',     'FLOAT'),
+            ('payment_account_id',    'INTEGER'),
+            ('payment_due_day',       'INTEGER'),
         ],
         'categorization_rules': [
             ('clean_description', 'VARCHAR(500)'),

@@ -2563,13 +2563,40 @@ class LoanCreate(BaseModel):
     loan_type: str  # mortgage, auto, student, personal, other
     original_principal: float
     current_balance: Optional[float] = None
-    interest_rate: Optional[float] = None
-    term_months: Optional[int] = None
-    monthly_payment: Optional[float] = None
-    start_date: Optional[str] = None  # YYYY-MM-DD
-    maturity_date: Optional[str] = None  # YYYY-MM-DD
-    account_id: Optional[int] = None
+    balance_date: Optional[str] = None              # YYYY-MM-DD — when current_balance was recorded
+    remaining_term_months: Optional[int] = None     # Remaining months as of balance_date
+    interest_rate: Optional[float] = None           # Annual % (e.g. 6.5)
+    term_months: Optional[int] = None               # Original total term
+    monthly_payment: Optional[float] = None         # Total PITI payment
+    property_tax_monthly: Optional[float] = None    # Escrow: property tax portion
+    insurance_monthly: Optional[float] = None       # Escrow: insurance portion
+    payment_account_id: Optional[int] = None        # Checking account that makes the payment
+    payment_due_day: Optional[int] = None           # Day of month (1-31)
+    start_date: Optional[str] = None                # YYYY-MM-DD
+    maturity_date: Optional[str] = None             # YYYY-MM-DD
+    account_id: Optional[int] = None                # Linked liability account
     notes: Optional[str] = None
+
+
+def _compute_pmt_split(balance: float, annual_rate: float, monthly_payment: float,
+                        property_tax: float = 0.0, insurance: float = 0.0) -> dict:
+    """
+    Split a single loan payment into P / I / Tax / Insurance components.
+    Uses standard amortization: interest = balance × (annual_rate/12/100).
+    """
+    monthly_rate = (annual_rate or 0.0) / 100.0 / 12.0
+    interest = round(balance * monthly_rate, 2) if monthly_rate > 0 else 0.0
+    escrow = round((property_tax or 0.0) + (insurance or 0.0), 2)
+    principal = round(monthly_payment - interest - escrow, 2)
+    if principal < 0:
+        principal = 0.0  # Edge case: payment doesn't cover interest yet
+    return {
+        'interest': interest,
+        'principal': principal,
+        'property_tax': round(property_tax or 0.0, 2),
+        'insurance': round(insurance or 0.0, 2),
+        'total': round(monthly_payment, 2),
+    }
 
 
 def serialize_loan(loan: Loan) -> dict:
@@ -2581,14 +2608,28 @@ def serialize_loan(loan: Loan) -> dict:
         'loan_type': loan.loan_type,
         'original_principal': loan.original_principal,
         'current_balance': loan.current_balance,
+        'balance_date': loan.balance_date.strftime('%Y-%m-%d') if loan.balance_date else None,
+        'remaining_term_months': loan.remaining_term_months,
         'interest_rate': loan.interest_rate,
         'term_months': loan.term_months,
         'monthly_payment': loan.monthly_payment,
+        'property_tax_monthly': loan.property_tax_monthly,
+        'insurance_monthly': loan.insurance_monthly,
+        'payment_account_id': loan.payment_account_id,
+        'payment_due_day': loan.payment_due_day,
         'start_date': loan.start_date.strftime('%Y-%m-%d') if loan.start_date else None,
         'maturity_date': loan.maturity_date.strftime('%Y-%m-%d') if loan.maturity_date else None,
         'is_active': loan.is_active,
         'notes': loan.notes,
         'created_at': loan.created_at.isoformat() if loan.created_at else None,
+        # Computed: next payment split (based on current_balance)
+        'next_split': _compute_pmt_split(
+            loan.current_balance or 0,
+            loan.interest_rate or 0,
+            loan.monthly_payment or 0,
+            loan.property_tax_monthly or 0,
+            loan.insurance_monthly or 0,
+        ) if loan.monthly_payment else None,
     }
 
 
@@ -2622,9 +2663,15 @@ async def create_loan(data: LoanCreate, db: Session = Depends(get_db)):
         loan_type=data.loan_type,
         original_principal=data.original_principal,
         current_balance=data.current_balance,
+        balance_date=datetime.strptime(data.balance_date, "%Y-%m-%d") if data.balance_date else None,
+        remaining_term_months=data.remaining_term_months,
         interest_rate=data.interest_rate,
         term_months=data.term_months,
         monthly_payment=data.monthly_payment,
+        property_tax_monthly=data.property_tax_monthly,
+        insurance_monthly=data.insurance_monthly,
+        payment_account_id=data.payment_account_id,
+        payment_due_day=data.payment_due_day,
         start_date=datetime.strptime(data.start_date, "%Y-%m-%d") if data.start_date else None,
         maturity_date=datetime.strptime(data.maturity_date, "%Y-%m-%d") if data.maturity_date else None,
         account_id=data.account_id,
@@ -2643,12 +2690,16 @@ async def update_loan(loan_id: int, updates: dict, db: Session = Depends(get_db)
     loan = db.query(Loan).filter_by(id=loan_id).first()
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
+    _date_fields = ('start_date', 'maturity_date', 'balance_date')
     allowed = ['lender', 'loan_type', 'original_principal', 'current_balance',
+               'balance_date', 'remaining_term_months',
                'interest_rate', 'term_months', 'monthly_payment',
+               'property_tax_monthly', 'insurance_monthly',
+               'payment_account_id', 'payment_due_day',
                'start_date', 'maturity_date', 'account_id', 'notes', 'is_active']
     for k, v in updates.items():
         if k in allowed:
-            if k in ('start_date', 'maturity_date') and v:
+            if k in _date_fields and v:
                 setattr(loan, k, datetime.strptime(v, "%Y-%m-%d"))
             else:
                 setattr(loan, k, v)
@@ -2667,6 +2718,190 @@ async def delete_loan(loan_id: int, db: Session = Depends(get_db)):
     loan.updated_at = datetime.utcnow()
     db.commit()
     return {'message': 'Loan deactivated'}
+
+
+@app.get("/api/loans/{loan_id}/compute-split")
+async def compute_loan_split(loan_id: int, db: Session = Depends(get_db)):
+    """
+    Compute the P/I/Tax/Insurance split for the next payment on this loan,
+    based on current_balance, interest_rate, monthly_payment, property_tax_monthly,
+    and insurance_monthly. Returns a preview the user can confirm before linking.
+    """
+    loan = db.query(Loan).filter_by(id=loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if not loan.monthly_payment:
+        raise HTTPException(status_code=400, detail="monthly_payment not set on loan")
+    split = _compute_pmt_split(
+        loan.current_balance or 0,
+        loan.interest_rate or 0,
+        loan.monthly_payment,
+        loan.property_tax_monthly or 0,
+        loan.insurance_monthly or 0,
+    )
+    return {**split, 'current_balance': loan.current_balance,
+            'balance_after': round((loan.current_balance or 0) - split['principal'], 2)}
+
+
+@app.get("/api/loans/{loan_id}/candidate-transactions")
+async def get_loan_candidate_transactions(
+    loan_id: int, limit: int = 6, db: Session = Depends(get_db)
+):
+    """
+    Return recent transactions from the loan's payment_account that are
+    close in amount to monthly_payment and not yet linked to any loan.
+    These are candidates for the user to link as a loan payment.
+    """
+    loan = db.query(Loan).filter_by(id=loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if not loan.payment_account_id or not loan.monthly_payment:
+        return []
+
+    target = loan.monthly_payment
+    tolerance = max(target * 0.15, 50.0)  # ±15% or $50, whichever is larger
+
+    # Transactions from the payment account matching the payment amount
+    # In Plaid sign convention stored: outflow = negative for liabilities... but checking
+    # account outflows can be either sign depending on setup. We look for amount near ±target.
+    txns = (
+        db.query(Transaction)
+        .filter(
+            Transaction.account_id == loan.payment_account_id,
+            Transaction.loan_id.is_(None),
+            Transaction.amount.between(-(target + tolerance), -(target - tolerance)),
+        )
+        .order_by(Transaction.date.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            'id': t.id,
+            'date': t.date.strftime('%Y-%m-%d'),
+            'amount': t.amount,
+            'description_raw': t.description_raw,
+            'description_clean': t.description_clean,
+            'action': t.action,
+            'is_split': t.is_split,
+        }
+        for t in txns
+    ]
+
+
+@app.post("/api/loans/{loan_id}/link-transaction")
+async def link_loan_transaction(
+    loan_id: int, body: dict, db: Session = Depends(get_db)
+):
+    """
+    Link an existing checking-account transaction to this loan as a payment.
+
+    Steps:
+    1. Compute P/I/Tax/Insurance split from current loan state
+    2. Delete any existing splits on the transaction
+    3. Create new TransactionSplit rows for each component
+    4. Mark transaction is_split=True, loan_id=loan_id, action='Transfer'
+    5. Subtract principal from loan.current_balance
+    6. Decrement loan.remaining_term_months by 1
+    7. Update loan.balance_date to this transaction's date
+    """
+    transaction_id = body.get('transaction_id')
+    if not transaction_id:
+        raise HTTPException(status_code=400, detail="transaction_id required")
+
+    loan = db.query(Loan).filter_by(id=loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+
+    txn = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    split = _compute_pmt_split(
+        loan.current_balance or 0,
+        loan.interest_rate or 0,
+        loan.monthly_payment or abs(txn.amount),
+        loan.property_tax_monthly or 0,
+        loan.insurance_monthly or 0,
+    )
+
+    # Remove any existing splits on this transaction
+    db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete()
+
+    # Create split records
+    components = [
+        (split['principal'],    'Transfer',  '',                 'Mortgage Principal'),
+        (split['interest'],     'Expense',   'Fees and Interest','Mortgage Interest'),
+    ]
+    if split['property_tax'] > 0:
+        components.append((split['property_tax'], 'Expense', 'Housing', 'Property Tax'))
+    if split['insurance'] > 0:
+        components.append((split['insurance'], 'Expense', 'Insurance', "Homeowner's Insurance"))
+
+    for amt, action, category, desc in components:
+        if amt <= 0:
+            continue
+        db.add(TransactionSplit(
+            parent_transaction_id=transaction_id,
+            amount=amt,
+            description=desc,
+            category=category,
+            action=action,
+        ))
+
+    # Update the parent transaction
+    txn.is_split = True
+    txn.loan_id = loan_id
+    txn.action = 'Transfer'
+    txn.description_clean = f'{loan.lender} payment'
+    txn.needs_review = False
+    txn.is_locked = True
+
+    # Update the loan
+    loan.current_balance = round((loan.current_balance or 0) - split['principal'], 2)
+    loan.balance_date = txn.date
+    if loan.remaining_term_months and loan.remaining_term_months > 0:
+        loan.remaining_term_months -= 1
+    loan.updated_at = datetime.utcnow()
+
+    db.commit()
+    return {
+        'message': 'Transaction linked',
+        'split': split,
+        'new_balance': loan.current_balance,
+        'remaining_term_months': loan.remaining_term_months,
+    }
+
+
+@app.delete("/api/loans/{loan_id}/unlink-transaction/{transaction_id}")
+async def unlink_loan_transaction(
+    loan_id: int, transaction_id: int, db: Session = Depends(get_db)
+):
+    """Reverse a loan payment link: restore splits, unlink, and add principal back to balance."""
+    loan = db.query(Loan).filter_by(id=loan_id).first()
+    txn = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not loan or not txn:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Find principal split to reverse the balance update
+    principal_split = (
+        db.query(TransactionSplit)
+        .filter_by(parent_transaction_id=transaction_id, action='Transfer')
+        .first()
+    )
+    if principal_split:
+        loan.current_balance = round((loan.current_balance or 0) + principal_split.amount, 2)
+        if loan.remaining_term_months is not None:
+            loan.remaining_term_months += 1
+        loan.updated_at = datetime.utcnow()
+
+    db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete()
+    txn.is_split = False
+    txn.loan_id = None
+    txn.is_locked = False
+    txn.needs_review = True
+    db.commit()
+    return {'message': 'Transaction unlinked'}
 
 
 # ---------------------------------------------------------------------------
@@ -2916,6 +3151,74 @@ async def get_daily_balances(
             for i in range(date_idx, num_days):
                 acct_balances[chk_id][i] = round(acct_balances[chk_id][i] - payment_amount, 2)
             projected_dates.setdefault(chk_id, set()).add(pdate_str)
+
+    # ── Loan Payment Projections ──────────────────────────────────────────
+    # For each loan with payment_account_id + payment_due_day + remaining_term_months > 0:
+    # project the monthly payment as a debit on the checking account and a principal
+    # credit (balance reduction) on the linked loan account.
+    active_loans = (
+        db.query(Loan)
+        .filter(
+            Loan.is_active == True,
+            Loan.payment_account_id.isnot(None),
+            Loan.payment_due_day.isnot(None),
+            Loan.monthly_payment.isnot(None),
+        )
+        .all()
+    )
+
+    for loan in active_loans:
+        chk_id = loan.payment_account_id
+        loan_acct_id = loan.account_id
+        due_day = loan.payment_due_day
+
+        if chk_id not in acct_balances:
+            continue
+
+        # Work with a running balance copy for amortization across projected months
+        running_loan_balance = loan.current_balance or 0.0
+        running_remaining = loan.remaining_term_months  # may be None
+
+        for y, m in sorted(months_in_range):
+            import calendar as _cal2
+            max_day = _cal2.monthrange(y, m)[1]
+            payment_date = date(y, m, min(due_day, max_day))
+            pdate_str = payment_date.isoformat()
+
+            if pdate_str not in dates_set:
+                continue
+            if payment_date <= today:
+                continue
+            if running_remaining is not None and running_remaining <= 0:
+                break  # Loan paid off
+
+            split = _compute_pmt_split(
+                running_loan_balance,
+                loan.interest_rate or 0,
+                loan.monthly_payment,
+                loan.property_tax_monthly or 0,
+                loan.insurance_monthly or 0,
+            )
+
+            date_idx = dates.index(pdate_str)
+
+            # Checking account: debit total payment
+            for i in range(date_idx, num_days):
+                acct_balances[chk_id][i] = round(acct_balances[chk_id][i] - split['total'], 2)
+            projected_dates.setdefault(chk_id, set()).add(pdate_str)
+
+            # Loan liability account: credit principal (reduces negative balance)
+            if loan_acct_id and loan_acct_id in acct_balances:
+                for i in range(date_idx, num_days):
+                    acct_balances[loan_acct_id][i] = round(
+                        acct_balances[loan_acct_id][i] + split['principal'], 2
+                    )
+                projected_dates.setdefault(loan_acct_id, set()).add(pdate_str)
+
+            # Advance amortization state for next month's projection
+            running_loan_balance = round(running_loan_balance - split['principal'], 2)
+            if running_remaining is not None:
+                running_remaining -= 1
 
     # ── Group by account type ─────────────────────────────────────────────
     GROUP_ORDER = [
