@@ -685,6 +685,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 txn_data['description_raw'],
                 amount,
                 txn_data.get('merchant_name'),
+                account_type=account.account_type or '',
             )
 
             # Apply GCB auto-tag and points category from rule notes
@@ -1286,12 +1287,14 @@ async def get_stats(
 
     transactions   = query.all()
     total_income   = sum(t.amount for t in transactions if t.action == 'Income')
-    total_expenses = sum(abs(t.amount) for t in transactions if t.action == 'Expense')
+    # Net expenses: charges (amount < 0) contribute positively; CC credits (amount > 0)
+    # contribute negatively, reducing the total — so we use -amount for all Expense rows.
+    total_expenses = sum(-t.amount for t in transactions if t.action == 'Expense')
     by_category: dict = {}
     for t in transactions:
         if t.action == 'Expense':
             cat = t.category_final
-            by_category[cat] = by_category.get(cat, 0) + abs(t.amount)
+            by_category[cat] = by_category.get(cat, 0) + (-t.amount)
 
     return {
         "total_transactions": len(transactions),
@@ -1678,7 +1681,8 @@ async def upload_rules(file: UploadFile = File(...), db: Session = Depends(get_d
         transactions = db.query(Transaction).filter(Transaction.is_locked == False).all()
         for t in transactions:
             action, category, confidence, display_desc = cat_engine.categorize(
-                t.description_raw, t.amount, t.merchant_name
+                t.description_raw, t.amount, t.merchant_name,
+                account_type=(t.account.account_type if t.account else ''),
             )
             t.action              = action
             t.category_auto       = '' if action == 'Transfer' else category
@@ -2002,7 +2006,8 @@ async def import_transactions(
 
         # Categorise with rules engine
         action, category, confidence, display_desc = categorizer.categorize(
-            desc_raw, amount, None
+            desc_raw, amount, None,
+            account_type=account.account_type or '',
         )
 
         # Apply GCB / points tags from rule notes
@@ -2101,7 +2106,10 @@ async def recategorize_all(db: Session = Depends(get_db)):
     cat_engine = CategorizationEngine(db)
     transactions = db.query(Transaction).filter(Transaction.is_locked == False).all()
     for t in transactions:
-        action, category, confidence, display_desc = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
+        action, category, confidence, display_desc = cat_engine.categorize(
+            t.description_raw, t.amount, t.merchant_name,
+            account_type=(t.account.account_type if t.account else ''),
+        )
         t.action              = action
         t.category_auto       = '' if action == 'Transfer' else category
         t.category_confidence = confidence
@@ -2124,7 +2132,10 @@ async def fix_transaction_signs(db: Session = Depends(get_db)):
         )
         if needs_flip:
             t.amount = -t.amount
-            action, category, confidence, display_desc = cat_engine.categorize(t.description_raw, t.amount, t.merchant_name)
+            action, category, confidence, display_desc = cat_engine.categorize(
+                t.description_raw, t.amount, t.merchant_name,
+                account_type=(t.account.account_type if t.account else ''),
+            )
             t.action              = action
             t.category_auto       = '' if action == 'Transfer' else category
             t.category_confidence = confidence
@@ -2182,7 +2193,8 @@ def _reapply_rules(db: Session) -> dict:
     updated = 0
     for t in txns:
         action, category, confidence, display_desc = categorizer.categorize(
-            t.description_raw, t.amount, t.merchant_name
+            t.description_raw, t.amount, t.merchant_name,
+            account_type=(t.account.account_type if t.account else ''),
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
         llm_category = '' if action == 'Transfer' else category
@@ -2705,12 +2717,18 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     from sqlalchemy import and_
 
     # Get only BUDGET_TYPES transactions (Expense, Income) for the year
+    # Exclude is_excluded and Transfer transactions
     txns = db.query(Transaction).filter(
         Transaction.year == year,
         Transaction.action.in_(BUDGET_TYPES),
+        Transaction.is_excluded != True,  # noqa: E712
     ).all()
 
-    # Build actuals: {category: {month: total_abs_amount}}
+    # Build actuals: {category: {month: net_amount}}
+    # Expense action: contribution = -t.amount
+    #   → charges (amount < 0): -(-X) = +X  (increases total)
+    #   → CC credits (amount > 0): -(+X) = -X  (reduces total — nets against charges)
+    # Income action: contribution = +t.amount
     actuals = {}
 
     for t in txns:
@@ -2724,18 +2742,20 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                     continue  # Skip GCB-tagged splits
                 cat = s.category or t.category_final or 'Unclassified'
                 month = str(t.month)
+                contrib = (-s.amount) if t.action == 'Expense' else s.amount
                 if cat not in actuals:
                     actuals[cat] = {}
-                actuals[cat][month] = round(actuals[cat].get(month, 0) + abs(s.amount), 2)
+                actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
         else:
             # Skip GCB-tagged whole transactions
             if t.is_gcb or t.gcb_tagged:
                 continue
             cat = t.category_final or 'Unclassified'
             month = str(t.month)
+            contrib = (-t.amount) if t.action == 'Expense' else t.amount
             if cat not in actuals:
                 actuals[cat] = {}
-            actuals[cat][month] = round(actuals[cat].get(month, 0) + abs(t.amount), 2)
+            actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
 
     return {'year': year, 'categories': actuals}
 
@@ -2758,13 +2778,14 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             y -= 1
         trailing.append((y, m))
 
-    # Fetch actuals for each of those months
+    # Fetch actuals for each of those months (net signed amounts, excluding is_excluded)
     totals: dict[str, list] = {}
     for ty, tm in trailing:
         txns = db.query(Transaction).filter(
             Transaction.year == ty,
             Transaction.month == tm,
             Transaction.action.in_(BUDGET_TYPES),
+            Transaction.is_excluded != True,  # noqa: E712
         ).all()
         month_totals: dict[str, float] = {}
         for t in txns:
@@ -2776,12 +2797,14 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
                     if s.is_gcb:
                         continue
                     cat = s.category or t.category_final or 'Unclassified'
-                    month_totals[cat] = round(month_totals.get(cat, 0) + abs(s.amount), 2)
+                    contrib = (-s.amount) if t.action == 'Expense' else s.amount
+                    month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
             else:
                 if t.is_gcb or t.gcb_tagged:
                     continue
                 cat = t.category_final or 'Unclassified'
-                month_totals[cat] = round(month_totals.get(cat, 0) + abs(t.amount), 2)
+                contrib = (-t.amount) if t.action == 'Expense' else t.amount
+                month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
         for cat, amt in month_totals.items():
             totals.setdefault(cat, []).append(amt)
 

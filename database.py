@@ -565,6 +565,25 @@ def _run_migrations_sqlite(engine, required_columns):
             print('  Migration: remapped consolidated categories')
         except Exception:
             pass
+        # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
+        try:
+            conn.execute("""
+                UPDATE transactions
+                SET action = 'Expense'
+                WHERE action = 'Income'
+                  AND amount > 0
+                  AND (is_locked = 0 OR is_locked IS NULL)
+                  AND account_id IN (
+                      SELECT id FROM accounts
+                      WHERE LOWER(account_type) IN ('credit', 'credit card')
+                  )
+                  AND UPPER(description_raw) NOT LIKE '%PAYROLL%'
+                  AND UPPER(description_raw) NOT LIKE '%DIR DEP%'
+                  AND UPPER(description_raw) NOT LIKE '%DIRECT DEP%'
+            """)
+            print('  Migration: reclassified CC credits from Income → Expense')
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -628,6 +647,23 @@ def _run_migrations_pg(engine, required_columns):
                     "UPDATE categorization_rules SET set_category = :new WHERE set_category = :old"
                 ), {'new': new, 'old': old})
             print('  Migration: remapped categorization_rules set_category')
+        # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
+        if insp.has_table('transactions') and insp.has_table('accounts'):
+            conn.execute(text("""
+                UPDATE transactions
+                SET action = 'Expense'
+                WHERE action = 'Income'
+                  AND amount > 0
+                  AND (is_locked = FALSE OR is_locked IS NULL)
+                  AND account_id IN (
+                      SELECT id FROM accounts
+                      WHERE LOWER(account_type) IN ('credit', 'credit card')
+                  )
+                  AND UPPER(description_raw) NOT LIKE '%PAYROLL%'
+                  AND UPPER(description_raw) NOT LIKE '%DIR DEP%'
+                  AND UPPER(description_raw) NOT LIKE '%DIRECT DEP%'
+            """))
+            print('  Migration: reclassified CC credits from Income → Expense')
 
 # Database initialization
 def init_db(database_url=None):

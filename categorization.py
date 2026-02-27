@@ -153,30 +153,40 @@ class CategorizationEngine:
         
         return None
     
-    def determine_action(self, amount: float, description: str) -> str:
+    def determine_action(self, amount: float, description: str, account_type: str = '') -> str:
         """
-        Determine transaction action (Income, Expense, Transfer)
+        Determine transaction action (Income, Expense, Transfer).
+
+        Key rule: positive amounts on credit-card accounts are credits / refunds —
+        they are negative Expenses, NOT Income.  Positive amounts on bank accounts
+        are true deposits and default to Income.
         """
         desc_upper = description.upper()
-        
-        # Transfers
+
+        # Transfers (checked first — overrides everything else)
         transfer_keywords = ['TRANSFER', 'AUTOPAY', 'PAYMENT', 'PMT', 'PYMT', 'ATM']
         if any(kw in desc_upper for kw in transfer_keywords):
             return 'Transfer'
-        
-        # Income
+
+        # Known income patterns
         income_keywords = ['PAYROLL', 'DIR DEP', 'DEPOSIT', 'DIRECT DEP', 'PRUDENTIAL', 'RAD DATA']
         if any(kw in desc_upper for kw in income_keywords) and amount > 0:
             return 'Income'
-        
+
         # Depreciation
         if 'DEPRECIATION' in desc_upper:
             return 'Depreciation'
-        
-        # Default based on amount
+
+        # Credit-card credits: positive amount on a CC account = refund / statement credit.
+        # Treat as Expense with positive amount so it nets against charges in budget totals.
+        is_cc = account_type.lower().strip() in ('credit', 'credit card')
+        if is_cc and amount > 0:
+            return 'Expense'
+
+        # Default based on sign
         return 'Income' if amount > 0 else 'Expense'
     
-    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None) -> Tuple[str, str, float, Optional[str]]:
+    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None, account_type: str = '') -> Tuple[str, str, float, Optional[str]]:
         """
         Two-pass categorization:
         Pass 1 — Match raw description against action/description rules (Groups 1 & 2)
@@ -262,7 +272,7 @@ class CategorizationEngine:
                     display_description,
                 )
 
-        action   = action or self.determine_action(amount, description)
+        action   = action or self.determine_action(amount, description, account_type)
         category = category or 'Unclassified'
         confidence = 0.85 if category != 'Unclassified' else 0.3
 
