@@ -908,7 +908,7 @@ function TransactionsPage({categories,toast}){
 function SimpleLineChart({lines,height=180,fmtY}){
   if(!lines||lines.length===0||lines.every(l=>!l.points||l.points.length===0))
     return<div style={{padding:'32px 0',textAlign:'center',color:'var(--text-muted)',fontSize:12}}>No data yet — run Balance Sync first</div>;
-  const yFmt=fmtY||(v=>{const abs=Math.abs(v);return(abs>=1000000?`${(v/1000000).toFixed(1)}M`:abs>=1000?`${(v/1000).toFixed(0)}k`:`${v.toFixed(0)}`);});
+  const yFmt=fmtY||(v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000000?`$${(abs/1000000).toFixed(2)}M`:abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);});
   const allY=lines.flatMap(l=>l.points.map(p=>p.y));
   const minY=Math.min(...allY);const maxY=Math.max(...allY);
   const rangeY=maxY-minY||1;
@@ -1126,7 +1126,7 @@ function DashboardPage({categories,toast}){
           <SimpleLineChart
             lines={timeline.length>0?[{label:'Net Worth',color:'#3b82f6',points:timeline.map(p=>({x:fmtMonthLabel(p.date),y:p.net_worth}))}]:[]}
             height={200}
-            fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000000?`$${(abs/1000000).toFixed(1)}M`:abs>=1000?`$${(abs/1000).toFixed(0)}k`:`$${abs.toFixed(0)}`);}}
+            fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000000?`$${(abs/1000000).toFixed(2)}M`:abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);}}
           />
         </div>
       </div>
@@ -1147,7 +1147,7 @@ function DashboardPage({categories,toast}){
             return<SimpleLineChart
               lines={[{label:acct.account_name,color,points:acct.months.map(m=>({x:fmtMonthLabel(`${m.year}-${String(m.month).padStart(2,'0')}-01`),y:m.closing}))}]}
               height={200}
-              fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000?`$${(abs/1000).toFixed(0)}k`:`$${abs.toFixed(0)}`);}}
+              fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);}}
             />;
           })()}
         </div>

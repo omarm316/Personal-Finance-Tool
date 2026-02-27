@@ -651,6 +651,12 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                     existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
                 continue
 
+            # Skip pending transactions (holds/authorizations not yet posted) — they distort balances
+            if txn_data.get('pending'):
+                sp.rollback()
+                skipped += 1
+                continue
+
             account = db.query(Account).filter_by(
                 plaid_account_id=txn_data['plaid_account_id']
             ).first()
