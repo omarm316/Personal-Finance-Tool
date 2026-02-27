@@ -1329,6 +1329,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
   const[expanded,setExpanded]=useState(false);
   const[debug,setDebug]=useState(null);
   const[debugging,setDebugging]=useState(false);
+  const[confirmingRemove,setConfirmingRemove]=useState(false);
   const save=async()=>{
     try{
       const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
@@ -1387,15 +1388,32 @@ function BankRow({item,toast,onRenamed,onSynced}){
           {item.is_active&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={runDebug} disabled={debugging}>{debugging?'…':'🔍 Debug'}</button>}
           {item.is_active&&<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Full Resync'}</button>}
           <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={async()=>{
-            const msg=item.transaction_count===0
-              ?`Remove "${item.institution_name}"? It has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`
-              :`Remove "${item.institution_name}"? The connection will be deactivated. Its ${item.account_count} account${item.account_count!==1?'s':''} and ${item.transaction_count.toLocaleString()} transaction${item.transaction_count!==1?'s':''} will be kept.`;
-            if(!confirm(msg))return;
-            try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Removed');}
-            catch(e){toast('Failed: '+(e.message||e),'error');}
+            if(item.transaction_count===0){
+              if(!confirm(`Remove "${item.institution_name}"? It has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`))return;
+              try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Removed');}
+              catch(e){toast('Failed: '+(e.message||e),'error');}
+            }else{
+              setConfirmingRemove(true);
+            }
           }}>Remove</button>
         </div>
       </div>
+      {confirmingRemove&&(
+        <div style={{marginTop:10,background:'#fff1f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+          <div>
+            <div style={{fontWeight:700,color:'#b91c1c',fontSize:13,marginBottom:2}}>⚠️ Remove "{item.institution_name}"?</div>
+            <div style={{fontSize:12,color:'#7f1d1d'}}>This will deactivate the connection — Plaid will stop syncing. Its <strong>{item.account_count} account{item.account_count!==1?'s':''}</strong> and <strong>{item.transaction_count.toLocaleString()} transaction{item.transaction_count!==1?'s':''}</strong> will be kept but no longer updated.</div>
+          </div>
+          <div style={{display:'flex',gap:8,flexShrink:0}}>
+            <button className="btn btn-sm btn-ghost" style={{fontSize:12}} onClick={()=>setConfirmingRemove(false)}>Cancel</button>
+            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',fontSize:12,border:'none'}} onClick={async()=>{
+              setConfirmingRemove(false);
+              try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Connection removed');}
+              catch(e){toast('Failed: '+(e.message||e),'error');}
+            }}>Yes, Remove</button>
+          </div>
+        </div>
+      )}
       {expanded&&item.accounts&&item.accounts.length>0&&(
         <div style={{marginTop:10,marginLeft:28,display:'flex',flexDirection:'column',gap:4}}>
           {item.accounts.map((a,i)=>(
