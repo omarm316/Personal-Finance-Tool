@@ -1037,21 +1037,24 @@ function BudgetScorecardCard({targets,actuals}){
   if(rows.length===0)return null;
   const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
   const totalActual=rows.reduce((s,r)=>s+r.actual,0);
+  // Helper: format signed amount — fmt() always uses abs(), so we handle sign ourselves
+  const fmtSigned=(n)=>n<0?`-${fmt(n)}`:fmt(n);
   return(
     <div className="card" style={{marginTop:20}}>
       <div className="section-header">
         <div className="section-title">Budget Scorecard — {monthLabel} {yr}</div>
-        <span style={{fontFamily:'DM Mono',fontSize:12,color:'var(--text-muted)'}}>
-          {fmt(totalActual)}{totalBudget>0?<> / {fmt(totalBudget)}</>:' spent'}
+        <span style={{fontFamily:'DM Mono',fontSize:12,color:totalActual<0?'var(--green)':'var(--text-muted)'}}>
+          {fmtSigned(totalActual)}{totalBudget>0?<> / {fmt(totalBudget)}</>:' spent'}
         </span>
       </div>
       <div style={{padding:'4px 0 8px'}}>
         {rows.map(({cat,budget,actual})=>{
-          const pct=budget>0?actual/budget:null;
+          const isCredit=actual<0;  // net credit: credits exceeded charges this month
+          const pct=(!isCredit&&budget>0)?actual/budget:null;
           const over=budget>0&&actual>budget;
-          const color=pct===null?'#9ca3af':pct>=1?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
-          const dot=pct===null?'●':pct>=1?'🔴':pct>=0.8?'🟡':'🟢';
-          const barPct=budget>0?Math.min(actual/budget*100,100):0;
+          const color=isCredit?'var(--green)':pct===null?'#9ca3af':pct>=1?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
+          const dot=isCredit?'●':pct===null?'●':pct>=1?'🔴':pct>=0.8?'🟡':'🟢';
+          const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
           const overAmt=over?actual-budget:0;
           return(
             <div key={cat} style={{padding:'9px 18px',borderBottom:'1px solid #f9fafb',display:'flex',alignItems:'center',gap:12}}>
@@ -1060,19 +1063,22 @@ function BudgetScorecardCard({targets,actuals}){
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,gap:8}}>
                   <span style={{fontSize:13,fontWeight:500}}>{cat}</span>
                   <span style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>
-                    {budget>0
-                      ?<>{fmt(actual)}<span style={{color:'var(--text-muted)'}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:600}}> +{fmt(overAmt)}</span>}</>
-                      :<span style={{color:'#9ca3af'}}>{fmt(actual)}<span style={{opacity:0.6,fontSize:11}}> (no budget)</span></span>
+                    {isCredit
+                      /* Net credit: show as negative in green */
+                      ?<span style={{color:'var(--green)'}}>{fmtSigned(actual)}{budget>0&&<span style={{color:'var(--text-muted)',fontWeight:400}}> / {fmt(budget)}</span>}<span style={{opacity:0.6,fontSize:11}}> (credit)</span></span>
+                      :budget>0
+                        ?<>{fmt(actual)}<span style={{color:'var(--text-muted)'}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:600}}> +{fmt(overAmt)}</span>}</>
+                        :<span style={{color:'#9ca3af'}}>{fmt(actual)}<span style={{opacity:0.6,fontSize:11}}> (no budget)</span></span>
                     }
                   </span>
                 </div>
-                {budget>0&&(
+                {!isCredit&&budget>0&&(
                   <div style={{background:'#f3f4f6',borderRadius:4,height:5,overflow:'hidden'}}>
                     <div style={{width:`${barPct}%`,height:'100%',background:color,borderRadius:4,transition:'width 0.3s ease'}}/>
                   </div>
                 )}
               </div>
-              {pct!==null&&(
+              {!isCredit&&pct!==null&&(
                 <span style={{fontFamily:'DM Mono',fontSize:12,color,minWidth:36,textAlign:'right',fontWeight:pct>=1?600:400}}>
                   {Math.round(pct*100)}%
                 </span>
@@ -1130,9 +1136,9 @@ function DashboardPage({categories,toast}){
       if(bals.length>0)setSelectedAcctId(id=>id??bals[0].account_id);
       setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
 
-      /* Top 5 expense categories */
+      /* Top 5 expense categories — only positive net spend (skip net-credit categories) */
       const byCat=s?.by_category||{};
-      const sorted=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      const sorted=Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5);
       setTopCats(sorted);
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
