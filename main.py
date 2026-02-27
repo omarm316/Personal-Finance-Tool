@@ -2154,6 +2154,44 @@ async def list_rules(
     } for r in rules]
 
 
+def _reapply_rules(db: Session) -> dict:
+    """
+    Re-run the categorization engine on every non-locked, non-manually-edited transaction.
+    Updates description_clean, category_auto, action, and confidence in place.
+    Returns {'updated': N, 'total': M}.
+    """
+    categorizer = CategorizationEngine(db)
+    txns = db.query(Transaction).filter(
+        Transaction.is_locked == False,
+        Transaction.category_manual == None,
+    ).all()
+    updated = 0
+    for t in txns:
+        action, category, confidence, display_desc = categorizer.categorize(
+            t.description_raw, t.amount, t.merchant_name
+        )
+        desc_clean = display_desc or categorizer.clean_description(t.description_raw)
+        llm_category = '' if action == 'Transfer' else category
+        source = 'rule' if confidence >= 0.85 else 'fallback'
+        if (t.description_clean != desc_clean or
+                t.category_auto != llm_category or
+                t.action != action):
+            t.description_clean = desc_clean
+            t.category_auto     = llm_category
+            t.action            = action
+            t.category_confidence = confidence
+            t.enrichment_source   = source
+            updated += 1
+    db.commit()
+    return {'updated': updated, 'total': len(txns)}
+
+
+@app.post("/api/rules/reapply")
+async def reapply_rules(db: Session = Depends(get_db)):
+    """Re-apply all active rules to every non-locked, non-manually-edited transaction."""
+    return _reapply_rules(db)
+
+
 @app.post("/api/rules")
 async def create_rule(data: dict, db: Session = Depends(get_db)):
     """Create a new categorization rule."""
@@ -2172,7 +2210,8 @@ async def create_rule(data: dict, db: Session = Depends(get_db)):
     db.add(rule)
     db.commit()
     db.refresh(rule)
-    return {'id': rule.id, 'message': 'Rule created'}
+    reapplied = _reapply_rules(db)
+    return {'id': rule.id, 'message': 'Rule created', 'reapplied': reapplied}
 
 
 @app.patch("/api/rules/{rule_id}")
@@ -2189,7 +2228,8 @@ async def update_rule(rule_id: int, data: dict, db: Session = Depends(get_db)):
             setattr(rule, k, v)
     rule.updated_at = datetime.utcnow()
     db.commit()
-    return {'message': 'Rule updated'}
+    reapplied = _reapply_rules(db)
+    return {'message': 'Rule updated', 'reapplied': reapplied}
 
 
 @app.delete("/api/rules/{rule_id}")

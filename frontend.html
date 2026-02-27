@@ -1532,6 +1532,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
   const[ruleEditing,setRuleEditing]=useState(null);
   const[ruleEditVals,setRuleEditVals]=useState({});
   const[showAddRule,setShowAddRule]=useState(false);
+  const[reapplying,setReapplying]=useState(false);
 
   const[balanceSyncing,setBalanceSyncing]=useState(false);
   const[balanceSyncResult,setBalanceSyncResult]=useState(null);
@@ -1559,8 +1560,9 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
   useEffect(()=>{if(tab==='rules')loadRules();},[tab,loadRules]);
 
   const startRuleEdit=(r)=>{setRuleEditing(r.id);setRuleEditVals({priority:r.priority,match_type:r.match_type,pattern:r.pattern,set_action:r.set_action||'',set_category:r.set_category||'',set_description:r.set_description||'',clean_description:r.clean_description||'',notes:r.notes||''});};
+  const _reapplyMsg=r=>r?.reapplied?.updated>0?` — ${r.reapplied.updated} transaction${r.reapplied.updated!==1?'s':''} refreshed`:'';
   const saveRuleEdit=async(id)=>{
-    try{await apiFetch(`/rules/${id}`,{method:'PATCH',body:JSON.stringify(ruleEditVals)});toast('Rule updated');setRuleEditing(null);await loadRules();}
+    try{const r=await apiFetch(`/rules/${id}`,{method:'PATCH',body:JSON.stringify(ruleEditVals)});toast(`Rule updated${_reapplyMsg(r)}`);setRuleEditing(null);await loadRules();}
     catch(e){toast('Failed to save','error');}
   };
   const deleteRule=async(id)=>{
@@ -1569,8 +1571,14 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
     catch(e){toast('Failed','error');}
   };
   const addRule=async()=>{
-    try{await apiFetch('/rules',{method:'POST',body:JSON.stringify(ruleEditVals)});toast('Rule created');setShowAddRule(false);setRuleEditVals({});await loadRules();}
+    try{const r=await apiFetch('/rules',{method:'POST',body:JSON.stringify(ruleEditVals)});toast(`Rule created${_reapplyMsg(r)}`);setShowAddRule(false);setRuleEditVals({});await loadRules();}
     catch(e){toast('Failed to create','error');}
+  };
+  const applyRules=async()=>{
+    setReapplying(true);
+    try{const r=await apiFetch('/rules/reapply',{method:'POST'});toast(r.updated>0?`${r.updated} transaction${r.updated!==1?'s':''} refreshed (${r.total} checked)`:'No changes needed — all transactions already up to date');}
+    catch(e){toast('Failed: '+(e.message||e),'error');}
+    finally{setReapplying(false);}
   };
 
   /* Cards file upload */
@@ -1636,6 +1644,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
             <div className="section-title">Categorization Rules ({rules.length})</div>
             <div style={{display:'flex',gap:8}}>
               <input className="search-input" placeholder="Search patterns…" value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)} style={{width:200}}/>
+              <button className="btn btn-sm btn-secondary" onClick={applyRules} disabled={reapplying} title="Re-apply all rules to existing non-locked transactions">{reapplying?'Applying…':'↺ Apply Rules'}</button>
               <button className="btn btn-sm btn-primary" onClick={()=>{setShowAddRule(true);setRuleEditVals({priority:100,match_type:'contains',pattern:'',set_action:'',set_category:'',set_description:'',clean_description:'',notes:''});}}>+ Add Rule</button>
             </div>
           </div>
