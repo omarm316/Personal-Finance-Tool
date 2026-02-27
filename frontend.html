@@ -1444,7 +1444,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
   );
 }
 
-function SettingsPage({banks,onConnectBank,toast}){
+function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
   const[tab,setTab]=useState('data');
   const[busy,setBusy]=useState(false);
   const[items,setItems]=useState([]);
@@ -1456,7 +1456,8 @@ function SettingsPage({banks,onConnectBank,toast}){
   const[ruleEditVals,setRuleEditVals]=useState({});
   const[showAddRule,setShowAddRule]=useState(false);
 
-  useEffect(()=>{apiFetch('/plaid/items').then(setItems).catch(()=>{});},[]);
+  const refreshItems=useCallback(()=>{apiFetch('/plaid/items').then(r=>{setItems(r);onBanksChanged&&onBanksChanged();}).catch(()=>{});},[onBanksChanged]);
+  useEffect(()=>{refreshItems();},[]);
 
   const run=async(path,msg)=>{setBusy(true);try{const r=await apiFetch(path,{method:'POST'});toast(msg);return r;}catch(e){toast('Failed: '+(e.message||'unknown error'),'error');}finally{setBusy(false);}};
 
@@ -1610,12 +1611,12 @@ function SettingsPage({banks,onConnectBank,toast}){
           <div className="section-header">
             <div className="section-title">Connected Banks ({items.length})</div>
             <div style={{display:'flex',gap:8}}>
-              {items.length>0&&<ResetResyncButton toast={toast} onDone={()=>apiFetch('/plaid/items').then(setItems).catch(()=>{})}/>}
+              {items.length>0&&<ResetResyncButton toast={toast} onDone={refreshItems}/>}
               <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
             </div>
           </div>
           {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
-            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it))} onSynced={()=>apiFetch('/plaid/items').then(setItems).catch(()=>{})}/>)
+            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>{setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it));onBanksChanged&&onBanksChanged();}} onSynced={refreshItems}/>)
           }
         </div>
       </div>}
@@ -3297,7 +3298,7 @@ function App(){
           {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}
           {page==='cards'&&<CardsPage toast={toast}/>}
           {page==='gcb'&&<GCBPage toast={toast}/>}
-          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast}/>}
+          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta}/>}
         </div>
       </div>
       <ToastContainer toasts={toasts}/>
