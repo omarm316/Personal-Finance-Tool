@@ -126,10 +126,11 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     start_dt = account.start_date
 
     # Build query for transactions after start_date up to as_of_date
-    # Excluded transactions are skipped so they don't affect the computed balance.
+    # Excluded and GCB-tagged transactions are skipped.
     query = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     )
     if start_dt:
         query = query.filter(Transaction.date >= start_dt)
@@ -167,6 +168,7 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     ).order_by(Transaction.date).all()
     if not txns:
         return 0
@@ -220,6 +222,7 @@ def _refresh_current_month_snapshot(db: Session, account_id: int) -> None:
         Transaction.year == year,
         Transaction.month == month,
         Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     ).scalar() or 0.0
     snapshot.closing_balance = round(snapshot.opening_balance + month_sum, 2)
     snapshot.synced_at = datetime.utcnow()
@@ -1275,7 +1278,10 @@ async def get_stats(
     end_date: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction).filter(Transaction.is_excluded != True)  # noqa: E712
+    query = db.query(Transaction).filter(
+        Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
+    )
     if year:
         query = query.filter(Transaction.year == year)
     if month:
@@ -2717,11 +2723,12 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     from sqlalchemy import and_
 
     # Get only BUDGET_TYPES transactions (Expense, Income) for the year
-    # Exclude is_excluded and Transfer transactions
+    # Exclude is_excluded, GCB-tagged, and Transfer transactions
     txns = db.query(Transaction).filter(
         Transaction.year == year,
         Transaction.action.in_(BUDGET_TYPES),
         Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     ).all()
 
     # Build actuals: {category: {month: net_amount}}
@@ -2778,7 +2785,7 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             y -= 1
         trailing.append((y, m))
 
-    # Fetch actuals for each of those months (net signed amounts, excluding is_excluded)
+    # Fetch actuals for each of those months (net signed amounts, excluding is_excluded + GCB)
     totals: dict[str, list] = {}
     for ty, tm in trailing:
         txns = db.query(Transaction).filter(
@@ -2786,6 +2793,7 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             Transaction.month == tm,
             Transaction.action.in_(BUDGET_TYPES),
             Transaction.is_excluded != True,  # noqa: E712
+            Transaction.is_gcb != True,       # noqa: E712
         ).all()
         month_totals: dict[str, float] = {}
         for t in txns:
@@ -2851,11 +2859,13 @@ async def get_balance_timeline(
     else:
         range_end = datetime.utcnow()
 
-    # Get all transactions for this account in range
+    # Get all transactions for this account in range (skip excluded and GCB)
     txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.date >= range_start,
         Transaction.date <= range_end,
+        Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     ).order_by(Transaction.date).all()
 
     # Group transaction amounts by date
@@ -3413,11 +3423,13 @@ async def get_cash_flow(
             'cc_payments': 0, 'loan_repayments': 0, 'transactions': [],
         }
 
-    # Get transactions for depository accounts in date range
+    # Get transactions for depository accounts in date range (skip excluded + GCB)
     txns = db.query(Transaction).filter(
         Transaction.account_id.in_(dep_ids),
         Transaction.date >= start_dt,
         Transaction.date <= end_dt,
+        Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
     ).order_by(Transaction.date.desc()).all()
 
     inflows = 0.0
@@ -3508,24 +3520,28 @@ async def get_daily_balances(
         range_end_dt = datetime.combine(end_dt, datetime.max.time())
         anchor_dt = datetime.combine(anchor_date, datetime.min.time())
 
-        # Sum all transactions from anchor up to day before range start
+        # Sum all transactions from anchor up to day before range start (skip excluded + GCB)
         pre_sum = (
             db.query(func.sum(Transaction.amount))
             .filter(
                 Transaction.account_id == acct.id,
                 Transaction.date >= anchor_dt,
                 Transaction.date < range_start_dt,
+                Transaction.is_excluded != True,  # noqa: E712
+                Transaction.is_gcb != True,       # noqa: E712
             )
             .scalar()
         ) or 0.0
 
-        # Fetch all transactions within the range
+        # Fetch all transactions within the range (skip excluded + GCB)
         txns = (
             db.query(Transaction.date, Transaction.amount)
             .filter(
                 Transaction.account_id == acct.id,
                 Transaction.date >= range_start_dt,
                 Transaction.date <= range_end_dt,
+                Transaction.is_excluded != True,  # noqa: E712
+                Transaction.is_gcb != True,       # noqa: E712
             )
             .all()
         )
