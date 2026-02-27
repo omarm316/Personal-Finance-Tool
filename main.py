@@ -772,11 +772,15 @@ async def remove_plaid_item(item_id: str, db: Session = Depends(get_db)):
         if txn_count == 0:
             db.delete(account)
             deleted_accounts += 1
-    item.is_active = False
+        else:
+            # Sever the Plaid link so the account survives without the item
+            account.plaid_item_id = None
+            account.plaid_account_id = None
+            account.is_active = True
+    db.delete(item)
     db.commit()
     return {
         "removed": True,
-        "institution": item.institution_name,
         "deleted_empty_accounts": deleted_accounts,
         "remaining_accounts": len(accounts) - deleted_accounts,
     }
