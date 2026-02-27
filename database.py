@@ -407,6 +407,42 @@ class MerchantOverride(Base):
 
 
 
+# ---------------------------------------------------------------------------
+# Category clean-up remap — old name → new canonical name.
+# Applied once per startup; idempotent (re-running is safe).
+# Covers: transaction category_auto/manual, budget_targets, rules.
+# ---------------------------------------------------------------------------
+_CAT_REMAP = [
+    # Utilities consolidation
+    ('Phone',             'Utilities'),
+    ('Internet',          'Utilities'),
+    ('Water',             'Utilities'),
+    ('Electricity',       'Utilities'),
+    # Entertainment consolidation
+    ('Leisure',           'Entertainment'),
+    ('Books',             'Entertainment'),
+    ('Events',            'Entertainment'),
+    # Education consolidation
+    ('Music Lessons',     'Education'),
+    ('Tutoring',          'Education'),
+    ('Studies',           'Education'),
+    # Business
+    ('Consulting',        'Business'),
+    # Investment / interest
+    ('Investments',       'Investment Gain (Loss)'),
+    ('Investment Income', 'Investment Gain (Loss)'),
+    ('Interest Income',   'Investment Gain (Loss)'),
+    # Family support
+    ('Siblings',          'For Others'),
+    ('Parents',           'For Others'),
+    # Misc
+    ('Lottery',           'Other'),
+    ('Dry Cleaning',      'Self Care'),
+    # Name standardisation
+    ('Fees and Interest', 'Fees & Interest'),
+]
+
+
 def _is_sqlite(engine):
     return str(engine.url).startswith('sqlite')
 
@@ -515,6 +551,20 @@ def _run_migrations_sqlite(engine, required_columns):
             print('  Migration: normalized account_type casing')
         except Exception:
             pass
+        # ── Category remap (consolidation) ──────────────────────────────────
+        try:
+            for old, new in _CAT_REMAP:
+                conn.execute(
+                    "UPDATE transactions SET category_auto = ? WHERE category_auto = ?", (new, old))
+                conn.execute(
+                    "UPDATE transactions SET category_manual = ? WHERE category_manual = ?", (new, old))
+                conn.execute(
+                    "UPDATE budget_targets SET category = ? WHERE category = ?", (new, old))
+                conn.execute(
+                    "UPDATE categorization_rules SET set_category = ? WHERE set_category = ?", (new, old))
+            print('  Migration: remapped consolidated categories')
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -556,6 +606,28 @@ def _run_migrations_pg(engine, required_columns):
                     "UPDATE accounts SET account_type = :new WHERE LOWER(account_type) = :old"
                 ), {'new': new_val, 'old': old_val})
             print('  Migration: normalized account_type casing')
+        # ── Category remap (consolidation) ──────────────────────────────────
+        if insp.has_table('transactions'):
+            for old, new in _CAT_REMAP:
+                conn.execute(text(
+                    "UPDATE transactions SET category_auto = :new WHERE category_auto = :old"
+                ), {'new': new, 'old': old})
+                conn.execute(text(
+                    "UPDATE transactions SET category_manual = :new WHERE category_manual = :old"
+                ), {'new': new, 'old': old})
+            print('  Migration: remapped transaction categories')
+        if insp.has_table('budget_targets'):
+            for old, new in _CAT_REMAP:
+                conn.execute(text(
+                    "UPDATE budget_targets SET category = :new WHERE category = :old"
+                ), {'new': new, 'old': old})
+            print('  Migration: remapped budget_targets categories')
+        if insp.has_table('categorization_rules'):
+            for old, new in _CAT_REMAP:
+                conn.execute(text(
+                    "UPDATE categorization_rules SET set_category = :new WHERE set_category = :old"
+                ), {'new': new, 'old': old})
+            print('  Migration: remapped categorization_rules set_category')
 
 # Database initialization
 def init_db(database_url=None):
@@ -575,68 +647,68 @@ def init_db(database_url=None):
 
 
 def seed_categories(session):
-    """Seed the database with your expense categories"""
+    """
+    Seed / refresh the category list.
+    Adds new categories if missing; marks removed categories inactive.
+    Safe to re-run on every startup.
+    """
     categories_data = [
-        # Expense categories from your budget
-        ("Groceries", None, "expense", 1),
-        ("Dining", None, "expense", 2),
-        ("Transportation", None, "expense", 3),
-        ("Housing", None, "expense", 4),
-        ("Healthcare", None, "expense", 5),
-        ("Education", None, "expense", 6),
-        ("Entertainment", None, "expense", 7),  # Combined Leisure
-        ("Clothing", None, "expense", 8),
-        ("Electronics", None, "expense", 9),
-        ("Phone", None, "expense", 10),
-        ("Internet", None, "expense", 11),
-        ("Streaming", None, "expense", 12),
-        ("Insurance", None, "expense", 13),
-        ("Fitness", None, "expense", 14),
-        ("Self Care", None, "expense", 15),
-        ("Vehicle", None, "expense", 16),
-        ("Travel", None, "expense", 17),
-        ("Gifts", None, "expense", 18),
-        ("Books", None, "expense", 19),
-        ("Kids", None, "expense", 20),
-        ("Parents", None, "expense", 21),
-        ("Siblings", None, "expense", 22),
-        ("For Others", None, "expense", 23),
-        ("Home", None, "expense", 24),
-        ("Water", None, "expense", 25),
-        ("Electricity", None, "expense", 26),
-        ("Fees and Interest", None, "expense", 27),
-        ("Consulting", None, "expense", 28),
-        ("Studies", None, "expense", 29),
-        ("Music Lessons", None, "expense", 30),
-        ("Tutoring", None, "expense", 31),
-        ("Events", None, "expense", 32),
-        ("Lottery", None, "expense", 33),
-        ("Dry Cleaning", None, "expense", 34),
-        ("Investments", None, "expense", 35),
-        ("Other", None, "expense", 36),
-        ("Leisure", None, "expense", 37),
-        
-        # Income categories
-        ("Work", None, "income", 1),
-        ("Investment Income", None, "income", 2),
-        ("Interest Income", None, "income", 3),
-        
-        # Special
-        ("Unclassified", None, "both", 100),
-        ("Transfer", None, "both", 101),
+        # ── Personal expense categories ───────────────────────────────────────
+        ("Groceries",              None, "expense",  1),
+        ("Dining",                 None, "expense",  2),
+        ("Transportation",         None, "expense",  3),  # gas, parking, transit, rides
+        ("Housing",                None, "expense",  4),  # rent / mortgage cash payment
+        ("Utilities",              None, "expense",  5),  # phone, internet, water, electricity
+        ("Healthcare",             None, "expense",  6),
+        ("Insurance",              None, "expense",  7),
+        ("Vehicle",                None, "expense",  8),  # maintenance, registration
+        ("Fitness",                None, "expense",  9),
+        ("Self Care",              None, "expense", 10),  # grooming, dry cleaning, spa
+        ("Clothing",               None, "expense", 11),
+        ("Electronics",            None, "expense", 12),
+        ("Streaming",              None, "expense", 13),  # subscriptions
+        ("Travel",                 None, "expense", 14),
+        ("Home",                   None, "expense", 15),  # furniture, repairs, maintenance
+        ("Kids",                   None, "expense", 16),
+        ("Entertainment",          None, "expense", 17),  # events, leisure, books, lottery
+        ("Gifts",                  None, "expense", 18),  # presents
+        ("For Others",             None, "expense", 19),  # financial support for family/others
+        ("Education",              None, "expense", 20),  # incl. lessons, tutoring, studies
+        ("Fees & Interest",        None, "expense", 21),
+        ("Other",                  None, "expense", 22),
+        # ── Both income and expense (use Action to distinguish) ───────────────
+        ("Business",               None, "both",    23),  # GCB + future ventures; Action = Income or Expense
+        ("Investment Gain (Loss)", None, "both",    24),  # gains, losses, interest income
+        # ── Income ───────────────────────────────────────────────────────────
+        ("Work",                   None, "income",   1),  # salary / payroll
+        # ── Special / system ─────────────────────────────────────────────────
+        ("Unclassified",           None, "both",   100),
+        ("Transfer",               None, "both",   101),
     ]
-    
+
+    active_names = {row[0] for row in categories_data}
+
     for name, parent, cat_type, order in categories_data:
         existing = session.query(Category).filter_by(name=name).first()
         if not existing:
-            category = Category(
+            session.add(Category(
                 name=name,
                 parent_category=parent,
                 category_type=cat_type,
-                display_order=order
-            )
-            session.add(category)
-    
+                display_order=order,
+                is_active=True,
+            ))
+        else:
+            # Re-activate in case it was marked inactive by a previous migration
+            existing.is_active = True
+            existing.display_order = order
+            existing.category_type = cat_type
+
+    # Deactivate any categories that are no longer in the canonical list
+    for cat in session.query(Category).all():
+        if cat.name not in active_names:
+            cat.is_active = False
+
     session.commit()
 
 
