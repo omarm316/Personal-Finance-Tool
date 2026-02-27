@@ -759,6 +759,29 @@ async def deactivate_item(item_id: str, db: Session = Depends(get_db)):
     return {"message": f"Deactivated {item.institution_name} ({item_id})"}
 
 
+@app.delete("/api/plaid/items/{item_id}")
+async def remove_plaid_item(item_id: str, db: Session = Depends(get_db)):
+    """Deactivate a PlaidItem and delete any of its accounts that have 0 transactions."""
+    item = db.query(PlaidItem).filter_by(item_id=item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    accounts = db.query(Account).filter_by(plaid_item_id=item_id).all()
+    deleted_accounts = 0
+    for account in accounts:
+        txn_count = db.query(Transaction).filter_by(account_id=account.id).count()
+        if txn_count == 0:
+            db.delete(account)
+            deleted_accounts += 1
+    item.is_active = False
+    db.commit()
+    return {
+        "removed": True,
+        "institution": item.institution_name,
+        "deleted_empty_accounts": deleted_accounts,
+        "remaining_accounts": len(accounts) - deleted_accounts,
+    }
+
+
 @app.post("/api/plaid/reset-and-resync")
 async def reset_and_resync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Wipe all Plaid-sourced transactions and accounts, clear cursors, then resync from scratch."""
