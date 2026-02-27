@@ -2807,6 +2807,26 @@ async def compute_loan_split(loan_id: int, db: Session = Depends(get_db)):
             'balance_after': round((loan.current_balance or 0) - split['principal'], 2)}
 
 
+@app.get("/api/loans/{loan_id}/linked-transactions")
+async def get_linked_transactions(loan_id: int, db: Session = Depends(get_db)):
+    """Return all transactions linked to this loan, with their split breakdown."""
+    loan = db.query(Loan).filter_by(id=loan_id).first()
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    txns = db.query(Transaction).filter_by(loan_id=loan_id).order_by(Transaction.date.desc()).all()
+    result = []
+    for t in txns:
+        splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all()
+        result.append({
+            'id': t.id,
+            'date': str(t.date),
+            'description': t.description_clean or t.description_raw,
+            'amount': t.amount,
+            'splits': [{'description': s.description, 'amount': s.amount, 'category': s.category} for s in splits],
+        })
+    return result
+
+
 @app.get("/api/loans/{loan_id}/candidate-transactions")
 async def get_loan_candidate_transactions(
     loan_id: int, limit: int = 6, db: Session = Depends(get_db)

@@ -2805,6 +2805,7 @@ function LoansPage({toast}){
   const[candidates,setCandidates]=useState([]);
   const[linkPreview,setLinkPreview]=useState(null);
   const[linking,setLinking]=useState(false);
+  const[linkedTxns,setLinkedTxns]=useState([]);
 
   const loanTypes=['mortgage','auto','student','personal','other'];
   const blankLoan={lender:'',loan_type:'mortgage',original_principal:'',current_balance:'',
@@ -2848,13 +2849,14 @@ function LoansPage({toast}){
   };
 
   const openLinkModal=async(loan)=>{
-    setLinkModal(loan);setLinkPreview(null);setCandidates([]);
+    setLinkModal(loan);setLinkPreview(null);setCandidates([]);setLinkedTxns([]);
     try{
-      const[cands,preview]=await Promise.all([
+      const[cands,preview,linked]=await Promise.all([
         apiFetch(`/loans/${loan.id}/candidate-transactions`),
         apiFetch(`/loans/${loan.id}/compute-split`),
+        apiFetch(`/loans/${loan.id}/linked-transactions`),
       ]);
-      setCandidates(cands);setLinkPreview(preview);
+      setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
     }catch(e){toast('Failed to load candidates: '+e.message,'error');}
   };
 
@@ -2867,6 +2869,22 @@ function LoansPage({toast}){
       setLinkModal(null);await load();
     }catch(e){toast('Link failed: '+e.message,'error');}
     finally{setLinking(false);}
+  };
+
+  const doUnlink=async(txnId)=>{
+    if(!linkModal)return;
+    if(!confirm('Unlink this payment? The loan balance will be restored.'))return;
+    try{
+      await apiFetch(`/loans/${linkModal.id}/unlink-transaction/${txnId}`,{method:'DELETE'});
+      toast('Payment unlinked');
+      const[cands,preview,linked]=await Promise.all([
+        apiFetch(`/loans/${linkModal.id}/candidate-transactions`),
+        apiFetch(`/loans/${linkModal.id}/compute-split`),
+        apiFetch(`/loans/${linkModal.id}/linked-transactions`),
+      ]);
+      setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
+      await load();
+    }catch(e){toast('Unlink failed: '+e.message,'error');}
   };
 
   const totalPrincipal=loans.reduce((s,l)=>s+l.original_principal,0);
@@ -2884,6 +2902,24 @@ function LoansPage({toast}){
             </div>
             <button className="btn btn-sm btn-ghost" onClick={()=>setLinkModal(null)}>✕</button>
           </div>
+          {linkedTxns.length>0&&<div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:6}}>Linked Payments</div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Principal</th><th></th></tr></thead>
+              <tbody>{linkedTxns.map(t=>{
+                const principal=t.splits.find(s=>s.description==='Principal');
+                return(
+                  <tr key={t.id}>
+                    <td style={{fontFamily:'DM Mono',fontSize:12}}>{t.date}</td>
+                    <td style={{fontSize:12}}>{t.description}</td>
+                    <td style={{fontFamily:'DM Mono',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                    <td style={{fontFamily:'DM Mono',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
+                    <td><button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>doUnlink(t.id)}>Unlink</button></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+          </div>}
           {linkPreview&&<div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:12,display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
             {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
               <div key={lbl} style={{textAlign:'center'}}>
