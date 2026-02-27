@@ -126,7 +126,11 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     start_dt = account.start_date
 
     # Build query for transactions after start_date up to as_of_date
-    query = db.query(Transaction).filter(Transaction.account_id == account_id)
+    # Excluded transactions are skipped so they don't affect the computed balance.
+    query = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.is_excluded != True,  # noqa: E712
+    )
     if start_dt:
         query = query.filter(Transaction.date >= start_dt)
     if as_of_date:
@@ -160,7 +164,10 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0
-    txns = db.query(Transaction).filter_by(account_id=account_id).order_by(Transaction.date).all()
+    txns = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.is_excluded != True,  # noqa: E712
+    ).order_by(Transaction.date).all()
     if not txns:
         return 0
     by_month: dict = defaultdict(float)
@@ -212,6 +219,7 @@ def _refresh_current_month_snapshot(db: Session, account_id: int) -> None:
         Transaction.account_id == account_id,
         Transaction.year == year,
         Transaction.month == month,
+        Transaction.is_excluded != True,  # noqa: E712
     ).scalar() or 0.0
     snapshot.closing_balance = round(snapshot.opening_balance + month_sum, 2)
     snapshot.synced_at = datetime.utcnow()
@@ -344,6 +352,7 @@ class TransactionResponse(BaseModel):
     is_locked: bool
     is_gcb: bool = False
     is_split: bool = False
+    is_excluded: bool = False
     points_category: Optional[str] = None
     account_name: str
     account_id: int = 0
@@ -359,6 +368,7 @@ class TransactionUpdate(BaseModel):
     needs_review: Optional[bool] = None
     is_locked: Optional[bool] = None
     is_gcb: Optional[bool] = None
+    is_excluded: Optional[bool] = None
     points_category: Optional[str] = None
 
 
@@ -1050,6 +1060,7 @@ def _serialize_txn(t, splits_map=None):
         "needs_review": t.needs_review,
         "is_locked": bool(t.is_locked or False),
         "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
+        "is_excluded": bool(t.is_excluded or False),
         "is_split": is_split,
         "splits": [
             {"id": s.id, "amount": s.amount, "description": s.description,
@@ -1167,6 +1178,9 @@ async def update_transaction(
         t.gcb_tagged = update.is_gcb  # Keep legacy column in sync
     if update.points_category is not None:
         t.points_category = update.points_category
+    if update.is_excluded is not None:
+        t.is_excluded = update.is_excluded
+        t.updated_at  = datetime.utcnow()
 
     db.commit()
     return {"message": "Transaction updated"}
@@ -1260,7 +1274,7 @@ async def get_stats(
     end_date: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction)
+    query = db.query(Transaction).filter(Transaction.is_excluded != True)  # noqa: E712
     if year:
         query = query.filter(Transaction.year == year)
     if month:

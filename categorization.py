@@ -75,42 +75,37 @@ class CategorizationEngine:
     
     def match_rule(self, description: str, amount: float) -> Optional[CategorizationRule]:
         """
-        Find first matching rule based on description and amount
-        Uses your Rules sheet logic (contains, equals, etc.)
+        Find first matching rule based on description and amount.
+        Tests against BOTH the raw description and the cleaned description so that
+        patterns like "PRUDENTIAL DIR" match "PRUDENTIAL DIR DEP PPD ID: …" even
+        after clean_description() strips "DIR DEP".
         """
         desc_clean = self.clean_description(description)
-        
+        desc_raw   = description.upper()
+
+        def _matches(pattern: str, match_type: str) -> bool:
+            if match_type == 'contains':
+                return pattern in desc_raw or pattern in desc_clean
+            if match_type == 'contains_any':
+                parts = [p.strip() for p in pattern.split(';')]
+                return any(p in desc_raw or p in desc_clean for p in parts)
+            if match_type == 'contains_all':
+                parts = [p.strip() for p in pattern.split(';')]
+                return all(p in desc_raw or p in desc_clean for p in parts)
+            if match_type == 'equals':
+                return desc_raw == pattern or desc_clean == pattern
+            if match_type == 'starts_with':
+                return desc_raw.startswith(pattern) or desc_clean.startswith(pattern)
+            if match_type == 'regex':
+                return bool(re.search(pattern, desc_raw, re.IGNORECASE)) or \
+                       bool(re.search(pattern, desc_clean, re.IGNORECASE))
+            return False
+
         for rule in self.rules:
             pattern = rule.pattern.upper()
-            
-            if rule.match_type == 'contains':
-                if pattern in desc_clean:
-                    return rule
-            
-            elif rule.match_type == 'contains_any':
-                # Pattern like "WORD1;WORD2;WORD3"
-                patterns = [p.strip() for p in pattern.split(';')]
-                if any(p in desc_clean for p in patterns):
-                    return rule
-            
-            elif rule.match_type == 'contains_all':
-                # All patterns must match
-                patterns = [p.strip() for p in pattern.split(';')]
-                if all(p in desc_clean for p in patterns):
-                    return rule
-            
-            elif rule.match_type == 'equals':
-                if desc_clean == pattern:
-                    return rule
-            
-            elif rule.match_type == 'starts_with':
-                if desc_clean.startswith(pattern):
-                    return rule
-            
-            elif rule.match_type == 'regex':
-                if re.search(pattern, desc_clean, re.IGNORECASE):
-                    return rule
-        
+            if _matches(pattern, rule.match_type):
+                return rule
+
         return None
     
     def learn_from_corrections(self, merchant: str) -> Optional[Dict]:
@@ -194,6 +189,7 @@ class CategorizationEngine:
                                  set_description field, or None if no rule matched.
         """
         desc_clean = self.clean_description(description)
+        desc_raw   = description.upper()  # Raw upper for broad matching
 
         # ── Pass 1: action + description normalization ───────────────────────
         action = None
@@ -207,18 +203,21 @@ class CategorizationEngine:
             pattern = rule.pattern.upper()
             matched = False
 
+            # Match against BOTH raw and cleaned so patterns like "PRUDENTIAL DIR"
+            # still fire on "PRUDENTIAL DIR DEP PPD ID: …" after cleaning strips noise.
             if rule.match_type == 'contains':
-                matched = pattern in desc_clean
+                matched = pattern in desc_raw or pattern in desc_clean
             elif rule.match_type == 'contains_any':
-                matched = any(p.strip() in desc_clean for p in pattern.split(';'))
+                matched = any(p.strip() in desc_raw or p.strip() in desc_clean for p in pattern.split(';'))
             elif rule.match_type == 'contains_all':
-                matched = all(p.strip() in desc_clean for p in pattern.split(';'))
+                matched = all(p.strip() in desc_raw or p.strip() in desc_clean for p in pattern.split(';'))
             elif rule.match_type == 'equals':
-                matched = desc_clean == pattern
+                matched = desc_raw == pattern or desc_clean == pattern
             elif rule.match_type == 'starts_with':
-                matched = desc_clean.startswith(pattern)
+                matched = desc_raw.startswith(pattern) or desc_clean.startswith(pattern)
             elif rule.match_type == 'regex':
-                matched = bool(re.search(pattern, desc_clean, re.IGNORECASE))
+                matched = bool(re.search(pattern, desc_raw, re.IGNORECASE)) or \
+                          bool(re.search(pattern, desc_clean, re.IGNORECASE))
 
             if matched:
                 if rule.set_action and not action:

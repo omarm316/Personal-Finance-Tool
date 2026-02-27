@@ -74,6 +74,9 @@ tbody tr.row-locked:hover{background:#dbeafe}
 tbody tr.row-review{background:#fffbeb}
 tbody tr.row-review:hover{background:#fef3c7}
 tbody tr.row-transfer{opacity:0.7}
+tbody tr.row-excluded{opacity:0.45;background:#f9fafb}
+tbody tr.row-excluded:hover{background:#f3f4f6}
+tbody tr.row-excluded td{text-decoration:line-through;color:var(--text-muted)}
 td{padding:11px 14px;font-size:13.5px}
 .badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
 .badge-transfer{background:#f3f4f6;color:#6b7280}
@@ -232,15 +235,23 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   );
 }
 
-function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit}){
+function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
   const[locked,setLocked]=useState(txn.is_locked);
   const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[excluded,setExcluded]=useState(txn.is_excluded||false);
   const[editing,setEditing]=useState(false);
   const[category,setCategory]=useState(txn.category_final);
   const[action,setAction]=useState(txn.action);
   const[saving,setSaving]=useState(false);
   const[expanded,setExpanded]=useState(false);
-  const rowClass=locked?'row-locked':txn.needs_review?'row-review':txn.action==='Transfer'?'row-transfer':'';
+  /* Quick Rule creation */
+  const[showQuickRule,setShowQuickRule]=useState(false);
+  const[rulePattern,setRulePattern]=useState(txn.description_clean||txn.description_raw||'');
+  const[ruleAction,setRuleAction]=useState(txn.action||'Expense');
+  const[ruleCategory,setRuleCategory]=useState(txn.category_final||'');
+  const[ruleSaving,setRuleSaving]=useState(false);
+  /* rowClass: excluded rows get a distinct muted style */
+  const rowClass=excluded?'row-excluded':locked?'row-locked':txn.needs_review?'row-review':txn.action==='Transfer'?'row-transfer':'';
   /* When type changes in edit mode, clear category if new type hides it */
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
   const[showRulePrompt,setShowRulePrompt]=useState(false);
@@ -260,8 +271,22 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
     }catch(e){}
     finally{setRuleCreating(false);setShowRulePrompt(false);}
   };
+  const saveQuickRule=async()=>{
+    if(!rulePattern.trim())return;
+    setRuleSaving(true);
+    try{
+      const res=await apiFetch('/rules',{method:'POST',body:JSON.stringify({
+        pattern:rulePattern.trim(),match_type:'contains',
+        set_action:ruleAction||null,set_category:ruleCategory||null,priority:100
+      })});
+      toast&&toast(`Rule created — ${res.reapplied||0} transactions refreshed`);
+      await onSave(txn.id,{});/* Reload */
+    }catch(e){toast&&toast('Failed to create rule: '+e.message,'error');}
+    finally{setRuleSaving(false);setShowQuickRule(false);}
+  };
   const cancel=()=>{setCategory(txn.category_final);setAction(txn.action);setEditing(false);};
   const toggleLock=async()=>{const nl=!locked;await onSave(txn.id,{is_locked:nl});setLocked(nl);};
+  const toggleExclude=async()=>{const ne=!excluded;await onSave(txn.id,{is_excluded:ne});setExcluded(ne);};
   const amtClass=txn.action==='Transfer'?'amount-neutral':txn.amount<0?'amount-neg':'amount-pos';
   const typeBadge=(a)=>{const l=(a||'').toLowerCase();return l==='income'?'income':l==='transfer'?'transfer':'expense';};
   const displayAction=txn.action_display||txn.action;
@@ -332,6 +357,25 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-sm btn-success" onClick={createRuleFromTxn} disabled={ruleCreating} style={{fontSize:11}}>{ruleCreating?'…':'Yes'}</button>
             <button className="btn btn-sm btn-ghost" onClick={()=>setShowRulePrompt(false)} style={{fontSize:11}}>No</button>
           </div>
+          :showQuickRule
+          ?<div style={{display:'flex',flexDirection:'column',gap:4,minWidth:220}}>
+            <div style={{display:'flex',gap:4,alignItems:'center'}}>
+              <span style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)'}}>New rule:</span>
+              <button className="btn btn-ghost" style={{padding:'2px 5px',fontSize:11,marginLeft:'auto'}} onClick={()=>setShowQuickRule(false)}>✕</button>
+            </div>
+            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)} placeholder="Pattern (e.g. STARBUCKS)"
+              style={{fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}/>
+            <div style={{display:'flex',gap:4}}>
+              <select value={ruleAction} onChange={e=>setRuleAction(e.target.value)} className="filter-select" style={{fontSize:11,padding:'3px 6px',flex:1}}>
+                {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+              </select>
+              <select value={ruleCategory} onChange={e=>setRuleCategory(e.target.value)} className="filter-select" style={{fontSize:11,padding:'3px 6px',flex:1}}>
+                <option value="">No category</option>
+                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <button className="btn btn-sm btn-success" onClick={saveQuickRule} disabled={ruleSaving} style={{fontSize:11}}>{ruleSaving?'Saving…':'Save Rule'}</button>
+          </div>
           :<div className="edit-actions">
             {txn.needs_review&&!locked&&<button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none'}} onClick={()=>onReview(txn)}>Review</button>}
             <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
@@ -340,6 +384,16 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'#fef9c3':'#f3f4f6',color:gcb?'#854d0e':'var(--text-muted)',border:gcb?'1px solid #fde047':'1px solid var(--border)'}}
               onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
               title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
+            {txn.enrichment_source!=='rule'&&<button className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe'}}
+              onClick={()=>{setRulePattern(txn.description_clean||txn.description_raw||'');setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
+              title="Create a rule from this transaction">Rule</button>}
+            <button className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:excluded?'#fef2f2':'#f3f4f6',color:excluded?'#991b1b':'var(--text-muted)',border:excluded?'1px solid #fca5a5':'1px solid var(--border)'}}
+              onClick={toggleExclude}
+              title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
+              {excluded?'↩':'⊘'}
+            </button>
           </div>
         }
       </td>
@@ -740,6 +794,7 @@ function TransactionsPage({categories,toast}){
   const[selectedIds,setSelectedIds]=useState(new Set());
   const[showBatchEdit,setShowBatchEdit]=useState(false);
   const[showDupes,setShowDupes]=useState(false);
+  const[showExcluded,setShowExcluded]=useState(false);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -778,20 +833,30 @@ function TransactionsPage({categories,toast}){
     }catch(e){toast('Batch update failed: '+e.message,'error');}
   };
   /* Clear selection whenever the visible set changes (filter applied) */
-  useEffect(()=>{setSelectedIds(new Set());},[search,catFilter,actionFilter,needsReview,accountFilter,startDate,endDate,showDupes]);
+  useEffect(()=>{setSelectedIds(new Set());},[search,catFilter,actionFilter,needsReview,accountFilter,startDate,endDate,showDupes,showExcluded]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
      A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
-     positive Transfer on the credit card account (hide by default — it's the duplicate).
-     Refunds/credits are NOT Transfers so they pass through unaffected. */
+     positive credit on the credit card account (hide by default — it's the duplicate).
+     Refunds/credits from merchants are typically Expense-type so they pass through unaffected.
+     We catch both Transfer-action payments AND Income-action payments whose description
+     contains payment keywords (catches CC payments mis-categorized as Income). */
+  const CC_PAY_WORDS=['PAYMENT','AUTOPAY','PMT','PYMT','TRANSFER'];
   const isCCPaymentDuplicate=(t)=>{
-    if(t.action!=='Transfer'||t.amount<=0)return false;
+    if(t.amount<=0)return false;
     const type=(t.account_type||'').toLowerCase();
-    return type==='credit'||type==='credit card';
+    if(type!=='credit'&&type!=='credit card')return false;
+    if(t.action==='Transfer')return true;
+    if(t.action==='Income'){
+      const d=(t.description_raw||'').toUpperCase();
+      return CC_PAY_WORDS.some(w=>d.includes(w));
+    }
+    return false;
   };
 
   let visible=txns;
   if(!showDupes)visible=visible.filter(t=>!isCCPaymentDuplicate(t));
+  if(!showExcluded)visible=visible.filter(t=>!t.is_excluded);
   if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
   if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
   if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
@@ -852,6 +917,7 @@ function TransactionsPage({categories,toast}){
           </select>
           <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
           <label className="filter-label" title="CC payments appear on both the checking account (kept) and the credit card account (hidden by default)"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show CC payment credits</label>
+          <label className="filter-label" title="Excluded transactions are hidden from totals and balances but not deleted"><input type="checkbox" checked={showExcluded} onChange={e=>setShowExcluded(e.target.checked)}/> Show excluded</label>
           <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
           <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
@@ -897,7 +963,7 @@ function TransactionsPage({categories,toast}){
               </th>
               <th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th><th>Actions</th>
             </tr></thead>
-            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)}/>)}</tbody>
+            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
           </table></div>
         }
       </div>

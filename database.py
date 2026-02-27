@@ -135,7 +135,11 @@ class Transaction(Base):
 
     # Loan payment tracking — set when this transaction is linked to a loan payment
     loan_id = Column(Integer, ForeignKey('loans.id'), nullable=True, index=True)
-    
+
+    # Exclude flag — user can exclude a transaction from all totals/balances without deleting it
+    # Useful for pending transactions that already entered the DB and should be ignored.
+    is_excluded = Column(Boolean, default=False, index=True)
+
     # Metadata
     year = Column(Integer, index=True)
     month = Column(Integer, index=True)
@@ -427,6 +431,7 @@ def run_migrations(engine):
             ('import_hash',       'VARCHAR(64)'),
             ('import_source',     'VARCHAR(20)'),
             ('loan_id',           'INTEGER'),
+            ('is_excluded',       'BOOLEAN DEFAULT FALSE'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),
