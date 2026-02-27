@@ -20,20 +20,29 @@
 }
 html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
 body{overflow:hidden}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:none;box-shadow:2px 0 12px rgba(0,36,93,0.18)}
-.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:none;box-shadow:2px 0 12px rgba(0,36,93,0.18);transition:width 0.22s ease;overflow:hidden}
+.sidebar.collapsed{width:56px}
+.sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:8px;min-height:72px}
+.sidebar.collapsed .sidebar-logo{justify-content:center;padding:18px 0 16px}
 .sidebar-logo h1{font-size:15px;font-weight:700;color:#fff;letter-spacing:-0.3px}
 .sidebar-logo p{font-size:11px;color:var(--sidebar-text);margin-top:2px}
-.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
-.nav-section-label{font-size:10px;font-weight:600;color:rgba(168,188,216,0.55);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit}
+.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--sidebar-text);font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto}
+.sidebar.collapsed .sidebar-toggle{margin-left:0}
+.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:#fff}
+.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.sidebar.collapsed .sidebar-nav{padding:12px 6px}
+.nav-section-label{font-size:10px;font-weight:600;color:rgba(168,188,216,0.55);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px;white-space:nowrap;overflow:hidden}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;white-space:nowrap;overflow:hidden}
+.sidebar.collapsed .nav-item{justify-content:center;padding:9px 0;gap:0}
 .nav-item:hover{background:var(--sidebar-hover-bg);color:#e8eef8}
 .nav-item.active{background:var(--sidebar-active-bg);color:#ffffff;font-weight:600;box-shadow:inset 3px 0 0 rgba(255,255,255,0.6)}
-.nav-icon{font-size:15px;width:18px;text-align:center}
-.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.1)}
-.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:#c8d8ee;display:flex;align-items:center;gap:8px}
+.sidebar.collapsed .nav-item.active{box-shadow:none}
+.nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0}
+.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.1);overflow:hidden}
+.sidebar.collapsed .sidebar-footer{padding:12px 6px}
+.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:#c8d8ee;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
-.main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
 .topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
 .content{flex:1;overflow-y:auto;padding:24px 28px}
@@ -150,24 +159,41 @@ function ToastContainer({toasts}){
   return<div className="toast-container">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>;
 }
 
-function Sidebar({page,setPage,banks,onConnectBank,onSync}){
+function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed}){
   const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
+  const toggle=()=>{const next=!collapsed;setCollapsed(next);try{localStorage.setItem('nav-collapsed',next?'1':'0');}catch(e){}};
   return(
-    <div className="sidebar">
-      <div className="sidebar-logo"><h1>Finance</h1><p>Personal dashboard</p></div>
+    <div className={`sidebar${collapsed?' collapsed':''}`}>
+      <div className="sidebar-logo">
+        {!collapsed&&<div style={{flex:1}}><h1>Finance</h1><p>Personal dashboard</p></div>}
+        <button className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand menu':'Collapse menu'}>{collapsed?'›':'‹'}</button>
+      </div>
       <nav className="sidebar-nav">
-        <div className="nav-section-label">Menu</div>
-        {nav.map(n=><button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)}><span className="nav-icon">{n.icon}</span>{n.label}</button>)}
+        {!collapsed&&<div className="nav-section-label">Menu</div>}
+        {nav.map(n=>(
+          <button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)} title={collapsed?n.label:''}>
+            <span className="nav-icon">{n.icon}</span>
+            {!collapsed&&n.label}
+          </button>
+        ))}
       </nav>
       <div className="sidebar-footer">
-        <div className="nav-section-label" style={{paddingTop:0,marginBottom:6}}>Connected Banks</div>
-        {uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
-          :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)}
-        <div style={{display:'flex',gap:6,marginTop:12}}>
-          <button className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank}>+ Bank</button>
-          <button className="btn btn-sm btn-outline-white" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
-        </div>
+        {collapsed
+          ?<div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <button className="btn btn-sm btn-primary" style={{justifyContent:'center',padding:'7px 0',width:'100%'}} onClick={onConnectBank} title="Connect bank">+</button>
+              <button className="btn btn-sm btn-outline-white" style={{justifyContent:'center',padding:'7px 0',width:'100%'}} onClick={onSync} title="Sync">↻</button>
+            </div>
+          :<>
+            <div className="nav-section-label" style={{paddingTop:0,marginBottom:6}}>Connected Banks</div>
+            {uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
+              :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)}
+            <div style={{display:'flex',gap:6,marginTop:12}}>
+              <button className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank}>+ Bank</button>
+              <button className="btn btn-sm btn-outline-white" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
+            </div>
+          </>
+        }
       </div>
     </div>
   );
@@ -3531,6 +3557,7 @@ function App(){
   const[page,setPage]=useState('dashboard');
   const[categories,setCategories]=useState([]);
   const[banks,setBanks]=useState([]);
+  const[collapsed,setCollapsed]=useState(()=>{try{return localStorage.getItem('nav-collapsed')==='1';}catch(e){return false;}});
   const{toasts,toast}=useToast();
 
   const loadMeta=useCallback(async()=>{
@@ -3556,8 +3583,8 @@ function App(){
 
   return(
     <div style={{display:'flex',height:'100vh'}}>
-      <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync}/>
-      <div className="main">
+      <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync} collapsed={collapsed} setCollapsed={setCollapsed}/>
+      <div className="main" style={{marginLeft:collapsed?56:220}}>
         <div className="topbar">
           <div className="topbar-title">{titles[page]}</div>
           <div>{banks.length>0&&<span className="bank-badge">● {banks.length} account{banks.length!==1?'s':''} connected</span>}</div>
