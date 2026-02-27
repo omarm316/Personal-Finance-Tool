@@ -25,6 +25,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
+    AccountMonthlySnapshot,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -134,6 +135,86 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     # Sum transaction amounts
     txn_sum = sum(t.amount for t in query.all())
     return round(starting + txn_sum, 2)
+
+
+# ---------------------------------------------------------------------------
+# Balance snapshot helpers (Section 0B)
+# ---------------------------------------------------------------------------
+
+def _sign_plaid_balance(raw: Optional[float], account_type_str: str) -> Optional[float]:
+    """Apply sign convention: credit/loan balances stored as negative (Plaid reports amount-owed as positive)."""
+    if raw is None:
+        return None
+    t = (account_type_str or '').lower().strip()
+    return -raw if t in ('credit', 'loan') else raw
+
+
+def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
+    """
+    Full rebuild of monthly opening/closing snapshots for one account.
+    Uses account.starting_balance as the baseline before the earliest transaction.
+    Returns the number of months built.
+    """
+    from collections import defaultdict
+    from sqlalchemy import func as _func
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        return 0
+    txns = db.query(Transaction).filter_by(account_id=account_id).order_by(Transaction.date).all()
+    if not txns:
+        return 0
+    by_month: dict = defaultdict(float)
+    for t in txns:
+        by_month[(t.date.year, t.date.month)] += t.amount
+    db.query(AccountMonthlySnapshot).filter_by(account_id=account_id).delete(synchronize_session=False)
+    running = account.starting_balance or 0.0
+    sorted_months = sorted(by_month.keys())
+    for (year, month) in sorted_months:
+        opening = running
+        closing = round(running + by_month[(year, month)], 2)
+        db.add(AccountMonthlySnapshot(
+            account_id=account_id,
+            year=year,
+            month=month,
+            opening_balance=round(opening, 2),
+            closing_balance=closing,
+        ))
+        running = closing
+    return len(sorted_months)
+
+
+def _refresh_current_month_snapshot(db: Session, account_id: int) -> None:
+    """
+    Lightweight post-sync update: recalculate only the current month's closing_balance.
+    Creates the current-month snapshot if it doesn't exist yet (month rollover handled).
+    Does NOT commit — caller is responsible for committing.
+    """
+    from sqlalchemy import func as _func
+    now = datetime.utcnow()
+    year, month = now.year, now.month
+    snapshot = db.query(AccountMonthlySnapshot).filter_by(
+        account_id=account_id, year=year, month=month
+    ).first()
+    if snapshot is None:
+        prev_m, prev_y = (month - 1, year) if month > 1 else (12, year - 1)
+        prev = db.query(AccountMonthlySnapshot).filter_by(
+            account_id=account_id, year=prev_y, month=prev_m
+        ).first()
+        if prev is None:
+            return  # No snapshot base yet — Balance Sync hasn't been run
+        snapshot = AccountMonthlySnapshot(
+            account_id=account_id, year=year, month=month,
+            opening_balance=round(prev.closing_balance, 2),
+            closing_balance=round(prev.closing_balance, 2),
+        )
+        db.add(snapshot)
+    month_sum = db.query(_func.sum(Transaction.amount)).filter(
+        Transaction.account_id == account_id,
+        Transaction.year == year,
+        Transaction.month == month,
+    ).scalar() or 0.0
+    snapshot.closing_balance = round(snapshot.opening_balance + month_sum, 2)
+    snapshot.synced_at = datetime.utcnow()
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +806,12 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             db.commit()
         added = await _sync_item(item, plaid, db)
         print(f"[sync] {item.institution_name}: {added} transaction(s) added")
+        # Refresh current-month balance snapshots for all accounts in this item
+        item_accounts = db.query(Account).filter_by(plaid_item_id=item_id, is_active=True).all()
+        for acct in item_accounts:
+            _refresh_current_month_snapshot(db, acct.id)
+        if item_accounts:
+            db.commit()
     except Exception as e:
         import traceback; traceback.print_exc()
         print(f"[sync] background sync failed for {item_id}: {e}")
@@ -2280,6 +2367,88 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
+# Balance Sync + Monthly Snapshots
+# ---------------------------------------------------------------------------
+
+@app.post("/api/accounts/sync-balances")
+async def sync_account_balances(db: Session = Depends(get_db)):
+    """
+    Fetch today's balances from Plaid, anchor each account's starting_balance, and rebuild
+    all monthly snapshots from existing transactions. Intended as a one-time setup or reset.
+    """
+    from sqlalchemy import func as _func
+    plaid = setup_plaid_from_env()
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    synced = []
+    skipped = []
+    for item in items:
+        try:
+            plaid_accounts = plaid.get_accounts(item.access_token)
+        except Exception as e:
+            print(f"[balance-sync] fetch failed for {item.institution_name}: {e}")
+            continue
+        for pa in plaid_accounts:
+            raw_balance = pa.get('balance')
+            if raw_balance is None:
+                skipped.append({'name': pa['name'], 'reason': 'null balance from Plaid'})
+                continue
+            account = db.query(Account).filter_by(plaid_account_id=pa['account_id']).first()
+            if not account:
+                skipped.append({'name': pa['name'], 'reason': 'no matching account in DB'})
+                continue
+            signed_balance = _sign_plaid_balance(raw_balance, account.account_type)
+            txn_sum = db.query(_func.sum(Transaction.amount)).filter(
+                Transaction.account_id == account.id
+            ).scalar() or 0.0
+            account.starting_balance = round(signed_balance - txn_sum, 4)
+            account.start_date = None  # use ALL transactions
+            db.flush()
+            months_built = rebuild_monthly_snapshots(db, account.id)
+            db.flush()
+            synced.append({'name': account.account_name, 'balance': signed_balance, 'months_built': months_built})
+    db.commit()
+    return {'synced': len(synced), 'skipped': len(skipped), 'accounts': synced, 'skipped_details': skipped}
+
+
+@app.get("/api/balances/monthly")
+async def get_monthly_balances(months: int = 24, db: Session = Depends(get_db)):
+    """
+    Return monthly opening/closing balance snapshots per account for charting.
+    Only returns accounts that have snapshot data.
+    """
+    from dateutil.relativedelta import relativedelta
+    cutoff = datetime.utcnow() - relativedelta(months=months)
+    cutoff_ym = cutoff.year * 100 + cutoff.month
+    accounts = db.query(Account).filter_by(is_active=True).all()
+    result = []
+    for account in accounts:
+        snapshots = (
+            db.query(AccountMonthlySnapshot)
+            .filter(
+                AccountMonthlySnapshot.account_id == account.id,
+                (AccountMonthlySnapshot.year * 100 + AccountMonthlySnapshot.month) >= cutoff_ym,
+            )
+            .order_by(AccountMonthlySnapshot.year, AccountMonthlySnapshot.month)
+            .all()
+        )
+        if not snapshots:
+            continue
+        flags = classify_account(account.account_type)
+        result.append({
+            'account_id': account.id,
+            'account_name': account.account_name,
+            'account_type': account.account_type,
+            'mask': account.mask,
+            'is_asset': flags['is_asset'],
+            'months': [
+                {'year': s.year, 'month': s.month, 'opening': s.opening_balance, 'closing': s.closing_balance}
+                for s in snapshots
+            ],
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Manual Transactions
 # ---------------------------------------------------------------------------
 
@@ -2714,6 +2883,9 @@ async def get_net_worth_timeline(months: int = 24, db: Session = Depends(get_db)
     # Add today
     dates.append(today)
 
+    from sqlalchemy import func as _func
+    loans = db.query(Loan).filter_by(is_active=True).all()
+
     for dt in dates:
         assets = 0.0
         liabs = 0.0
@@ -2724,11 +2896,25 @@ async def get_net_worth_timeline(months: int = 24, db: Session = Depends(get_db)
                 assets += balance
             else:
                 liabs += balance  # Already negative
+
+        # Add loan liabilities — reconstruct historical balance from principal payments
+        if loans:
+            principal_paid_after = db.query(_func.sum(TransactionSplit.amount)).join(
+                Transaction, TransactionSplit.parent_transaction_id == Transaction.id
+            ).filter(
+                TransactionSplit.description == 'Principal',
+                Transaction.date > dt,
+            ).scalar() or 0.0
+            total_loan_balance = sum(l.current_balance or 0 for l in loans)
+            # principal_paid_after is negative (payments); subtract negatives to get historical balance
+            historical_loans = total_loan_balance - principal_paid_after
+            liabs -= round(historical_loans, 2)  # loans are liabilities → subtract from net worth
+
         points.append({
             'date': dt.strftime('%Y-%m-%d'),
             'assets': round(assets, 2),
             'liabilities': round(liabs, 2),
-            'net_worth': round(assets + liabs, 2),  # Assets + Liabilities (liabilities already negative)
+            'net_worth': round(assets + liabs, 2),
         })
 
     return {'timeline': points}

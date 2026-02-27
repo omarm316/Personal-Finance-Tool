@@ -1,7 +1,7 @@
 """
 Database models for the finance automation system
 """
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -283,6 +283,27 @@ class Loan(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AccountMonthlySnapshot(Base):
+    """
+    Monthly opening/closing balance snapshots per account.
+    Populated by the Balance Sync tool and updated after every Plaid transaction sync.
+    Formula: opening_balance + SUM(transactions in month) = closing_balance
+    """
+    __tablename__ = 'account_monthly_snapshots'
+
+    id              = Column(Integer, primary_key=True)
+    account_id      = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False, index=True)
+    year            = Column(Integer, nullable=False)
+    month           = Column(Integer, nullable=False)   # 1–12
+    opening_balance = Column(Float, nullable=False)
+    closing_balance = Column(Float, nullable=False)
+    synced_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('account_id', 'year', 'month', name='uq_account_month'),
+    )
 
 
 class BudgetTarget(Base):
