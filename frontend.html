@@ -163,6 +163,8 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
   const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
   const toggle=()=>{const next=!collapsed;setCollapsed(next);try{localStorage.setItem('nav-collapsed',next?'1':'0');}catch(e){}};
+  const[banksOpen,setBanksOpen]=useState(()=>{try{return localStorage.getItem('banks-open')!=='0';}catch(e){return true;}});
+  const toggleBanks=()=>{const next=!banksOpen;setBanksOpen(next);try{localStorage.setItem('banks-open',next?'1':'0');}catch(e){}};
   return(
     <div className={`sidebar${collapsed?' collapsed':''}`}>
       <div className="sidebar-logo">
@@ -185,10 +187,15 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
               <button className="btn btn-sm btn-outline-white" style={{justifyContent:'center',padding:'7px 0',width:'100%'}} onClick={onSync} title="Sync">↻</button>
             </div>
           :<>
-            <div className="nav-section-label" style={{paddingTop:0,marginBottom:6}}>Connected Banks</div>
-            {uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
-              :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)}
-            <div style={{display:'flex',gap:6,marginTop:12}}>
+            <button onClick={toggleBanks} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 10px 6px',color:'rgba(168,188,216,0.55)'}}>
+              <span style={{fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:1}}>Connected Banks</span>
+              <span style={{fontSize:11,lineHeight:1,transition:'transform 0.18s',display:'inline-block',transform:banksOpen?'rotate(0deg)':'rotate(-90deg)'}}>{banksOpen?'▾':'▾'}</span>
+            </button>
+            {banksOpen&&(
+              uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
+                :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)
+            )}
+            <div style={{display:'flex',gap:6,marginTop:banksOpen?12:8}}>
               <button className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank}>+ Bank</button>
               <button className="btn btn-sm btn-outline-white" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>
             </div>
