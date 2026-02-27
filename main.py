@@ -84,7 +84,7 @@ def classify_account(account_type: str) -> dict:
     }
 
 
-def serialize_account(a: Account) -> dict:
+def serialize_account(a: Account, transaction_count: int = 0) -> dict:
     """
     Standard serialization for an Account object, including classification flags.
     Used by all endpoints that return account data.
@@ -107,6 +107,7 @@ def serialize_account(a: Account) -> dict:
         'is_liability': flags['is_liability'],
         'is_credit': flags['is_credit'],
         'bucket': flags['bucket'],
+        'transaction_count': transaction_count,
     }
 
 
@@ -467,15 +468,30 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
 
         # Create Account records — use subtype for better classification
         for a in accounts:
-            existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
-            if existing:
-                existing.is_active = True
-            else:
-                # Prefer subtype (checking, savings, credit card) over type (depository, credit)
-                raw_subtype = (a.get('subtype') or '').lower().strip()
-                raw_type = (a.get('type') or '').lower().strip()
-                account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
+            # Prefer subtype (checking, savings, credit card) over type (depository, credit)
+            raw_subtype  = (a.get('subtype') or '').lower().strip()
+            raw_type     = (a.get('type') or '').lower().strip()
+            account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
 
+            existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
+
+            # Fallback dedup: if Plaid issued new account IDs for the same physical account
+            # (happens when re-linking an institution), match by mask + type + institution.
+            if not existing and a.get('mask'):
+                existing = (db.query(Account)
+                    .join(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
+                    .filter(
+                        Account.mask == a['mask'],
+                        Account.account_type == account_type,
+                        PlaidItem.institution_name == plaid_item.institution_name,
+                    ).first())
+
+            if existing:
+                # Adopt: update Plaid IDs so future transactions flow to the right account
+                existing.plaid_account_id = a['account_id']
+                existing.plaid_item_id    = item_id
+                existing.is_active        = True
+            else:
                 db.add(Account(
                     plaid_account_id=a['account_id'],
                     plaid_item_id=item_id,
@@ -671,13 +687,27 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             try:
                 accounts = plaid.get_accounts(item.access_token)
                 for a in accounts:
+                    raw_subtype  = (a.get('subtype') or '').lower().strip()
+                    raw_type     = (a.get('type') or '').lower().strip()
+                    account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
+
                     existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
+
+                    # Fallback dedup for re-linked institutions
+                    if not existing and a.get('mask'):
+                        existing = (db.query(Account)
+                            .join(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
+                            .filter(
+                                Account.mask == a['mask'],
+                                Account.account_type == account_type,
+                                PlaidItem.institution_name == item.institution_name,
+                            ).first())
+
                     if existing:
-                        existing.is_active = True
+                        existing.plaid_account_id = a['account_id']
+                        existing.plaid_item_id    = item_id
+                        existing.is_active        = True
                     else:
-                        raw_subtype = (a.get('subtype') or '').lower().strip()
-                        raw_type    = (a.get('type') or '').lower().strip()
-                        account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
                         db.add(Account(
                             plaid_account_id=a['account_id'],
                             plaid_item_id=item_id,
@@ -2099,8 +2129,14 @@ async def export_csv(
 @app.get("/api/accounts")
 async def list_accounts(db: Session = Depends(get_db)):
     """List all active accounts (Plaid + manual) with classification flags."""
+    from sqlalchemy import func as _func
     accounts = db.query(Account).filter_by(is_active=True).order_by(Account.created_at).all()
-    return [serialize_account(a) for a in accounts]
+    # Batch-load transaction counts (one query, not N+1)
+    counts = dict(
+        db.query(Transaction.account_id, _func.count(Transaction.id))
+        .group_by(Transaction.account_id).all()
+    )
+    return [serialize_account(a, counts.get(a.id, 0)) for a in accounts]
 
 
 @app.post("/api/accounts")
@@ -2160,6 +2196,60 @@ async def sever_plaid_connection(account_id: int, db: Session = Depends(get_db))
     account.is_manual = True
     db.commit()
     return {"message": f"Plaid connection severed for {account.account_name}. Account is now manual."}
+
+
+@app.post("/api/accounts/{account_id}/merge-into/{target_id}")
+async def merge_accounts(account_id: int, target_id: int, db: Session = Depends(get_db)):
+    """
+    Merge source account into target: reassign all transactions and card links,
+    then delete the source account. Used to clean up duplicate accounts.
+    """
+    source = db.query(Account).filter_by(id=account_id).first()
+    target = db.query(Account).filter_by(id=target_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source account not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="Target account not found")
+    if source.id == target.id:
+        raise HTTPException(status_code=400, detail="Cannot merge account into itself")
+
+    # Reassign all transactions to target
+    txn_count = db.query(Transaction).filter_by(account_id=account_id).update(
+        {'account_id': target_id}, synchronize_session=False
+    )
+    # Reassign any card links
+    db.query(Card).filter_by(account_id=account_id).update(
+        {'account_id': target_id, 'plaid_account_id': target.plaid_account_id},
+        synchronize_session=False,
+    )
+    # Delete source account
+    db.delete(source)
+    db.commit()
+    return {"merged": True, "transactions_moved": txn_count,
+            "source": account_id, "target": target_id}
+
+
+@app.delete("/api/accounts/{account_id}")
+async def delete_account(account_id: int, db: Session = Depends(get_db)):
+    """
+    Permanently delete an account and ALL its transactions.
+    Also nulls out any card links that pointed to this account.
+    """
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    txn_count = db.query(Transaction).filter_by(account_id=account_id).count()
+    # Null card links first (FK constraint)
+    db.query(Card).filter_by(account_id=account_id).update(
+        {'account_id': None, 'plaid_account_id': None}, synchronize_session=False
+    )
+    # Delete all transactions
+    db.query(Transaction).filter_by(account_id=account_id).delete(synchronize_session=False)
+    # Delete account
+    db.delete(account)
+    db.commit()
+    return {"deleted": True, "transactions_deleted": txn_count}
 
 
 # ---------------------------------------------------------------------------
