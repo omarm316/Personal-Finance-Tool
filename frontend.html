@@ -1206,14 +1206,52 @@ function DeleteAccountModal({account,onDone,onClose}){
   );
 }
 
+/* AccountRow is a top-level component so React never remounts it on parent
+   re-renders (same fix as LoanForm — defining it inside AccountsPage would
+   create a new function reference each render, causing React to unmount/remount
+   the row and swallow click events before modals can open). */
+function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,onCancel,onStartEdit,onSever,onMerge,onDelete}){
+  const isEditing=editingId===a.id;
+  return(
+    <div style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:12}}>
+      <span style={{width:7,height:7,borderRadius:'50%',background:a.is_manual?(a.is_asset?'var(--blue)':'var(--red)'):'#22c55e',flexShrink:0}}/>
+      <div style={{flex:1}}>
+        {isEditing?<>
+          <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4}}/>
+          <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)'}}/>
+        </>:<>
+          <div style={{fontSize:14,fontWeight:500}}>{a.account_name}</div>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
+            {a.account_type}{a.mask?` ····${a.mask}`:''}{a.bucket?` · ${a.bucket}`:''}{a.notes?` · ${a.notes}`:''}
+          </div>
+        </>}
+      </div>
+      {!a.is_manual&&<span className="bank-badge">● Connected</span>}
+      {a.is_manual&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
+      <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{a.transaction_count} txns</span>
+      <div style={{display:'flex',gap:6,flexShrink:0}}>
+        {isEditing?<>
+          <button className="btn btn-sm btn-success" onClick={()=>onSave(a.id)}>Save</button>
+          <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
+        </>:<>
+          <button className="btn btn-sm btn-secondary" onClick={()=>onStartEdit(a)}>Edit</button>
+          {showPlaidActions&&<button className="btn btn-sm" style={{background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa',fontSize:11}} onClick={()=>onSever(a)}>Sever</button>}
+          <button className="btn btn-sm" style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontSize:11}} onClick={()=>onMerge(a)}>Merge →</button>
+          <button className="btn btn-sm" style={{background:'#fef2f2',color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={()=>onDelete(a)}>Delete</button>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 function AccountsPage({banks,onConnectBank,onSync,toast}){
   const[accounts,setAccounts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[showManual,setShowManual]=useState(false);
   const[editingId,setEditingId]=useState(null);
   const[editVals,setEditVals]=useState({});
-  const[mergeAccount,setMergeAccount]=useState(null); // account to merge (source)
-  const[deleteAccount,setDeleteAccount]=useState(null); // account to delete
+  const[mergeAccount,setMergeAccount]=useState(null);
+  const[deleteAccount,setDeleteAccount]=useState(null);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -1231,56 +1269,15 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
     try{await apiFetch(`/accounts/${id}`,{method:'PATCH',body:JSON.stringify(editVals)});toast('Account updated');setEditingId(null);await load();}
     catch(e){toast('Failed to save','error');}
   };
-
   const severPlaid=async(a)=>{
     if(!confirm(`Sever Plaid connection for "${a.account_name}"? Transactions will be kept.`))return;
     try{await apiFetch(`/accounts/${a.id}/sever-plaid`,{method:'POST'});toast('Plaid connection severed');await load();}
     catch(e){toast('Failed: '+(e.message||'error'),'error');}
   };
+  const handleMergeDone=(msg,err)=>{setMergeAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
+  const handleDeleteDone=(msg,err)=>{setDeleteAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
 
-  const handleMergeDone=(msg,err)=>{
-    setMergeAccount(null);
-    if(err)toast(err,'error');else{toast(msg);load();}
-  };
-  const handleDeleteDone=(msg,err)=>{
-    setDeleteAccount(null);
-    if(err)toast(err,'error');else{toast(msg);load();}
-  };
-
-  /* Shared account row */
-  const AccountRow=({a,showPlaidActions})=>{
-    const isEditing=editingId===a.id;
-    return(
-      <div style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:12}}>
-        <span style={{width:7,height:7,borderRadius:'50%',background:a.is_manual?(a.is_asset?'var(--blue)':'var(--red)'):'#22c55e',flexShrink:0}}/>
-        <div style={{flex:1}}>
-          {isEditing?<>
-            <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4}}/>
-            <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)'}}/>
-          </>:<>
-            <div style={{fontSize:14,fontWeight:500}}>{a.account_name}</div>
-            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
-              {a.account_type}{a.mask?` ····${a.mask}`:''}{a.bucket?` · ${a.bucket}`:''}{a.notes?` · ${a.notes}`:''}
-            </div>
-          </>}
-        </div>
-        {!a.is_manual&&<span className="bank-badge">● Connected</span>}
-        {a.is_manual&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
-        <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{a.transaction_count} txns</span>
-        <div style={{display:'flex',gap:6,flexShrink:0}}>
-          {isEditing?<>
-            <button className="btn btn-sm btn-success" onClick={()=>saveEdit(a.id)}>Save</button>
-            <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>Cancel</button>
-          </>:<>
-            <button className="btn btn-sm btn-secondary" onClick={()=>startEdit(a)}>Edit</button>
-            {showPlaidActions&&<button className="btn btn-sm" style={{background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa',fontSize:11}} onClick={()=>severPlaid(a)}>Sever</button>}
-            <button className="btn btn-sm" style={{background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',fontSize:11}} onClick={()=>setMergeAccount(a)}>Merge →</button>
-            <button className="btn btn-sm" style={{background:'#fef2f2',color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={()=>setDeleteAccount(a)}>Delete</button>
-          </>}
-        </div>
-      </div>
-    );
-  };
+  const rowProps={editingId,editVals,setEditVals,onSave:saveEdit,onCancel:cancelEdit,onStartEdit:startEdit,onSever:severPlaid,onMerge:setMergeAccount,onDelete:setDeleteAccount};
 
   return(
     <div>
@@ -1296,7 +1293,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
           </div>
         </div>
         {plaidAccounts.length===0?<div className="empty"><div className="empty-icon">◫</div><span>No Plaid accounts connected</span></div>
-          :plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true}/>)}
+          :plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true} {...rowProps}/>)}
       </div>
       <div className="card">
         <div className="section-header">
@@ -1304,7 +1301,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
         </div>
         {manualAccounts.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No manual accounts yet</span></div>
-          :manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false}/>)}
+          :manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false} {...rowProps}/>)}
       </div>
     </div>
   );
