@@ -2324,6 +2324,7 @@ function BudgetsPage({categories,toast}){
   const[loading,setLoading]=useState(true);
   const[saving,setSaving]=useState(false);
   const[error,setError]=useState('');
+  const[yearEdits,setYearEdits]=useState({});  // {cat:{m:string}} for year bulk-edit
 
   /* ── Category sets ─────────────────────────────────────────────────────── */
   const incomeCats=categories.filter(c=>c.category_type==='income').map(c=>c.name);
@@ -2356,16 +2357,27 @@ function BudgetsPage({categories,toast}){
   const getBudget=(cat,m)=>targets[cat]?.[String(m)]?.amount||0;
   const getActual=(cat,m)=>actuals[cat]?.[String(m)]||0;
 
-  /* Sort by annual actuals desc, then budget desc */
-  const sortedCats=(catList)=>[...catList].sort((a,b)=>{
-    const totA=()=>{let s=0;for(let m=1;m<=12;m++)s+=getActual(a,m)+getBudget(a,m);return s;};
-    const totB=()=>{let s=0;for(let m=1;m<=12;m++)s+=getActual(b,m)+getBudget(b,m);return s;};
-    return totB()-totA();
+  /* Alphabetical sort, pin Unclassified/Other/For Others to bottom */
+  const BUDGET_BOTTOM=new Set(['Unclassified','Other','For Others']);
+  const alphaCats=(list)=>[...new Set(list)].sort((a,b)=>{
+    const aB=BUDGET_BOTTOM.has(a),bB=BUDGET_BOTTOM.has(b);
+    if(aB&&!bB)return 1;if(!aB&&bB)return -1;
+    return a.localeCompare(b);
   });
 
-  /* Include cats that appear in targets OR actuals, merged with seed list */
-  const allIncomeCats=sortedCats([...new Set([...incomeCats,...Object.keys(targets).filter(c=>incomeCats.includes(c)||getActual(c,1)+getActual(c,2)+getActual(c,3)+getActual(c,4)+getActual(c,5)+getActual(c,6)+getActual(c,7)+getActual(c,8)+getActual(c,9)+getActual(c,10)+getActual(c,11)+getActual(c,12)>0)])]);
-  const allExpenseCats=sortedCats([...new Set([...expenseCats,...Object.keys(actuals).filter(c=>!incomeCats.includes(c)&&c!=='Transfer'&&c!=='Unclassified')])]);
+  const SKIP_CATS=new Set(['Transfer','Unclassified','Work']);
+  /* Income: only categories flagged as income type */
+  const allIncomeCats=alphaCats([
+    ...incomeCats,
+    ...Object.keys(targets).filter(c=>incomeCats.includes(c)),
+    ...Object.keys(actuals).filter(c=>incomeCats.includes(c)),
+  ]);
+  /* Expenses: all expense-type categories + any non-income entries found in data */
+  const allExpenseCats=alphaCats([
+    ...expenseCats,
+    ...Object.keys(targets).filter(c=>!incomeCats.includes(c)&&!SKIP_CATS.has(c)),
+    ...Object.keys(actuals).filter(c=>!incomeCats.includes(c)&&!SKIP_CATS.has(c)),
+  ]);
 
   /* ── Edit mode ─────────────────────────────────────────────────────────── */
   const startEdit=async()=>{
@@ -2408,6 +2420,36 @@ function BudgetsPage({categories,toast}){
         toast(`Copied ${bulk.length} targets from ${year-1}`);await load();
       }else toast('No prior year targets found','error');
     }catch(e){toast('Failed to copy','error');}finally{setSaving(false);}
+  };
+
+  const startYearEdit=()=>{
+    const e={};
+    [...allIncomeCats,...allExpenseCats].forEach(cat=>{
+      e[cat]={};
+      for(let m=1;m<=12;m++){
+        const v=targets[cat]?.[String(m)]?.amount;
+        e[cat][String(m)]=v!=null&&v>0?String(v):'';
+      }
+    });
+    setYearEdits(e);
+    setView('edit-year');
+  };
+
+  const saveYearEdits=async()=>{
+    setSaving(true);setError('');
+    try{
+      const bulk=[];
+      Object.entries(yearEdits).forEach(([cat,months])=>{
+        Object.entries(months).forEach(([m,val])=>{
+          const amt=parseFloat(val);
+          if(!isNaN(amt)&&amt>=0) bulk.push({year,month:parseInt(m),category:cat,amount:amt});
+        });
+      });
+      if(bulk.length>0) await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});
+      toast(`Saved ${bulk.length} budget targets`);
+      setView('annual');setYearEdits({});await load();
+    }catch(e){setError('Failed to save');toast('Failed to save','error');}
+    finally{setSaving(false);}
   };
 
   /* ── KPI values for selected month ───────────────────────────────────────── */
@@ -2745,6 +2787,78 @@ function BudgetsPage({categories,toast}){
     );
   };
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW C — EDIT YEAR  (spreadsheet grid, all 12 months × all categories)
+  ═══════════════════════════════════════════════════════════════════════ */
+  const renderEditYearView=()=>{
+    const setCell=(cat,m,val)=>setYearEdits(prev=>({...prev,[cat]:{...prev[cat],[String(m)]:val}}));
+    const renderSection=(label,catList,isIncome)=>(
+      <>
+        <tr style={{background:'var(--sidebar-bg)'}}>
+          <td colSpan={13} style={{fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{label}</td>
+        </tr>
+        {catList.map(cat=>(
+          <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
+            <td style={{fontWeight:500,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--card-bg)',zIndex:1,whiteSpace:'nowrap'}}>{cat}</td>
+            {MO.map((mo,i)=>{
+              const m=i+1;
+              const isCur=m===curMonth&&year===curYear;
+              const val=yearEdits[cat]?.[String(m)]??'';
+              const actual=getActual(cat,m);
+              return(
+                <td key={m} style={{padding:'3px 3px',background:isCur?'rgba(99,102,241,0.05)':'transparent',minWidth:82}}>
+                  <input type="number" step="1" min="0" value={val}
+                    onChange={e=>setCell(cat,m,e.target.value)}
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'DM Mono',
+                      background:isCur?'rgba(99,102,241,0.06)':'var(--card-bg)',
+                      outline:isCur?'1px solid var(--blue)':undefined}}
+                    placeholder={actual>0?String(Math.round(actual)):''}/>
+                  {actual>0&&<div style={{fontSize:9,color:isIncome?'var(--green)':'var(--text-muted)',textAlign:'right',padding:'1px 3px 0',opacity:0.8}}>
+                    act {fmt(actual)}</div>}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </>
+    );
+    return(
+      <div>
+        <div style={{display:'flex',gap:8,marginBottom:10,justifyContent:'flex-end',alignItems:'center'}}>
+          <span style={{fontSize:12,color:'var(--text-muted)'}}>Editing all months for {year} · Current month (highlighted) shown first</span>
+          <button className="btn btn-sm btn-ghost" onClick={()=>{setView('annual');setYearEdits({});}}>Cancel</button>
+          <button className="btn btn-sm btn-success" onClick={saveYearEdits} disabled={saving}>{saving?'Saving…':'Save Year'}</button>
+        </div>
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{overflowX:'auto'}}>
+            <table style={{borderCollapse:'collapse',minWidth:1100}}>
+              <thead>
+                <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
+                  <th style={{textAlign:'left',padding:'8px 10px',fontWeight:600,fontSize:11,color:'var(--text-muted)',minWidth:150,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:3}}>Category</th>
+                  {MO.map((mo,i)=>{
+                    const isCur=(i+1)===curMonth&&year===curYear;
+                    return(
+                      <th key={i} style={{textAlign:'center',padding:'6px 4px',fontWeight:isCur?700:600,fontSize:11,
+                        color:isCur?'var(--blue)':'var(--text-muted)',minWidth:82,
+                        background:isCur?'rgba(99,102,241,0.1)':'transparent',
+                        borderBottom:isCur?'2px solid var(--blue)':undefined}}>
+                        {mo}{isCur?' ★':''}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {renderSection('Income',allIncomeCats,true)}
+                {renderSection('Expenses',allExpenseCats,false)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   /* ── KPI strip (shared across both views) ───────────────────────────────── */
   const renderKPIs=()=>{
     if(view==='month'){
@@ -2783,11 +2897,14 @@ function BudgetsPage({categories,toast}){
         </div>
         <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
           <button className={`btn btn-sm ${view==='month'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setView('month');if(editing){setEditing(false);setSuggestions({});}}}
+            onClick={()=>{setView('month');setEditing(false);setSuggestions({});setYearEdits({});}}
             style={{borderRadius:7}}>Month View</button>
           <button className={`btn btn-sm ${view==='annual'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setView('annual');if(editing){setEditing(false);setSuggestions({});}}}
+            onClick={()=>{setView('annual');setEditing(false);setSuggestions({});setYearEdits({});}}
             style={{borderRadius:7}}>Annual View</button>
+          <button className={`btn btn-sm ${view==='edit-year'?'btn-primary':'btn-ghost'}`}
+            onClick={startYearEdit}
+            style={{borderRadius:7}}>✏ Edit Year</button>
         </div>
       </div>
 
@@ -2799,7 +2916,7 @@ function BudgetsPage({categories,toast}){
         ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
         :(allIncomeCats.length===0&&allExpenseCats.length===0&&Object.keys(targets).length===0)
           ?<div className="card"><div className="empty"><div className="empty-icon">◉</div><span>No budget data for {year}</span></div></div>
-          :view==='month'?renderMonthView():renderAnnualView()
+          :view==='month'?renderMonthView():view==='edit-year'?renderEditYearView():renderAnnualView()
       }
     </div>
   );
