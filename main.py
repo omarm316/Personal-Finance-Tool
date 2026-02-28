@@ -115,30 +115,49 @@ def serialize_account(a: Account, transaction_count: int = 0) -> dict:
 def get_account_balance(db: Session, account_id: int, as_of_date: datetime = None) -> float:
     """
     Compute account balance at a given date (or now if not specified).
-    Formula: starting_balance + SUM(transactions.amount WHERE date <= target_date)
-    This is the single reusable helper for all balance calculations.
+
+    Anchor model (start_date is set):
+      starting_balance = Plaid balance AT start_date (the anchor).
+      Forward  (as_of >= anchor): anchor + SUM(transactions strictly after anchor)
+      Backward (as_of <  anchor): anchor - SUM(transactions from as_of+1 through anchor)
+
+    Legacy model (start_date is None):
+      starting_balance = plaid_balance - SUM(all transactions).
+      balance = starting_balance + SUM(all transactions up to as_of).
     """
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0.0
 
-    starting = account.starting_balance or 0.0
-    start_dt = account.start_date
+    anchor = account.starting_balance or 0.0
+    anchor_dt = account.start_date
 
-    # ALL transactions must be included here — starting_balance is anchored as
-    # (plaid_actual - SUM of ALL txns), so the query must sum the same set.
-    # Filtering out any subset would create a gap and give a wrong balance.
-    query = db.query(Transaction).filter(
-        Transaction.account_id == account_id,
-    )
-    if start_dt:
-        query = query.filter(Transaction.date >= start_dt)
-    if as_of_date:
-        query = query.filter(Transaction.date <= as_of_date)
+    if anchor_dt is None:
+        # Legacy: starting_balance = pre-all-transactions offset
+        query = db.query(Transaction).filter(Transaction.account_id == account_id)
+        if as_of_date:
+            query = query.filter(Transaction.date <= as_of_date)
+        return round(anchor + sum(t.amount for t in query.all()), 2)
 
-    # Sum transaction amounts
-    txn_sum = sum(t.amount for t in query.all())
-    return round(starting + txn_sum, 2)
+    # Anchor model
+    as_of_cmp = as_of_date if as_of_date else datetime.utcnow()
+    if as_of_cmp >= anchor_dt:
+        # Forward: transactions strictly after the anchor day are not yet in the Plaid snapshot
+        query = db.query(Transaction).filter(
+            Transaction.account_id == account_id,
+            Transaction.date > anchor_dt,
+        )
+        if as_of_date:
+            query = query.filter(Transaction.date <= as_of_date)
+        return round(anchor + sum(t.amount for t in query.all()), 2)
+    else:
+        # Backward: subtract transactions that happened after as_of but on/before anchor
+        txn_sum = sum(t.amount for t in db.query(Transaction).filter(
+            Transaction.account_id == account_id,
+            Transaction.date > as_of_date,
+            Transaction.date <= anchor_dt,
+        ).all())
+        return round(anchor - txn_sum, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +183,6 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0
-    # ALL transactions — must match the filter used when starting_balance was anchored.
     txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
     ).order_by(Transaction.date).all()
@@ -174,7 +192,19 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     for t in txns:
         by_month[(t.date.year, t.date.month)] += t.amount
     db.query(AccountMonthlySnapshot).filter_by(account_id=account_id).delete(synchronize_session=False)
-    running = account.starting_balance or 0.0
+
+    if account.start_date:
+        # Anchor model: starting_balance = Plaid balance AT start_date.
+        # Derive the "balance before any transaction" by subtracting all transactions
+        # up to and including the anchor date from the anchor balance.
+        pre_anchor_sum = db.query(_func.sum(Transaction.amount)).filter(
+            Transaction.account_id == account_id,
+            Transaction.date <= account.start_date,
+        ).scalar() or 0.0
+        running = round((account.starting_balance or 0.0) - pre_anchor_sum, 4)
+    else:
+        # Legacy: starting_balance is already the pre-all-transactions offset
+        running = account.starting_balance or 0.0
     sorted_months = sorted(by_month.keys())
     for (year, month) in sorted_months:
         opening = running
@@ -2472,11 +2502,12 @@ async def sync_account_balances(db: Session = Depends(get_db)):
                 skipped.append({'name': pa['name'], 'reason': 'no matching account in DB'})
                 continue
             signed_balance = _sign_plaid_balance(raw_balance, account.account_type)
-            txn_sum = db.query(_func.sum(Transaction.amount)).filter(
-                Transaction.account_id == account.id
-            ).scalar() or 0.0
-            account.starting_balance = round(signed_balance - txn_sum, 4)
-            account.start_date = None  # use ALL transactions
+            # Anchor model: store the Plaid balance AS-IS with the current timestamp.
+            # Balance = anchor ± transactions relative to this point.
+            # Do NOT subtract the transaction sum — that made starting_balance stale
+            # every time a new transaction arrived.
+            account.starting_balance = round(signed_balance, 4)
+            account.start_date = datetime.utcnow()  # anchor date
             db.flush()
             months_built = rebuild_monthly_snapshots(db, account.id)
             db.flush()
@@ -3513,19 +3544,44 @@ async def get_daily_balances(
         anchor_date = acct.start_date.date() if acct.start_date else date(2000, 1, 1)
         range_start_dt = datetime.combine(start_dt, datetime.min.time())
         range_end_dt = datetime.combine(end_dt, datetime.max.time())
-        anchor_dt = datetime.combine(anchor_date, datetime.min.time())
+        # Use end-of-day for anchor so transactions ON anchor_date are considered
+        # "already in the Plaid snapshot" (anchor_balance includes them).
+        anchor_dt = datetime.combine(anchor_date, datetime.max.time())
 
-        # Sum ALL transactions from anchor up to day before range start.
-        # Must match how starting_balance was anchored (all transactions, no filter).
-        pre_sum = (
-            db.query(func.sum(Transaction.amount))
-            .filter(
-                Transaction.account_id == acct.id,
-                Transaction.date >= anchor_dt,
-                Transaction.date < range_start_dt,
+        # Compute balance at EOD(range_start - 1) using the anchor.
+        #
+        # Anchor model (start_date is set):
+        #   anchor_balance = Plaid balance AT anchor_dt (end of anchor day).
+        #   If anchor is WITHIN or AFTER the display range: go backward —
+        #     subtract transactions from range_start through anchor_dt
+        #     to get the balance just before range_start.
+        #   If anchor is BEFORE the display range: go forward —
+        #     add transactions from anchor_dt up to (but not including) range_start.
+        #
+        # Legacy model (start_date is None, anchor_dt = year 2000):
+        #   pre_sum forward from year 2000 to range_start (same as before).
+        if anchor_dt >= range_start_dt:
+            # Anchor within or after range: walk backward to range_start - 1
+            pre_sum = -(
+                db.query(func.sum(Transaction.amount))
+                .filter(
+                    Transaction.account_id == acct.id,
+                    Transaction.date >= range_start_dt,
+                    Transaction.date <= anchor_dt,
+                )
+                .scalar() or 0.0
             )
-            .scalar()
-        ) or 0.0
+        else:
+            # Anchor before range: walk forward to range_start - 1
+            pre_sum = (
+                db.query(func.sum(Transaction.amount))
+                .filter(
+                    Transaction.account_id == acct.id,
+                    Transaction.date >= anchor_dt,
+                    Transaction.date < range_start_dt,
+                )
+                .scalar() or 0.0
+            )
 
         # Fetch ALL transactions within the range (same reasoning).
         txns = (
