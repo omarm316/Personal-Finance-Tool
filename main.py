@@ -2865,6 +2865,19 @@ async def delete_splits(transaction_id: int, db: Session = Depends(get_db)):
     return {"message": "Splits removed"}
 
 
+@app.delete("/api/transactions/{transaction_id}")
+async def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    """Permanently delete a transaction and its splits. Used to clean up Plaid duplicates."""
+    t = db.query(Transaction).filter_by(id=transaction_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    # Remove child splits first to avoid FK constraint errors
+    db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete(synchronize_session=False)
+    db.delete(t)
+    db.commit()
+    return {"deleted": True, "id": transaction_id}
+
+
 # ---------------------------------------------------------------------------
 # Budget Targets (Section 4)
 # ---------------------------------------------------------------------------

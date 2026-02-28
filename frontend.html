@@ -585,11 +585,27 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           )}
           {/* Footer */}
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:6,borderTop:'1px solid var(--border)'}}>
-            <button className="btn btn-sm btn-secondary"
-              onClick={()=>{setShowTxnInfo(false);onSplit(txn);}}
-              title={txn.is_split?'Edit existing splits':'Split this transaction into parts'}>
-              {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
-            </button>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-sm btn-secondary"
+                onClick={()=>{setShowTxnInfo(false);onSplit(txn);}}
+                title={txn.is_split?'Edit existing splits':'Split this transaction into parts'}>
+                {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
+              </button>
+              <button className="btn btn-sm"
+                style={{background:'#fef2f2',color:'#991b1b',border:'1px solid #fca5a5',fontSize:12}}
+                onClick={async()=>{
+                  if(!confirm(`Permanently delete this transaction?\n\n"${txn.description_display||txn.description_raw}"\n${fmtDate(txn.date)} · ${txn.amount<0?'–':'+'}${fmt(txn.amount)}\n\nThis cannot be undone.`))return;
+                  try{
+                    await apiFetch(`/transactions/${txn.id}`,{method:'DELETE'});
+                    setShowTxnInfo(false);
+                    toast&&toast('Transaction deleted');
+                    onSave(txn.id,{__deleted:true});
+                  }catch(e){toast&&toast('Delete failed: '+(e.message||e),'error');}
+                }}
+                title="Permanently delete this transaction">
+                🗑 Delete
+              </button>
+            </div>
             <button className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px'}} onClick={()=>setShowTxnInfo(false)}>Close</button>
           </div>
         </div>
@@ -1001,6 +1017,8 @@ function TransactionsPage({categories,toast}){
   /* Preserve scroll position after save (Section 2C) */
   const handleSave=async(id,updates)=>{
     const scrollY=window.scrollY;
+    /* __deleted is a sentinel set by the delete button after it already called DELETE — just reload */
+    if(updates.__deleted){await load();requestAnimationFrame(()=>window.scrollTo(0,scrollY));return;}
     try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();toast('Saved');requestAnimationFrame(()=>window.scrollTo(0,scrollY));}
     catch(e){toast('Failed to save','error');}
   };
