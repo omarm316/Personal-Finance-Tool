@@ -29,26 +29,62 @@ class CategorizationEngine:
     
     def clean_description(self, raw_description: str) -> str:
         """
-        Clean and standardize transaction description
-        Mimics your Excel cleaning logic
+        Deterministic noise-stripper for bank transaction descriptions.
+
+        Removes trailing identifiers, payment network codes, store numbers,
+        and other bank-appended garbage that adds no display value.
+        Returns an uppercased, whitespace-normalised result.
         """
         if not raw_description:
             return ""
-        
+
         desc = raw_description.upper().strip()
-        
-        # Remove common noise
-        noise_patterns = [
-            r'\s+PPD ID:.*',
-            r'\s+DIR DEP.*',
-            r'\s+PAYROLL.*',
-            r'\d{10,}',  # Long numbers
-            r'\s{2,}',   # Multiple spaces
+
+        # ── Suffix patterns (strip everything from the keyword onwards) ──────
+        suffix_patterns = [
+            r'\s+PPD ID:.*',            # ACH payroll/direct-deposit IDs
+            r'\s+WEB ID:.*',            # ACH web-initiated IDs
+            r'\s+CCD ID:.*',            # ACH corporate credit/debit IDs
+            r'\s+TEL ID:.*',
+            r'\s+ORIG CO ID:.*',
+            r'\s+ORIG ID:.*',
+            r'\s+DIR DEP.*',            # Direct deposit suffix
+            r'\s+PAYROLL.*',            # Payroll suffix
+            r'\s+DIRECT DEP.*',
+            r'\s+PURCHASE.*',           # "PURCHASE AUTHORIZED ON …"
+            r'\s+AUTHORIZED ON.*',
+            r'\s+CARD \d+.*',           # "CARD 1234 …"
+            r'\s+REF#.*',               # Reference numbers
+            r'\s+CONF#.*',              # Confirmation numbers
+            r'\s+TRN#.*',
         ]
-        
-        for pattern in noise_patterns:
-            desc = re.sub(pattern, ' ', desc)
-        
+        for p in suffix_patterns:
+            desc = re.sub(p, '', desc)
+
+        # ── Prefix patterns (strip payment-network tag at start) ─────────────
+        prefix_patterns = [
+            r'^TST\*',                  # Toast POS
+            r'^SQ \*',                  # Square
+            r'^SQU\*',
+            r'^PP\*',                   # PayPal
+            r'^PAYPAL \*',
+            r'^VENMO \*',
+            r'^CKE\*',                  # Various POS prefixes
+            r'^SP ',                    # Shopify "SP MerchantName"
+        ]
+        for p in prefix_patterns:
+            desc = re.sub(p, '', desc)
+
+        # ── Inline noise (remove in-place) ───────────────────────────────────
+        inline_patterns = [
+            r'\d{15,}',                 # Very long numbers (card/account IDs)
+            r'#\d{4,}',                 # Store/transaction codes like #1234
+            r'\b\d{4,}\b(?!\s*%)',      # Standalone 4+ digit numbers (not percentages)
+            r'\s{2,}',                  # Collapsed multiple spaces
+        ]
+        for p in inline_patterns:
+            desc = re.sub(p, ' ', desc)
+
         return desc.strip()
     
     def extract_merchant(self, description: str) -> Optional[str]:

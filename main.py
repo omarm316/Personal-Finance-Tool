@@ -1062,36 +1062,46 @@ async def force_resync_item(item_id: str, background_tasks: BackgroundTasks, db:
 # Transactions: list
 # ---------------------------------------------------------------------------
 
-def _best_description(raw: str, stored_clean, categorizer=None) -> str:
+def _best_description(raw: str, stored_clean, enrichment_source=None, categorizer=None) -> str:
     """
-    Return the best human-readable description for a transaction.
+    Compute the best human-readable description for a transaction.
+
+    Design principle: only two trustworthy sources for display names —
+      (a) an explicit Rule with set_description (user-controlled, deterministic)
+      (b) the noise-stripper (deterministic regex, never hallucinates)
+
+    LLM-written description_clean is intentionally SKIPPED because the LLM
+    sometimes produces garbled output (e.g. 'CONRADFT LAUDERDALEFT LAUDERDALE').
+    It is only trusted when a rule explicitly set it (enrichment_source == 'rule').
 
     Priority:
-      1. stored description_clean — if non-empty AND meaningfully different from raw
-      2. Rule set_description    — if a rule matches AND its display name != raw
-      3. noise-stripped output   — always strips PPD IDs, long numbers, PAYROLL, etc.
-      4. raw as final fallback
+      1. Rule set_description  — rule matched AND has a display name != raw
+      2. Noise-stripped raw    — deterministic: removes PPD IDs, long numbers,
+                                 PAYROLL/DIR DEP suffixes, etc.
+      3. Raw fallback
     """
     raw = (raw or "").strip()
     if not raw:
         return raw
-    stored = (stored_clean or "").strip()
     raw_upper = raw.upper()
 
-    if stored and stored.upper() != raw_upper:
-        return stored                     # already a meaningful custom value
-
     if categorizer:
+        # Priority 1: rule with an explicit custom display name
         rule = categorizer.match_rule(raw, 0)
         if rule and rule.set_description:
             sd = rule.set_description.strip()
             if sd.upper() != raw_upper:
-                return sd                 # rule has a genuine custom display name
+                return sd
+
+        # Priority 2: noise-stripper (always deterministic)
         cleaned = categorizer.clean_description(raw)
         if cleaned and cleaned != raw_upper:
-            return cleaned                # noise-stripped improvement
+            return cleaned
 
-    return stored or raw
+    # Priority 3: fall back to raw (or rule-written stored_clean if source is 'rule')
+    if enrichment_source == 'rule' and stored_clean:
+        return stored_clean.strip() or raw
+    return raw
 
 
 def _serialize_txn(t, splits_map=None, categorizer=None):
@@ -1110,7 +1120,9 @@ def _serialize_txn(t, splits_map=None, categorizer=None):
         category_display = t.category_final
 
     description_display = _best_description(
-        t.description_raw, t.description_clean, categorizer
+        t.description_raw, t.description_clean,
+        enrichment_source=t.enrichment_source,
+        categorizer=categorizer
     )
 
     return {
