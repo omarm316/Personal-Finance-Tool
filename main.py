@@ -26,7 +26,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
-    AccountMonthlySnapshot,
+    AccountMonthlySnapshot, UserCorrection,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -2871,8 +2871,13 @@ async def delete_transaction(transaction_id: int, db: Session = Depends(get_db))
     t = db.query(Transaction).filter_by(id=transaction_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    # Remove child splits first to avoid FK constraint errors
+    # Clear all FK references before deleting the parent row
     db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete(synchronize_session=False)
+    db.query(UserCorrection).filter_by(transaction_id=transaction_id).delete(synchronize_session=False)
+    # Nullify any child Transaction rows (split children stored as Transaction rows)
+    db.query(Transaction).filter(Transaction.parent_transaction_id == transaction_id).update(
+        {Transaction.parent_transaction_id: None}, synchronize_session=False
+    )
     db.delete(t)
     db.commit()
     return {"deleted": True, "id": transaction_id}
