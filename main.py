@@ -797,6 +797,50 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     if errors:
         print(f"[sync] {plaid_item.institution_name}: {errors} transaction(s) failed to write")
 
+    # ── Handle modified transactions ─────────────────────────────────────────
+    # Plaid sends updated metadata (date shift, merchant enrichment, amount
+    # correction) in the 'modified' list.  We update unlocked transactions only —
+    # locked ones represent a manual override that should be preserved.
+    modified_count = 0
+    for txn_data in result.get('modified', []):
+        existing = db.query(Transaction).filter_by(
+            plaid_transaction_id=txn_data['plaid_transaction_id']
+        ).first()
+        if not existing or existing.is_locked:
+            continue
+        new_amount = -txn_data['amount']
+        new_date   = txn_data['date']
+        existing.date          = new_date
+        existing.year          = new_date.year
+        existing.month         = new_date.month
+        existing.day           = new_date.day
+        existing.amount        = new_amount
+        existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+        modified_count += 1
+    if modified_count:
+        print(f"[sync] {plaid_item.institution_name}: {modified_count} transaction(s) updated (Plaid modified)")
+
+    # ── Handle removed transactions ───────────────────────────────────────────
+    # Plaid removes a transaction when: a pending txn is cancelled, a date/ID
+    # changes on settlement, or bank data is corrected.  We hard-delete unlocked
+    # transactions and leave locked ones untouched (user manually confirmed them).
+    removed_count  = 0
+    locked_skipped = 0
+    for plaid_id in result.get('removed', []):
+        existing = db.query(Transaction).filter_by(plaid_transaction_id=plaid_id).first()
+        if not existing:
+            continue
+        if existing.is_locked:
+            locked_skipped += 1
+            print(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
+            continue
+        db.delete(existing)
+        removed_count += 1
+    if removed_count:
+        print(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) removed (Plaid removed)")
+    if locked_skipped:
+        print(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
+
     # Store cursor — use None instead of empty string for clean state
     plaid_item.cursor         = result['next_cursor'] or None
     plaid_item.last_synced_at = datetime.utcnow()
