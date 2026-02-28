@@ -2298,14 +2298,17 @@ async def reapply_rules(db: Session = Depends(get_db)):
 @app.post("/api/rules/clean-descriptions")
 async def clean_all_descriptions(db: Session = Depends(get_db)):
     """
-    Sync description_clean for every transaction to match its best rule Display Name.
+    Sync description_clean for every transaction to the best available display name.
 
-    Two passes:
-      Pass A — For every transaction that matches a rule with set_description:
-               force description_clean = rule.set_description regardless of what
-               was previously stored (LLM may have left a noisy or raw value).
-      Pass B — For every transaction still missing description_clean (null/empty):
-               fill with the noise-stripped version of description_raw.
+    Priority order for each transaction:
+      1. Rule set_description — IF it is set AND different from the raw description
+         (if the user left the display name as the full noisy raw string, skip it)
+      2. noise-stripped clean_description(description_raw) — always available
+         and will strip PPD IDs, long numbers, PAYROLL suffixes, etc.
+
+    Updates whenever the computed name differs from what is currently stored,
+    so it also fixes transactions where description_clean == description_raw
+    (LLM copied it verbatim without cleaning).
 
     Only touches description_clean. Never modifies category, action, is_locked,
     or category_manual. Safe to run at any time; idempotent.
@@ -2315,23 +2318,25 @@ async def clean_all_descriptions(db: Session = Depends(get_db)):
     updated = 0
 
     for t in all_txns:
-        if not t.description_raw:
+        raw = (t.description_raw or '').strip()
+        if not raw:
             continue
 
-        matched_rule = categorizer.match_rule(t.description_raw, t.amount)
+        matched_rule = categorizer.match_rule(raw, t.amount)
 
-        if matched_rule and matched_rule.set_description:
-            # Pass A: rule has an explicit Display Name — always use it
-            wanted = matched_rule.set_description
-            if t.description_clean != wanted:
-                t.description_clean = wanted
-                updated += 1
-        elif not t.description_clean:
-            # Pass B: no rule display name and still blank — use noise-stripper
-            cleaned = categorizer.clean_description(t.description_raw)
-            if cleaned:
-                t.description_clean = cleaned
-                updated += 1
+        # Determine the best display name
+        if (matched_rule
+                and matched_rule.set_description
+                and matched_rule.set_description.strip().upper() != raw.upper()):
+            # Rule has a real custom display name (not just a copy of the raw description)
+            wanted = matched_rule.set_description.strip()
+        else:
+            # Fall back to noise-stripped version — removes PPD ID, long numbers, etc.
+            wanted = categorizer.clean_description(raw)
+
+        if wanted and t.description_clean != wanted:
+            t.description_clean = wanted
+            updated += 1
 
     db.commit()
     return {'updated': updated, 'total': len(all_txns)}
