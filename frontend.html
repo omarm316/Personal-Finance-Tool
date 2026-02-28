@@ -321,7 +321,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
         set_action:ruleAction||null,set_category:ruleCategory||null,
         set_description:ruleDesc.trim()||null,priority:100
       })});
-      toast&&toast(`Rule created — ${res.reapplied||0} transactions refreshed`);
+      toast&&toast(`Rule created — ${res.reapplied?.updated??0} transactions updated (${res.reapplied?.unlocked??0} unlocked)`);
       await onSave(txn.id,{});/* Reload */
     }catch(e){toast&&toast('Failed to create rule: '+e.message,'error');}
     finally{setRuleSaving(false);setShowQuickRule(false);}

@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
@@ -2212,18 +2213,38 @@ async def list_rules(
     } for r in rules]
 
 
-def _reapply_rules(db: Session) -> dict:
+def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
     """
-    Re-run the categorization engine on every non-locked, non-manually-edited transaction.
-    Updates description_clean, category_auto, action, and confidence in place.
-    Returns {'updated': N, 'total': M}.
+    Re-run the categorization engine on transactions.
+
+    Normal mode (force_unlock=False):
+      - Only processes non-locked, non-manually-edited transactions.
+
+    Force mode (force_unlock=True):
+      - Also processes locked/manual transactions IF a rule now matches them.
+        Clears category_manual and is_locked so the rule takes over,
+        exactly as if the rule had been in place from the start.
+
+    Returns {'updated': N, 'total': M, 'unlocked': K}.
     """
     categorizer = CategorizationEngine(db)
+
+    # Always process unlocked, non-manual transactions
     txns = db.query(Transaction).filter(
         Transaction.is_locked == False,
         Transaction.category_manual == None,
     ).all()
+
+    # In force mode also check locked/manual transactions for new rule matches
+    locked_txns = []
+    if force_unlock:
+        locked_txns = db.query(Transaction).filter(
+            or_(Transaction.is_locked == True, Transaction.category_manual != None)
+        ).all()
+
     updated = 0
+    unlocked = 0
+
     for t in txns:
         action, category, confidence, display_desc = categorizer.categorize(
             t.description_raw, t.amount, t.merchant_name,
@@ -2234,15 +2255,38 @@ def _reapply_rules(db: Session) -> dict:
         source = 'rule' if confidence >= 0.85 else 'fallback'
         if (t.description_clean != desc_clean or
                 t.category_auto != llm_category or
-                t.action != action):
+                t.action != action or
+                t.enrichment_source != source):
             t.description_clean = desc_clean
             t.category_auto     = llm_category
             t.action            = action
             t.category_confidence = confidence
             t.enrichment_source   = source
             updated += 1
+
+    for t in locked_txns:
+        matched_rule = categorizer.match_rule(t.description_raw, t.amount)
+        if not matched_rule:
+            continue  # Rule doesn't match — keep manual override intact
+        action, category, confidence, display_desc = categorizer.categorize(
+            t.description_raw, t.amount, t.merchant_name,
+            account_type=(t.account.account_type if t.account else ''),
+        )
+        desc_clean = display_desc or categorizer.clean_description(t.description_raw)
+        llm_category = '' if action == 'Transfer' else category
+        # Clear the manual override so the rule governs this transaction going forward
+        t.category_manual   = None
+        t.is_locked         = False
+        t.description_clean = desc_clean
+        t.category_auto     = llm_category
+        t.action            = action
+        t.category_confidence = confidence
+        t.enrichment_source   = 'rule'
+        unlocked += 1
+        updated += 1
+
     db.commit()
-    return {'updated': updated, 'total': len(txns)}
+    return {'updated': updated, 'total': len(txns) + len(locked_txns), 'unlocked': unlocked}
 
 
 @app.post("/api/rules/reapply")
@@ -2269,7 +2313,9 @@ async def create_rule(data: dict, db: Session = Depends(get_db)):
     db.add(rule)
     db.commit()
     db.refresh(rule)
-    reapplied = _reapply_rules(db)
+    # force_unlock=True: if the new rule matches a previously-locked transaction,
+    # clear the manual override so the rule takes over for all history.
+    reapplied = _reapply_rules(db, force_unlock=True)
     return {'id': rule.id, 'message': 'Rule created', 'reapplied': reapplied}
 
 
