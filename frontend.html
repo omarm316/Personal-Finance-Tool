@@ -287,6 +287,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   /* Quick Rule creation */
   const[showQuickRule,setShowQuickRule]=useState(false);
   const[rulePattern,setRulePattern]=useState(txn.description_clean||txn.description_raw||'');
+  const[ruleDesc,setRuleDesc]=useState(txn.description_clean||txn.description_raw||'');
   const[ruleAction,setRuleAction]=useState(txn.action||'Expense');
   const[ruleCategory,setRuleCategory]=useState(txn.category_final||'');
   const[ruleSaving,setRuleSaving]=useState(false);
@@ -317,7 +318,8 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
     try{
       const res=await apiFetch('/rules',{method:'POST',body:JSON.stringify({
         pattern:rulePattern.trim(),match_type:'contains',
-        set_action:ruleAction||null,set_category:ruleCategory||null,priority:100
+        set_action:ruleAction||null,set_category:ruleCategory||null,
+        set_description:ruleDesc.trim()||null,priority:100
       })});
       toast&&toast(`Rule created — ${res.reapplied||0} transactions refreshed`);
       await onSave(txn.id,{});/* Reload */
@@ -403,7 +405,9 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               <span style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)'}}>New rule:</span>
               <button className="btn btn-ghost" style={{padding:'2px 5px',fontSize:11,marginLeft:'auto'}} onClick={()=>setShowQuickRule(false)}>✕</button>
             </div>
-            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)} placeholder="Pattern (e.g. STARBUCKS)"
+            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)} placeholder="Pattern to match (e.g. STARBUCKS)"
+              style={{fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}/>
+            <input value={ruleDesc} onChange={e=>setRuleDesc(e.target.value)} placeholder="Display name (e.g. Starbucks Coffee)"
               style={{fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}/>
             <div style={{display:'flex',gap:4}}>
               <select value={ruleAction} onChange={e=>setRuleAction(e.target.value)} className="filter-select" style={{fontSize:11,padding:'3px 6px',flex:1}}>
@@ -426,7 +430,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
             {txn.enrichment_source!=='rule'&&<button className="btn btn-sm"
               style={{padding:'4px 7px',fontSize:11,background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe'}}
-              onClick={()=>{setRulePattern(txn.description_clean||txn.description_raw||'');setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
+              onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
               title="Create a rule from this transaction">Rule</button>}
             <button className="btn btn-sm"
               style={{padding:'4px 7px',fontSize:11,background:excluded?'#fef2f2':'#f3f4f6',color:excluded?'#991b1b':'var(--text-muted)',border:excluded?'1px solid #fca5a5':'1px solid var(--border)'}}
@@ -1718,7 +1722,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
   );
 }
 
-function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
+function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
   const[tab,setTab]=useState('data');
   const[busy,setBusy]=useState(false);
   const[items,setItems]=useState([]);
@@ -1854,8 +1858,14 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
                 {[['contains','Contains'],['contains_any','Contains Any'],['contains_all','Contains All'],['equals','Equals'],['starts_with','Starts With'],['regex','Regex']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
               </select>
               <input value={ruleEditVals.pattern||''} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} placeholder="Pattern" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
-              <input value={ruleEditVals.set_action||''} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} placeholder="Action" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
-              <input value={ruleEditVals.set_category||''} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} placeholder="Category" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <select value={ruleEditVals.set_action||''} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                <option value="">— Action —</option>
+                {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+              </select>
+              <select value={ruleEditVals.set_category||''} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                <option value="">— Category —</option>
+                {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
             </div>
             <div style={{display:'flex',gap:8}}>
               <input value={ruleEditVals.set_description||''} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} placeholder="Set Description" style={{flex:1,border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
@@ -1874,8 +1884,14 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged}){
                     {[['contains','Contains'],['contains_any','Contains Any'],['contains_all','Contains All'],['equals','Equals'],['starts_with','Starts With'],['regex','Regex']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
                   </select></td>
                   <td><input value={ruleEditVals.pattern} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} style={{width:'100%',fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
-                  <td><input value={ruleEditVals.set_action} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{width:70,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
-                  <td><input value={ruleEditVals.set_category} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><select value={ruleEditVals.set_action} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}>
+                    <option value="">—</option>
+                    {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+                  </select></td>
+                  <td><select value={ruleEditVals.set_category} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{width:110,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}>
+                    <option value="">—</option>
+                    {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select></td>
                   <td><input value={ruleEditVals.set_description} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} style={{width:100,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
                   <td><input value={ruleEditVals.notes} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
                   <td></td>
@@ -3606,7 +3622,7 @@ function App(){
           {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}
           {page==='cards'&&<CardsPage toast={toast}/>}
           {page==='gcb'&&<GCBPage toast={toast}/>}
-          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta}/>}
+          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta} categories={categories}/>}
         </div>
       </div>
       <ToastContainer toasts={toasts}/>
