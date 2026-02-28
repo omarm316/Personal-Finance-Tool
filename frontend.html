@@ -284,6 +284,8 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   const[action,setAction]=useState(txn.action);
   const[saving,setSaving]=useState(false);
   const[expanded,setExpanded]=useState(false);
+  /* Transaction info modal */
+  const[showTxnInfo,setShowTxnInfo]=useState(false);
   /* Quick Rule creation */
   const[showQuickRule,setShowQuickRule]=useState(false);
   const[rulePattern,setRulePattern]=useState(txn.description_clean||txn.description_raw||'');
@@ -401,6 +403,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           </div>
           :<div className="edit-actions">
             {txn.needs_review&&!locked&&<button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none'}} onClick={()=>onReview(txn)}>Review</button>}
+            <button className="btn btn-sm" style={{padding:'0',fontSize:13,background:'var(--bg)',color:'var(--text-muted)',border:'1px solid var(--border)',borderRadius:'50%',width:26,height:26,display:'inline-flex',alignItems:'center',justifyContent:'center',flexShrink:0}} onClick={()=>setShowTxnInfo(true)} title="Transaction details">ⓘ</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)} style={{fontSize:11}}>{txn.is_split?'Splits':'Split'}</button>
             {locked&&<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13}} onClick={toggleLock} title="Unlock">🔓</button>}
@@ -493,6 +496,95 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-success" style={{fontSize:13,padding:'8px 22px',fontWeight:600}} onClick={saveQuickRule} disabled={ruleSaving}>
               {ruleSaving?'Saving…':'Save Rule'}
             </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    {showTxnInfo&&ReactDOM.createPortal(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}
+        onClick={e=>{if(e.target===e.currentTarget)setShowTxnInfo(false);}}>
+        <div style={{background:'var(--card-bg)',borderRadius:14,padding:32,width:580,maxWidth:'94vw',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(0,0,0,0.35)',display:'flex',flexDirection:'column',gap:18}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:18,color:'var(--text-primary)'}}>Transaction Details</div>
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>ID #{txn.id}</div>
+            </div>
+            <button className="btn btn-ghost" style={{padding:'4px 8px',fontSize:16,lineHeight:1}} onClick={()=>setShowTxnInfo(false)}>✕</button>
+          </div>
+          {/* Description block */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px',display:'flex',flexDirection:'column',gap:4}}>
+            <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</div>
+            <div style={{fontWeight:600,fontSize:15,color:'var(--text-primary)'}}>{txn.description_display||txn.description_raw}</div>
+            {txn.description_display&&txn.description_display!==txn.description_raw&&(
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                <span style={{fontWeight:600}}>Raw: </span>
+                <span style={{fontFamily:'monospace'}}>{txn.description_raw}</span>
+              </div>
+            )}
+          </div>
+          {/* Info grid */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            {[
+              ['Date',fmtDate(txn.date)],
+              ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
+              ['Account',txn.account_name],
+              ['Type',txn.action_display||txn.action||'—'],
+              ['Category',txn.category_final||'Unclassified'],
+              ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
+              ['Import Source',txn.import_source||'plaid'],
+              ['Enrichment',txn.enrichment_source||'—'],
+            ].map(([label,value])=>(
+              <div key={label} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px'}}>
+                <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:3}}>{label}</div>
+                <div style={{fontSize:13,color:'var(--text-primary)',fontWeight:500,wordBreak:'break-word'}}>{value}</div>
+              </div>
+            ))}
+          </div>
+          {/* Category override note */}
+          {txn.category_manual&&txn.category_auto&&txn.category_auto!==txn.category_manual&&(
+            <div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:8,padding:'9px 13px',border:'1px solid var(--border)'}}>
+              <span style={{fontWeight:600}}>AI suggested: </span><span>{txn.category_auto}</span>
+              <span style={{margin:'0 8px',opacity:0.4}}>→</span>
+              <span style={{fontWeight:600}}>Manual override: </span><span>{txn.category_manual}</span>
+            </div>
+          )}
+          {/* Flags */}
+          {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {locked&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'#f3f4f6',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒 Locked</span>}
+              {txn.is_gcb&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'#fef9c3',color:'#854d0e',border:'1px solid #fde047'}}>⭐ GCB</span>}
+              {excluded&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'#fef2f2',color:'#991b1b',border:'1px solid #fca5a5'}}>⊘ Excluded</span>}
+              {txn.needs_review&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'#fffbeb',color:'#92400e',border:'1px solid #fde68a'}}>⚠ Needs Review</span>}
+            </div>
+          )}
+          {/* Splits breakdown */}
+          {txn.is_split&&txn.splits&&txn.splits.length>0&&(
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Splits ({txn.splits.length})</div>
+              <div style={{border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
+                {txn.splits.map((s,i)=>(
+                  <div key={i} style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:10,alignItems:'center',padding:'10px 14px',borderBottom:i<txn.splits.length-1?'1px solid var(--border)':'none',background:i%2===0?'var(--bg)':'var(--card-bg)'}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{s.description||<span style={{fontStyle:'italic',color:'var(--text-muted)'}}>—</span>}</div>
+                      {s.category&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{s.category}</div>}
+                    </div>
+                    <span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:10}}>{s.action}</span>
+                    <span style={{fontWeight:600,fontSize:13,minWidth:70,textAlign:'right',color:'var(--text-primary)'}}>{s.amount<0?'–':'+' }{fmt(s.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Footer */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:6,borderTop:'1px solid var(--border)'}}>
+            <button className="btn btn-sm btn-secondary"
+              onClick={()=>{setShowTxnInfo(false);onSplit(txn);}}
+              title={txn.is_split?'Edit existing splits':'Split this transaction into parts'}>
+              {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
+            </button>
+            <button className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px'}} onClick={()=>setShowTxnInfo(false)}>Close</button>
           </div>
         </div>
       </div>,
