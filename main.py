@@ -125,12 +125,12 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     starting = account.starting_balance or 0.0
     start_dt = account.start_date
 
-    # Build query for transactions after start_date up to as_of_date
-    # Excluded and GCB-tagged transactions are skipped.
+    # Build query for transactions after start_date up to as_of_date.
+    # NOTE: ALL transactions are included — excluded/GCB flags mean "skip in
+    # budget analysis" but those transactions still moved real money and must
+    # be counted here so the balance matches the actual bank balance.
     query = db.query(Transaction).filter(
         Transaction.account_id == account_id,
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
     )
     if start_dt:
         query = query.filter(Transaction.date >= start_dt)
@@ -165,10 +165,9 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0
+    # ALL transactions count toward balance — excluded/GCB still moved real money.
     txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
     ).order_by(Transaction.date).all()
     if not txns:
         return 0
@@ -217,12 +216,11 @@ def _refresh_current_month_snapshot(db: Session, account_id: int) -> None:
             closing_balance=round(prev.closing_balance, 2),
         )
         db.add(snapshot)
+    # ALL transactions count — excluded/GCB still moved real money.
     month_sum = db.query(_func.sum(Transaction.amount)).filter(
         Transaction.account_id == account_id,
         Transaction.year == year,
         Transaction.month == month,
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
     ).scalar() or 0.0
     snapshot.closing_balance = round(snapshot.opening_balance + month_sum, 2)
     snapshot.synced_at = datetime.utcnow()
@@ -2859,13 +2857,11 @@ async def get_balance_timeline(
     else:
         range_end = datetime.utcnow()
 
-    # Get all transactions for this account in range (skip excluded and GCB)
+    # ALL transactions count — excluded/GCB still moved real money.
     txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.date >= range_start,
         Transaction.date <= range_end,
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
     ).order_by(Transaction.date).all()
 
     # Group transaction amounts by date
