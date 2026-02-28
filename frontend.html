@@ -1830,7 +1830,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
     setCleaningDescs(true);
     try{
       const r=await apiFetch('/rules/clean-descriptions',{method:'POST'});
-      toast(r.updated>0?`Cleaned ${r.updated} description${r.updated!==1?'s':''} (${r.total} had missing names)`:'All descriptions already filled in — nothing to update');
+      toast(r.updated>0?`Updated ${r.updated} display name${r.updated!==1?'s':''} across ${r.total} transactions`:'All display names already match their rules — nothing to update');
     }catch(e){toast('Failed: '+(e.message||e),'error');}
     finally{setCleaningDescs(false);}
   };

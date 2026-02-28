@@ -2298,29 +2298,43 @@ async def reapply_rules(db: Session = Depends(get_db)):
 @app.post("/api/rules/clean-descriptions")
 async def clean_all_descriptions(db: Session = Depends(get_db)):
     """
-    Fill description_clean for every transaction where it is NULL or empty.
-    Safe to run at any time — only touches description_clean, never category,
-    action, is_locked, or category_manual.  Uses the best rule match if one
-    exists, otherwise falls back to the basic noise-stripping cleaner.
+    Sync description_clean for every transaction to match its best rule Display Name.
+
+    Two passes:
+      Pass A — For every transaction that matches a rule with set_description:
+               force description_clean = rule.set_description regardless of what
+               was previously stored (LLM may have left a noisy or raw value).
+      Pass B — For every transaction still missing description_clean (null/empty):
+               fill with the noise-stripped version of description_raw.
+
+    Only touches description_clean. Never modifies category, action, is_locked,
+    or category_manual. Safe to run at any time; idempotent.
     """
     categorizer = CategorizationEngine(db)
-    txns = db.query(Transaction).filter(
-        or_(Transaction.description_clean == None, Transaction.description_clean == "")
-    ).all()
+    all_txns = db.query(Transaction).filter(Transaction.description_raw != None).all()
     updated = 0
-    for t in txns:
+
+    for t in all_txns:
         if not t.description_raw:
             continue
+
         matched_rule = categorizer.match_rule(t.description_raw, t.amount)
+
         if matched_rule and matched_rule.set_description:
-            desc_clean = matched_rule.set_description
-        else:
-            desc_clean = categorizer.clean_description(t.description_raw)
-        if desc_clean:
-            t.description_clean = desc_clean
-            updated += 1
+            # Pass A: rule has an explicit Display Name — always use it
+            wanted = matched_rule.set_description
+            if t.description_clean != wanted:
+                t.description_clean = wanted
+                updated += 1
+        elif not t.description_clean:
+            # Pass B: no rule display name and still blank — use noise-stripper
+            cleaned = categorizer.clean_description(t.description_raw)
+            if cleaned:
+                t.description_clean = cleaned
+                updated += 1
+
     db.commit()
-    return {'updated': updated, 'total': len(txns)}
+    return {'updated': updated, 'total': len(all_txns)}
 
 
 @app.post("/api/rules")
