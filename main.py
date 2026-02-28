@@ -1062,7 +1062,39 @@ async def force_resync_item(item_id: str, background_tasks: BackgroundTasks, db:
 # Transactions: list
 # ---------------------------------------------------------------------------
 
-def _serialize_txn(t, splits_map=None):
+def _best_description(raw: str, stored_clean, categorizer=None) -> str:
+    """
+    Return the best human-readable description for a transaction.
+
+    Priority:
+      1. stored description_clean — if non-empty AND meaningfully different from raw
+      2. Rule set_description    — if a rule matches AND its display name != raw
+      3. noise-stripped output   — always strips PPD IDs, long numbers, PAYROLL, etc.
+      4. raw as final fallback
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    stored = (stored_clean or "").strip()
+    raw_upper = raw.upper()
+
+    if stored and stored.upper() != raw_upper:
+        return stored                     # already a meaningful custom value
+
+    if categorizer:
+        rule = categorizer.match_rule(raw, 0)
+        if rule and rule.set_description:
+            sd = rule.set_description.strip()
+            if sd.upper() != raw_upper:
+                return sd                 # rule has a genuine custom display name
+        cleaned = categorizer.clean_description(raw)
+        if cleaned and cleaned != raw_upper:
+            return cleaned                # noise-stripped improvement
+
+    return stored or raw
+
+
+def _serialize_txn(t, splits_map=None, categorizer=None):
     """Serialize a Transaction with inline splits and computed display fields."""
     splits = splits_map.get(t.id, []) if splits_map else []
     is_split = bool(t.is_split or False)
@@ -1077,11 +1109,15 @@ def _serialize_txn(t, splits_map=None):
         action_display   = t.action
         category_display = t.category_final
 
+    description_display = _best_description(
+        t.description_raw, t.description_clean, categorizer
+    )
+
     return {
         "id": t.id, "date": t.date,
         "description_raw": t.description_raw,
         "description_clean": t.description_clean,
-        "description_display": t.description_clean or t.description_raw,
+        "description_display": description_display,
         "merchant_name": t.merchant_name,
         "amount": t.amount, "action": t.action,
         "action_display": action_display,
@@ -1147,7 +1183,8 @@ async def get_transactions(
         for s in all_splits:
             splits_map.setdefault(s.parent_transaction_id, []).append(s)
 
-    return [_serialize_txn(t, splits_map) for t in txns]
+    categorizer = CategorizationEngine(db)
+    return [_serialize_txn(t, splits_map, categorizer) for t in txns]
 
 
 # ---------------------------------------------------------------------------
@@ -1160,7 +1197,8 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     if not t:
         raise HTTPException(status_code=404, detail="Transaction not found")
     splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all() if t.is_split else []
-    return _serialize_txn(t, {t.id: splits} if splits else {})
+    categorizer = CategorizationEngine(db)
+    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer)
 
 
 # ---------------------------------------------------------------------------
