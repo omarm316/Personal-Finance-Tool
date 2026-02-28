@@ -2295,6 +2295,34 @@ async def reapply_rules(db: Session = Depends(get_db)):
     return _reapply_rules(db)
 
 
+@app.post("/api/rules/clean-descriptions")
+async def clean_all_descriptions(db: Session = Depends(get_db)):
+    """
+    Fill description_clean for every transaction where it is NULL or empty.
+    Safe to run at any time — only touches description_clean, never category,
+    action, is_locked, or category_manual.  Uses the best rule match if one
+    exists, otherwise falls back to the basic noise-stripping cleaner.
+    """
+    categorizer = CategorizationEngine(db)
+    txns = db.query(Transaction).filter(
+        or_(Transaction.description_clean == None, Transaction.description_clean == "")
+    ).all()
+    updated = 0
+    for t in txns:
+        if not t.description_raw:
+            continue
+        matched_rule = categorizer.match_rule(t.description_raw, t.amount)
+        if matched_rule and matched_rule.set_description:
+            desc_clean = matched_rule.set_description
+        else:
+            desc_clean = categorizer.clean_description(t.description_raw)
+        if desc_clean:
+            t.description_clean = desc_clean
+            updated += 1
+    db.commit()
+    return {'updated': updated, 'total': len(txns)}
+
+
 @app.post("/api/rules")
 async def create_rule(data: dict, db: Session = Depends(get_db)):
     """Create a new categorization rule."""

@@ -1825,6 +1825,15 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
     catch(e){toast('Failed: '+(e.message||e),'error');}
     finally{setReapplying(false);}
   };
+  const[cleaningDescs,setCleaningDescs]=useState(false);
+  const cleanDescriptions=async()=>{
+    setCleaningDescs(true);
+    try{
+      const r=await apiFetch('/rules/clean-descriptions',{method:'POST'});
+      toast(r.updated>0?`Cleaned ${r.updated} description${r.updated!==1?'s':''} (${r.total} had missing names)`:'All descriptions already filled in — nothing to update');
+    }catch(e){toast('Failed: '+(e.message||e),'error');}
+    finally{setCleaningDescs(false);}
+  };
 
   /* Cards file upload */
   const uploadCards=async(e)=>{
@@ -1889,6 +1898,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
             <div className="section-title">Categorization Rules ({rules.length})</div>
             <div style={{display:'flex',gap:8}}>
               <input className="search-input" placeholder="Search patterns…" value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)} style={{width:200}}/>
+              <button className="btn btn-sm btn-secondary" onClick={cleanDescriptions} disabled={cleaningDescs} title="Fill in missing display names for transactions that still show raw bank text">{cleaningDescs?'Cleaning…':'✦ Fix Descriptions'}</button>
               <button className="btn btn-sm btn-secondary" onClick={applyRules} disabled={reapplying} title="Re-apply all rules to existing non-locked transactions">{reapplying?'Applying…':'↺ Apply Rules'}</button>
               <button className="btn btn-sm btn-primary" onClick={()=>{setShowAddRule(true);setRuleEditVals({priority:100,match_type:'contains',pattern:'',set_action:'',set_category:'',set_description:'',clean_description:'',notes:''});}}>+ Add Rule</button>
             </div>
