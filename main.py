@@ -3515,28 +3515,25 @@ async def get_daily_balances(
         range_end_dt = datetime.combine(end_dt, datetime.max.time())
         anchor_dt = datetime.combine(anchor_date, datetime.min.time())
 
-        # Sum all transactions from anchor up to day before range start (skip excluded + GCB)
+        # Sum ALL transactions from anchor up to day before range start.
+        # Must match how starting_balance was anchored (all transactions, no filter).
         pre_sum = (
             db.query(func.sum(Transaction.amount))
             .filter(
                 Transaction.account_id == acct.id,
                 Transaction.date >= anchor_dt,
                 Transaction.date < range_start_dt,
-                Transaction.is_excluded != True,  # noqa: E712
-                Transaction.is_gcb != True,       # noqa: E712
             )
             .scalar()
         ) or 0.0
 
-        # Fetch all transactions within the range (skip excluded + GCB)
+        # Fetch ALL transactions within the range (same reasoning).
         txns = (
             db.query(Transaction.date, Transaction.amount)
             .filter(
                 Transaction.account_id == acct.id,
                 Transaction.date >= range_start_dt,
                 Transaction.date <= range_end_dt,
-                Transaction.is_excluded != True,  # noqa: E712
-                Transaction.is_gcb != True,       # noqa: E712
             )
             .all()
         )
