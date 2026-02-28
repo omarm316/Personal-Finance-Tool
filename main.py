@@ -371,14 +371,16 @@ class TransactionResponse(BaseModel):
     id: int
     date: datetime
     description_raw: str
-    description_clean: Optional[str]
-    merchant_name: Optional[str]
+    description_clean: Optional[str] = None
+    description_display: Optional[str] = None   # computed best display name
+    merchant_name: Optional[str] = None
     amount: float
     action: str
-    category_auto: Optional[str]
-    category_manual: Optional[str]
+    action_display: Optional[str] = None
+    category_auto: Optional[str] = None
+    category_manual: Optional[str] = None
     category_final: str
-    category_confidence: Optional[float]
+    category_confidence: Optional[float] = None
     needs_review: bool
     is_locked: bool
     is_gcb: bool = False
@@ -387,6 +389,9 @@ class TransactionResponse(BaseModel):
     points_category: Optional[str] = None
     account_name: str
     account_id: int = 0
+    enrichment_source: Optional[str] = None
+    import_source: Optional[str] = None
+    splits: Optional[list] = None
 
     class Config:
         from_attributes = True
