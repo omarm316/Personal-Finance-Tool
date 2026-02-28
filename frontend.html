@@ -399,27 +399,6 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-sm btn-success" onClick={createRuleFromTxn} disabled={ruleCreating} style={{fontSize:11}}>{ruleCreating?'…':'Yes'}</button>
             <button className="btn btn-sm btn-ghost" onClick={()=>setShowRulePrompt(false)} style={{fontSize:11}}>No</button>
           </div>
-          :showQuickRule
-          ?<div style={{display:'flex',flexDirection:'column',gap:4,minWidth:220}}>
-            <div style={{display:'flex',gap:4,alignItems:'center'}}>
-              <span style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)'}}>New rule:</span>
-              <button className="btn btn-ghost" style={{padding:'2px 5px',fontSize:11,marginLeft:'auto'}} onClick={()=>setShowQuickRule(false)}>✕</button>
-            </div>
-            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)} placeholder="Pattern to match (e.g. STARBUCKS)"
-              style={{fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}/>
-            <input value={ruleDesc} onChange={e=>setRuleDesc(e.target.value)} placeholder="Display name (e.g. Starbucks Coffee)"
-              style={{fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}/>
-            <div style={{display:'flex',gap:4}}>
-              <select value={ruleAction} onChange={e=>setRuleAction(e.target.value)} className="filter-select" style={{fontSize:11,padding:'3px 6px',flex:1}}>
-                {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
-              </select>
-              <select value={ruleCategory} onChange={e=>setRuleCategory(e.target.value)} className="filter-select" style={{fontSize:11,padding:'3px 6px',flex:1}}>
-                <option value="">No category</option>
-                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
-            </div>
-            <button className="btn btn-sm btn-success" onClick={saveQuickRule} disabled={ruleSaving} style={{fontSize:11}}>{ruleSaving?'Saving…':'Save Rule'}</button>
-          </div>
           :<div className="edit-actions">
             {txn.needs_review&&!locked&&<button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none'}} onClick={()=>onReview(txn)}>Review</button>}
             <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
@@ -454,6 +433,71 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
         <td></td>
       </tr>
     ))}
+    {showQuickRule&&ReactDOM.createPortal(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}
+        onClick={e=>{if(e.target===e.currentTarget)setShowQuickRule(false);}}>
+        <div style={{background:'var(--card-bg)',borderRadius:14,padding:32,width:500,maxWidth:'92vw',boxShadow:'0 24px 64px rgba(0,0,0,0.35)',display:'flex',flexDirection:'column',gap:20}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:18,color:'var(--text-primary)'}}>Create Rule</div>
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Auto-categorize future matching transactions</div>
+            </div>
+            <button className="btn btn-ghost" style={{padding:'4px 8px',fontSize:16,lineHeight:1}} onClick={()=>setShowQuickRule(false)}>✕</button>
+          </div>
+          {/* Source transaction */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 14px',fontSize:12,color:'var(--text-secondary)'}}>
+            <span style={{fontWeight:600,color:'var(--text-muted)',marginRight:6}}>From transaction:</span>
+            <span style={{fontFamily:'monospace',color:'var(--text-primary)'}}>{txn.description_raw}</span>
+          </div>
+          {/* Match Pattern */}
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <label style={{fontWeight:600,fontSize:13,color:'var(--text-primary)'}}>Match Pattern</label>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:2}}>Text to look for in the bank description. Any transaction containing this text will match.</div>
+            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)}
+              placeholder="e.g. STARBUCKS"
+              style={{fontSize:13,padding:'8px 12px',border:'1px solid var(--border)',borderRadius:7,width:'100%',boxSizing:'border-box',background:'var(--bg)',color:'var(--text-primary)'}}
+              autoFocus/>
+          </div>
+          {/* Display Name */}
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <label style={{fontWeight:600,fontSize:13,color:'var(--text-primary)'}}>Display Name</label>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:2}}>The clean, readable name shown for matched transactions (replaces the raw bank description).</div>
+            <input value={ruleDesc} onChange={e=>setRuleDesc(e.target.value)}
+              placeholder="e.g. Starbucks Coffee"
+              style={{fontSize:13,padding:'8px 12px',border:'1px solid var(--border)',borderRadius:7,width:'100%',boxSizing:'border-box',background:'var(--bg)',color:'var(--text-primary)'}}/>
+          </div>
+          {/* Type + Category */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <label style={{fontWeight:600,fontSize:13,color:'var(--text-primary)'}}>Type</label>
+              <select value={ruleAction} onChange={e=>setRuleAction(e.target.value)}
+                className="filter-select"
+                style={{fontSize:13,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,background:'var(--bg)',color:'var(--text-primary)'}}>
+                {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <label style={{fontWeight:600,fontSize:13,color:'var(--text-primary)'}}>Category</label>
+              <select value={ruleCategory} onChange={e=>setRuleCategory(e.target.value)}
+                className="filter-select"
+                style={{fontSize:13,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,background:'var(--bg)',color:'var(--text-primary)'}}>
+                <option value="">No category</option>
+                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Actions */}
+          <div style={{display:'flex',gap:10,justifyContent:'flex-end',paddingTop:4}}>
+            <button className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px'}} onClick={()=>setShowQuickRule(false)}>Cancel</button>
+            <button className="btn btn-success" style={{fontSize:13,padding:'8px 22px',fontWeight:600}} onClick={saveQuickRule} disabled={ruleSaving}>
+              {ruleSaving?'Saving…':'Save Rule'}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
     </React.Fragment>
   );
 }
