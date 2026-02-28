@@ -351,7 +351,6 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
         <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2,flexWrap:'wrap'}}>
           {locked&&<span title="Manually edited — protected from sync">🔒</span>}
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
-          {txn.description_display&&txn.description_display!==txn.description_raw&&<span style={{fontSize:10,color:'var(--text-muted)'}} title={txn.description_raw}>raw: {txn.description_raw.substring(0,30)}{txn.description_raw.length>30?'...':''}</span>}
           {txn.enrichment_source&&txn.enrichment_source!=='rule'&&(()=>{
             const src=txn.enrichment_source;
             const cfg={llm:{bg:'#dbeafe',color:'#1d4ed8',label:'AI'},override:{bg:'#dcfce7',color:'#15803d',label:'saved'},fallback:{bg:'#f3f4f6',color:'var(--text-muted)',label:'fallback'}};
@@ -526,16 +525,23 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           </div>
           {/* Info grid */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-            {[
-              ['Date',fmtDate(txn.date)],
-              ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
-              ['Account',txn.account_name],
-              ['Type',txn.action_display||txn.action||'—'],
-              ['Category',txn.category_final||'Unclassified'],
-              ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
-              ['Import Source',txn.import_source||'plaid'],
-              ['Enrichment',txn.enrichment_source||'—'],
-            ].map(([label,value])=>(
+            {(()=>{
+              const importLabel={plaid:'Plaid',csv:'CSV',ofx:'OFX',manual:'Manual'};
+              const enrichLabel={llm:'AI',rule:'Rule',override:'Manual Override',fallback:'Fallback'};
+              const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):'—';
+              const src=txn.import_source||'plaid';
+              const enr=txn.enrichment_source||null;
+              return[
+                ['Date',fmtDate(txn.date)],
+                ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
+                ['Account',txn.account_name],
+                ['Type',txn.action_display||cap(txn.action)],
+                ['Category',txn.category_final||'Unclassified'],
+                ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
+                ['Import Source',importLabel[src]||cap(src)],
+                ['Enrichment',enr?(enrichLabel[enr]||cap(enr)):'—'],
+              ];
+            })().map(([label,value])=>(
               <div key={label} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px'}}>
                 <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:3}}>{label}</div>
                 <div style={{fontSize:13,color:'var(--text-primary)',fontWeight:500,wordBreak:'break-word'}}>{value}</div>
