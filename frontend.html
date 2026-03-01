@@ -3870,7 +3870,8 @@ function DailyBalancesPage({toast}){
     if(rangeMode==='custom'&&(!s||!e))return;
     setLoading(true);
     try{
-      const q=(s&&e)?`?start_date=${s}&end_date=${e}`:'';
+      const ct=todayStr(); // client's local date — avoids UTC midnight drift
+      const q=`?client_today=${ct}${s?`&start_date=${s}`:''}${e?`&end_date=${e}`:''}`;
       setData(await apiFetch(`/daily-balances${q}`));
     }catch(err){toast('Failed to load daily balances','error');}
     finally{setLoading(false);}

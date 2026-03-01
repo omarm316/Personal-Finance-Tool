@@ -3721,6 +3721,7 @@ def todayStr_py():
 async def get_daily_balances(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    client_today: Optional[str] = None,   # client's local YYYY-MM-DD (avoids UTC drift)
     db: Session = Depends(get_db),
 ):
     """
@@ -3737,7 +3738,11 @@ async def get_daily_balances(
     import calendar as _cal
     from sqlalchemy import func
 
-    today = datetime.utcnow().date()
+    # Prefer the client's local date — avoids UTC midnight rollover shifting "today"
+    try:
+        today = date.fromisoformat(client_today) if client_today else datetime.utcnow().date()
+    except ValueError:
+        today = datetime.utcnow().date()
 
     if not start_date:
         start_date = f"{today.year}-{today.month:02d}-01"
