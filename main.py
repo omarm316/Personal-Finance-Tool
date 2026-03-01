@@ -821,9 +821,13 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         print(f"[sync] {plaid_item.institution_name}: {modified_count} transaction(s) updated (Plaid modified)")
 
     # ── Handle removed transactions ───────────────────────────────────────────
-    # Plaid removes a transaction when: a pending txn is cancelled, a date/ID
-    # changes on settlement, or bank data is corrected.  We hard-delete unlocked
-    # transactions and leave locked ones untouched (user manually confirmed them).
+    # Plaid removes a transaction when: a date/ID changes on settlement, a
+    # pending txn is cancelled, or bank data is corrected.  Since we never
+    # import pending transactions, every txn in our DB is already posted.
+    # Hard-deleting posted transactions is too aggressive — Plaid often removes
+    # a settled txn and re-adds it with a new ID when the date is adjusted.
+    # Instead we SOFT-DELETE (is_excluded=True + flag in description_clean) so
+    # the user can see and recover them.  Locked transactions are never touched.
     removed_count  = 0
     locked_skipped = 0
     for plaid_id in result.get('removed', []):
@@ -834,10 +838,16 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             locked_skipped += 1
             print(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
             continue
-        db.delete(existing)
+        # Soft-delete: exclude from all views but keep the row in the DB
+        existing.is_excluded = True
+        existing.needs_review = False
+        note = " [removed by Plaid — may reappear with a new ID]"
+        if existing.description_clean and note not in existing.description_clean:
+            existing.description_clean = existing.description_clean + note
         removed_count += 1
+        print(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
     if removed_count:
-        print(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) removed (Plaid removed)")
+        print(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) soft-deleted (Plaid removed)")
     if locked_skipped:
         print(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
 
