@@ -1445,7 +1445,7 @@ function DashboardPage({categories,toast}){
       const yr=new Date().getFullYear();
       const[s,r,rv,nw,bt,ba,bt2,ba2]=await Promise.all([
         apiFetch(statsQ),
-        apiFetch('/transactions?limit=8'),  // always the 8 most recent, period-independent
+        apiFetch('/transactions?limit=12'),  // always the 12 most recent, period-independent
         apiFetch('/transactions?needs_review=true&limit=50'),
         apiFetch('/net-worth').catch(()=>null),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
@@ -1466,7 +1466,13 @@ function DashboardPage({categories,toast}){
 
   const handleSave=async(id,updates)=>{
     if(updates.__deleted){await load();return;}
-    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();}
+    try{
+      await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+      /* Tell the user what happened — especially important when the row disappears from the review queue */
+      if(updates.needs_review===false)toast('✓ Reviewed — transaction moved to Transactions page');
+      else if(Object.keys(updates).length>0)toast('✓ Saved');
+      await load();
+    }
     catch(e){toast('Failed to save','error');}
   };
   const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});};
