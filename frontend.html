@@ -1208,6 +1208,131 @@ function SimpleLineChart({lines,height=180,fmtY}){
   );
 }
 
+/* ── Spending Breakdown: interactive donut + ranked category list ──────────── */
+function SpendingBreakdownCard({topCats}){
+  const[hovCat,setHovCat]=useState(null);
+  if(!topCats||topCats.length===0)return null;
+  const total=topCats.reduce((s,[,a])=>s+a,0);
+  const data=topCats.map(([cat,amount],i)=>({cat,amount,color:CHART_COLORS[i%CHART_COLORS.length]}));
+  /* SVG donut via arc paths */
+  const cx=85,cy=85,R=64,r=44,GAP=2.5;
+  const polar=(radius,deg)=>{const a=(deg-90)*Math.PI/180;return[cx+radius*Math.cos(a),cy+radius*Math.sin(a)];};
+  const segPath=(s,e)=>{
+    const lg=e-s>180?1:0;
+    const[x1,y1]=polar(R,s);const[x2,y2]=polar(R,e);const[x3,y3]=polar(r,e);const[x4,y4]=polar(r,s);
+    return`M${x1},${y1} A${R},${R} 0 ${lg},1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 ${lg},0 ${x4},${y4} Z`;
+  };
+  let cum=0;
+  const segs=data.map(({cat,amount,color})=>{
+    const deg=(amount/total)*360;
+    const seg={cat,color,path:segPath(cum+GAP/2,cum+deg-GAP/2)};
+    cum+=deg;return seg;
+  });
+  const hd=hovCat?data.find(d=>d.cat===hovCat):null;
+  return(
+    <div className="card">
+      <div className="section-header"><div className="section-title">Spending Breakdown</div></div>
+      <div style={{display:'flex',alignItems:'center',padding:'8px 0 12px'}}>
+        {/* Donut */}
+        <svg width={170} height={170} style={{flexShrink:0,overflow:'visible',cursor:'default'}}>
+          {segs.map(({cat,color,path})=>(
+            <path key={cat} d={path} fill={color}
+              opacity={hovCat&&hovCat!==cat?0.2:1}
+              style={{cursor:'pointer',transition:'opacity 0.15s'}}
+              onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}/>
+          ))}
+          <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
+          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="DM Mono,monospace">${fmt(hd?hd.amount:total)}</text>
+          {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
+        </svg>
+        {/* Category list — hover syncs with donut */}
+        <div style={{flex:1,paddingRight:16}}>
+          {data.map(({cat,amount,color})=>{
+            const pct=Math.round(amount/total*100);
+            const isHov=hovCat===cat;
+            return(
+              <div key={cat} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 6px',borderRadius:6,background:isHov?'#f0f6ff':'transparent',cursor:'default',transition:'background 0.1s'}}
+                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}>
+                <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
+                <span style={{flex:1,fontSize:12,fontWeight:isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
+                <span style={{fontFamily:'DM Mono',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
+                <span style={{fontFamily:'DM Mono',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Budget vs Actual: 12-month bar chart with target markers ─────────────── */
+function BudgetBarChart({actuals,targets,actualsPrior,targetsPrior,expenseCats}){
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();const curM=now.getMonth()+1,curY=now.getFullYear();
+  /* Build last 12 calendar months */
+  const months12=Array.from({length:12},(_,i)=>{
+    const d=new Date(curY,curM-1-(11-i),1);
+    return{year:d.getFullYear(),month:d.getMonth()+1,isCur:i===11};
+  });
+  const getA=(year,month)=>{
+    const src=year===curY?actuals:actualsPrior;
+    return expenseCats.reduce((s,cat)=>s+(src[cat]?.[String(month)]||0),0);
+  };
+  const getB=(year,month)=>{
+    const src=year===curY?targets:targetsPrior;
+    return expenseCats.reduce((s,cat)=>s+(src[cat]?.[String(month)]?.amount||0),0);
+  };
+  const data=months12.map(({year,month,isCur},i)=>({
+    label:MO[month-1]+(month===1?` '${String(year).slice(2)}`:''),
+    actual:getA(year,month),budget:getB(year,month),isCur,isFuture:false,
+  }));
+  const maxVal=Math.max(...data.map(d=>Math.max(d.actual,d.budget)),100);
+  const W=560,H=190;
+  const pad={top:20,right:12,bottom:28,left:58};
+  const cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom;
+  const colW=cW/12,barW=colW*0.55;
+  const xMid=i=>pad.left+i*colW+colW/2;
+  const yV=v=>pad.top+cH-(v/maxVal)*cH;
+  const yTicks=[0,0.25,0.5,0.75,1].map(p=>maxVal*p);
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
+      {/* Y grid + labels */}
+      {yTicks.map((v,i)=>(
+        <g key={i}>
+          <line x1={pad.left} y1={yV(v)} x2={pad.left+cW} y2={yV(v)} stroke={v===0?'#e5e7eb':'#f3f4f6'} strokeWidth={1}/>
+          <text x={pad.left-6} y={yV(v)+4} textAnchor="end" fontSize={9} fill="#9ca3af">{v>=1000?`$${(v/1000).toFixed(0)}k`:`$${Math.round(v)}`}</text>
+        </g>
+      ))}
+      {/* Bars + budget target ticks */}
+      {data.map(({label,actual,budget,isCur},i)=>{
+        const over=budget>0&&actual>budget;
+        const close=budget>0&&!over&&actual>budget*0.85;
+        const barColor=over?'#ef4444':close?'#f59e0b':'#10b981';
+        const bH=Math.max((actual/maxVal)*cH,actual>0?2:0);
+        const x=xMid(i)-barW/2;
+        return(
+          <g key={i}>
+            {isCur&&<rect x={pad.left+i*colW} y={pad.top} width={colW} height={cH} fill="rgba(99,102,241,0.05)" rx={2}/>}
+            {actual>0&&<rect x={x} y={yV(actual)} width={barW} height={bH} fill={barColor} opacity={0.82} rx={2}/>}
+            {budget>0&&<line x1={x-3} y1={yV(budget)} x2={x+barW+3} y2={yV(budget)} stroke="#64748b" strokeWidth={2} strokeLinecap="round"/>}
+            <text x={xMid(i)} y={H-6} textAnchor="middle" fontSize={9} fill={isCur?'#0d1b2e':'#9ca3af'} fontWeight={isCur?600:400}>{label}</text>
+          </g>
+        );
+      })}
+      {/* Legend */}
+      <rect x={pad.left} y={3} width={8} height={8} fill="#10b981" rx={1} opacity={0.82}/>
+      <text x={pad.left+11} y={10} fontSize={8.5} fill="#9ca3af">Under budget</text>
+      <rect x={pad.left+85} y={3} width={8} height={8} fill="#f59e0b" rx={1} opacity={0.82}/>
+      <text x={pad.left+96} y={10} fontSize={8.5} fill="#9ca3af">Near limit</text>
+      <rect x={pad.left+158} y={3} width={8} height={8} fill="#ef4444" rx={1} opacity={0.82}/>
+      <text x={pad.left+169} y={10} fontSize={8.5} fill="#9ca3af">Over budget</text>
+      <line x1={pad.left+230} y1={7} x2={pad.left+244} y2={7} stroke="#64748b" strokeWidth={2} strokeLinecap="round"/>
+      <text x={pad.left+247} y={10} fontSize={8.5} fill="#9ca3af">Budget target</text>
+    </svg>
+  );
+}
+
 function BudgetScorecardCard({targets,actuals}){
   const now=new Date();
   const yr=now.getFullYear();
@@ -1302,6 +1427,8 @@ function DashboardPage({categories,toast}){
   const[selectedAcctId,setSelectedAcctId]=useState(null);
   const[budgetTargets,setBudgetTargets]=useState({});
   const[budgetActuals,setBudgetActuals]=useState({});
+  const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
+  const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
 
   const getDates=()=>{
     const now=new Date();
@@ -1317,7 +1444,7 @@ function DashboardPage({categories,toast}){
       const{start,end}=getDates();
       const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
       const yr=new Date().getFullYear();
-      const[s,r,rv,nw,tl,mb,bt,ba]=await Promise.all([
+      const[s,r,rv,nw,tl,mb,bt,ba,bt2,ba2]=await Promise.all([
         apiFetch(statsQ),
         apiFetch(`/transactions?limit=5${start?`&start_date=${start}`:''}${end?`&end_date=${end}`:''}`),
         apiFetch('/transactions?needs_review=true&limit=10'),
@@ -1326,12 +1453,15 @@ function DashboardPage({categories,toast}){
         apiFetch('/balances/monthly?months=24').catch(()=>null),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr}`).catch(()=>({categories:{}})),
+        apiFetch(`/budget/targets?year=${yr-1}`).catch(()=>({categories:{}})),
+        apiFetch(`/budget/actuals?year=${yr-1}`).catch(()=>({categories:{}})),
       ]);
       setStats(s);setRecent(r);setReviewQ(rv);setNetWorth(nw);
       setTimeline(tl?.timeline||[]);
       const bals=mb||[];setMonthlyBals(bals);
       if(bals.length>0)setSelectedAcctId(id=>id??bals[0].account_id);
       setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
+      setBudgetTargetsPrior(bt2.categories||{});setBudgetActualsPrior(ba2.categories||{});
 
       /* Top 5 expense categories — only positive net spend (skip net-credit categories) */
       const byCat=s?.by_category||{};
@@ -1371,21 +1501,21 @@ function DashboardPage({categories,toast}){
         </div>
       </div>
 
-      {/* KPI row 1: Cash flow */}
+      {/* KPI row — colored left border accent (Stripe-style) */}
       <div className="metric-grid">
-        <div className="card metric-card">
+        <div className="card metric-card" style={{borderLeft:'3px solid var(--green)'}}>
           <div className="metric-label">Total Income</div>
           <div className="metric-value" style={{color:'var(--green)'}}>{fmt(income)}</div>
         </div>
-        <div className="card metric-card">
+        <div className="card metric-card" style={{borderLeft:'3px solid var(--red)'}}>
           <div className="metric-label">Total Expenses</div>
           <div className="metric-value" style={{color:'var(--red)'}}>-{fmt(expenses)}</div>
         </div>
-        <div className="card metric-card">
+        <div className="card metric-card" style={{borderLeft:`3px solid ${(income-expenses)>=0?'var(--green)':'var(--red)'}`}}>
           <div className="metric-label">Net Cash Flow</div>
           <div className="metric-value" style={{color:(income-expenses)>=0?'var(--green)':'var(--red)'}}>{income-expenses>=0?'+':''}{fmt(income-expenses)}</div>
         </div>
-        <div className="card metric-card">
+        <div className="card metric-card" style={{borderLeft:`3px solid ${netWorth&&netWorth.net_worth>=0?'var(--green)':'var(--red)'}`}}>
           <div className="metric-label">Net Worth</div>
           <div className="metric-value" style={{color:netWorth&&netWorth.net_worth>=0?'var(--green)':'var(--red)'}}>{netWorth?fmt(netWorth.net_worth):'—'}</div>
         </div>
@@ -1415,28 +1545,8 @@ function DashboardPage({categories,toast}){
             }
           </div>
 
-          {/* Top 5 expense categories */}
-          {topCats.length>0&&<div className="card">
-            <div className="section-header"><div className="section-title">Top Expense Categories</div></div>
-            <div style={{padding:'8px 0'}}>{topCats.map(([cat,amt],i)=>{
-              const maxAmt=topCats[0][1]||1;
-              const pct=Math.round(amt/maxAmt*100);
-              return(
-                <div key={cat} style={{padding:'8px 18px',display:'flex',alignItems:'center',gap:12}}>
-                  <span style={{width:20,textAlign:'right',fontSize:12,color:'var(--text-muted)',fontWeight:600}}>{i+1}</span>
-                  <div style={{flex:1}}>
-                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
-                      <span style={{fontSize:13,fontWeight:500}}>{cat}</span>
-                      <span style={{fontFamily:'DM Mono',fontSize:12,color:'var(--red)'}}>{fmt(amt)}</span>
-                    </div>
-                    <div style={{background:'#f3f4f6',borderRadius:3,height:5,overflow:'hidden'}}>
-                      <div style={{width:`${pct}%`,height:'100%',background:'var(--red)',borderRadius:3,opacity:0.7}}/>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}</div>
-          </div>}
+          {/* Spending breakdown: donut + ranked categories (interactive) */}
+          <SpendingBreakdownCard topCats={topCats}/>
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:20}}>
@@ -1476,6 +1586,27 @@ function DashboardPage({categories,toast}){
           </div>}
         </div>
       </div>
+
+      {/* Budget vs Actual — 12-month bar chart */}
+      {(()=>{
+        const expCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name);
+        const hasData=expCats.some(cat=>budgetActuals[cat]||budgetActualsPrior[cat]||budgetTargets[cat]||budgetTargetsPrior[cat]);
+        if(!hasData)return null;
+        return(
+          <div className="card" style={{marginTop:20}}>
+            <div className="section-header">
+              <div className="section-title">Budget vs. Actual — Last 12 Months</div>
+              <span style={{fontSize:11,color:'var(--text-muted)'}}>bars = actual spend · markers = budget target</span>
+            </div>
+            <div style={{padding:'8px 8px 4px'}}>
+              <BudgetBarChart
+                actuals={budgetActuals} targets={budgetTargets}
+                actualsPrior={budgetActualsPrior} targetsPrior={budgetTargetsPrior}
+                expenseCats={expCats}/>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Net Worth Over Time */}
       <div className="card" style={{marginTop:20}}>
