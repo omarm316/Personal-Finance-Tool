@@ -1418,6 +1418,7 @@ async def get_stats(
     query = db.query(Transaction).filter(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
+        Transaction.gcb_tagged != True,   # noqa: E712
     )
     if year:
         query = query.filter(Transaction.year == year)
@@ -1464,6 +1465,8 @@ async def get_stats(
                 elif t.action == 'Income':
                     total_income += s.amount
         else:
+            if t.is_gcb or t.gcb_tagged:
+                continue
             if t.action == 'Expense':
                 cat = t.category_final or 'Unclassified'
                 contrib = -t.amount
