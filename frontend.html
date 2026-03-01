@@ -136,8 +136,9 @@ const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).fo
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
 const CHART_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ef4444','#84cc16'];
-const monthStart=()=>new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString().slice(0,10);
-const todayStr=()=>new Date().toISOString().slice(0,10);
+const monthStart=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
+const todayStr=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const localDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
 function useToast(){
   const[toasts,setToasts]=useState([]);
@@ -1242,7 +1243,7 @@ function SpendingBreakdownCard({topCats}){
               onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}/>
           ))}
           <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
-          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="DM Mono,monospace">${fmt(hd?hd.amount:total)}</text>
+          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="DM Mono,monospace">{fmt(hd?hd.amount:total)}</text>
           {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
         </svg>
         {/* Category list — hover syncs with donut */}
@@ -1362,7 +1363,7 @@ function BudgetScorecardCard({targets,actuals}){
   // Helper: format signed amount — fmt() always uses abs(), so we handle sign ourselves
   const fmtSigned=(n)=>n<0?`-${fmt(n)}`:fmt(n);
   return(
-    <div className="card" style={{marginTop:20}}>
+    <div className="card">
       <div className="section-header">
         <div className="section-title">Budget Scorecard — {monthLabel} {yr}</div>
         <span style={{fontFamily:'DM Mono',fontSize:12,color:totalActual<0?'var(--green)':'var(--text-muted)'}}>
@@ -1432,7 +1433,7 @@ function DashboardPage({categories,toast}){
     const now=new Date();
     if(period==='month')return{start:monthStart(),end:todayStr()};
     if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
-    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:d.toISOString().slice(0,10),end:todayStr()};}
+    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:localDateStr(d),end:todayStr()};}
     return{start:'',end:''};
   };
 
@@ -1444,7 +1445,7 @@ function DashboardPage({categories,toast}){
       const yr=new Date().getFullYear();
       const[s,r,rv,nw,bt,ba,bt2,ba2]=await Promise.all([
         apiFetch(statsQ),
-        apiFetch(`/transactions?limit=8${start?`&start_date=${start}`:''}${end?`&end_date=${end}`:''}`),
+        apiFetch('/transactions?limit=8'),  // always the 8 most recent, period-independent
         apiFetch('/transactions?needs_review=true&limit=50'),
         apiFetch('/net-worth').catch(()=>null),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
@@ -1517,7 +1518,7 @@ function DashboardPage({categories,toast}){
       </div>
 
       {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
-      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,marginTop:20,alignItems:'start'}}>
+      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,marginTop:20,alignItems:'stretch'}}>
         {/* Left: Budget Scorecard — naturally narrower in this column */}
         <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals}/>
 
@@ -1546,8 +1547,8 @@ function DashboardPage({categories,toast}){
             }
           </div>
 
-          {/* Net Worth Summary */}
-          {netWorth&&<div className="card">
+          {/* Net Worth Summary — marginTop:auto pushes it to bottom of the column */}
+          {netWorth&&<div className="card" style={{marginTop:'auto'}}>
             <div className="section-header"><div className="section-title">Net Worth Summary</div></div>
             {Object.entries(netWorth.buckets||{}).map(([bucket,bData])=>{
               const total=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
@@ -3198,7 +3199,7 @@ function BudgetsPage({categories,toast}){
 
 function NetWorthPage({toast}){
   /* ── shared "as of" date ─────────────────────────────────────────────── */
-  const todayStr=(()=>{const d=new Date();return d.toISOString().slice(0,10);})();
+  const todayStr=localDateStr(new Date());
   const[asOf,setAsOf]=useState(todayStr);
   const[subTab,setSubTab]=useState('networth');   // 'networth' | 'balances'
 
@@ -3875,7 +3876,7 @@ function DailyBalancesPage({toast}){
 
   const fmtBal=v=>{
     if(v==null)return'—';
-    const abs=Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+    const abs=Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     return v<0?`(${abs})`:abs;
   };
 
