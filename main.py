@@ -1484,6 +1484,83 @@ async def get_stats(
     }
 
 
+@app.get("/api/stats/detail")
+async def get_stats_detail(
+    category: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Return individual transactions (and split line items) that contribute to a
+    given category's total in /api/stats — useful for debugging overstatement.
+    """
+    query = db.query(Transaction).filter(
+        Transaction.is_excluded != True,  # noqa: E712
+        Transaction.is_gcb != True,       # noqa: E712
+        Transaction.gcb_tagged != True,   # noqa: E712
+        Transaction.action.in_(BUDGET_TYPES),
+    )
+    if year:
+        query = query.filter(Transaction.year == year)
+    if month:
+        query = query.filter(Transaction.month == month)
+    if start_date:
+        query = query.filter(Transaction.date >= datetime.strptime(start_date, "%Y-%m-%d"))
+    if end_date:
+        query = query.filter(Transaction.date <= datetime.strptime(end_date, "%Y-%m-%d"))
+
+    transactions = query.all()
+    split_txn_ids = [t.id for t in transactions if t.is_split]
+    splits_map: dict = {}
+    if split_txn_ids:
+        all_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.parent_transaction_id.in_(split_txn_ids)
+        ).all()
+        for s in all_splits:
+            splits_map.setdefault(s.parent_transaction_id, []).append(s)
+
+    rows = []
+    total = 0.0
+    for t in transactions:
+        if t.is_gcb or t.gcb_tagged:
+            continue
+        if t.is_split:
+            for s in splits_map.get(t.id, []):
+                if s.is_gcb:
+                    continue
+                cat = s.category or t.category_final or 'Unclassified'
+                if cat != category:
+                    continue
+                contrib = -s.amount if t.action == 'Expense' else s.amount
+                total += contrib
+                rows.append({
+                    "id": t.id, "date": str(t.date)[:10],
+                    "description": t.description_clean or t.description_raw,
+                    "action": t.action, "is_split": True,
+                    "split_description": s.description,
+                    "split_category": cat,
+                    "split_amount": s.amount, "contrib": round(contrib, 2),
+                })
+        else:
+            cat = t.category_final or 'Unclassified'
+            if cat != category:
+                continue
+            contrib = -t.amount if t.action == 'Expense' else t.amount
+            total += contrib
+            rows.append({
+                "id": t.id, "date": str(t.date)[:10],
+                "description": t.description_clean or t.description_raw,
+                "action": t.action, "is_split": False,
+                "amount": t.amount, "contrib": round(contrib, 2),
+            })
+
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return {"category": category, "total": round(total, 2), "count": len(rows), "rows": rows}
+
+
 # ---------------------------------------------------------------------------
 # Cards
 # ---------------------------------------------------------------------------
