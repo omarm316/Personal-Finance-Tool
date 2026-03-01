@@ -1066,6 +1066,10 @@ function TransactionsPage({categories,toast}){
   if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
   if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
 
+  const visibleExpenses=visible.filter(t=>t.action==='Expense').reduce((s,t)=>s+(-t.amount),0);
+  const visibleIncome=visible.filter(t=>t.action==='Income').reduce((s,t)=>s+t.amount,0);
+  const visibleNet=visibleIncome-visibleExpenses;
+
   const exportCSV=()=>{
     const h=['Date','Description','Amount','Type','Category','Account'];
     const rows=visible.map(t=>[fmtDate(t.date),t.description_display||t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
@@ -1128,12 +1132,17 @@ function TransactionsPage({categories,toast}){
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
           {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter)&&
             <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');}}>Clear</button>}
-          <span className="filter-count">{visible.length} transactions</span>
           {visible.length>0&&<button className="btn btn-sm btn-ghost" onClick={selectAll} title="Select all visible transactions">☑ Select All</button>}
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
           <button className="btn btn-sm btn-secondary" onClick={startEnrich} disabled={enrichJob?.status==='running'} title="Run AI enrichment on unclassified transactions">{enrichJob?.status==='running'?'Enriching…':'✨ Enrich'}</button>
+        </div>
+        <div style={{padding:'6px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',flexWrap:'wrap'}}>
+          <span><b style={{color:'var(--text-primary)',fontWeight:600}}>{visible.length}</b> transactions</span>
+          {visibleExpenses>0&&<span>Expenses: <b style={{color:'var(--red)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{fmt(visibleExpenses)}</b></span>}
+          {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{fmt(visibleIncome)}</b></span>}
+          {(visibleExpenses>0||visibleIncome>0)&&<span>Net: <b style={{color:visibleNet>=0?'var(--green)':'var(--red)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{visibleNet>=0?'+':''}{fmt(visibleNet)}</b></span>}
         </div>
         {enrichJob&&(
           <div style={{padding:'8px 16px',background:enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
@@ -1210,7 +1219,7 @@ function SimpleLineChart({lines,height=180,fmtY}){
 }
 
 /* ── Spending Breakdown: interactive donut + ranked category list ──────────── */
-function SpendingBreakdownCard({topCats}){
+function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
   const[hovCat,setHovCat]=useState(null);
   if(!topCats||topCats.length===0)return(
     <div className="card" style={{display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',minHeight:120,gap:6}}>
@@ -1237,16 +1246,24 @@ function SpendingBreakdownCard({topCats}){
   const hd=hovCat?data.find(d=>d.cat===hovCat):null;
   return(
     <div className="card">
-      <div className="section-header"><div className="section-title">Spending Breakdown</div></div>
+      <div className="section-header">
+        <div className="section-title">Spending Breakdown</div>
+        {selectedCat&&<span style={{fontSize:11,color:'var(--blue)',fontWeight:500}}>Click a category to toggle detail ↓</span>}
+      </div>
       <div style={{display:'flex',alignItems:'center',padding:'8px 0 12px'}}>
         {/* Donut */}
         <svg width={170} height={170} style={{flexShrink:0,overflow:'visible',cursor:'default'}}>
-          {segs.map(({cat,color,path})=>(
-            <path key={cat} d={path} fill={color}
-              opacity={hovCat&&hovCat!==cat?0.2:1}
-              style={{cursor:'pointer',transition:'opacity 0.15s'}}
-              onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}/>
-          ))}
+          {segs.map(({cat,color,path})=>{
+            const isSel=selectedCat===cat;
+            return(
+              <path key={cat} d={path} fill={color}
+                opacity={hovCat&&hovCat!==cat&&!isSel?0.2:1}
+                stroke={isSel?'#1d4ed8':'none'} strokeWidth={isSel?2.5:0}
+                style={{cursor:'pointer',transition:'opacity 0.15s'}}
+                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}
+                onClick={()=>onCategoryClick&&onCategoryClick(cat)}/>
+            );
+          })}
           <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
           <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="DM Mono,monospace">{fmt(hd?hd.amount:total)}</text>
           {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
@@ -1256,11 +1273,17 @@ function SpendingBreakdownCard({topCats}){
           {data.map(({cat,amount,color})=>{
             const pct=Math.round(amount/total*100);
             const isHov=hovCat===cat;
+            const isSel=selectedCat===cat;
             return(
-              <div key={cat} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 6px',borderRadius:6,background:isHov?'#f0f6ff':'transparent',cursor:'default',transition:'background 0.1s'}}
-                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}>
+              <div key={cat}
+                style={{display:'flex',alignItems:'center',gap:8,padding:'5px 6px',borderRadius:6,
+                  background:isSel?'#dbeafe':isHov?'#f0f6ff':'transparent',
+                  cursor:'pointer',transition:'background 0.1s',
+                  outline:isSel?'1.5px solid #93c5fd':'none'}}
+                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}
+                onClick={()=>onCategoryClick&&onCategoryClick(cat)}>
                 <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
-                <span style={{flex:1,fontSize:12,fontWeight:isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
+                <span style={{flex:1,fontSize:12,fontWeight:isSel||isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
                 <span style={{fontFamily:'DM Mono',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
                 <span style={{fontFamily:'DM Mono',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
               </div>
@@ -1438,6 +1461,52 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={}}){
   );
 }
 
+function CategoryDetailPanel({detail,onClose}){
+  const{cat,loading,rows,total}=detail;
+  return(
+    <div className="card" style={{overflow:'hidden'}}>
+      <div className="section-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:10}}>
+          <div className="section-title">{cat}</div>
+          {!loading&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:700,color:'var(--red)'}}>{fmt(total)}</span>}
+          {!loading&&<span style={{fontSize:11,color:'var(--text-muted)'}}>{rows.length} transactions</span>}
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={onClose} style={{fontSize:13,padding:'2px 8px'}}>✕</button>
+      </div>
+      {loading
+        ?<div className="loading" style={{padding:'20px 0'}}><div className="spinner"/><span>Loading…</span></div>
+        :rows.length===0
+          ?<div style={{padding:'16px 18px',color:'var(--text-muted)',fontSize:13}}>No transactions found.</div>
+          :<div style={{maxHeight:320,overflowY:'auto'}}>
+            <table style={{width:'100%'}}>
+              <thead><tr style={{background:'var(--sidebar-bg)'}}>
+                <th style={{padding:'6px 14px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textAlign:'left',whiteSpace:'nowrap'}}>Date</th>
+                <th style={{padding:'6px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textAlign:'left'}}>Description</th>
+                <th style={{padding:'6px 14px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textAlign:'right',whiteSpace:'nowrap'}}>Amount</th>
+              </tr></thead>
+              <tbody>
+                {rows.map((r,i)=>(
+                  <tr key={i} style={{borderBottom:'1px solid #f3f4f6'}}>
+                    <td style={{padding:'7px 14px',fontSize:12,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{r.date}</td>
+                    <td style={{padding:'7px 8px',fontSize:12,fontWeight:500}}>
+                      {r.is_split
+                        ?<span>{r.description} <span style={{fontSize:10,background:'#eff6ff',color:'#2563eb',borderRadius:3,padding:'1px 4px',marginLeft:4}}>split{r.split_description?': '+r.split_description:''}</span></span>
+                        :r.description}
+                    </td>
+                    <td style={{padding:'7px 14px',textAlign:'right',fontFamily:'DM Mono',fontSize:12,
+                      color:r.contrib>=0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                      {r.contrib>=0?'+':''}{fmt(Math.abs(r.contrib))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+      }
+    </div>
+  );
+}
+
 function DashboardPage({categories,toast}){
   const[stats,setStats]=useState(null);
   const[recent,setRecent]=useState([]);
@@ -1454,6 +1523,7 @@ function DashboardPage({categories,toast}){
   const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
   const[budgetView,setBudgetView]=useState('month'); // 'month' | 'annual'
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
+  const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
 
   const getDates=()=>{
     const now=new Date();
@@ -1507,6 +1577,19 @@ function DashboardPage({categories,toast}){
   };
   const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});};
 
+  const openCatDetail=async(cat)=>{
+    if(catDetail?.cat===cat){setCatDetail(null);return;}
+    const yr=new Date().getFullYear();
+    const{start,end}=budgetView==='annual'
+      ?{start:`${yr}-01-01`,end:todayStr()}
+      :getDates();
+    setCatDetail({cat,loading:true,rows:[],total:0});
+    try{
+      const d=await apiFetch(`/stats/detail?category=${encodeURIComponent(cat)}&start_date=${start}&end_date=${end}`);
+      setCatDetail({cat,loading:false,rows:d.rows||[],total:d.total||0});
+    }catch(e){setCatDetail(null);toast('Failed to load detail','error');}
+  };
+
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
 
   const income=stats?.total_income??0;
@@ -1559,9 +1642,9 @@ function DashboardPage({categories,toast}){
         <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>Budget view:</span>
         <div style={{display:'flex',gap:3,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:8,padding:3}}>
           <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>setBudgetView('month')} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Monthly</button>
+            onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Monthly</button>
           <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>setBudgetView('annual')} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Annual YTD</button>
+            onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Annual YTD</button>
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch'}}>
@@ -1574,7 +1657,9 @@ function DashboardPage({categories,toast}){
             budgetView==='annual'
               ? Object.entries(ytdByCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6)
               : topCats
-          }/>
+          } onCategoryClick={openCatDetail} selectedCat={catDetail?.cat}/>
+
+          {catDetail&&<CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>}
 
           {/* Recent Transactions */}
           <div className="card">
