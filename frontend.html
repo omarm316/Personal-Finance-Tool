@@ -1421,10 +1421,8 @@ function DashboardPage({categories,toast}){
   const[topCats,setTopCats]=useState([]);
   const[period,setPeriod]=useState('month');
   const[reviewTxn,setReviewTxn]=useState(null);
+  const[splitTxn,setSplitTxn]=useState(null);
   const[loading,setLoading]=useState(true);
-  const[timeline,setTimeline]=useState([]);
-  const[monthlyBals,setMonthlyBals]=useState([]);
-  const[selectedAcctId,setSelectedAcctId]=useState(null);
   const[budgetTargets,setBudgetTargets]=useState({});
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
@@ -1444,29 +1442,21 @@ function DashboardPage({categories,toast}){
       const{start,end}=getDates();
       const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
       const yr=new Date().getFullYear();
-      const[s,r,rv,nw,tl,mb,bt,ba,bt2,ba2]=await Promise.all([
+      const[s,r,rv,nw,bt,ba,bt2,ba2]=await Promise.all([
         apiFetch(statsQ),
-        apiFetch(`/transactions?limit=5${start?`&start_date=${start}`:''}${end?`&end_date=${end}`:''}`),
-        apiFetch('/transactions?needs_review=true&limit=10'),
+        apiFetch(`/transactions?limit=8${start?`&start_date=${start}`:''}${end?`&end_date=${end}`:''}`),
+        apiFetch('/transactions?needs_review=true&limit=50'),
         apiFetch('/net-worth').catch(()=>null),
-        apiFetch('/net-worth/timeline?months=24').catch(()=>null),
-        apiFetch('/balances/monthly?months=24').catch(()=>null),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/targets?year=${yr-1}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr-1}`).catch(()=>({categories:{}})),
       ]);
       setStats(s);setRecent(r);setReviewQ(rv);setNetWorth(nw);
-      setTimeline(tl?.timeline||[]);
-      const bals=mb||[];setMonthlyBals(bals);
-      if(bals.length>0)setSelectedAcctId(id=>id??bals[0].account_id);
       setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
       setBudgetTargetsPrior(bt2.categories||{});setBudgetActualsPrior(ba2.categories||{});
-
-      /* Top 5 expense categories — only positive net spend (skip net-credit categories) */
       const byCat=s?.by_category||{};
-      const sorted=Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5);
-      setTopCats(sorted);
+      setTopCats(Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6));
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
   },[period]);
@@ -1474,10 +1464,11 @@ function DashboardPage({categories,toast}){
   useEffect(()=>{load();},[load]);
 
   const handleSave=async(id,updates)=>{
-    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();toast('Saved');}
-    catch(e){toast('Failed','error');}
+    if(updates.__deleted){await load();return;}
+    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();}
+    catch(e){toast('Failed to save','error');}
   };
-  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
+  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});};
 
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
 
@@ -1485,10 +1476,14 @@ function DashboardPage({categories,toast}){
   const expenses=stats?.total_expenses??0;
   const hr=new Date().getHours();
   const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
+  const expCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name);
 
   return(
     <div>
       {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
+      {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
+
+      {/* Header */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
         <div>
           <h2 style={{fontSize:18,fontWeight:600}}>Good {greeting}</h2>
@@ -1501,7 +1496,7 @@ function DashboardPage({categories,toast}){
         </div>
       </div>
 
-      {/* KPI row — colored left border accent (Stripe-style) */}
+      {/* KPI row */}
       <div className="metric-grid">
         <div className="card metric-card" style={{borderLeft:'3px solid var(--green)'}}>
           <div className="metric-label">Total Income</div>
@@ -1521,57 +1516,37 @@ function DashboardPage({categories,toast}){
         </div>
       </div>
 
-      <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals}/>
+      {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
+      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,marginTop:20,alignItems:'start'}}>
+        {/* Left: Budget Scorecard — naturally narrower in this column */}
+        <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals}/>
 
-      <div className="dash-grid">
+        {/* Right: Spending Breakdown → Recent Transactions → Net Worth Summary */}
         <div style={{display:'flex',flexDirection:'column',gap:20}}>
-          {/* Recent transactions */}
+          <SpendingBreakdownCard topCats={topCats}/>
+
+          {/* Recent Transactions */}
           <div className="card">
             <div className="section-header"><div className="section-title">Recent Transactions</div></div>
-            {recent.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
+            {recent.length===0
+              ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
               :<table style={{width:'100%'}}><tbody>{recent.map(t=>(
                 <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
-                  <td style={{padding:'11px 16px',color:'var(--text-muted)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
-                  <td style={{padding:'11px 8px',fontSize:13.5,fontWeight:500}}>{t.description_display||t.description_raw}</td>
-                  <td style={{padding:'11px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
+                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:500}}>{t.description_display||t.description_raw}</td>
+                  <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap'}}>
                     <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
                   </td>
-                  <td style={{padding:'11px 16px'}}>
+                  <td style={{padding:'9px 10px'}}>
                     {showCategoryForType(t.action)&&<span className={`badge ${!t.category_final||t.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{t.category_final||'Unclassified'}</span>}
                   </td>
-                  <td style={{padding:'11px 12px',fontSize:11,color:'var(--text-muted)',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.account_name}>{t.account_name}</td>
+                  <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.account_name}>{t.account_name}</td>
                 </tr>
               ))}</tbody></table>
             }
           </div>
 
-          {/* Spending breakdown: donut + ranked categories (interactive) */}
-          <SpendingBreakdownCard topCats={topCats}/>
-        </div>
-
-        <div style={{display:'flex',flexDirection:'column',gap:20}}>
-          {/* Review queue */}
-          <div className="card">
-            <div className="section-header">
-              <div className="section-title">Needs Review</div>
-              {reviewQ.length>0&&<span className="badge" style={{background:'#fef3c7',color:'#92400e'}}>{reviewQ.length}</span>}
-            </div>
-            {reviewQ.length===0
-              ?<div className="empty" style={{padding:40}}><div className="empty-icon">✓</div><span style={{fontSize:13}}>All caught up!</span></div>
-              :<div>{reviewQ.map(t=>(
-                <div key={t.id} style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description_display||t.description_raw}</div>
-                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{fmtDate(t.date)}</div>
-                  </div>
-                  <div style={{fontSize:13,fontFamily:'DM Mono',color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</div>
-                  <button className="btn btn-sm" style={{background:'var(--amber)',color:'#fff',border:'none',flexShrink:0}} onClick={()=>setReviewTxn(t)}>Review</button>
-                </div>
-              ))}</div>
-            }
-          </div>
-
-          {/* Quick net worth breakdown */}
+          {/* Net Worth Summary */}
           {netWorth&&<div className="card">
             <div className="section-header"><div className="section-title">Net Worth Summary</div></div>
             {Object.entries(netWorth.buckets||{}).map(([bucket,bData])=>{
@@ -1587,60 +1562,58 @@ function DashboardPage({categories,toast}){
         </div>
       </div>
 
-      {/* Budget vs Actual — 12-month bar chart */}
-      {(()=>{
-        const expCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name);
-        const hasData=expCats.some(cat=>budgetActuals[cat]||budgetActualsPrior[cat]||budgetTargets[cat]||budgetTargetsPrior[cat]);
-        if(!hasData)return null;
-        return(
-          <div className="card" style={{marginTop:20}}>
-            <div className="section-header">
-              <div className="section-title">Budget vs. Actual — Last 12 Months</div>
-              <span style={{fontSize:11,color:'var(--text-muted)'}}>bars = actual spend · markers = budget target</span>
-            </div>
-            <div style={{padding:'8px 8px 4px'}}>
-              <BudgetBarChart
-                actuals={budgetActuals} targets={budgetTargets}
-                actualsPrior={budgetActualsPrior} targetsPrior={budgetTargetsPrior}
-                expenseCats={expCats}/>
-            </div>
+      {/* ── Section 2: Budget vs. Actual — Last 12 Months ───────────────────── */}
+      <div className="card" style={{marginTop:28}}>
+        <div style={{padding:'20px 22px 4px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'baseline',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:17,color:'var(--text-primary)'}}>Budget vs. Actual</div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:3}}>Last 12 months · bars = actual spend · markers = budget target</div>
           </div>
-        );
-      })()}
-
-      {/* Net Worth Over Time */}
-      <div className="card" style={{marginTop:20}}>
-        <div className="section-header"><div className="section-title">Net Worth Over Time</div></div>
-        <div style={{padding:'0 4px 8px'}}>
-          <SimpleLineChart
-            lines={timeline.length>0?[{label:'Net Worth',color:'#3b82f6',points:timeline.map(p=>({x:fmtMonthLabel(p.date),y:p.net_worth}))}]:[]}
-            height={200}
-            fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000000?`$${(abs/1000000).toFixed(2)}M`:abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);}}
-          />
+        </div>
+        <div style={{padding:'12px 12px 6px'}}>
+          <BudgetBarChart
+            actuals={budgetActuals} targets={budgetTargets}
+            actualsPrior={budgetActualsPrior} targetsPrior={budgetTargetsPrior}
+            expenseCats={expCats}/>
         </div>
       </div>
 
-      {/* Account Balances Over Time */}
-      {monthlyBals.length>0&&<div className="card" style={{marginTop:20}}>
+      {/* ── Section 3: Needs Review — full transaction rows ──────────────────── */}
+      <div className="card" style={{marginTop:28}}>
         <div className="section-header">
-          <div className="section-title">Account Balance Over Time</div>
-          <select className="form-input" style={{width:'auto',fontSize:12,padding:'3px 8px'}} value={selectedAcctId||''} onChange={e=>setSelectedAcctId(Number(e.target.value))}>
-            {monthlyBals.map(a=><option key={a.account_id} value={a.account_id}>{a.account_name}{a.mask?` ····${a.mask}`:''}</option>)}
-          </select>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontWeight:700,fontSize:15}}>Needs Review</span>
+            {reviewQ.length>0&&<span style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:10,background:'#fef3c7',color:'#92400e'}}>{reviewQ.length}</span>}
+          </div>
+          {reviewQ.length>0&&<span style={{fontSize:11,color:'var(--text-muted)'}}>Edit, categorize, create rules, or exclude directly below</span>}
         </div>
-        <div style={{padding:'0 4px 8px'}}>
-          {(()=>{
-            const acct=monthlyBals.find(a=>a.account_id===selectedAcctId);
-            if(!acct)return null;
-            const color=CHART_COLORS[monthlyBals.findIndex(a=>a.account_id===selectedAcctId)%CHART_COLORS.length];
-            return<SimpleLineChart
-              lines={[{label:acct.account_name,color,points:acct.months.map(m=>({x:fmtMonthLabel(`${m.year}-${String(m.month).padStart(2,'0')}-01`),y:m.closing}))}]}
-              height={200}
-              fmtY={v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);}}
-            />;
-          })()}
-        </div>
-      </div>}
+        {reviewQ.length===0
+          ?<div className="empty" style={{padding:48}}><div className="empty-icon">✓</div><span style={{fontSize:14,fontWeight:500}}>All caught up!</span><span style={{fontSize:12,color:'var(--text-muted)'}}>No transactions need attention</span></div>
+          :<div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'var(--bg)',borderBottom:'2px solid var(--border)'}}>
+                  <th style={{width:28,padding:'8px 12px'}}/>
+                  <th style={{textAlign:'left',padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Date</th>
+                  <th style={{textAlign:'left',padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</th>
+                  <th style={{textAlign:'right',padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Amount</th>
+                  <th style={{padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Type</th>
+                  <th style={{padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Category</th>
+                  <th style={{padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Account</th>
+                  <th style={{padding:'8px 8px',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewQ.map(t=>(
+                  <TxnRow key={t.id} txn={t} categories={categories}
+                    onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn}
+                    selected={false} onToggleSelect={()=>{}} onBatchEdit={()=>{}} toast={toast}/>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
     </div>
   );
 }
