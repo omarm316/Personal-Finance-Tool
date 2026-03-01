@@ -1428,16 +1428,49 @@ async def get_stats(
     if end_date:
         query = query.filter(Transaction.date <= datetime.strptime(end_date, "%Y-%m-%d"))
 
-    transactions   = query.all()
-    total_income   = sum(t.amount for t in transactions if t.action == 'Income')
-    # Net expenses: charges (amount < 0) contribute positively; CC credits (amount > 0)
-    # contribute negatively, reducing the total — so we use -amount for all Expense rows.
-    total_expenses = sum(-t.amount for t in transactions if t.action == 'Expense')
+    transactions = query.all()
+
+    # Batch-load splits for all split transactions in one query
+    split_txn_ids = [t.id for t in transactions if t.is_split]
+    splits_map: dict = {}
+    if split_txn_ids:
+        all_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.parent_transaction_id.in_(split_txn_ids)
+        ).all()
+        for s in all_splits:
+            splits_map.setdefault(s.parent_transaction_id, []).append(s)
+
+    # Compute totals & by-category, handling split transactions correctly.
+    # For split parents (is_split=True): skip the parent's own amount and instead
+    # accumulate from the individual TransactionSplit line items (each with their own category).
+    # This mirrors the logic in /budget/actuals and prevents double-counting.
+    total_income = 0.0
+    total_expenses = 0.0
     by_category: dict = {}
+
     for t in transactions:
-        if t.action == 'Expense':
-            cat = t.category_final
-            by_category[cat] = by_category.get(cat, 0) + (-t.amount)
+        if t.action not in BUDGET_TYPES:
+            continue
+        if t.is_split:
+            for s in splits_map.get(t.id, []):
+                if s.is_gcb:
+                    continue
+                if t.action == 'Expense':
+                    cat = s.category or t.category_final or 'Unclassified'
+                    # charges (s.amount < 0) → -s.amount is positive; credits → negative (nets correctly)
+                    contrib = -s.amount
+                    total_expenses += contrib
+                    by_category[cat] = by_category.get(cat, 0) + contrib
+                elif t.action == 'Income':
+                    total_income += s.amount
+        else:
+            if t.action == 'Expense':
+                cat = t.category_final or 'Unclassified'
+                contrib = -t.amount
+                total_expenses += contrib
+                by_category[cat] = by_category.get(cat, 0) + contrib
+            elif t.action == 'Income':
+                total_income += t.amount
 
     return {
         "total_transactions": len(transactions),
