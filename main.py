@@ -4009,6 +4009,7 @@ async def get_daily_balances(
             "projected_dates": sorted(p_dates),
         })
 
+    _ASSET_GROUPS = {"Checking & Savings", "Investments", "Other Assets"}
     result_groups = []
     for grp_name, _ in GROUP_ORDER:
         accts = groups_map.get(grp_name, [])
@@ -4017,6 +4018,7 @@ async def get_daily_balances(
         totals = [round(sum(a["balances"][i] for a in accts), 2) for i in range(num_days)]
         result_groups.append({
             "group": grp_name,
+            "is_asset": grp_name in _ASSET_GROUPS,
             "accounts": accts,
             "totals": totals,
         })

@@ -3930,6 +3930,8 @@ function DailyBalancesPage({toast}){
                   </th>
                 );
               })}
+              {/* Grand Total = Net Worth per date */}
+              <th rowSpan={2} style={{padding:'6px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px',borderBottom:'2px solid var(--border)',borderLeft:'3px solid #6366f1',background:'#eef2ff',whiteSpace:'nowrap',color:'#4338ca',minWidth:100}}>Grand Total</th>
             </tr>
             {/* Row 2: Account name sub-headers */}
             <tr style={{background:'var(--card-bg)'}}>
@@ -3951,19 +3953,35 @@ function DailyBalancesPage({toast}){
                   <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'#fef9c3':isFuture?'#fafafa':'var(--card-bg)',padding:'3px 10px',fontFamily:'DM Mono',fontSize:11,borderRight:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap',color:isToday?'#92400e':isFuture?'var(--text-muted)':'var(--text-secondary)',fontWeight:isToday?700:400}}>
                     {d.slice(5)}{isToday&&<span style={{marginLeft:5,fontSize:9,fontWeight:800,background:'#fbbf24',color:'#fff',borderRadius:3,padding:'1px 4px'}}>TODAY</span>}
                   </td>
-                  {groups.map(grp=>{
-                    const tot=grp.totals[di];
-                    return[
-                      <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontWeight:600,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:tot<0?'var(--red)':'inherit',background:tot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(tot)}</td>,
-                      ...(!collapsed[grp.group]?grp.accounts.map(acct=>{
-                        const val=acct.balances[di];
+                  {(()=>{
+                    /* For each group: liabilities always shown as (negative) in red */
+                    let grandTotal=0;
+                    const cells=groups.flatMap(grp=>{
+                      const isLiab=!grp.is_asset;
+                      const rawTot=grp.totals[di];
+                      /* contribution to net worth: assets add, liabilities subtract */
+                      grandTotal+=isLiab?-Math.abs(rawTot??0):(rawTot??0);
+                      const dispTot=isLiab?-Math.abs(rawTot??0):(rawTot??0);
+                      const totCell=(
+                        <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontWeight:600,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispTot<0?'var(--red)':'inherit',background:isLiab?'#fff5f5':dispTot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(dispTot)}</td>
+                      );
+                      const acctCells=!collapsed[grp.group]?grp.accounts.map(acct=>{
+                        const rawVal=acct.balances[di];
+                        const dispVal=isLiab?-Math.abs(rawVal??0):(rawVal??0);
                         const isProj=acct.projected_dates&&acct.projected_dates.length>0&&d>=acct.projected_dates[0];
                         return(
-                          <td key={acct.id} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:val<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap'}}>{fmtBal(val)}</td>
+                          <td key={acct.id} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap'}}>{fmtBal(dispVal)}</td>
                         );
-                      }):[])
-                    ];
-                  })}
+                      }):[];
+                      return[totCell,...acctCells];
+                    });
+                    grandTotal=Math.round(grandTotal*100)/100;
+                    const gtColor=grandTotal>=0?'var(--green)':'var(--red)';
+                    cells.push(
+                      <td key="grand-total" style={{padding:'3px 10px',textAlign:'right',fontFamily:'DM Mono',fontWeight:700,fontSize:12,borderLeft:'3px solid #6366f1',borderBottom:'1px solid #f0f0f0',color:gtColor,background:'#eef2ff',whiteSpace:'nowrap'}}>{fmtBal(grandTotal)}</td>
+                    );
+                    return cells;
+                  })()}
                 </tr>
               );
             })}
