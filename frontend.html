@@ -2406,7 +2406,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
             </div>
             {balanceSyncResult.accounts&&balanceSyncResult.accounts.length>0&&(()=>{
               const fmtB=v=>{const neg=v<0;return (neg?'−':'')+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(v));};
-              const anyDelta=balanceSyncResult.accounts.some(a=>Math.abs(a.delta||0)>0.01);
+              const anyDelta=balanceSyncResult.accounts.some(a=>a.delta!=null&&Math.abs(a.delta)>0.01);
               return <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                   <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
@@ -2416,24 +2416,27 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
                     <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Difference</th>
                   </tr></thead>
                   <tbody>{balanceSyncResult.accounts.map((a,i)=>{
-                    const diff=a.delta||0;
-                    const absDiff=Math.abs(diff);
-                    const diffColor=absDiff<0.01?'var(--text-muted)':absDiff<10?'#b45309':'var(--red)';
+                    const diff=a.delta;
+                    const absDiff=diff!=null?Math.abs(diff):null;
+                    const diffColor=diff==null?'var(--text-muted)':absDiff<0.01?'var(--text-muted)':absDiff<10?'#b45309':'var(--red)';
                     return <tr key={i} style={{borderBottom:'1px solid var(--border-light)'}}>
                       <td style={{padding:'5px 8px 5px 0'}}>
                         <span style={{fontWeight:500}}>{a.name}</span>
+                        {a.is_manual&&<span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>manual</span>}
                         {a.anchor_updated&&<span style={{marginLeft:6,fontSize:10,background:'#fef3c7',color:'#b45309',borderRadius:3,padding:'1px 4px'}}>anchor reset</span>}
                       </td>
-                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.plaid_balance)}</td>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace',color:a.is_manual?'var(--text-muted)':'inherit'}}>
+                        {a.plaid_balance!=null?fmtB(a.plaid_balance):'—'}
+                      </td>
                       <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.computed_balance)}</td>
                       <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:diffColor,fontWeight:absDiff>0.01?600:400}}>
-                        {absDiff<0.01?'—':(diff>0?'+':'')+fmtB(diff)}
+                        {diff==null?'—':absDiff<0.01?'—':(diff>0?'+':'')+fmtB(diff)}
                       </td>
                     </tr>;
                   })}</tbody>
                 </table>
                 {anyDelta&&<div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
-                  A non-zero difference typically means Plaid's balance lags behind your transactions (e.g. after a weekend). If the difference persists after transactions have posted, use ⚡ Force Resync.
+                  A non-zero difference typically means Plaid's balance lags your transactions (e.g. after a weekend). If it persists once transactions have posted, use ⚡ Force Resync.
                 </div>}
               </div>;
             })()}

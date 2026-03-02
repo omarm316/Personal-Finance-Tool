@@ -2911,6 +2911,28 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
                 'months_built': months_built,
             })
     db.commit()
+
+    # Include manual accounts (no Plaid balance to compare, but show computed balance)
+    manual_accounts = db.query(Account).filter_by(is_active=True, is_manual=True).all()
+    plaid_seen_ids = {a['name'] for a in synced}  # avoid dupes if a manual acct somehow matched
+    for acct in manual_accounts:
+        if acct.account_name in plaid_seen_ids:
+            continue
+        computed_balance = get_account_balance(db, acct.id)
+        synced.append({
+            'name': acct.account_name,
+            'account_type': acct.account_type or '',
+            'plaid_balance': None,  # no Plaid connection
+            'computed_balance': computed_balance,
+            'delta': None,
+            'anchor_updated': False,
+            'months_built': 0,
+            'is_manual': True,
+        })
+
+    # Sort alphabetically for easy scanning
+    synced.sort(key=lambda a: (a['name'] or '').lower())
+
     return {'synced': len(synced), 'skipped': len(skipped), 'accounts': synced, 'skipped_details': skipped}
 
 
