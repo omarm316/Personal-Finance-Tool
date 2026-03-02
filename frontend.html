@@ -2398,10 +2398,45 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               <button className="btn btn-sm btn-secondary" onClick={()=>{if(window.confirm("Force resync will re-anchor all accounts to today's Plaid balance. Only do this when Plaid's balance is fully up to date. Continue?"))syncBalances(true);}} disabled={balanceSyncing} style={{borderColor:'#f59e0b',color:'#b45309'}}>⚡ Force Resync</button>
             </div>
           </div>
-          {balanceSyncResult&&<div style={{marginTop:10,fontSize:12,color:'var(--text-muted)'}}>
-            Last sync: {balanceSyncResult.synced} account{balanceSyncResult.synced!==1?'s':''} processed
-            {balanceSyncResult.force&&<span style={{marginLeft:8,fontWeight:600,color:'#b45309'}}>(force resync — anchors updated from Plaid)</span>}
-            {balanceSyncResult.skipped>0&&<span style={{marginLeft:8,color:'#b45309'}}>({balanceSyncResult.skipped} skipped — no Plaid balance available)</span>}
+          {balanceSyncResult&&<div style={{marginTop:12}}>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>
+              Last sync: {balanceSyncResult.synced} account{balanceSyncResult.synced!==1?'s':''} processed
+              {balanceSyncResult.force&&<span style={{marginLeft:8,fontWeight:600,color:'#b45309'}}>(force resync — anchors updated from Plaid)</span>}
+              {balanceSyncResult.skipped>0&&<span style={{marginLeft:8,color:'#b45309'}}>({balanceSyncResult.skipped} skipped)</span>}
+            </div>
+            {balanceSyncResult.accounts&&balanceSyncResult.accounts.length>0&&(()=>{
+              const fmtB=v=>{const neg=v<0;return (neg?'−':'')+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(v));};
+              const anyDelta=balanceSyncResult.accounts.some(a=>Math.abs(a.delta||0)>0.01);
+              return <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
+                    <th style={{textAlign:'left',padding:'4px 8px 4px 0',fontWeight:500}}>Account</th>
+                    <th style={{textAlign:'right',padding:'4px 8px',fontWeight:500}}>Plaid Balance</th>
+                    <th style={{textAlign:'right',padding:'4px 8px',fontWeight:500}}>System Balance</th>
+                    <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Difference</th>
+                  </tr></thead>
+                  <tbody>{balanceSyncResult.accounts.map((a,i)=>{
+                    const diff=a.delta||0;
+                    const absDiff=Math.abs(diff);
+                    const diffColor=absDiff<0.01?'var(--text-muted)':absDiff<10?'#b45309':'var(--red)';
+                    return <tr key={i} style={{borderBottom:'1px solid var(--border-light)'}}>
+                      <td style={{padding:'5px 8px 5px 0'}}>
+                        <span style={{fontWeight:500}}>{a.name}</span>
+                        {a.anchor_updated&&<span style={{marginLeft:6,fontSize:10,background:'#fef3c7',color:'#b45309',borderRadius:3,padding:'1px 4px'}}>anchor reset</span>}
+                      </td>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.plaid_balance)}</td>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.computed_balance)}</td>
+                      <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:diffColor,fontWeight:absDiff>0.01?600:400}}>
+                        {absDiff<0.01?'—':(diff>0?'+':'')+fmtB(diff)}
+                      </td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+                {anyDelta&&<div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
+                  A non-zero difference typically means Plaid's balance lags behind your transactions (e.g. after a weekend). If the difference persists after transactions have posted, use ⚡ Force Resync.
+                </div>}
+              </div>;
+            })()}
           </div>}
         </div>
         <div className="card" style={{marginBottom:20}}>

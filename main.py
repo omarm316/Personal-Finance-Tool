@@ -2897,9 +2897,16 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
             db.flush()
             months_built = rebuild_monthly_snapshots(db, account.id)
             db.flush()
+            # Compute the transaction-derived balance after snapshots are rebuilt
+            # so we can surface any discrepancy vs. Plaid's reported number.
+            computed_balance = get_account_balance(db, account.id)
+            delta = round(computed_balance - signed_balance, 2)
             synced.append({
                 'name': account.account_name,
+                'account_type': account.account_type or '',
                 'plaid_balance': signed_balance,
+                'computed_balance': computed_balance,
+                'delta': delta,
                 'anchor_updated': anchor_updated,
                 'months_built': months_built,
             })
