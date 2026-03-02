@@ -999,8 +999,8 @@ function TransactionsPage({categories,toast}){
   const[showDupes,setShowDupes]=useState(false);
   const[showExcluded,setShowExcluded]=useState(false);
 
-  const load=useCallback(async()=>{
-    setLoading(true);
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent)setLoading(true);
     try{
       let q='?limit=500';
       if(needsReview)q+='&needs_review=true';
@@ -1010,17 +1010,18 @@ function TransactionsPage({categories,toast}){
       const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
       setTxns(t);setAccounts(a);
     }catch(e){toast('Failed to load','error');}
-    finally{setLoading(false);}
+    finally{if(!silent)setLoading(false);}
   },[needsReview,startDate,endDate,accountFilter]);
 
   useEffect(()=>{load();},[load]);
 
-  /* Preserve scroll position after save (Section 2C) */
   const handleSave=async(id,updates)=>{
-    const scrollY=window.scrollY;
-    /* __deleted is a sentinel set by the delete button after it already called DELETE — just reload */
-    if(updates.__deleted){await load();requestAnimationFrame(()=>window.scrollTo(0,scrollY));return;}
-    try{await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});await load();toast('Saved');requestAnimationFrame(()=>window.scrollTo(0,scrollY));}
+    if(updates.__deleted){await load();return;}
+    try{
+      await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+      await load({silent:true});
+      toast('Saved');
+    }
     catch(e){toast('Failed to save','error');}
   };
   const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
@@ -1362,15 +1363,15 @@ function BudgetBarChart({actuals,targets,actualsPrior,targetsPrior,expenseCats})
   );
 }
 
-function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={}}){
+function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMonth,viewYear}){
   const now=new Date();
-  const yr=now.getFullYear();
-  const mo=now.getMonth()+1;
+  const yr=viewYear||now.getFullYear();
+  const mo=viewMonth||(now.getMonth()+1);
   const mStr=String(mo);
-  const monthLabel=now.toLocaleString('default',{month:'long'});
+  const monthLabel=new Date(yr,mo-1,1).toLocaleString('default',{month:'long'});
   const SKIP=new Set(['Transfer','Unclassified','Work']);
   const isAnnual=view==='annual';
-  const title=isAnnual?`Budget vs. Actual — ${yr} YTD`:`Budget vs. Actual — ${monthLabel}`;
+  const title=isAnnual?`Budget vs. Actual — ${yr} YTD`:`Budget vs. Actual — ${monthLabel} ${yr}`;
 
   // Annual mode: use ytdActuals from /stats (expense-only, credits netted).
   // Monthly mode: use budgetActuals per-month slice.
@@ -1524,23 +1525,33 @@ function DashboardPage({categories,toast}){
   const[budgetView,setBudgetView]=useState('month'); // 'month' | 'annual'
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
   const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
+  const[viewYear,setViewYear]=useState(new Date().getFullYear());
+  const[viewMonth,setViewMonth]=useState(new Date().getMonth()+1);
 
   const getDates=()=>{
     const now=new Date();
-    if(period==='month')return{start:monthStart(),end:todayStr()};
+    if(period==='month'){
+      // Use selected year/month so the budget scorecard and KPI stats stay in sync
+      const firstDay=`${viewYear}-${String(viewMonth).padStart(2,'0')}-01`;
+      const lastDay=new Date(viewYear,viewMonth,0).getDate();
+      const lastDayStr=`${viewYear}-${String(viewMonth).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      return{start:firstDay,end:lastDayStr};
+    }
     if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
     if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:localDateStr(d),end:todayStr()};}
     return{start:'',end:''};
   };
 
-  const load=useCallback(async()=>{
-    setLoading(true);
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent)setLoading(true);
     try{
       const{start,end}=getDates();
       const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
-      const yr=new Date().getFullYear();
-      // Always fetch YTD expense stats for annual view (expense-only, correctly nets credits)
-      const ytdQ=`/stats?start_date=${yr}-01-01&end_date=${todayStr()}`;
+      const yr=viewYear;
+      const curY=new Date().getFullYear();
+      // YTD stats: for current year use today; for past years use Dec 31
+      const ytdEnd=yr<curY?`${yr}-12-31`:todayStr();
+      const ytdQ=`/stats?start_date=${yr}-01-01&end_date=${ytdEnd}`;
       const[s,r,rv,nw,bt,ba,bt2,ba2,ytdS]=await Promise.all([
         apiFetch(statsQ),
         apiFetch('/transactions?limit=12'),
@@ -1559,8 +1570,8 @@ function DashboardPage({categories,toast}){
       const byCat=s?.by_category||{};
       setTopCats(Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6));
     }catch(e){toast('Failed to load','error');}
-    finally{setLoading(false);}
-  },[period]);
+    finally{if(!silent)setLoading(false);}
+  },[period,viewYear,viewMonth]);
 
   useEffect(()=>{load();},[load]);
 
@@ -1568,10 +1579,9 @@ function DashboardPage({categories,toast}){
     if(updates.__deleted){await load();return;}
     try{
       await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
-      /* Tell the user what happened — especially important when the row disappears from the review queue */
       if(updates.needs_review===false)toast('✓ Reviewed — transaction moved to Transactions page');
       else if(Object.keys(updates).length>0)toast('✓ Saved');
-      await load();
+      await load({silent:true});
     }
     catch(e){toast('Failed to save','error');}
   };
@@ -1637,8 +1647,8 @@ function DashboardPage({categories,toast}){
       </div>
 
       {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
-      {/* Budget view toggle */}
-      <div style={{display:'flex',alignItems:'center',gap:8,marginTop:20,marginBottom:12}}>
+      {/* Budget view toggle + year/month selectors */}
+      <div style={{display:'flex',alignItems:'center',gap:8,marginTop:20,marginBottom:12,flexWrap:'wrap'}}>
         <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>Budget view:</span>
         <div style={{display:'flex',gap:3,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:8,padding:3}}>
           <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
@@ -1646,10 +1656,24 @@ function DashboardPage({categories,toast}){
           <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
             onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Annual YTD</button>
         </div>
+        <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
+          style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+          {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+        {budgetView==='month'&&(
+          <select value={viewMonth} onChange={e=>{setViewMonth(+e.target.value);setCatDetail(null);}}
+            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
+              <option key={i+1} value={i+1}>{m}</option>
+            ))}
+          </select>
+        )}
       </div>
       <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch'}}>
         {/* Left: Budget Scorecard */}
-        <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals} view={budgetView} ytdActuals={ytdByCat}/>
+        <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals} view={budgetView} ytdActuals={ytdByCat} viewMonth={viewMonth} viewYear={viewYear}/>
 
         {/* Right: Spending Breakdown → Recent Transactions → Net Worth Summary */}
         <div style={{display:'flex',flexDirection:'column',gap:20}}>
@@ -1658,6 +1682,7 @@ function DashboardPage({categories,toast}){
               ? Object.entries(ytdByCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6)
               : topCats
           } onCategoryClick={openCatDetail} selectedCat={catDetail?.cat}/>
+
 
           {catDetail&&<CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>}
 

@@ -3299,6 +3299,43 @@ async def get_net_worth(as_of: Optional[str] = None, db: Session = Depends(get_d
             # Liabilities stored negative (e.g. credit card balance = -500)
             total_liabilities += balance
 
+    # Add active loans that aren't already covered by a linked account in this snapshot
+    from sqlalchemy import func as _func
+    active_account_ids = {a.id for a in accounts}
+    active_loans = db.query(Loan).filter_by(is_active=True).all()
+    loan_items = []
+    for loan in active_loans:
+        if loan.account_id and loan.account_id in active_account_ids:
+            continue  # already represented via its linked liability account
+        balance = loan.current_balance or 0.0
+        if loan.balance_date and balance > 0:
+            # Subtract principal payments made after the recorded balance_date
+            principal_paid = db.query(_func.sum(TransactionSplit.amount)).join(
+                Transaction, TransactionSplit.parent_transaction_id == Transaction.id
+            ).filter(
+                TransactionSplit.description == 'Principal',
+                Transaction.loan_id == loan.id,
+                Transaction.date > loan.balance_date,
+            ).scalar() or 0.0
+            balance = max(0.0, balance - principal_paid)
+        signed = -round(balance, 2)  # negative = liability (consistent with account convention)
+        loan_items.append({
+            'account_id': None,
+            'account_name': f"{loan.lender} ({loan.loan_type})",
+            'account_type': 'loan',
+            'mask': None,
+            'is_manual': True,
+            'starting_balance': 0,
+            'start_date': None,
+            'balance': signed,
+        })
+        total_liabilities += signed
+
+    if loan_items:
+        if 'Loans' not in buckets:
+            buckets['Loans'] = {'is_asset': False, 'accounts': []}
+        buckets['Loans']['accounts'].extend(loan_items)
+
     return {
         'as_of': as_of_dt.strftime('%Y-%m-%d'),
         'total_assets': round(total_assets, 2),
