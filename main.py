@@ -2902,6 +2902,7 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
             computed_balance = get_account_balance(db, account.id)
             delta = round(computed_balance - signed_balance, 2)
             synced.append({
+                '_account_id': account.id,
                 'name': account.account_name,
                 'account_type': account.account_type or '',
                 'plaid_balance': signed_balance,
@@ -2909,28 +2910,37 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
                 'delta': delta,
                 'anchor_updated': anchor_updated,
                 'months_built': months_built,
+                'is_manual': False,
+                'source': 'plaid',
             })
     db.commit()
 
-    # Include manual accounts (no Plaid balance to compare, but show computed balance)
-    manual_accounts = db.query(Account).filter_by(is_active=True, is_manual=True).all()
-    plaid_seen_ids = {a['name'] for a in synced}  # avoid dupes if a manual acct somehow matched
-    for acct in manual_accounts:
-        if acct.account_name in plaid_seen_ids:
+    # Ensure every active DB account appears — even if Plaid returned a null
+    # balance, the connection failed, or the account is manual.
+    synced_ids = {e['_account_id'] for e in synced}
+    all_accounts = db.query(Account).filter_by(is_active=True).all()
+    for acct in all_accounts:
+        if acct.id in synced_ids:
             continue
         computed_balance = get_account_balance(db, acct.id)
+        is_manual = bool(acct.is_manual) or not acct.plaid_account_id
         synced.append({
+            '_account_id': acct.id,
             'name': acct.account_name,
             'account_type': acct.account_type or '',
-            'plaid_balance': None,  # no Plaid connection
+            'plaid_balance': None,
             'computed_balance': computed_balance,
             'delta': None,
             'anchor_updated': False,
             'months_built': 0,
-            'is_manual': True,
+            'is_manual': is_manual,
+            # 'plaid_unavailable' = has a Plaid link but balance couldn't be fetched
+            'source': 'manual' if is_manual else 'plaid_unavailable',
         })
 
-    # Sort alphabetically for easy scanning
+    # Strip internal tracking field, sort A–Z
+    for e in synced:
+        e.pop('_account_id', None)
     synced.sort(key=lambda a: (a['name'] or '').lower())
 
     return {'synced': len(synced), 'skipped': len(skipped), 'accounts': synced, 'skipped_details': skipped}

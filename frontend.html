@@ -2419,17 +2419,19 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
                     const diff=a.delta;
                     const absDiff=diff!=null?Math.abs(diff):null;
                     const diffColor=diff==null?'var(--text-muted)':absDiff<0.01?'var(--text-muted)':absDiff<10?'#b45309':'var(--red)';
+                    const plaidUnavail=a.source==='plaid_unavailable';
                     return <tr key={i} style={{borderBottom:'1px solid var(--border-light)'}}>
                       <td style={{padding:'5px 8px 5px 0'}}>
                         <span style={{fontWeight:500}}>{a.name}</span>
                         {a.is_manual&&<span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>manual</span>}
+                        {plaidUnavail&&<span style={{marginLeft:6,fontSize:10,background:'#fee2e2',color:'#991b1b',borderRadius:3,padding:'1px 4px'}} title="Plaid returned no balance for this account">no Plaid data</span>}
                         {a.anchor_updated&&<span style={{marginLeft:6,fontSize:10,background:'#fef3c7',color:'#b45309',borderRadius:3,padding:'1px 4px'}}>anchor reset</span>}
                       </td>
-                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace',color:a.is_manual?'var(--text-muted)':'inherit'}}>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace',color:(a.is_manual||plaidUnavail)?'var(--text-muted)':'inherit'}}>
                         {a.plaid_balance!=null?fmtB(a.plaid_balance):'—'}
                       </td>
                       <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.computed_balance)}</td>
-                      <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:diffColor,fontWeight:absDiff>0.01?600:400}}>
+                      <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:diffColor,fontWeight:absDiff!=null&&absDiff>0.01?600:400}}>
                         {diff==null?'—':absDiff<0.01?'—':(diff>0?'+':'')+fmtB(diff)}
                       </td>
                     </tr>;
