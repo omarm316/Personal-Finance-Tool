@@ -724,6 +724,17 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 account_type=account.account_type or '',
             )
 
+            # If action=Transfer was determined via a user-correction override
+            # (not a built-in rule), lock the new transaction immediately so
+            # future recategorisation runs and /apply-rules don't revert it.
+            _correction_locked = False
+            if action == 'Transfer':
+                _m = txn_data.get('merchant_name') or categorizer.extract_merchant(txn_data['description_raw'])
+                if _m and categorizer._check_transfer_correction(
+                    _m, categorizer.clean_description(txn_data['description_raw'])
+                ):
+                    _correction_locked = True
+
             # Apply GCB auto-tag and points category from rule notes
             desc_upper = txn_data['description_raw'].upper()
             gcb_auto   = False
@@ -779,6 +790,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 card_id=linked_card_id,
                 gcb_tagged=gcb_auto,
                 points_category=points_cat,
+                is_locked=_correction_locked,
                 year=txn_date.year,
                 month=txn_date.month,
                 day=txn_date.day,
