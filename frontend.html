@@ -3466,6 +3466,10 @@ function NetWorthPage({toast}){
   const[sideFilter,setSideFilter]=useState('');
   const[typeFilter,setTypeFilter]=useState('');
   const[nameFilter,setNameFilter]=useState('');
+  /* statement / reconcile view */
+  const[stmtView,setStmtView]=useState(false);
+  const[reconcileData,setReconcileData]=useState(null);
+  const[reconcileLoading,setReconcileLoading]=useState(false);
 
   /* ── Net Worth: load data ────────────────────────────────────────────── */
   const loadNW=useCallback(async()=>{
@@ -3501,6 +3505,16 @@ function NetWorthPage({toast}){
     if(selectedId){setSelectedAccount(accounts.find(a=>a.id===selectedId)||null);loadTimeline(selectedId);}
     else{setTimeline(null);setSelectedAccount(null);}
   },[selectedId,asOf]);
+
+  /* Fetch statement/reconcile data when account or date changes (only when stmtView is open) */
+  useEffect(()=>{
+    if(!selectedId||!stmtView){setReconcileData(null);return;}
+    setReconcileLoading(true);
+    apiFetch(`/accounts/${selectedId}/reconcile?end=${asOf}`)
+      .then(d=>setReconcileData(d))
+      .catch(()=>toast('Failed to load statement','error'))
+      .finally(()=>setReconcileLoading(false));
+  },[selectedId,stmtView,asOf]);
 
   /* ── Helpers ─────────────────────────────────────────────────────────── */
   const fmtBal=(v)=>v===0?'$0':(v<0?'-':'')+fmt(Math.abs(v));
@@ -3752,26 +3766,90 @@ function NetWorthPage({toast}){
               </svg>
             </div>}
 
-            {/* Daily table */}
+            {/* Daily / Statement toggle card */}
             <div className="card">
               <div className="section-header">
-                <div className="section-title">Daily Balances</div>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>{tlItems.length} days</span>
-              </div>
-              {tlItems.length===0
-                ?<div className="empty"><span>No transaction data in this range</span></div>
-                :<div className="table-wrap" style={{maxHeight:380,overflowY:'auto'}}>
-                  <table>
-                    <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
-                    <tbody>{[...tlItems].reverse().map(d=>(
-                      <tr key={d.date}>
-                        <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
-                        <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
-                        <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
+                <div className="section-title">{stmtView?'Statement View':'Daily Balances'}</div>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  {/* Counts */}
+                  {stmtView&&reconcileData&&<span style={{fontSize:12,color:'var(--text-muted)'}}>
+                    {reconcileData.transaction_count} txns
+                    {reconcileData.excluded_count>0&&<span style={{color:'var(--amber)',marginLeft:6}}>· {reconcileData.excluded_count} excluded</span>}
+                  </span>}
+                  {!stmtView&&<span style={{fontSize:12,color:'var(--text-muted)'}}>{tlItems.length} days</span>}
+                  {/* Toggle */}
+                  <div style={{display:'flex',gap:2,background:'var(--sidebar-bg)',border:'1px solid var(--border)',borderRadius:6,padding:2}}>
+                    <button className={`btn btn-sm ${!stmtView?'btn-primary':'btn-ghost'}`} style={{padding:'3px 10px',fontSize:12,borderRadius:5}} onClick={()=>setStmtView(false)}>Daily</button>
+                    <button className={`btn btn-sm ${stmtView?'btn-primary':'btn-ghost'}`} style={{padding:'3px 10px',fontSize:12,borderRadius:5}} onClick={()=>setStmtView(true)}>Statement</button>
+                  </div>
                 </div>
+              </div>
+
+              {stmtView
+                /* ── Statement view: individual transactions + running balance ── */
+                ? reconcileLoading
+                  ? <div className="loading" style={{padding:24}}><div className="spinner"/><span>Loading…</span></div>
+                  : !reconcileData||reconcileData.transactions.length===0
+                    ? <div className="empty"><span>No transactions since the anchor date</span></div>
+                    : <div className="table-wrap" style={{maxHeight:440,overflowY:'auto'}}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Description</th>
+                              <th style={{textAlign:'right'}}>Amount</th>
+                              <th style={{textAlign:'right'}}>Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Anchor row (always first) */}
+                            <tr style={{background:'var(--sidebar-bg)'}}>
+                              <td style={{color:'var(--text-muted)',fontSize:12}}>{reconcileData.anchor_date||'—'}</td>
+                              <td style={{fontSize:12,color:'var(--text-muted)',fontStyle:'italic'}}>⚓ Anchor — starting balance</td>
+                              <td/>
+                              <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600}}>{fmtBal(reconcileData.anchor_balance)}</td>
+                            </tr>
+                            {/* Transactions oldest→newest */}
+                            {reconcileData.transactions.map(t=>(
+                              <tr key={t.id} style={{opacity:t.is_excluded?0.4:1,background:t.is_excluded?'var(--sidebar-bg)':undefined}}>
+                                <td style={{color:'var(--text-secondary)',fontSize:13}}>{t.date}</td>
+                                <td>
+                                  <div style={{fontSize:13,textDecoration:t.is_excluded?'line-through':'none'}}>{t.description}</div>
+                                  <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>
+                                    {t.action}{t.category&&t.action!=='Transfer'?` · ${t.category}`:''}
+                                    {t.is_excluded?<span style={{color:'var(--amber)',marginLeft:4}}>excluded</span>:''}
+                                    {t.needs_review?<span style={{color:'var(--amber)',marginLeft:4}}>· needs review</span>:''}
+                                  </div>
+                                </td>
+                                <td style={{textAlign:'right'}}>
+                                  <span className={t.amount>0?'amount-pos':'amount-neg'} style={{textDecoration:t.is_excluded?'line-through':'none'}}>
+                                    {t.amount>0?'+':''}{fmt(Math.abs(t.amount))}
+                                  </span>
+                                </td>
+                                <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
+                                  {t.is_excluded?'—':fmtBal(t.running_balance)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                /* ── Daily summary view (existing) ── */
+                : tlItems.length===0
+                  ? <div className="empty"><span>No transaction data in this range</span></div>
+                  : <div className="table-wrap" style={{maxHeight:380,overflowY:'auto'}}>
+                      <table>
+                        <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
+                        <tbody>{[...tlItems].reverse().map(d=>(
+                          <tr key={d.date}>
+                            <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
+                            <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
+                            <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
               }
             </div>
           </>

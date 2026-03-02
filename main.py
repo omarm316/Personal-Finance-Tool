@@ -3270,6 +3270,87 @@ async def get_balance_timeline(
 
 
 # ---------------------------------------------------------------------------
+# Balance Reconciliation (Section 5 supplement)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/accounts/{account_id}/reconcile")
+async def reconcile_account(
+    account_id: int,
+    end: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Bank-statement-style transaction list with running balance, for auditing.
+
+    Uses the same anchor + transactions formula as get_account_balance():
+      - Anchor = starting_balance set at start_date (last known-good balance)
+      - Live transactions = all transactions strictly after start_date
+      - Running balance accumulates only from non-excluded transactions
+
+    Excluded transactions are included in the response (flagged) so the user
+    can see what was filtered out and identify wrongly-excluded items.
+    """
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    anchor      = account.starting_balance or 0.0
+    anchor_dt   = account.start_date
+    range_end   = (
+        datetime.strptime(end, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        if end else datetime.utcnow()
+    )
+
+    # Fetch transactions using same filter as get_account_balance anchor model:
+    # strictly AFTER the anchor date (transactions ON the anchor day are already
+    # included in the Plaid snapshot that set starting_balance).
+    query = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.date <= range_end,
+    )
+    if anchor_dt:
+        query = query.filter(Transaction.date > anchor_dt)
+
+    txns = query.order_by(Transaction.date, Transaction.id).all()
+
+    # Build per-transaction running balance.
+    # Excluded transactions are shown grayed-out but do NOT move the balance.
+    running = anchor
+    rows = []
+    for t in txns:
+        excluded = bool(t.is_excluded)
+        if not excluded:
+            running = round(running + t.amount, 2)
+        cat = t.category_manual or t.category_auto or 'Unclassified'
+        rows.append({
+            'id':              t.id,
+            'date':            t.date.strftime('%Y-%m-%d'),
+            'description':     t.description_clean or t.description_raw or '',
+            'amount':          t.amount,
+            'action':          t.action,
+            'category':        cat,
+            'is_excluded':     excluded,
+            'is_locked':       bool(t.is_locked),
+            'needs_review':    bool(t.needs_review),
+            'running_balance': running,
+        })
+
+    excluded_count = sum(1 for r in rows if r['is_excluded'])
+    return {
+        'account_id':        account_id,
+        'account_name':      account.account_name,
+        'account_type':      account.account_type,
+        'is_manual':         bool(account.is_manual),
+        'anchor_balance':    anchor,
+        'anchor_date':       anchor_dt.strftime('%Y-%m-%d') if anchor_dt else None,
+        'computed_balance':  running,
+        'transaction_count': len(rows) - excluded_count,
+        'excluded_count':    excluded_count,
+        'transactions':      rows,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Net Worth (Section 5) — entirely account-driven
 # ---------------------------------------------------------------------------
 
