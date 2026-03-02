@@ -2190,12 +2190,19 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
 
   const[balanceSyncing,setBalanceSyncing]=useState(false);
   const[balanceSyncResult,setBalanceSyncResult]=useState(null);
-  const syncBalances=async()=>{
+  const syncBalances=async(force=false)=>{
     setBalanceSyncing(true);
     try{
-      const r=await apiFetch('/accounts/sync-balances',{method:'POST'});
-      setBalanceSyncResult(r);
-      toast(`Balance sync complete — ${r.synced} account${r.synced!==1?'s':''} anchored, ${r.accounts.reduce((s,a)=>s+a.months_built,0)} month snapshots built`);
+      const url='/accounts/sync-balances'+(force?'?force=true':'');
+      const r=await apiFetch(url,{method:'POST'});
+      setBalanceSyncResult({...r,force});
+      const anchored=r.accounts.filter(a=>a.anchor_updated).length;
+      const snaps=r.accounts.reduce((s,a)=>s+a.months_built,0);
+      if(force){
+        toast(`Force resync complete — ${anchored} anchor${anchored!==1?'s':''} updated, ${snaps} month snapshots rebuilt`);
+      }else{
+        toast(`Balance sync complete — ${snaps} month snapshots rebuilt${anchored>0?` (${anchored} new anchor${anchored!==1?'s':''} set)`:''}`);
+      }
     }catch(e){toast('Balance sync failed: '+(e.message||e),'error');}
     finally{setBalanceSyncing(false);}
   };
@@ -2384,12 +2391,16 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
           <div className="section-header">
             <div>
               <div className="section-title">Balance Sync</div>
-              <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Fetches today's balances from Plaid and builds monthly history. Run once to get started, or to reset if balances drift.</div>
+              <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Rebuilds monthly balance snapshots from your transactions. Use <b>Force Resync</b> only when Plaid's balance is current (not right after a long weekend) — it re-anchors all accounts to today's Plaid balance.</div>
             </div>
-            <button className="btn btn-sm btn-secondary" onClick={syncBalances} disabled={balanceSyncing}>{balanceSyncing?'Syncing…':'↺ Sync Balances from Plaid'}</button>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <button className="btn btn-sm btn-secondary" onClick={()=>syncBalances(false)} disabled={balanceSyncing}>{balanceSyncing?'Syncing…':'↺ Sync Balances'}</button>
+              <button className="btn btn-sm btn-secondary" onClick={()=>{if(window.confirm("Force resync will re-anchor all accounts to today's Plaid balance. Only do this when Plaid's balance is fully up to date. Continue?"))syncBalances(true);}} disabled={balanceSyncing} style={{borderColor:'#f59e0b',color:'#b45309'}}>⚡ Force Resync</button>
+            </div>
           </div>
           {balanceSyncResult&&<div style={{marginTop:10,fontSize:12,color:'var(--text-muted)'}}>
-            Last sync: {balanceSyncResult.synced} account{balanceSyncResult.synced!==1?'s':''} anchored
+            Last sync: {balanceSyncResult.synced} account{balanceSyncResult.synced!==1?'s':''} processed
+            {balanceSyncResult.force&&<span style={{marginLeft:8,fontWeight:600,color:'#b45309'}}>(force resync — anchors updated from Plaid)</span>}
             {balanceSyncResult.skipped>0&&<span style={{marginLeft:8,color:'#b45309'}}>({balanceSyncResult.skipped} skipped — no Plaid balance available)</span>}
           </div>}
         </div>

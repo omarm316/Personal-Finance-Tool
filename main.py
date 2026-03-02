@@ -119,7 +119,13 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     """
     Compute account balance at a given date (or now if not specified).
 
-    Anchor model (start_date is set):
+    Preferred path — Monthly Snapshot model:
+      Uses the most recent completed-month snapshot (transaction-derived) as the anchor.
+      This is immune to Plaid balance lag (e.g. after long weekends when Plaid's balance
+      reflects an earlier date than our transaction data).
+      balance = snapshot.closing_balance + SUM(transactions strictly after snapshot month end)
+
+    Fallback — Anchor model (start_date is set, no prior-month snapshot available):
       starting_balance = Plaid balance AT start_date (the anchor).
       Forward  (as_of >= anchor): anchor + SUM(transactions strictly after anchor)
       Backward (as_of <  anchor): anchor - SUM(transactions from as_of+1 through anchor)
@@ -128,10 +134,43 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
       starting_balance = plaid_balance - SUM(all transactions).
       balance = starting_balance + SUM(all transactions up to as_of).
     """
+    from sqlalchemy import func as _func
+    import calendar as _cal
+
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0.0
 
+    now = as_of_date if as_of_date else datetime.utcnow()
+    ref_ym = now.year * 100 + now.month
+
+    # ── Preferred: use the most recent completed-month snapshot as anchor ──────
+    # Snapshots are rebuilt from transactions, so they're accurate regardless of
+    # whether the Plaid balance was stale when sync-balances last ran.
+    snap = (
+        db.query(AccountMonthlySnapshot)
+        .filter(
+            AccountMonthlySnapshot.account_id == account_id,
+            (AccountMonthlySnapshot.year * 100 + AccountMonthlySnapshot.month) < ref_ym,
+        )
+        .order_by(
+            (AccountMonthlySnapshot.year * 100 + AccountMonthlySnapshot.month).desc()
+        )
+        .first()
+    )
+    if snap:
+        last_day = _cal.monthrange(snap.year, snap.month)[1]
+        snap_end_dt = datetime(snap.year, snap.month, last_day, 23, 59, 59)
+        delta_q = db.query(_func.sum(Transaction.amount)).filter(
+            Transaction.account_id == account_id,
+            Transaction.date > snap_end_dt,
+        )
+        if as_of_date:
+            delta_q = delta_q.filter(Transaction.date <= as_of_date)
+        delta = delta_q.scalar() or 0.0
+        return round(snap.closing_balance + delta, 2)
+
+    # ── Fallback: original anchor / legacy model ──────────────────────────────
     anchor = account.starting_balance or 0.0
     anchor_dt = account.start_date
 
@@ -2717,13 +2756,22 @@ async def update_account(account_id: int, updates: dict, db: Session = Depends(g
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     allowed = ['account_name', 'notes', 'starting_balance', 'start_date', 'account_type']
+    anchor_changed = False
     for k, v in updates.items():
         if k in allowed:
             if k == 'start_date' and v:
                 setattr(account, k, datetime.strptime(v, "%Y-%m-%d"))
+                anchor_changed = True
             else:
                 setattr(account, k, v)
+                if k == 'starting_balance':
+                    anchor_changed = True
     db.commit()
+    # Whenever the anchor (starting_balance / start_date) changes, rebuild monthly
+    # snapshots so the balance history reflects the corrected starting point.
+    if anchor_changed:
+        rebuild_monthly_snapshots(db, account.id)
+        db.commit()
     return {"message": "Account updated"}
 
 
@@ -2805,12 +2853,19 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/accounts/sync-balances")
-async def sync_account_balances(db: Session = Depends(get_db)):
+async def sync_account_balances(force: bool = False, db: Session = Depends(get_db)):
     """
-    Fetch today's balances from Plaid, anchor each account's starting_balance, and rebuild
-    all monthly snapshots from existing transactions. Intended as a one-time setup or reset.
+    Fetch today's balances from Plaid and rebuild all monthly snapshots.
+
+    Normal mode (force=False): only writes the Plaid anchor for NEW accounts
+    (accounts with no start_date yet).  Existing accounts keep their current anchor —
+    the balance is instead derived from the transaction-based monthly snapshots.
+    This avoids the "stale Plaid balance" problem where Plaid's reported balance
+    lags behind our transaction data by several days (e.g. after a long weekend).
+
+    Force mode (force=True): re-anchors ALL accounts from today's Plaid balance.
+    Use only when you know Plaid's balance is current and you want to hard-reset.
     """
-    from sqlalchemy import func as _func
     plaid = setup_plaid_from_env()
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     synced = []
@@ -2831,16 +2886,23 @@ async def sync_account_balances(db: Session = Depends(get_db)):
                 skipped.append({'name': pa['name'], 'reason': 'no matching account in DB'})
                 continue
             signed_balance = _sign_plaid_balance(raw_balance, account.account_type)
-            # Anchor model: store the Plaid balance AS-IS with the current timestamp.
-            # Balance = anchor ± transactions relative to this point.
-            # Do NOT subtract the transaction sum — that made starting_balance stale
-            # every time a new transaction arrived.
-            account.starting_balance = round(signed_balance, 4)
-            account.start_date = datetime.utcnow()  # anchor date
+            anchor_updated = False
+            if force or account.start_date is None:
+                # Force resync OR first-time setup: anchor from Plaid.
+                # In normal (non-force) mode we preserve the existing anchor so
+                # that a stale Plaid balance cannot corrupt the running history.
+                account.starting_balance = round(signed_balance, 4)
+                account.start_date = datetime.utcnow()
+                anchor_updated = True
             db.flush()
             months_built = rebuild_monthly_snapshots(db, account.id)
             db.flush()
-            synced.append({'name': account.account_name, 'balance': signed_balance, 'months_built': months_built})
+            synced.append({
+                'name': account.account_name,
+                'plaid_balance': signed_balance,
+                'anchor_updated': anchor_updated,
+                'months_built': months_built,
+            })
     db.commit()
     return {'synced': len(synced), 'skipped': len(skipped), 'accounts': synced, 'skipped_details': skipped}
 
