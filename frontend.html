@@ -998,6 +998,8 @@ function TransactionsPage({categories,toast}){
   const[showBatchEdit,setShowBatchEdit]=useState(false);
   const[showDupes,setShowDupes]=useState(false);
   const[showExcluded,setShowExcluded]=useState(false);
+  const[quickYear,setQuickYear]=useState('');
+  const[quickMonth,setQuickMonth]=useState('');
 
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
@@ -1111,6 +1113,7 @@ function TransactionsPage({categories,toast}){
       {showImport&&<ImportModal accounts={accounts} onClose={()=>setShowImport(false)} onImported={load} toast={toast}/>}
       {showBatchEdit&&<BatchEditModal count={selectedIds.size} categories={categories} onSave={handleBatchSave} onClose={()=>setShowBatchEdit(false)}/>}
       <div className="card">
+        {/* ── Row 1: search + type / category / account filters + visibility checkboxes ── */}
         <div className="filters">
           <input className="search-input" placeholder="Search descriptions…" value={search} onChange={e=>setSearch(e.target.value)}/>
           <select className="filter-select" value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
@@ -1128,22 +1131,47 @@ function TransactionsPage({categories,toast}){
           <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
           <label className="filter-label" title="CC payments appear on both the checking account (kept) and the credit card account (hidden by default)"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show CC payment credits</label>
           <label className="filter-label" title="Excluded transactions are hidden from totals and balances but not deleted"><input type="checkbox" checked={showExcluded} onChange={e=>setShowExcluded(e.target.checked)}/> Show excluded</label>
+        </div>
+        {/* ── Row 2: date quick-select + custom date range + action buttons ── */}
+        <div className="filters" style={{paddingTop:8,paddingBottom:8}}>
+          {/* Year quick-select */}
+          <select className="filter-select" value={quickYear} onChange={e=>{
+            const y=e.target.value;
+            setQuickYear(y);setQuickMonth('');
+            if(!y){setStartDate('');setEndDate('');}
+            else{const isCurY=y===String(new Date().getFullYear());setStartDate(`${y}-01-01`);setEndDate(isCurY?todayStr():`${y}-12-31`);}
+          }}>
+            <option value="">All years</option>
+            {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          {/* Month quick-select (only when a year is chosen) */}
+          {quickYear&&<select className="filter-select" value={quickMonth} onChange={e=>{
+            const m=e.target.value;setQuickMonth(m);
+            if(!m){const isCurY=quickYear===String(new Date().getFullYear());setStartDate(`${quickYear}-01-01`);setEndDate(isCurY?todayStr():`${quickYear}-12-31`);}
+            else{const mP=String(m).padStart(2,'0');const ld=new Date(parseInt(quickYear),parseInt(m),0).getDate();setStartDate(`${quickYear}-${mP}-01`);setEndDate(`${quickYear}-${mP}-${String(ld).padStart(2,'0')}`);}
+          }}>
+            <option value="">All months</option>
+            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((lbl,i)=><option key={i+1} value={i+1}>{lbl}</option>)}
+          </select>}
+          {/* Custom date range inputs */}
           <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
           <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
-          {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter)&&
-            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');}}>Clear</button>}
+          {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter||quickYear)&&
+            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');setQuickYear('');setQuickMonth('');}}>Clear</button>}
+          {/* Push action buttons to the right */}
+          <span style={{flex:1}}/>
           {visible.length>0&&<button className="btn btn-sm btn-ghost" onClick={selectAll} title="Select all visible transactions">☑ Select All</button>}
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
           <button className="btn btn-sm btn-secondary" onClick={startEnrich} disabled={enrichJob?.status==='running'} title="Run AI enrichment on unclassified transactions">{enrichJob?.status==='running'?'Enriching…':'✨ Enrich'}</button>
         </div>
+        {/* ── Totals bar: Expenses (net of credits) + Income shown separately ── */}
         <div style={{padding:'6px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',flexWrap:'wrap'}}>
           <span><b style={{color:'var(--text-primary)',fontWeight:600}}>{visible.length}</b> transactions</span>
-          {visibleExpenses>0&&<span>Expenses: <b style={{color:'var(--red)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{fmt(visibleExpenses)}</b></span>}
+          {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
           {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{fmt(visibleIncome)}</b></span>}
-          {(visibleExpenses>0||visibleIncome>0)&&<span>Net: <b style={{color:visibleNet>=0?'var(--green)':'var(--red)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{visibleNet>=0?'+':''}{fmt(visibleNet)}</b></span>}
         </div>
         {enrichJob&&(
           <div style={{padding:'8px 16px',background:enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
