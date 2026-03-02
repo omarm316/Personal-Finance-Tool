@@ -42,6 +42,8 @@ ACCOUNT_TYPE_MAP = {
     # Assets
     'checking':       ('Cash & Savings', True, False),
     'savings':        ('Cash & Savings', True, False),
+    'cash':           ('Cash & Savings', True, False),
+    'gift card':      ('Cash & Savings', True, False),
     'money market':   ('Cash & Savings', True, False),
     'cd':             ('Cash & Savings', True, False),
     'investment':     ('Investments', True, False),

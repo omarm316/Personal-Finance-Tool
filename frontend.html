@@ -1835,9 +1835,9 @@ function ManualAccountModal({onClose,onSaved,toast}){
         <div className="review-field"><label>Account Type</label>
           <select value={type} onChange={e=>setType(e.target.value)}>
             {/* All valid types — Title Case values match what the backend normalises to */}
-            {[['Checking','Checking'],['Savings','Savings'],['Investment','Investment'],
-              ['Real Estate','Real Estate'],['Vehicle','Vehicle'],['Business','Business'],
-              ['Credit Card','Credit Card'],['Loan','Loan'],['Other','Other']
+            {[['Checking','Checking'],['Savings','Savings'],['Cash','Cash'],['Gift Card','Gift Card'],
+              ['Investment','Investment'],['Real Estate','Real Estate'],['Vehicle','Vehicle'],
+              ['Business','Business'],['Credit Card','Credit Card'],['Loan','Loan'],['Other','Other']
             ].map(([v,l])=><option key={v} value={v}>{l}</option>)}
           </select>
         </div>
