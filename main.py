@@ -1364,26 +1364,43 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
 
         # Delete Plaid-sourced transactions from accounts whose plaid_account_id
         # was corrected — their transactions are mixed up after the bad merge.
-        # Must delete dependent user_corrections rows first (FK constraint).
+        # Three FK constraints on transactions.id must be cleared in order:
+        #   user_corrections.transaction_id
+        #   transaction_splits.parent_transaction_id
+        #   transactions.parent_transaction_id  (self-ref: split-child rows)
         total_deleted = 0
         for acct_id in updated_account_ids:
-            # Remove any user corrections that reference these transactions
-            db.execute(
-                _text(
-                    "DELETE FROM user_corrections "
-                    "WHERE transaction_id IN ("
-                    "  SELECT id FROM transactions "
-                    "  WHERE account_id = :acct_id "
-                    "  AND plaid_transaction_id IS NOT NULL"
-                    ")"
-                ),
-                {"acct_id": acct_id},
-            )
-            deleted = db.query(Transaction).filter(
-                Transaction.account_id == acct_id,
-                Transaction.plaid_transaction_id != None,
-            ).delete(synchronize_session=False)
-            total_deleted += deleted
+            # A) user_corrections on the Plaid txns themselves
+            db.execute(_text(
+                "DELETE FROM user_corrections WHERE transaction_id IN ("
+                "  SELECT id FROM transactions"
+                "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+            ), {"a": acct_id})
+            # B) user_corrections on any split-child txns of those Plaid txns
+            db.execute(_text(
+                "DELETE FROM user_corrections WHERE transaction_id IN ("
+                "  SELECT id FROM transactions WHERE parent_transaction_id IN ("
+                "    SELECT id FROM transactions"
+                "    WHERE account_id = :a AND plaid_transaction_id IS NOT NULL))"
+            ), {"a": acct_id})
+            # C) transaction_splits rows referencing the Plaid txns
+            db.execute(_text(
+                "DELETE FROM transaction_splits WHERE parent_transaction_id IN ("
+                "  SELECT id FROM transactions"
+                "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+            ), {"a": acct_id})
+            # D) split-child transaction rows (parent_transaction_id → Plaid txn)
+            db.execute(_text(
+                "DELETE FROM transactions WHERE parent_transaction_id IN ("
+                "  SELECT id FROM transactions"
+                "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+            ), {"a": acct_id})
+            # E) the Plaid-sourced transactions themselves
+            result = db.execute(_text(
+                "DELETE FROM transactions"
+                " WHERE account_id = :a AND plaid_transaction_id IS NOT NULL"
+            ), {"a": acct_id})
+            total_deleted += result.rowcount
 
         item.cursor = None
         db.commit()
