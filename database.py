@@ -407,6 +407,24 @@ class MerchantOverride(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class DuplicateIgnore(Base):
+    """
+    Stores pairs of account IDs that the user has confirmed are NOT duplicates
+    (e.g. two genuinely different Amex cards that happen to share the same mask).
+    The scan will never flag these two accounts together again.
+    Always store with account_id_a < account_id_b for uniqueness.
+    """
+    __tablename__ = 'duplicate_ignore'
+
+    id = Column(Integer, primary_key=True)
+    account_id_a = Column(Integer, nullable=False)   # lower of the two IDs
+    account_id_b = Column(Integer, nullable=False)   # higher of the two IDs
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('account_id_a', 'account_id_b', name='uq_dup_ignore_pair'),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Category clean-up remap — old name → new canonical name.

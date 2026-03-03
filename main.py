@@ -26,7 +26,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
-    AccountMonthlySnapshot, UserCorrection,
+    AccountMonthlySnapshot, UserCorrection, DuplicateIgnore,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -2852,9 +2852,21 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
     """
     Find groups of active accounts that appear to be duplicates:
     same mask + account_type with 2+ active records.
-    Returns them sorted by mask so the user can review and merge.
+
+    False-positive guard: if both accounts have an official_name set and
+    they differ, they are genuinely different products (e.g. Amex Gold vs
+    Amex Platinum both ending in the same digits) and are silently skipped.
+
+    User-ignored pairs (stored in duplicate_ignore table) are returned in a
+    separate 'ignored' list so they remain visible but won't be merged.
     """
     from sqlalchemy import func as _func
+
+    # Load all user-ignored pairs as a set of frozensets for O(1) lookup
+    ignored_pairs = {
+        frozenset((r.account_id_a, r.account_id_b))
+        for r in db.query(DuplicateIgnore).all()
+    }
 
     dup_keys = (
         db.query(Account.mask, Account.account_type)
@@ -2865,6 +2877,8 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
     )
 
     groups = []
+    ignored = []
+
     for mask, acct_type in dup_keys:
         accounts = (
             db.query(Account)
@@ -2872,13 +2886,14 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
             .order_by(Account.id)
             .all()
         )
-        acct_list = []
-        for a in accounts:
+
+        def _acct_info(a):
             txn_count = db.query(Transaction).filter_by(account_id=a.id).count()
             card_count = db.query(Card).filter_by(account_id=a.id).count()
-            acct_list.append({
+            return {
                 'id': a.id,
                 'name': a.account_name,
+                'official_name': a.official_name,
                 'mask': a.mask,
                 'account_type': a.account_type,
                 'plaid_account_id': a.plaid_account_id,
@@ -2886,17 +2901,70 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
                 'is_manual': a.is_manual,
                 'transaction_count': txn_count,
                 'card_count': card_count,
+            }
+
+        # Evaluate each (keep, discard) pair individually so we can
+        # apply both the official_name guard and the ignore list per-pair.
+        keep = accounts[0]
+        keep_info = _acct_info(keep)
+        for discard in accounts[1:]:
+            discard_info = _acct_info(discard)
+            pair = frozenset((keep.id, discard.id))
+
+            # Guard 1: different official_names → genuinely different cards
+            ko = (keep.official_name or '').strip()
+            do = (discard.official_name or '').strip()
+            if ko and do and ko.lower() != do.lower():
+                continue  # silently skip — not a duplicate
+
+            # Guard 2: user has permanently ignored this pair
+            if pair in ignored_pairs:
+                ignored.append({
+                    'accounts': [keep_info, discard_info],
+                    'keep_id': keep.id,
+                    'discard_ids': [discard.id],
+                })
+                continue
+
+            groups.append({
+                'mask': mask,
+                'account_type': acct_type,
+                'accounts': [keep_info, discard_info],
+                'keep_id': keep.id,
+                'discard_ids': [discard.id],
             })
-        groups.append({
-            'mask': mask,
-            'account_type': acct_type,
-            'accounts': acct_list,
-            'keep_id': acct_list[0]['id'],
-            'discard_ids': [a['id'] for a in acct_list[1:]],
-        })
 
     groups.sort(key=lambda g: g['mask'])
-    return {'duplicates': groups, 'count': len(groups)}
+    return {'duplicates': groups, 'count': len(groups), 'ignored': ignored}
+
+
+@app.post("/api/accounts/ignore-duplicate-pair")
+async def ignore_duplicate_pair(body: dict, db: Session = Depends(get_db)):
+    """
+    Permanently mark two accounts as NOT duplicates.
+    The pair is stored in duplicate_ignore and will never appear in the scan again.
+    """
+    id_a = int(body.get('account_id_a', 0))
+    id_b = int(body.get('account_id_b', 0))
+    if not id_a or not id_b or id_a == id_b:
+        raise HTTPException(status_code=400, detail="Provide two different account IDs")
+    lo, hi = min(id_a, id_b), max(id_a, id_b)
+    existing = db.query(DuplicateIgnore).filter_by(account_id_a=lo, account_id_b=hi).first()
+    if not existing:
+        db.add(DuplicateIgnore(account_id_a=lo, account_id_b=hi))
+        db.commit()
+    return {'ignored': True, 'account_id_a': lo, 'account_id_b': hi}
+
+
+@app.delete("/api/accounts/ignore-duplicate-pair")
+async def unignore_duplicate_pair(body: dict, db: Session = Depends(get_db)):
+    """Remove a pair from the ignore list so it appears in future scans."""
+    id_a = int(body.get('account_id_a', 0))
+    id_b = int(body.get('account_id_b', 0))
+    lo, hi = min(id_a, id_b), max(id_a, id_b)
+    db.query(DuplicateIgnore).filter_by(account_id_a=lo, account_id_b=hi).delete()
+    db.commit()
+    return {'unignored': True}
 
 
 @app.post("/api/accounts/merge-duplicates")
