@@ -654,6 +654,19 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                         PlaidItem.institution_name == plaid_item.institution_name,
                     ).first())
 
+            # Second fallback: match severed accounts (plaid_item_id=NULL, is_manual=True).
+            # The inner JOIN above excludes these because NULL never matches.
+            # Safe to match by mask + type alone since we're already inside the
+            # exchange_public_token flow for a specific institution.
+            if not existing and a.get('mask'):
+                existing = (db.query(Account)
+                    .filter(
+                        Account.mask == a['mask'],
+                        Account.account_type == account_type,
+                        Account.plaid_item_id == None,
+                        Account.is_active == True,
+                    ).first())
+
             if existing:
                 # Adopt: update Plaid IDs so future transactions flow to the right account
                 existing.plaid_account_id = a['account_id']
