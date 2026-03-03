@@ -1229,115 +1229,115 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
                 "on the NEWER entry for this bank instead."
             )
 
-        updates = []    # (db_account_obj, new_plaid_account_id)
-        creates = []    # raw Plaid account dicts
-        already_ok = []
+        import difflib as _difflib
+
+        def _name_sim(a: str, b: str) -> float:
+            """Character-level similarity ratio between two account name strings."""
+            return _difflib.SequenceMatcher(
+                None, (a or '').lower(), (b or '').lower()
+            ).ratio()
+
+        # ── Step 1: load all active DB accounts that belong to this Plaid item ──
+        # We query by plaid_item_id rather than iterating Plaid accounts to also
+        # capture accounts whose plaid_account_id was corrupted by a bad merge.
+        db_accounts = (
+            db.query(Account)
+            .filter(Account.plaid_item_id == item.item_id, Account.is_active == True)
+            .all()
+        )
+        # Remember original plaid_account_ids so we can tell which accounts had a
+        # WRONG id after the bad merge (those need their Plaid transactions cleared).
+        orig_plaid_ids: dict = {a.id: a.plaid_account_id for a in db_accounts}
+
+        # ── Step 2: NULL every plaid_account_id for this item ──────────────────
+        # PostgreSQL allows multiple NULLs in a UNIQUE column.  Zeroing them all
+        # out first means the subsequent UPDATE/INSERT phase faces zero UNIQUE
+        # conflicts, regardless of what IDs got shuffled during the bad merge.
+        db.execute(
+            _text(
+                "UPDATE accounts SET plaid_account_id = NULL "
+                "WHERE plaid_item_id = :iid AND is_active = true"
+            ),
+            {"iid": item.item_id},
+        )
+        db.flush()
+        db.expire_all()   # discard ORM cache — every subsequent query hits the DB
+
+        # ── Step 3: match Plaid accounts → DB accounts ──────────────────────────
+        # Pass A — exact official_name + mask (case-insensitive).
+        # Pass B — mask + account_type + best name-similarity score.
+        #           Handles "The Platinum Card®" → "Platinum Card" drift.
+        matched_pairs: list = []    # [(db_acct, plaid_pa)]
+        remaining_db = list(db_accounts)
+        unmatched_plaid = []
 
         for pa in plaid_accounts:
-            plaid_account_id = pa['account_id']
-            mask = pa.get('mask')
-            official_name = (pa.get('official_name') or pa.get('name', '')).strip()
-            account_type = pa.get('type', '').lower()
-
-            # Match ONLY by official_name + mask.
-            # After a bad merge, plaid_account_id on surviving accounts is wrong
-            # (they absorbed IDs from deleted duplicates), so we cannot use it as
-            # a lookup key — it would find the wrong account.
-            candidate = None
-            if mask and official_name:
-                candidate = (
-                    db.query(Account)
-                    .filter(
-                        Account.mask == mask,
-                        Account.official_name == official_name,
-                        Account.is_active == True,
-                    )
-                    .first()
-                )
-
-            if candidate:
-                if candidate.plaid_account_id == plaid_account_id:
-                    already_ok.append(candidate.account_name)
-                else:
-                    updates.append((candidate, plaid_account_id))
+            pname = (pa.get('official_name') or pa.get('name') or '').strip()
+            pmask = pa.get('mask')
+            found = None
+            if pname and pmask:
+                for d in remaining_db:
+                    if (d.mask == pmask and
+                            (d.official_name or '').strip().lower() == pname.lower()):
+                        found = d
+                        break
+            if found:
+                matched_pairs.append((found, pa))
+                remaining_db.remove(found)
             else:
-                # Not matched by official_name+mask — create fresh.
-                # (Deleted accounts, or accounts with slightly different names.)
-                creates.append(pa)
+                unmatched_plaid.append(pa)
 
-        # Pre-scan: resolve UNIQUE conflicts BEFORE entering the creates loop.
-        # -----------------------------------------------------------------------
-        # After a bad merge, some surviving DB accounts hold wrong plaid_account_ids
-        # (they absorbed IDs from deleted duplicates).  If such an account's
-        # official_name also drifted slightly (e.g. "The Platinum Card®" → "Platinum
-        # Card"), the matching loop above put it into `creates` rather than `updates`.
-        # That means:
-        #   • The "real" CREATE for the account that owns the conflicting ID would fail
-        #     with a UNIQUE violation.
-        #   • The name-drifted account would be accidentally INSERTed as a new duplicate.
-        #
-        # Fix: for each creates entry whose plaid_account_id is already held by an
-        # existing DB account, find the "twin" creates entry (same mask + account_type
-        # as the conflict holder) — that twin IS the conflict holder with a drifted
-        # name.  Demote the twin from creates → updates so Pass 1 fixes its ID,
-        # and leave the current entry in creates so it INSERTs cleanly afterwards.
-        # -----------------------------------------------------------------------
-        already_matched_db_ids = {cand.id for cand, _ in updates}
-        twin_indices_to_skip = set()  # creates indices promoted to updates
-
-        for i, pa in enumerate(creates):
-            if i in twin_indices_to_skip:
+        # Pass B: fallback for name-drifted accounts
+        still_unmatched = []
+        for pa in unmatched_plaid:
+            pname = (pa.get('official_name') or pa.get('name') or '').strip()
+            pmask  = pa.get('mask')
+            ptype  = pa.get('type', '').lower()
+            candidates = [
+                d for d in remaining_db
+                if d.mask == pmask and d.account_type == ptype
+            ]
+            if not candidates:
+                still_unmatched.append(pa)
                 continue
-            plaid_account_id = pa['account_id']
-            # Is this plaid_account_id already held by an unmatched DB account?
-            holder_row = db.execute(
+            best = max(
+                candidates,
+                key=lambda d: _name_sim(d.official_name or d.account_name or '', pname),
+            )
+            if _name_sim(best.official_name or best.account_name or '', pname) >= 0.4:
+                matched_pairs.append((best, pa))
+                remaining_db.remove(best)
+            else:
+                still_unmatched.append(pa)
+
+        # ── Step 4: UPDATE matched accounts with correct plaid_account_ids ──────
+        results = []
+        updated_account_ids = []   # IDs where plaid_account_id changed → clear txns
+
+        for db_acct, pa in matched_pairs:
+            new_pid = pa['account_id']
+            was_correct = (orig_plaid_ids.get(db_acct.id) == new_pid)
+            db.execute(
                 _text(
-                    "SELECT id, mask, account_type, account_name "
-                    "FROM accounts WHERE plaid_account_id = :pid AND is_active = true"
+                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid "
+                    "WHERE id=:id"
                 ),
-                {"pid": plaid_account_id},
-            ).fetchone()
-            if not holder_row or holder_row.id in already_matched_db_ids:
-                continue  # no conflict, or already being updated
+                {"pid": new_pid, "iid": item.item_id, "id": db_acct.id},
+            )
+            if was_correct:
+                results.append({'status': 'ok', 'account': db_acct.account_name})
+            else:
+                updated_account_ids.append(db_acct.id)
+                results.append({
+                    'status': 'updated',
+                    'account': db_acct.account_name,
+                    'new_plaid_id': new_pid,
+                })
+        db.flush()
 
-            # Find the twin: another creates entry with same mask+type as the holder.
-            # That twin is the holder's Plaid entry (name drifted → missed above).
-            for j, other_pa in enumerate(creates):
-                if j == i or j in twin_indices_to_skip:
-                    continue
-                if (other_pa.get('mask') == holder_row.mask and
-                        other_pa.get('type', '').lower() == holder_row.account_type):
-                    # Demote twin to an UPDATE of the conflict holder
-                    holder_acct = db.query(Account).filter_by(id=holder_row.id).first()
-                    if holder_acct:
-                        updates.append((holder_acct, other_pa['account_id']))
-                        already_matched_db_ids.add(holder_row.id)
-                        twin_indices_to_skip.add(j)
-                    break
-
-        # Rebuild creates excluding the promoted twins
-        creates = [pa for idx, pa in enumerate(creates) if idx not in twin_indices_to_skip]
-
-        results = [{'status': 'ok', 'account': n} for n in already_ok]
-
-        # Pass 1: UPDATEs via raw SQL — must come first to free the unique IDs
-        # that were absorbed from deleted accounts during the bad merge.
-        updated_account_ids = []
-        for candidate, new_pid in updates:
-            db.execute(_text(
-                "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid WHERE id=:id"
-            ), {"pid": new_pid, "iid": item.item_id, "id": candidate.id})
-            updated_account_ids.append(candidate.id)
-            results.append({
-                'status': 'updated',
-                'account': candidate.account_name,
-                'new_plaid_id': new_pid,
-            })
-        db.flush()  # commit updates; freed IDs are now available for creates
-
-        # Pass 2: CREATEs — conflicts pre-resolved above, simple loop
+        # ── Step 5: CREATE new accounts for Plaid entries with no DB match ──────
         created_account_ids = []
-        for pa in creates:
+        for pa in still_unmatched:
             plaid_account_id = pa['account_id']
             mask = pa.get('mask')
             official_name = (pa.get('official_name') or pa.get('name', '')).strip()
