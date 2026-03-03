@@ -2452,6 +2452,20 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               finally{setBusy(false);}
             }}>{busy?'…':'Run Backfill'}</button>
           </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">#️⃣ Backfill Transaction Content Hashes</div>
+              <div className="settings-desc">One-time migration: assigns a stable content hash to every existing transaction. Required before "Re-download" can preserve your classifications across Plaid re-links. Safe to run multiple times — only unprocessed rows are updated.</div>
+            </div>
+            <button className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/transactions/backfill-content-hashes',{method:'POST'});
+                toast(`#️⃣ Hashed ${r.backfilled} transaction${r.backfilled!==1?'s':''}`);
+              }catch(e){toast('Backfill failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Run Backfill'}</button>
+          </div>
         </div>
         <div className="card" style={{marginBottom:20}}>
           <div className="section-header"><div className="section-title">Cards Import</div></div>

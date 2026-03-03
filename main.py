@@ -14,6 +14,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+import hashlib
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from pydantic import BaseModel
@@ -63,6 +64,35 @@ ACCOUNT_TYPE_MAP = {
     'auto':           ('Personal Loans', False, True),
     'business_loan':  ('Business Loans', False, True),
 }
+
+# ---------------------------------------------------------------------------
+# Content-hash helpers — stable transaction identity across Plaid re-links
+# ---------------------------------------------------------------------------
+
+def _content_base_hash(account_id: int, date, amount: float, description_raw: str) -> str:
+    """
+    14-character prefix of SHA-256(account_id|date|amount|description_raw).
+    Stable: uses the raw bank string (not enriched merchant name), normalised
+    amount (2 dp), and uppercase description so minor spacing/case changes
+    don't break the match.
+    """
+    raw = f"{account_id}|{date}|{amount:.2f}|{(description_raw or '').strip().upper()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:14]
+
+
+def _assign_content_hash(db: Session, account_id: int, date, amount: float, description_raw: str) -> str:
+    """
+    Assign a unique content_hash for a new transaction.
+    Counts existing transactions that share the same base hash to determine
+    the next suffix: -00, -01, -02 …
+    Thread-safe within a single DB session (flush before calling if needed).
+    """
+    base  = _content_base_hash(account_id, date, amount, description_raw)
+    count = db.query(Transaction).filter(
+        Transaction.content_hash.like(f'{base}-%')
+    ).count()
+    return f'{base}-{count:02d}'
+
 
 # Map Plaid top-level types to our types (fallback when subtype is missing)
 PLAID_TYPE_FALLBACK = {
@@ -812,6 +842,10 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
     skipped = 0
     errors  = 0
+    # Track DB row IDs matched via content_hash this sync so each row is
+    # only adopted once (handles multiple identical transactions on the same day).
+    content_matched_ids: set = set()
+
     for txn_data in result['added']:
         sp = db.begin_nested()  # savepoint — so a single-row failure only rolls back that row
         try:
@@ -821,6 +855,12 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             if existing:
                 if not existing.is_locked:
                     existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+                # Backfill content_hash if this row predates the feature
+                if not existing.content_hash:
+                    existing.content_hash = _assign_content_hash(
+                        db, existing.account_id, existing.date,
+                        existing.amount, existing.description_raw
+                    )
                 continue
 
             # Skip pending transactions (holds/authorizations not yet posted) — they distort balances
@@ -836,6 +876,30 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
                 skipped += 1
                 continue
+
+            # ── Content-hash fallback (re-link survivor) ──────────────────────
+            # plaid_transaction_id didn't match — Plaid regenerated IDs (re-link).
+            # Try to find the existing row by content hash so we preserve all
+            # user work (category, notes, locks) and just adopt the new Plaid ID.
+            txn_amount  = -txn_data['amount']
+            txn_date    = txn_data['date']
+            base_hash   = _content_base_hash(account.id, txn_date, txn_amount, txn_data['description_raw'])
+            hash_match  = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.content_hash.like(f'{base_hash}-%'),
+                    Transaction.id.notin_(content_matched_ids) if content_matched_ids else True,
+                )
+                .order_by(Transaction.content_hash)  # lowest suffix first → stable ordering
+                .first()
+            )
+            if hash_match:
+                # Adopt the new Plaid ID — all user classifications are preserved
+                hash_match.plaid_transaction_id = txn_data['plaid_transaction_id']
+                content_matched_ids.add(hash_match.id)
+                print(f"[sync] content-hash match: adopted new plaid_id for '{hash_match.description_raw[:40]}'")
+                sp.commit()
+                continue  # do NOT insert a duplicate row
 
             # Resolve card_id from account→card FK (set via match-accounts flow)
             linked_card_id = account.card.id if account.card else None
@@ -917,6 +981,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 gcb_tagged=gcb_auto,
                 points_category=points_cat,
                 is_locked=_correction_locked,
+                content_hash=_assign_content_hash(db, account.id, txn_date, amount, txn_data['description_raw']),
                 year=txn_date.year,
                 month=txn_date.month,
                 day=txn_date.day,
@@ -1329,6 +1394,37 @@ async def backfill_persistent_ids(db: Session = Depends(get_db)):
         'total_no_pid':  total_no_pid,
         'items':         results,
     }
+
+
+@app.post("/api/transactions/backfill-content-hashes")
+async def backfill_content_hashes(db: Session = Depends(get_db)):
+    """
+    One-time backfill: assign content_hash to every transaction that was
+    created before this feature was added (i.e. content_hash IS NULL).
+
+    content_hash = SHA256(account_id|date|amount|description_raw)[:14] + "-NN"
+    where NN is a zero-padded counter that disambiguates identical transactions
+    on the same account/date with the same amount and description.
+
+    Safe to run multiple times — only NULL rows are touched.
+    Returns count of rows updated.
+    """
+    txns = (
+        db.query(Transaction)
+        .filter(Transaction.content_hash == None)   # noqa: E711
+        .order_by(Transaction.account_id, Transaction.date, Transaction.id)
+        .all()
+    )
+    updated = 0
+    for txn in txns:
+        txn.content_hash = _assign_content_hash(
+            db, txn.account_id, txn.date, txn.amount, txn.description_raw
+        )
+        db.flush()  # make hash visible so the next count() is correct
+        updated += 1
+
+    db.commit()
+    return {"backfilled": updated}
 
 
 @app.post("/api/plaid/items/{item_id}/recover-accounts")
@@ -3201,16 +3297,17 @@ async def reset_and_resync_account(
     db: Session = Depends(get_db),
 ):
     """
-    Delete ALL Plaid-sourced transactions for this account only, reset the
-    item's sync cursor (affects the whole institution — all accounts on the same
-    Plaid item will re-download), and kick off a fresh background sync.
+    Non-destructive re-download: reset the Plaid sync cursor so the next sync
+    re-fetches all transactions from the beginning.  Existing transactions are
+    NOT deleted — the sync loop will match them by content_hash and adopt the
+    new Plaid IDs, preserving all user work (category, notes, locks, splits).
+
+    Only truly new transactions (no content-hash match) will be inserted.
 
     NOTE: cursor reset affects ALL accounts sharing the same Plaid item
     (i.e. the same bank connection). This is unavoidable — Plaid's cursor is
     per-item, not per-account.
     """
-    from sqlalchemy import text as _text
-
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -3219,41 +3316,9 @@ async def reset_and_resync_account(
     if not account.plaid_item_id:
         raise HTTPException(status_code=400, detail="Account has no Plaid item — reconnect first")
 
-    acct_id = account.id
-
-    # FK-safe deletion (same order as recover-accounts):
-    # A) user_corrections on the Plaid txns themselves
-    db.execute(_text(
-        "DELETE FROM user_corrections WHERE transaction_id IN ("
-        "  SELECT id FROM transactions"
-        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
-    ), {"a": acct_id})
-    # B) user_corrections on split-child txns of those Plaid txns
-    db.execute(_text(
-        "DELETE FROM user_corrections WHERE transaction_id IN ("
-        "  SELECT id FROM transactions WHERE parent_transaction_id IN ("
-        "    SELECT id FROM transactions"
-        "    WHERE account_id = :a AND plaid_transaction_id IS NOT NULL))"
-    ), {"a": acct_id})
-    # C) transaction_splits rows referencing the Plaid txns
-    db.execute(_text(
-        "DELETE FROM transaction_splits WHERE parent_transaction_id IN ("
-        "  SELECT id FROM transactions"
-        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
-    ), {"a": acct_id})
-    # D) split-child transaction rows
-    db.execute(_text(
-        "DELETE FROM transactions WHERE parent_transaction_id IN ("
-        "  SELECT id FROM transactions"
-        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
-    ), {"a": acct_id})
-    # E) the Plaid-sourced transactions themselves
-    result = db.execute(_text(
-        "DELETE FROM transactions WHERE account_id = :a AND plaid_transaction_id IS NOT NULL"
-    ), {"a": acct_id})
-    deleted = result.rowcount
-
-    # Reset cursor so the next sync re-fetches from the beginning
+    # Reset cursor so the next sync re-fetches from the beginning.
+    # Existing transactions are preserved; the content-hash fallback in
+    # _sync_item() will match them and adopt new Plaid IDs without duplication.
     item = db.query(PlaidItem).filter_by(item_id=account.plaid_item_id).first()
     if item:
         item.cursor = None
@@ -3265,9 +3330,8 @@ async def reset_and_resync_account(
         background_tasks.add_task(_sync_item_background, item.item_id, False)
 
     return {
-        "transactions_deleted": deleted,
         "status": "resync started",
-        "note": "Cursor reset affects all accounts at this institution — they will all re-download transactions.",
+        "note": "Cursor reset — all transactions will re-download and be matched by content hash. No data deleted.",
     }
 
 

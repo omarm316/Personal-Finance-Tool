@@ -128,6 +128,13 @@ class Transaction(Base):
     # import_source: 'plaid' | 'csv' | 'ofx' | 'manual'
     import_source = Column(String(20), nullable=True)
 
+    # Content hash — stable identity that survives Plaid re-links.
+    # Format: SHA256(account_id|date|amount|description_raw)[:14] + "-" + NN (zero-padded suffix)
+    # e.g. "a1b2c3d4e5f6a7-00". The suffix differentiates identical transactions
+    # on the same day (same merchant, same amount). No UNIQUE constraint — the
+    # base+suffix pair is unique by construction at insert time.
+    content_hash = Column(String(20), nullable=True, index=True)
+
     # GCB (Gift Card Business) tagging
     gcb_tagged = Column(Boolean, default=False, index=True)  # Legacy — kept for backward compat
     is_gcb = Column(Boolean, default=False, index=True)       # New canonical GCB flag (Section 3b)
@@ -489,6 +496,7 @@ def run_migrations(engine):
             ('import_source',     'VARCHAR(20)'),
             ('loan_id',           'INTEGER'),
             ('is_excluded',       'BOOLEAN DEFAULT FALSE'),
+            ('content_hash',      'VARCHAR(20)'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),
