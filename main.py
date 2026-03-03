@@ -2847,22 +2847,21 @@ async def merge_accounts(account_id: int, target_id: int, db: Session = Depends(
             "source": account_id, "target": target_id}
 
 
-@app.get("/api/accounts/detect-duplicates")
-async def detect_duplicate_accounts(db: Session = Depends(get_db)):
+def _find_duplicate_pairs(db: Session):
     """
-    Find groups of active accounts that appear to be duplicates:
-    same mask + account_type with 2+ active records.
+    Shared helper used by both detect and merge endpoints.
+    Returns (mergeable_groups, ignored_groups).
 
-    False-positive guard: if both accounts have an official_name set and
-    they differ, they are genuinely different products (e.g. Amex Gold vs
-    Amex Platinum both ending in the same digits) and are silently skipped.
+    Filters applied:
+      1. official_name guard: if both accounts have a non-empty official_name
+         that differs, they are genuinely different products — silently skipped.
+      2. Ignore list: pairs recorded in duplicate_ignore are placed in
+         ignored_groups instead of mergeable_groups.
 
-    User-ignored pairs (stored in duplicate_ignore table) are returned in a
-    separate 'ignored' list so they remain visible but won't be merged.
+    Each group dict has: mask, account_type, accounts (list), keep_id, discard_ids.
     """
     from sqlalchemy import func as _func
 
-    # Load all user-ignored pairs as a set of frozensets for O(1) lookup
     ignored_pairs = {
         frozenset((r.account_id_a, r.account_id_b))
         for r in db.query(DuplicateIgnore).all()
@@ -2876,7 +2875,7 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
         .all()
     )
 
-    groups = []
+    mergeable = []
     ignored = []
 
     for mask, acct_type in dup_keys:
@@ -2903,8 +2902,6 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
                 'card_count': card_count,
             }
 
-        # Evaluate each (keep, discard) pair individually so we can
-        # apply both the official_name guard and the ignore list per-pair.
         keep = accounts[0]
         keep_info = _acct_info(keep)
         for discard in accounts[1:]:
@@ -2915,26 +2912,34 @@ async def detect_duplicate_accounts(db: Session = Depends(get_db)):
             ko = (keep.official_name or '').strip()
             do = (discard.official_name or '').strip()
             if ko and do and ko.lower() != do.lower():
-                continue  # silently skip — not a duplicate
+                continue  # silently skip
 
-            # Guard 2: user has permanently ignored this pair
+            # Guard 2: user-ignored pair
             if pair in ignored_pairs:
                 ignored.append({
+                    'mask': mask, 'account_type': acct_type,
                     'accounts': [keep_info, discard_info],
-                    'keep_id': keep.id,
-                    'discard_ids': [discard.id],
+                    'keep_id': keep.id, 'discard_ids': [discard.id],
                 })
                 continue
 
-            groups.append({
-                'mask': mask,
-                'account_type': acct_type,
+            mergeable.append({
+                'mask': mask, 'account_type': acct_type,
                 'accounts': [keep_info, discard_info],
-                'keep_id': keep.id,
-                'discard_ids': [discard.id],
+                'keep_id': keep.id, 'discard_ids': [discard.id],
             })
 
-    groups.sort(key=lambda g: g['mask'])
+    mergeable.sort(key=lambda g: g['mask'])
+    return mergeable, ignored
+
+
+@app.get("/api/accounts/detect-duplicates")
+async def detect_duplicate_accounts(db: Session = Depends(get_db)):
+    """
+    Find groups of active accounts that appear to be duplicates.
+    Applies official_name guard and user ignore list — same filters as merge.
+    """
+    groups, ignored = _find_duplicate_pairs(db)
     return {'duplicates': groups, 'count': len(groups), 'ignored': ignored}
 
 
@@ -2971,37 +2976,23 @@ async def unignore_duplicate_pair(body: dict, db: Session = Depends(get_db)):
 async def merge_duplicate_accounts(db: Session = Depends(get_db)):
     """
     Auto-merge all detected duplicate accounts.
-    For each duplicate group (same mask + account_type):
-    - Keeps the lowest-ID account (has custom name, history, card links)
-    - Adopts Plaid IDs from the newer account so future syncs work
-    - Moves new transactions from duplicates to the canonical account
-    - Deletes the duplicate accounts
-    - Rebuilds monthly snapshots for the canonical account
+    Uses the same filters as detect-duplicates (official_name guard + ignore
+    list) so only pairs visible in the UI are ever merged.
     """
-    from sqlalchemy import func as _func
-
-    dup_keys = (
-        db.query(Account.mask, Account.account_type)
-        .filter(Account.is_active == True, Account.mask != None, Account.mask != '')
-        .group_by(Account.mask, Account.account_type)
-        .having(_func.count(Account.id) > 1)
-        .all()
-    )
+    groups, _ = _find_duplicate_pairs(db)
 
     results = []
-    for mask, acct_type in dup_keys:
-        accounts = (
-            db.query(Account)
-            .filter(Account.is_active == True, Account.mask == mask, Account.account_type == acct_type)
-            .order_by(Account.id)
-            .all()
-        )
-        if len(accounts) < 2:
+    for g in groups:
+        keep_id = g['keep_id']
+        keep = db.query(Account).filter_by(id=keep_id).first()
+        if not keep:
             continue
 
-        keep = accounts[0]  # oldest = custom name + card links + history
-
-        for discard in accounts[1:]:
+        from sqlalchemy import text as _text
+        for discard_id in g['discard_ids']:
+            discard = db.query(Account).filter_by(id=discard_id).first()
+            if not discard:
+                continue
             # 1. Move all transactions to canonical account
             txn_count = db.query(Transaction).filter_by(account_id=discard.id).update(
                 {'account_id': keep.id}, synchronize_session=False
@@ -3015,11 +3006,9 @@ async def merge_duplicate_accounts(db: Session = Depends(get_db)):
             # The plaid_account_id column has a UNIQUE + NOT NULL constraint,
             # so we must DELETE discard first (releasing its unique value)
             # before we can assign that same value to keep.
-            # Use raw SQL to control the exact order within the transaction.
-            from sqlalchemy import text as _text
             new_plaid_account_id = discard.plaid_account_id
             new_plaid_item_id = discard.plaid_item_id
-            discard_id = discard.id
+            discard_name = discard.account_name
             # Remove discard from ORM session before raw DELETE
             db.expunge(discard)
             # 4. Delete duplicate via raw SQL (frees the unique constraint)
@@ -3033,12 +3022,12 @@ async def merge_duplicate_accounts(db: Session = Depends(get_db)):
 
             results.append({
                 'kept': {'id': keep.id, 'name': keep.account_name},
-                'discarded': {'id': discard.id, 'name': discard.account_name},
+                'discarded': {'id': discard_id, 'name': discard_name},
                 'transactions_moved': txn_count,
             })
 
         db.commit()
-        # 5. Rebuild snapshots for canonical account
+        # Rebuild snapshots for canonical account
         try:
             rebuild_monthly_snapshots(db, keep.id)
         except Exception as e:
