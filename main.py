@@ -1192,6 +1192,148 @@ async def force_resync_item(item_id: str, background_tasks: BackgroundTasks, db:
     return {"message": f"Resync started for {item.institution_name}", "status": "started"}
 
 
+@app.post("/api/plaid/items/{item_id}/recover-accounts")
+async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(get_db)):
+    """
+    Recovery endpoint for when accounts were wrongly merged (e.g. bad merge of
+    duplicate accounts scrambled plaid_account_ids).
+
+    Algorithm:
+    1. Fetch all accounts from Plaid for this item.
+    2. For each Plaid account, find the matching DB account by official_name + mask
+       (most reliable after a merge scramble where plaid_account_ids got shuffled).
+    3. If found but plaid_account_id differs → mark for UPDATE.
+    4. If not found at all → mark for CREATE.
+    5. Do all UPDATEs first (raw SQL, releases unique IDs), then flush.
+    6. Then do all CREATEs (now that unique IDs are freed).
+    7. Delete Plaid-sourced transactions from updated accounts — their transactions
+       were mixed up during the bad merge; re-sync will reassign them correctly.
+    8. Reset the sync cursor so the next sync fetches full history.
+    """
+    from sqlalchemy import text as _text
+    plaid_svc = setup_plaid_from_env()
+    item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+    if not item:
+        raise HTTPException(404, "PlaidItem not found")
+
+    plaid_accounts = plaid_svc.get_accounts(item.access_token)
+
+    updates = []    # (db_account_obj, new_plaid_account_id)
+    creates = []    # raw Plaid account dicts
+    already_ok = []
+
+    for pa in plaid_accounts:
+        plaid_account_id = pa['account_id']
+        mask = pa.get('mask')
+        official_name = (pa.get('official_name') or pa.get('name', '')).strip()
+        account_type = pa.get('type', '').lower()
+
+        # Primary: match by official_name + mask — reliable even when
+        # plaid_account_ids have been shuffled by a bad merge.
+        candidate = None
+        if mask and official_name:
+            candidate = (
+                db.query(Account)
+                .filter(
+                    Account.mask == mask,
+                    Account.official_name == official_name,
+                    Account.is_active == True,
+                )
+                .first()
+            )
+
+        if candidate:
+            if candidate.plaid_account_id == plaid_account_id:
+                already_ok.append(candidate.account_name)
+            else:
+                updates.append((candidate, plaid_account_id))
+            continue
+
+        # Fallback: match by plaid_account_id (account is already correct)
+        existing = db.query(Account).filter_by(
+            plaid_account_id=plaid_account_id, is_active=True
+        ).first()
+        if existing:
+            already_ok.append(existing.account_name)
+            continue
+
+        # Not found by any method — create it
+        creates.append(pa)
+
+    results = [{'status': 'ok', 'account': n} for n in already_ok]
+
+    # Pass 1: UPDATE plaid_account_ids via raw SQL.
+    # Must happen before CREATEs so the old (wrong) IDs are freed first.
+    updated_account_ids = []
+    for candidate, new_pid in updates:
+        db.execute(_text(
+            "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid WHERE id=:id"
+        ), {"pid": new_pid, "iid": item.item_id, "id": candidate.id})
+        updated_account_ids.append(candidate.id)
+        results.append({
+            'status': 'updated',
+            'account': candidate.account_name,
+            'new_plaid_id': new_pid,
+        })
+    db.flush()  # releases old unique IDs so creates can use them
+
+    # Pass 2: CREATE missing accounts
+    created_account_ids = []
+    for pa in creates:
+        plaid_account_id = pa['account_id']
+        mask = pa.get('mask')
+        official_name = (pa.get('official_name') or pa.get('name', '')).strip()
+        account_type = pa.get('type', '').lower()
+        new_acct = Account(
+            plaid_account_id=plaid_account_id,
+            plaid_item_id=item.item_id,
+            account_name=official_name or f"Account ···{mask}",
+            account_type=account_type,
+            official_name=official_name,
+            mask=mask,
+            is_active=True,
+            is_manual=False,
+            starting_balance=0,
+        )
+        db.add(new_acct)
+        db.flush()
+        created_account_ids.append(new_acct.id)
+        results.append({
+            'status': 'created',
+            'account': new_acct.account_name,
+            'plaid_id': plaid_account_id,
+        })
+
+    # Delete Plaid-sourced transactions from accounts whose plaid_account_id was
+    # corrected — these accounts absorbed foreign transactions during the bad merge.
+    # Deleting + re-syncing is the only way to correctly reassign them.
+    total_deleted = 0
+    for acct_id in updated_account_ids:
+        deleted = db.query(Transaction).filter(
+            Transaction.account_id == acct_id,
+            Transaction.plaid_transaction_id != None,
+        ).delete(synchronize_session=False)
+        total_deleted += deleted
+
+    # Reset cursor so the next sync fetches the full transaction history
+    item.cursor = None
+    db.commit()
+
+    # Rebuild snapshots for all affected accounts
+    for acct_id in updated_account_ids + created_account_ids:
+        try:
+            rebuild_monthly_snapshots(db, acct_id)
+        except Exception:
+            pass
+
+    return {
+        'accounts': results,
+        'transactions_deleted': total_deleted,
+        'cursor_reset': True,
+        'message': f'Recovery complete. Run "↺ Full Resync" for {item.institution_name} to restore all transactions.',
+    }
+
+
 # ---------------------------------------------------------------------------
 # Transactions: list
 # ---------------------------------------------------------------------------
