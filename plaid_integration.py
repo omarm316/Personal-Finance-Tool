@@ -150,6 +150,7 @@ class PlaidClient:
 
             accounts.append({
                 'account_id': account['account_id'],
+                'persistent_account_id': account.get('persistent_account_id'),  # Stable across re-links; None if institution doesn't support it
                 'name': account['name'],
                 'official_name': account.get('official_name'),
                 'type': acct_type_str,

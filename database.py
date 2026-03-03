@@ -71,6 +71,7 @@ class Account(Base):
     
     id = Column(Integer, primary_key=True)
     plaid_account_id = Column(String(100), unique=True, nullable=True, index=True)  # NULL for manual accounts
+    persistent_account_id = Column(String(200), nullable=True, index=True)  # Stable across re-links (Plaid persistent_account_id); no UNIQUE constraint (edge-case recovery may have duplicates temporarily)
     plaid_item_id = Column(String(100), nullable=True, index=True)  # FK to plaid_items.item_id; NULL for manual
     account_name = Column(String(100), nullable=False)  # e.g., "Chase 8997"
     account_type = Column(String(50))  # checking, credit, etc.
@@ -493,6 +494,7 @@ def run_migrations(engine):
             ('starting_balance', 'FLOAT DEFAULT 0'),
             ('start_date', 'DATE'),
             ('notes', 'TEXT'),
+            ('persistent_account_id', 'VARCHAR(200)'),
         ],
         'plaid_items': [
             ('institution_id', 'VARCHAR(50)'),
