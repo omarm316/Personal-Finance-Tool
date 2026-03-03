@@ -3027,8 +3027,8 @@ async def merge_duplicate_accounts(db: Session = Depends(get_db)):
             # 5. Now safely adopt the freed Plaid IDs onto keep
             if new_plaid_account_id:
                 db.execute(_text(
-                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid, is_manual=0 WHERE id=:kid"
-                ), {"pid": new_plaid_account_id, "iid": new_plaid_item_id, "kid": keep.id})
+                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid, is_manual=:manual WHERE id=:kid"
+                ), {"pid": new_plaid_account_id, "iid": new_plaid_item_id, "manual": False, "kid": keep.id})
                 db.expire(keep)  # force ORM to re-read updated values
 
             results.append({
