@@ -2429,6 +2429,25 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               finally{setBusy(false);}
             }}>{busy?'…':'Rebuild'}</button>
           </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">🔑 Backfill Persistent Account IDs</div>
+              <div className="settings-desc">One-time migration: fetches Plaid's stable account identifiers for all connected banks and stores them locally. Run once — enables reliable re-link matching in future. Safe to run multiple times.</div>
+            </div>
+            <button className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/plaid/backfill-persistent-ids',{method:'POST'});
+                const noSupport=r.items.filter(i=>i.no_pid>0).map(i=>i.institution);
+                let msg=`🔑 Backfilled ${r.total_updated} account${r.total_updated!==1?'s':''}`;
+                if(noSupport.length>0)msg+=` (${noSupport.join(', ')}: no persistent IDs — institution limitation)`;
+                toast(msg);
+                // Show per-institution detail in console for debugging
+                console.table(r.items);
+              }catch(e){toast('Backfill failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Run Backfill'}</button>
+          </div>
         </div>
         <div className="card" style={{marginBottom:20}}>
           <div className="section-header"><div className="section-title">Cards Import</div></div>

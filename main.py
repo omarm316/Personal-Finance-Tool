@@ -1241,6 +1241,82 @@ async def force_resync_item(item_id: str, background_tasks: BackgroundTasks, db:
     return {"message": f"Resync started for {item.institution_name}", "status": "started"}
 
 
+@app.post("/api/plaid/backfill-persistent-ids")
+async def backfill_persistent_ids(db: Session = Depends(get_db)):
+    """
+    One-time backfill: for every active Plaid item, call Plaid's accounts API
+    and write persistent_account_id onto any DB account that still has NULL.
+
+    Matches Plaid accounts to DB rows via plaid_account_id (exact, fast).
+    Updates only rows where persistent_account_id IS NULL so it is safe to
+    re-run any number of times.
+
+    Returns a per-institution summary and overall counts.
+    """
+    plaid  = setup_plaid_from_env()
+    items  = db.query(PlaidItem).filter_by(is_active=True).all()
+
+    total_updated   = 0
+    total_no_pid    = 0   # Plaid returned None for persistent_account_id (institution doesn't support it)
+    results         = []
+
+    for item in items:
+        item_updated  = 0
+        item_skipped  = 0
+        item_no_pid   = 0
+        errors        = []
+
+        try:
+            plaid_accounts = plaid.get_accounts(item.access_token)
+        except Exception as e:
+            results.append({
+                'institution': item.institution_name,
+                'item_id': item.item_id,
+                'error': str(e),
+            })
+            continue
+
+        for pa in plaid_accounts:
+            pid = pa.get('persistent_account_id')
+            if not pid:
+                item_no_pid += 1
+                continue  # institution doesn't provide persistent IDs — nothing to write
+
+            # Match DB account by plaid_account_id (fast & unambiguous)
+            db_acct = (db.query(Account)
+                .filter_by(plaid_account_id=pa['account_id'])
+                .first())
+
+            if not db_acct:
+                item_skipped += 1
+                continue  # account not in DB (probably was deleted or never adopted)
+
+            if db_acct.persistent_account_id:
+                item_skipped += 1
+                continue  # already populated — skip
+
+            db_acct.persistent_account_id = pid
+            item_updated += 1
+
+        db.commit()
+        total_updated += item_updated
+        total_no_pid  += item_no_pid
+
+        results.append({
+            'institution':  item.institution_name,
+            'item_id':      item.item_id,
+            'updated':      item_updated,
+            'skipped':      item_skipped,
+            'no_pid':       item_no_pid,   # Plaid returned None — institution limitation
+        })
+
+    return {
+        'total_updated': total_updated,
+        'total_no_pid':  total_no_pid,
+        'items':         results,
+    }
+
+
 @app.post("/api/plaid/items/{item_id}/recover-accounts")
 async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(get_db)):
     """
