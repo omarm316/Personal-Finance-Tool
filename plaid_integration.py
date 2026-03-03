@@ -88,6 +88,16 @@ class PlaidClient:
         via /item/get → institution_id → /institutions/get_by_id.
         Returns None on any failure so callers can fall back gracefully.
         """
+        return (self.get_institution_info(access_token) or {}).get('name')
+
+    def get_institution_info(self, access_token: str) -> Optional[dict]:
+        """
+        Look up both the institution name AND Plaid's immutable institution_id
+        (e.g. {'name': 'Chase', 'institution_id': 'ins_3'}).
+        institution_id never changes even when users rename the connection,
+        so it's the reliable key for account matching on re-link.
+        Returns None on any failure.
+        """
         try:
             item_resp = self.client.item_get(ItemGetRequest(access_token=access_token))
             institution_id = item_resp['item']['institution_id']
@@ -98,7 +108,10 @@ class PlaidClient:
                         country_codes=[CountryCode('US')],
                     )
                 )
-                return inst_resp['institution']['name']
+                return {
+                    'name': inst_resp['institution']['name'],
+                    'institution_id': institution_id,
+                }
         except Exception:
             pass
         return None

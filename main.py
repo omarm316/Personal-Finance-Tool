@@ -613,22 +613,27 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         accounts     = plaid.get_accounts(access_token)
 
         # Create or update PlaidItem
+        # Fetch institution info once — name (display) + institution_id (immutable, used for matching)
+        inst_info = plaid.get_institution_info(access_token) or {}
+        inst_name = inst_info.get('name') or (accounts[0]['name'].split(' ')[0] if accounts else 'Unknown')
+        inst_id   = inst_info.get('institution_id')
+
         plaid_item = db.query(PlaidItem).filter_by(item_id=item_id).first()
         if plaid_item:
             plaid_item.access_token = access_token
             plaid_item.is_active    = True
             plaid_item.updated_at   = datetime.utcnow()
-            # Refresh institution name in case it was set incorrectly before
-            refreshed = plaid.get_institution_name(access_token)
-            if refreshed:
-                plaid_item.institution_name = refreshed
+            # Always refresh canonical institution name and id from Plaid
+            plaid_item.institution_name = inst_name
+            if inst_id:
+                plaid_item.institution_id = inst_id
         else:
-            # Fetch the proper institution name from Plaid; fall back to first word of account name
-            institution_name = (
-                plaid.get_institution_name(access_token)
-                or (accounts[0]['name'].split(' ')[0] if accounts else 'Unknown')
+            plaid_item = PlaidItem(
+                item_id=item_id,
+                institution_name=inst_name,
+                institution_id=inst_id,
+                is_active=True,
             )
-            plaid_item = PlaidItem(item_id=item_id, institution_name=institution_name, is_active=True)
             plaid_item.access_token = access_token
             db.add(plaid_item)
 
@@ -643,29 +648,33 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
 
             existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
 
-            # Fallback dedup: if Plaid issued new account IDs for the same physical account
-            # (happens when re-linking an institution), match by mask + type + institution.
+            # Fallback dedup: match by mask + account_type across any account at this institution.
+            # Uses Plaid's immutable institution_id so user renames of the connection name
+            # (e.g. "Chase" → "Chase (Omer)") don't break matching.
+            # OUTER JOIN means severed accounts (plaid_item_id=NULL) are also found.
             if not existing and a.get('mask'):
-                existing = (db.query(Account)
-                    .join(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
-                    .filter(
-                        Account.mask == a['mask'],
-                        Account.account_type == account_type,
+                base_filters = [
+                    Account.mask == a['mask'],
+                    Account.account_type == account_type,
+                    Account.is_active == True,
+                ]
+                if plaid_item.institution_id:
+                    # Preferred: match on immutable Plaid institution_id
+                    inst_match = or_(
+                        PlaidItem.institution_id == plaid_item.institution_id,
+                        Account.plaid_item_id == None,   # severed accounts — safe since we're inside this institution's link flow
+                    )
+                else:
+                    # Fallback: match on institution_name (less reliable if user renamed)
+                    inst_match = or_(
                         PlaidItem.institution_name == plaid_item.institution_name,
-                    ).first())
-
-            # Second fallback: match severed accounts (plaid_item_id=NULL, is_manual=True).
-            # The inner JOIN above excludes these because NULL never matches.
-            # Safe to match by mask + type alone since we're already inside the
-            # exchange_public_token flow for a specific institution.
-            if not existing and a.get('mask'):
-                existing = (db.query(Account)
-                    .filter(
-                        Account.mask == a['mask'],
-                        Account.account_type == account_type,
                         Account.plaid_item_id == None,
-                        Account.is_active == True,
-                    ).first())
+                    )
+                existing = (db.query(Account)
+                    .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
+                    .filter(*base_filters, inst_match)
+                    .order_by(Account.id)   # deterministic: prefer oldest account (most history)
+                    .first())
 
             if existing:
                 # Adopt: update Plaid IDs so future transactions flow to the right account
@@ -2836,6 +2845,127 @@ async def merge_accounts(account_id: int, target_id: int, db: Session = Depends(
     db.commit()
     return {"merged": True, "transactions_moved": txn_count,
             "source": account_id, "target": target_id}
+
+
+@app.get("/api/accounts/detect-duplicates")
+async def detect_duplicate_accounts(db: Session = Depends(get_db)):
+    """
+    Find groups of active accounts that appear to be duplicates:
+    same mask + account_type with 2+ active records.
+    Returns them sorted by mask so the user can review and merge.
+    """
+    from sqlalchemy import func as _func
+
+    dup_keys = (
+        db.query(Account.mask, Account.account_type)
+        .filter(Account.is_active == True, Account.mask != None, Account.mask != '')
+        .group_by(Account.mask, Account.account_type)
+        .having(_func.count(Account.id) > 1)
+        .all()
+    )
+
+    groups = []
+    for mask, acct_type in dup_keys:
+        accounts = (
+            db.query(Account)
+            .filter(Account.is_active == True, Account.mask == mask, Account.account_type == acct_type)
+            .order_by(Account.id)
+            .all()
+        )
+        acct_list = []
+        for a in accounts:
+            txn_count = db.query(Transaction).filter_by(account_id=a.id).count()
+            card_count = db.query(Card).filter_by(account_id=a.id).count()
+            acct_list.append({
+                'id': a.id,
+                'name': a.account_name,
+                'mask': a.mask,
+                'account_type': a.account_type,
+                'plaid_account_id': a.plaid_account_id,
+                'plaid_item_id': a.plaid_item_id,
+                'is_manual': a.is_manual,
+                'transaction_count': txn_count,
+                'card_count': card_count,
+            })
+        groups.append({
+            'mask': mask,
+            'account_type': acct_type,
+            'accounts': acct_list,
+            'keep_id': acct_list[0]['id'],
+            'discard_ids': [a['id'] for a in acct_list[1:]],
+        })
+
+    groups.sort(key=lambda g: g['mask'])
+    return {'duplicates': groups, 'count': len(groups)}
+
+
+@app.post("/api/accounts/merge-duplicates")
+async def merge_duplicate_accounts(db: Session = Depends(get_db)):
+    """
+    Auto-merge all detected duplicate accounts.
+    For each duplicate group (same mask + account_type):
+    - Keeps the lowest-ID account (has custom name, history, card links)
+    - Adopts Plaid IDs from the newer account so future syncs work
+    - Moves new transactions from duplicates to the canonical account
+    - Deletes the duplicate accounts
+    - Rebuilds monthly snapshots for the canonical account
+    """
+    from sqlalchemy import func as _func
+
+    dup_keys = (
+        db.query(Account.mask, Account.account_type)
+        .filter(Account.is_active == True, Account.mask != None, Account.mask != '')
+        .group_by(Account.mask, Account.account_type)
+        .having(_func.count(Account.id) > 1)
+        .all()
+    )
+
+    results = []
+    for mask, acct_type in dup_keys:
+        accounts = (
+            db.query(Account)
+            .filter(Account.is_active == True, Account.mask == mask, Account.account_type == acct_type)
+            .order_by(Account.id)
+            .all()
+        )
+        if len(accounts) < 2:
+            continue
+
+        keep = accounts[0]  # oldest = custom name + card links + history
+
+        for discard in accounts[1:]:
+            # 1. Move all transactions to canonical account
+            txn_count = db.query(Transaction).filter_by(account_id=discard.id).update(
+                {'account_id': keep.id}, synchronize_session=False
+            )
+            # 2. Move card links to canonical account
+            db.query(Card).filter_by(account_id=discard.id).update(
+                {'account_id': keep.id, 'plaid_account_id': keep.plaid_account_id},
+                synchronize_session=False,
+            )
+            # 3. Adopt Plaid IDs from discard so future syncs route to keep
+            if discard.plaid_account_id:
+                keep.plaid_account_id = discard.plaid_account_id
+                keep.plaid_item_id = discard.plaid_item_id
+                keep.is_manual = False
+            # 4. Delete duplicate
+            db.delete(discard)
+            db.flush()
+
+            results.append({
+                'kept': {'id': keep.id, 'name': keep.account_name},
+                'discarded': {'id': discard.id, 'name': discard.account_name},
+                'transactions_moved': txn_count,
+            })
+
+        db.commit()
+        # 5. Rebuild snapshots for canonical account
+        try:
+            rebuild_monthly_snapshots(db, keep.id)
+        except Exception as e:
+            print(f"[merge-duplicates] snapshot rebuild failed for account {keep.id}: {e}")
+
+    return {'merged': results, 'count': len(results)}
 
 
 @app.delete("/api/accounts/{account_id}")

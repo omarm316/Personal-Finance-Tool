@@ -2206,6 +2206,31 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
     }catch(e){toast('Balance sync failed: '+(e.message||e),'error');}
     finally{setBalanceSyncing(false);}
   };
+  const[dupGroups,setDupGroups]=useState(null);
+  const[dupScanning,setDupScanning]=useState(false);
+  const[dupMerging,setDupMerging]=useState(false);
+  const scanDuplicates=async()=>{
+    setDupScanning(true);
+    try{
+      const r=await apiFetch('/accounts/detect-duplicates');
+      setDupGroups(r.duplicates);
+      if(r.count===0)toast('No duplicate accounts found ✓');
+    }catch(e){toast('Duplicate scan failed: '+(e.message||e),'error');}
+    finally{setDupScanning(false);}
+  };
+  const mergeDuplicates=async()=>{
+    if(!dupGroups||dupGroups.length===0)return;
+    const names=dupGroups.map(g=>g.accounts.map(a=>a.name).join(' → ')).join('\n');
+    if(!window.confirm(`Merge ${dupGroups.length} duplicate group${dupGroups.length!==1?'s':''}?\n\nFor each group, the oldest account (with your custom name and card links) will be kept and all history merged into it.\n\n${names}`))return;
+    setDupMerging(true);
+    try{
+      const r=await apiFetch('/accounts/merge-duplicates',{method:'POST'});
+      toast(`Merged ${r.count} duplicate group${r.count!==1?'s':''} — your custom names and card links are preserved`);
+      setDupGroups(null);
+      onBanksChanged&&onBanksChanged();
+    }catch(e){toast('Merge failed: '+(e.message||e),'error');}
+    finally{setDupMerging(false);}
+  };
   const refreshItems=useCallback(()=>{apiFetch('/plaid/items').then(r=>{setItems(r);onBanksChanged&&onBanksChanged();}).catch(()=>{});},[onBanksChanged]);
   useEffect(()=>{refreshItems();},[]);
 
@@ -2443,6 +2468,52 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               </div>;
             })()}
           </div>}
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header">
+            <div>
+              <div className="section-title">Duplicate Accounts</div>
+              <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>After re-linking a bank, Plaid sometimes creates duplicate accounts. Scan to detect them and merge with one click — your custom names, card links, and full history are preserved.</div>
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <button className="btn btn-sm btn-secondary" onClick={scanDuplicates} disabled={dupScanning||dupMerging}>{dupScanning?'Scanning…':'🔍 Scan for Duplicates'}</button>
+              {dupGroups&&dupGroups.length>0&&<button className="btn btn-sm btn-primary" onClick={mergeDuplicates} disabled={dupMerging}>{dupMerging?'Merging…':'✓ Merge All'}</button>}
+            </div>
+          </div>
+          {dupGroups&&(dupGroups.length===0
+            ?<div style={{fontSize:12,color:'var(--text-muted)',marginTop:8}}>✓ No duplicate accounts found.</div>
+            :<div style={{marginTop:12}}>
+              <div style={{fontSize:12,color:'#b45309',marginBottom:8,fontWeight:500}}>{dupGroups.length} duplicate group{dupGroups.length!==1?'s':''} found — click "Merge All" to fix</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
+                  <th style={{textAlign:'left',padding:'4px 8px 4px 0',fontWeight:500}}>Keep (oldest)</th>
+                  <th style={{textAlign:'left',padding:'4px 8px',fontWeight:500}}>Discard (duplicate)</th>
+                  <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Txns</th>
+                </tr></thead>
+                <tbody>{dupGroups.map((g,gi)=>g.discard_ids.map((did,di)=>{
+                  const keep=g.accounts.find(a=>a.id===g.keep_id);
+                  const discard=g.accounts.find(a=>a.id===did);
+                  return <tr key={`${gi}-${di}`} style={{borderBottom:'1px solid var(--border-light)'}}>
+                    <td style={{padding:'5px 8px 5px 0'}}>
+                      <span style={{fontWeight:500}}>{keep.name}</span>
+                      <span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>…{keep.mask}</span>
+                      {keep.card_count>0&&<span style={{marginLeft:4,fontSize:10,background:'#dbeafe',color:'#1d4ed8',borderRadius:3,padding:'1px 4px'}}>{keep.card_count} card{keep.card_count!==1?'s':''}</span>}
+                    </td>
+                    <td style={{padding:'5px 8px',color:'var(--text-muted)'}}>
+                      <span>{discard.name}</span>
+                      <span style={{marginLeft:6,fontSize:10,background:'#fee2e2',color:'#991b1b',borderRadius:3,padding:'1px 4px'}}>duplicate</span>
+                    </td>
+                    <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:'var(--text-muted)'}}>
+                      {discard.transaction_count>0?`+${discard.transaction_count}`:'—'}
+                    </td>
+                  </tr>;
+                }))}</tbody>
+              </table>
+              <div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
+                "Merge All" keeps the oldest account's name and card links, adopts the new Plaid connection so future syncs work, and moves any new transactions across.
+              </div>
+            </div>
+          )}
         </div>
         <div className="card" style={{marginBottom:20}}>
           <div className="section-header">

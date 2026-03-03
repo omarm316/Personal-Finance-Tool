@@ -45,7 +45,8 @@ class PlaidItem(Base):
 
     id = Column(Integer, primary_key=True)
     item_id = Column(String(100), unique=True, nullable=False, index=True)
-    institution_name = Column(String(200))          # e.g. "Chase"
+    institution_name = Column(String(200))          # e.g. "Chase" — user-renameable
+    institution_id = Column(String(50))             # Plaid's immutable ID e.g. "ins_3" — used for matching
     access_token_enc = Column(Text, nullable=False) # AES-encrypted via Fernet
     cursor = Column(Text, nullable=True)            # Plaid sync cursor — persisted here
     last_synced_at = Column(DateTime, nullable=True)
@@ -474,6 +475,9 @@ def run_migrations(engine):
             ('starting_balance', 'FLOAT DEFAULT 0'),
             ('start_date', 'DATE'),
             ('notes', 'TEXT'),
+        ],
+        'plaid_items': [
+            ('institution_id', 'VARCHAR(50)'),
         ],
         'cards': [
             ('account_id', 'INTEGER'),
