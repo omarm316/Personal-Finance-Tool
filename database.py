@@ -73,6 +73,7 @@ class Account(Base):
     plaid_account_id = Column(String(100), unique=True, nullable=True, index=True)  # NULL for manual accounts
     persistent_account_id = Column(String(200), nullable=True, index=True)  # Stable across re-links (Plaid persistent_account_id); no UNIQUE constraint (edge-case recovery may have duplicates temporarily)
     plaid_item_id = Column(String(100), nullable=True, index=True)  # FK to plaid_items.item_id; NULL for manual
+    institution_id = Column(String(50), nullable=True, index=True)  # Copied from PlaidItem; persists after sever-plaid so re-link matching stays institution-scoped
     account_name = Column(String(100), nullable=False)  # e.g., "Chase 8997"
     account_type = Column(String(50))  # checking, credit, etc.
     official_name = Column(String(200))
@@ -495,6 +496,7 @@ def run_migrations(engine):
             ('start_date', 'DATE'),
             ('notes', 'TEXT'),
             ('persistent_account_id', 'VARCHAR(200)'),
+            ('institution_id', 'VARCHAR(50)'),
         ],
         'plaid_items': [
             ('institution_id', 'VARCHAR(50)'),
@@ -632,6 +634,23 @@ def _run_migrations_pg(engine, required_columns):
                     'UPDATE transactions SET is_gcb = gcb_tagged WHERE is_gcb = FALSE AND gcb_tagged = TRUE'
                 ))
                 print('  Migration: copied gcb_tagged → is_gcb')
+        # Backfill institution_id onto accounts that still have NULL.
+        # Copies from the linked plaid_items row. Safe to run every startup
+        # (IS NULL guard makes it idempotent). Preserves institution_id on
+        # severed accounts (plaid_item_id=NULL) — those were already written.
+        if insp.has_table('accounts') and insp.has_table('plaid_items'):
+            existing_acct_cols = {c['name'] for c in insp.get_columns('accounts')}
+            if 'institution_id' in existing_acct_cols:
+                result = conn.execute(text(
+                    "UPDATE accounts a"
+                    " SET institution_id = pi.institution_id"
+                    " FROM plaid_items pi"
+                    " WHERE a.plaid_item_id = pi.item_id"
+                    "   AND a.institution_id IS NULL"
+                    "   AND pi.institution_id IS NOT NULL"
+                ))
+                if result.rowcount:
+                    print(f'  Migration: backfilled institution_id on {result.rowcount} account(s)')
         # Normalize account_type to Title Case
         if insp.has_table('accounts'):
             type_map = [

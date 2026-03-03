@@ -97,6 +97,8 @@ def serialize_account(a: Account, transaction_count: int = 0) -> dict:
     return {
         'id': a.id,
         'plaid_account_id': a.plaid_account_id,
+        'persistent_account_id': getattr(a, 'persistent_account_id', None),
+        'institution_id': getattr(a, 'institution_id', None),
         'plaid_item_id': a.plaid_item_id,
         'account_name': a.account_name,
         'account_type': a.account_type,
@@ -673,7 +675,11 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
 
             # Step 3: mask + account_type + institution fallback
-            # OUTER JOIN so severed accounts (plaid_item_id=NULL) are also found.
+            # Uses Account.institution_id (stored on the account itself, survives
+            # sever-plaid) so severed accounts are ONLY matched within the same
+            # institution — fixes the original bug where any severed account at
+            # any institution could match. Falls back to JOIN when institution_id
+            # is not yet populated (pre-migration rows).
             if not existing and a.get('mask'):
                 base_filters = [
                     Account.mask == a['mask'],
@@ -682,13 +688,18 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 ]
                 if plaid_item.institution_id:
                     inst_match = or_(
+                        # Active accounts: match via plaid_items JOIN
                         PlaidItem.institution_id == plaid_item.institution_id,
-                        Account.plaid_item_id == None,
+                        # Severed accounts: match via stored institution_id (safe — institution-scoped)
+                        and_(
+                            Account.plaid_item_id == None,
+                            Account.institution_id == plaid_item.institution_id,
+                        ),
                     )
                 else:
                     inst_match = or_(
                         PlaidItem.institution_name == plaid_item.institution_name,
-                        Account.plaid_item_id == None,
+                        Account.plaid_item_id == None,  # best-effort without institution_id
                     )
                 existing = (db.query(Account)
                     .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
@@ -711,6 +722,8 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 existing.is_active        = True
                 if a.get('persistent_account_id'):
                     existing.persistent_account_id = a['persistent_account_id']
+                if plaid_item.institution_id:
+                    existing.institution_id = plaid_item.institution_id
 
                 account_results.append({
                     "name": existing.account_name,
@@ -723,6 +736,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 new_acct = Account(
                     plaid_account_id=a['account_id'],
                     persistent_account_id=a.get('persistent_account_id'),
+                    institution_id=inst_id,   # stored so it survives sever-plaid
                     plaid_item_id=item_id,
                     account_name=f"{a['name']} {a.get('mask','')}".strip(),
                     account_type=account_type,
