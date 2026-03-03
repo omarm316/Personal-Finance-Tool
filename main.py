@@ -2943,14 +2943,25 @@ async def merge_duplicate_accounts(db: Session = Depends(get_db)):
                 {'account_id': keep.id, 'plaid_account_id': keep.plaid_account_id},
                 synchronize_session=False,
             )
-            # 3. Adopt Plaid IDs from discard so future syncs route to keep
-            if discard.plaid_account_id:
-                keep.plaid_account_id = discard.plaid_account_id
-                keep.plaid_item_id = discard.plaid_item_id
-                keep.is_manual = False
-            # 4. Delete duplicate
-            db.delete(discard)
-            db.flush()
+            # 3. Adopt Plaid IDs from discard so future syncs route to keep.
+            # The plaid_account_id column has a UNIQUE + NOT NULL constraint,
+            # so we must DELETE discard first (releasing its unique value)
+            # before we can assign that same value to keep.
+            # Use raw SQL to control the exact order within the transaction.
+            from sqlalchemy import text as _text
+            new_plaid_account_id = discard.plaid_account_id
+            new_plaid_item_id = discard.plaid_item_id
+            discard_id = discard.id
+            # Remove discard from ORM session before raw DELETE
+            db.expunge(discard)
+            # 4. Delete duplicate via raw SQL (frees the unique constraint)
+            db.execute(_text("DELETE FROM accounts WHERE id = :id"), {"id": discard_id})
+            # 5. Now safely adopt the freed Plaid IDs onto keep
+            if new_plaid_account_id:
+                db.execute(_text(
+                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid, is_manual=0 WHERE id=:kid"
+                ), {"pid": new_plaid_account_id, "iid": new_plaid_item_id, "kid": keep.id})
+                db.expire(keep)  # force ORM to re-read updated values
 
             results.append({
                 'kept': {'id': keep.id, 'name': keep.account_name},
