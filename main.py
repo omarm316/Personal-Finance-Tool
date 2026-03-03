@@ -3081,6 +3081,120 @@ async def update_account(account_id: int, updates: dict, db: Session = Depends(g
     return {"message": "Account updated"}
 
 
+# ---------------------------------------------------------------------------
+# Per-account controls  (Change 4)
+# Route order matters: static paths must come BEFORE /{id} patterns
+# ---------------------------------------------------------------------------
+
+@app.post("/api/accounts/rebuild-all-snapshots")
+async def rebuild_all_snapshots(db: Session = Depends(get_db)):
+    """
+    Rebuild monthly balance snapshots for ALL active accounts.
+    Non-destructive — safe to run any time. Use after bulk resyncs.
+    """
+    accounts = db.query(Account).filter_by(is_active=True).all()
+    rebuilt = 0
+    for acct in accounts:
+        try:
+            rebuild_monthly_snapshots(db, acct.id)
+            rebuilt += 1
+        except Exception as e:
+            print(f"[rebuild-all-snapshots] account {acct.id} failed: {e}")
+    db.commit()
+    return {"rebuilt": True, "accounts_rebuilt": rebuilt}
+
+
+@app.post("/api/accounts/{account_id}/reset-and-resync")
+async def reset_and_resync_account(
+    account_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete ALL Plaid-sourced transactions for this account only, reset the
+    item's sync cursor (affects the whole institution — all accounts on the same
+    Plaid item will re-download), and kick off a fresh background sync.
+
+    NOTE: cursor reset affects ALL accounts sharing the same Plaid item
+    (i.e. the same bank connection). This is unavoidable — Plaid's cursor is
+    per-item, not per-account.
+    """
+    from sqlalchemy import text as _text
+
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if account.is_manual:
+        raise HTTPException(status_code=400, detail="Account is manual — nothing to resync")
+    if not account.plaid_item_id:
+        raise HTTPException(status_code=400, detail="Account has no Plaid item — reconnect first")
+
+    acct_id = account.id
+
+    # FK-safe deletion (same order as recover-accounts):
+    # A) user_corrections on the Plaid txns themselves
+    db.execute(_text(
+        "DELETE FROM user_corrections WHERE transaction_id IN ("
+        "  SELECT id FROM transactions"
+        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+    ), {"a": acct_id})
+    # B) user_corrections on split-child txns of those Plaid txns
+    db.execute(_text(
+        "DELETE FROM user_corrections WHERE transaction_id IN ("
+        "  SELECT id FROM transactions WHERE parent_transaction_id IN ("
+        "    SELECT id FROM transactions"
+        "    WHERE account_id = :a AND plaid_transaction_id IS NOT NULL))"
+    ), {"a": acct_id})
+    # C) transaction_splits rows referencing the Plaid txns
+    db.execute(_text(
+        "DELETE FROM transaction_splits WHERE parent_transaction_id IN ("
+        "  SELECT id FROM transactions"
+        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+    ), {"a": acct_id})
+    # D) split-child transaction rows
+    db.execute(_text(
+        "DELETE FROM transactions WHERE parent_transaction_id IN ("
+        "  SELECT id FROM transactions"
+        "  WHERE account_id = :a AND plaid_transaction_id IS NOT NULL)"
+    ), {"a": acct_id})
+    # E) the Plaid-sourced transactions themselves
+    result = db.execute(_text(
+        "DELETE FROM transactions WHERE account_id = :a AND plaid_transaction_id IS NOT NULL"
+    ), {"a": acct_id})
+    deleted = result.rowcount
+
+    # Reset cursor so the next sync re-fetches from the beginning
+    item = db.query(PlaidItem).filter_by(item_id=account.plaid_item_id).first()
+    if item:
+        item.cursor = None
+
+    db.commit()
+
+    # Kick off background resync for the whole item
+    if item:
+        background_tasks.add_task(_sync_item_background, item.item_id, False)
+
+    return {
+        "transactions_deleted": deleted,
+        "status": "resync started",
+        "note": "Cursor reset affects all accounts at this institution — they will all re-download transactions.",
+    }
+
+
+@app.post("/api/accounts/{account_id}/rebuild-snapshots")
+async def rebuild_account_snapshots(account_id: int, db: Session = Depends(get_db)):
+    """
+    Rebuild monthly balance snapshots for a single account.
+    Non-destructive — safe to run any time. Use when Daily Balances looks wrong.
+    """
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    months_built = rebuild_monthly_snapshots(db, account_id)
+    db.commit()
+    return {"rebuilt": True, "months_built": months_built}
+
+
 @app.post("/api/accounts/{account_id}/sever-plaid")
 async def sever_plaid_connection(account_id: int, db: Session = Depends(get_db)):
     """
