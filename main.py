@@ -3137,12 +3137,15 @@ def _find_duplicate_pairs(db: Session):
     Returns (mergeable_groups, ignored_groups).
 
     Filters applied:
-      1. official_name guard: if both accounts have a non-empty official_name
-         that differs, they are genuinely different products — silently skipped.
+      1. official_name WARN (not skip): if both accounts have a non-empty official_name
+         that differs, the pair is shown with a "warning" flag so the user can decide.
+         Previously this silently skipped pairs — that caused the Amex merge disaster
+         (backend acted on pairs that never appeared in the UI).
       2. Ignore list: pairs recorded in duplicate_ignore are placed in
          ignored_groups instead of mergeable_groups.
 
-    Each group dict has: mask, account_type, accounts (list), keep_id, discard_ids.
+    Each group dict has: mask, account_type, accounts (list), keep_id, discard_ids,
+    and optionally "warning" (str) for name-mismatch pairs.
     """
     from sqlalchemy import func as _func
 
@@ -3177,6 +3180,7 @@ def _find_duplicate_pairs(db: Session):
                 'id': a.id,
                 'name': a.account_name,
                 'official_name': a.official_name,
+                'persistent_account_id': a.persistent_account_id,
                 'mask': a.mask,
                 'account_type': a.account_type,
                 'plaid_account_id': a.plaid_account_id,
@@ -3192,13 +3196,7 @@ def _find_duplicate_pairs(db: Session):
             discard_info = _acct_info(discard)
             pair = frozenset((keep.id, discard.id))
 
-            # Guard 1: different official_names → genuinely different cards
-            ko = (keep.official_name or '').strip()
-            do = (discard.official_name or '').strip()
-            if ko and do and ko.lower() != do.lower():
-                continue  # silently skip
-
-            # Guard 2: user-ignored pair
+            # User-ignored pair → separate list (no longer silently skipped by official_name)
             if pair in ignored_pairs:
                 ignored.append({
                     'mask': mask, 'account_type': acct_type,
@@ -3207,11 +3205,22 @@ def _find_duplicate_pairs(db: Session):
                 })
                 continue
 
-            mergeable.append({
+            # Warn (don't skip) when official_names differ — user decides
+            ko = (keep.official_name or '').strip()
+            do = (discard.official_name or '').strip()
+            warning = None
+            if ko and do and ko.lower() != do.lower():
+                warning = f'Different product names ("{ko}" vs "{do}") — confirm before merging'
+
+            entry = {
                 'mask': mask, 'account_type': acct_type,
                 'accounts': [keep_info, discard_info],
                 'keep_id': keep.id, 'discard_ids': [discard.id],
-            })
+            }
+            if warning:
+                entry['warning'] = warning
+
+            mergeable.append(entry)
 
     mergeable.sort(key=lambda g: g['mask'])
     return mergeable, ignored
@@ -3256,68 +3265,103 @@ async def unignore_duplicate_pair(body: dict, db: Session = Depends(get_db)):
     return {'unignored': True}
 
 
+def _do_merge_pair(keep_id: int, discard_id: int, db: Session) -> dict:
+    """
+    Core merge logic — move transactions and cards from discard → keep,
+    adopt Plaid IDs from discard, delete discard, rebuild snapshots.
+    Raises HTTPException on bad inputs; returns result dict on success.
+    """
+    from sqlalchemy import text as _text
+
+    keep    = db.query(Account).filter_by(id=keep_id).first()
+    discard = db.query(Account).filter_by(id=discard_id).first()
+    if not keep:
+        raise HTTPException(status_code=404, detail=f"Keep account {keep_id} not found")
+    if not discard:
+        raise HTTPException(status_code=404, detail=f"Discard account {discard_id} not found")
+    if keep_id == discard_id:
+        raise HTTPException(status_code=400, detail="keep_id and discard_id must differ")
+
+    # 1. Move all transactions to canonical account
+    txn_count = db.query(Transaction).filter_by(account_id=discard.id).update(
+        {'account_id': keep.id}, synchronize_session=False
+    )
+    # 2. Move card links to canonical account
+    db.query(Card).filter_by(account_id=discard.id).update(
+        {'account_id': keep.id, 'plaid_account_id': keep.plaid_account_id},
+        synchronize_session=False,
+    )
+    # 3. Capture discard values before deletion
+    new_plaid_account_id = discard.plaid_account_id
+    new_plaid_item_id    = discard.plaid_item_id
+    discard_name         = discard.account_name
+    # 4. Remove discard from ORM session before raw DELETE (frees UNIQUE constraint)
+    db.expunge(discard)
+    db.execute(_text("DELETE FROM accounts WHERE id = :id"), {"id": discard_id})
+    # 5. Adopt the freed Plaid IDs onto keep so future syncs route here
+    if new_plaid_account_id:
+        db.execute(_text(
+            "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid, is_manual=false WHERE id=:kid"
+        ), {"pid": new_plaid_account_id, "iid": new_plaid_item_id, "kid": keep.id})
+        db.expire(keep)
+
+    db.commit()
+
+    try:
+        rebuild_monthly_snapshots(db, keep.id)
+    except Exception as e:
+        print(f"[merge-pair] snapshot rebuild failed for account {keep.id}: {e}")
+
+    return {
+        'merged': True,
+        'kept':       {'id': keep.id,   'name': keep.account_name},
+        'discarded':  {'id': discard_id, 'name': discard_name},
+        'transactions_moved': txn_count,
+    }
+
+
+@app.post("/api/accounts/merge-pair")
+async def merge_one_pair(body: dict, db: Session = Depends(get_db)):
+    """
+    Merge exactly one duplicate pair selected by the user.
+    Body: {keep_id: int, discard_id: int}
+    Moves all transactions and card links from discard → keep,
+    adopts discard's Plaid IDs onto keep, deletes discard, rebuilds snapshots.
+    """
+    keep_id    = body.get('keep_id')
+    discard_id = body.get('discard_id')
+    if not keep_id or not discard_id:
+        raise HTTPException(status_code=400, detail="Provide keep_id and discard_id")
+    return _do_merge_pair(int(keep_id), int(discard_id), db)
+
+
 @app.post("/api/accounts/merge-duplicates")
-async def merge_duplicate_accounts(db: Session = Depends(get_db)):
+async def merge_duplicate_accounts(body: dict, db: Session = Depends(get_db)):
     """
-    Auto-merge all detected duplicate accounts.
-    Uses the same filters as detect-duplicates (official_name guard + ignore
-    list) so only pairs visible in the UI are ever merged.
+    Merge an explicit list of duplicate pairs.
+    Body: {pair_ids: [{keep_id, discard_id}, ...]}
+    Requires an explicit list — no silent "merge everything detected" behaviour.
     """
-    groups, _ = _find_duplicate_pairs(db)
+    pair_ids = body.get('pair_ids')
+    if not pair_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="pair_ids is required — provide [{keep_id, discard_id}, ...] to specify which pairs to merge"
+        )
 
     results = []
-    for g in groups:
-        keep_id = g['keep_id']
-        keep = db.query(Account).filter_by(id=keep_id).first()
-        if not keep:
+    for pair in pair_ids:
+        keep_id    = pair.get('keep_id')
+        discard_id = pair.get('discard_id')
+        if not keep_id or not discard_id:
             continue
-
-        from sqlalchemy import text as _text
-        for discard_id in g['discard_ids']:
-            discard = db.query(Account).filter_by(id=discard_id).first()
-            if not discard:
-                continue
-            # 1. Move all transactions to canonical account
-            txn_count = db.query(Transaction).filter_by(account_id=discard.id).update(
-                {'account_id': keep.id}, synchronize_session=False
-            )
-            # 2. Move card links to canonical account
-            db.query(Card).filter_by(account_id=discard.id).update(
-                {'account_id': keep.id, 'plaid_account_id': keep.plaid_account_id},
-                synchronize_session=False,
-            )
-            # 3. Adopt Plaid IDs from discard so future syncs route to keep.
-            # The plaid_account_id column has a UNIQUE + NOT NULL constraint,
-            # so we must DELETE discard first (releasing its unique value)
-            # before we can assign that same value to keep.
-            new_plaid_account_id = discard.plaid_account_id
-            new_plaid_item_id = discard.plaid_item_id
-            discard_name = discard.account_name
-            # Remove discard from ORM session before raw DELETE
-            db.expunge(discard)
-            # 4. Delete duplicate via raw SQL (frees the unique constraint)
-            db.execute(_text("DELETE FROM accounts WHERE id = :id"), {"id": discard_id})
-            # 5. Now safely adopt the freed Plaid IDs onto keep
-            if new_plaid_account_id:
-                db.execute(_text(
-                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid, is_manual=:manual WHERE id=:kid"
-                ), {"pid": new_plaid_account_id, "iid": new_plaid_item_id, "manual": False, "kid": keep.id})
-                db.expire(keep)  # force ORM to re-read updated values
-
-            results.append({
-                'kept': {'id': keep.id, 'name': keep.account_name},
-                'discarded': {'id': discard_id, 'name': discard_name},
-                'transactions_moved': txn_count,
-            })
-
-        db.commit()
-        # Rebuild snapshots for canonical account
         try:
-            rebuild_monthly_snapshots(db, keep.id)
-        except Exception as e:
-            print(f"[merge-duplicates] snapshot rebuild failed for account {keep.id}: {e}")
+            result = _do_merge_pair(int(keep_id), int(discard_id), db)
+            results.append(result)
+        except HTTPException as e:
+            results.append({'error': e.detail, 'keep_id': keep_id, 'discard_id': discard_id})
 
-    return {'merged': results, 'count': len(results)}
+    return {'merged': results, 'count': len([r for r in results if r.get('merged')])}
 
 
 @app.delete("/api/accounts/{account_id}")

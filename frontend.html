@@ -2256,7 +2256,6 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
   };
   const[dupResult,setDupResult]=useState(null); // {duplicates, ignored}
   const[dupScanning,setDupScanning]=useState(false);
-  const[dupMerging,setDupMerging]=useState(false);
   const dupGroups=dupResult?.duplicates||null;
   const dupIgnored=dupResult?.ignored||[];
   const scanDuplicates=async()=>{
@@ -2268,18 +2267,22 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
     }catch(e){toast('Duplicate scan failed: '+(e.message||e),'error');}
     finally{setDupScanning(false);}
   };
-  const mergeDuplicates=async()=>{
-    if(!dupGroups||dupGroups.length===0)return;
-    const names=dupGroups.map(g=>g.accounts.map(a=>a.name).join(' → ')).join('\n');
-    if(!window.confirm(`Merge ${dupGroups.length} duplicate group${dupGroups.length!==1?'s':''}?\n\nFor each group, the oldest account (with your custom name and card links) will be kept and all history merged into it.\n\n${names}`))return;
-    setDupMerging(true);
+  const mergeOnePair=async(keepId,discardId)=>{
     try{
-      const r=await apiFetch('/accounts/merge-duplicates',{method:'POST'});
-      toast(`Merged ${r.count} duplicate group${r.count!==1?'s':''} — your custom names and card links are preserved`);
-      setDupResult(null);
+      const r=await apiFetch('/accounts/merge-pair',{method:'POST',body:JSON.stringify({keep_id:keepId,discard_id:discardId})});
+      toast(`Merged: ${r.kept?.name} kept, ${r.discarded?.name} removed (${r.transactions_moved} txns moved)`);
+      // Remove just this pair from local state — other pairs unaffected
+      setDupResult(prev=>{
+        if(!prev)return prev;
+        const newGroups=prev.duplicates.map(g=>{
+          if(g.keep_id!==keepId)return g;
+          const newDiscards=g.discard_ids.filter(id=>id!==discardId);
+          return newDiscards.length>0?{...g,discard_ids:newDiscards}:null;
+        }).filter(Boolean);
+        return{...prev,duplicates:newGroups,count:newGroups.length};
+      });
       onBanksChanged&&onBanksChanged();
     }catch(e){toast('Merge failed: '+(e.message||e),'error');}
-    finally{setDupMerging(false);}
   };
   const ignoreDuplicatePair=async(idA,idB)=>{
     try{
@@ -2547,20 +2550,19 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>After re-linking a bank, Plaid sometimes creates duplicate accounts. Scan to detect them and merge with one click — your custom names, card links, and full history are preserved.</div>
             </div>
             <div style={{display:'flex',gap:8,alignItems:'center'}}>
-              <button className="btn btn-sm btn-secondary" onClick={scanDuplicates} disabled={dupScanning||dupMerging}>{dupScanning?'Scanning…':'🔍 Scan for Duplicates'}</button>
-              {dupGroups&&dupGroups.length>0&&<button className="btn btn-sm btn-primary" onClick={mergeDuplicates} disabled={dupMerging}>{dupMerging?'Merging…':'✓ Merge All'}</button>}
+              <button className="btn btn-sm btn-secondary" onClick={scanDuplicates} disabled={dupScanning}>{dupScanning?'Scanning…':'🔍 Scan for Duplicates'}</button>
             </div>
           </div>
           {dupResult&&(()=>{
             const hasDups=dupGroups&&dupGroups.length>0;
             const hasIgnored=dupIgnored&&dupIgnored.length>0;
             if(!hasDups&&!hasIgnored)return<div style={{fontSize:12,color:'var(--text-muted)',marginTop:8}}>✓ No duplicate accounts found.</div>;
-            const DupTable=({rows,showIgnore,showUnignore})=>(
+            const DupTable=({rows,showMerge,showIgnore,showUnignore})=>(
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                 <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
                   <th style={{textAlign:'left',padding:'4px 8px 4px 0',fontWeight:500}}>Keep (oldest)</th>
                   <th style={{textAlign:'left',padding:'4px 8px',fontWeight:500}}>{showIgnore?'Flagged as duplicate':'Ignored (not a duplicate)'}</th>
-                  <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>{showIgnore?'':'Action'}</th>
+                  <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Actions</th>
                 </tr></thead>
                 <tbody>{rows.map((g,gi)=>g.discard_ids.map((did,di)=>{
                   const keep=g.accounts.find(a=>a.id===g.keep_id);
@@ -2570,15 +2572,21 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
                       <span style={{fontWeight:500}}>{keep.name}</span>
                       <span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>…{keep.mask}</span>
                       {keep.card_count>0&&<span style={{marginLeft:4,fontSize:10,background:'#dbeafe',color:'#1d4ed8',borderRadius:3,padding:'1px 4px'}}>{keep.card_count} card{keep.card_count!==1?'s':''}</span>}
+                      <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{keep.transaction_count} txn{keep.transaction_count!==1?'s':''}</div>
                     </td>
-                    <td style={{padding:'5px 8px',color:'var(--text-muted)'}}>
-                      <span>{discard.name}</span>
-                      {showIgnore&&<span style={{marginLeft:6,fontSize:10,background:'#fee2e2',color:'#991b1b',borderRadius:3,padding:'1px 4px'}}>duplicate</span>}
-                      {showUnignore&&<span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>ignored</span>}
+                    <td style={{padding:'5px 8px'}}>
+                      <span style={{color:'var(--text-muted)'}}>{discard.name}</span>
+                      <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{discard.transaction_count} txn{discard.transaction_count!==1?'s':''}</div>
+                      {showIgnore&&<span style={{marginLeft:0,fontSize:10,background:'#fee2e2',color:'#991b1b',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2}}>duplicate</span>}
+                      {showUnignore&&<span style={{marginLeft:0,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2}}>ignored</span>}
+                      {g.warning&&<span title={g.warning} style={{marginLeft:4,fontSize:10,background:'#fef3c7',color:'#92400e',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2,cursor:'help'}}>⚠️ confirm</span>}
                     </td>
                     <td style={{textAlign:'right',padding:'5px 0 5px 8px',whiteSpace:'nowrap'}}>
-                      {showIgnore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'1px 6px'}} onClick={()=>ignoreDuplicatePair(keep.id,did)} title="Mark as not a duplicate — won't appear in future scans">Ignore</button>}
-                      {showUnignore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'1px 6px'}} onClick={()=>unignorePair(keep.id,did)}>Unignore</button>}
+                      <div style={{display:'flex',gap:4,justifyContent:'flex-end',flexWrap:'nowrap'}}>
+                        {showMerge&&<button className="btn btn-xs btn-primary" style={{fontSize:10,padding:'2px 8px'}} onClick={()=>{if(g.warning){if(!window.confirm(`⚠️ ${g.warning}\n\nMerge anyway? This will keep "${keep.name}" and remove "${discard.name}".`))return;}mergeOnePair(keep.id,did);}}>Merge ▶</button>}
+                        {showIgnore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>ignoreDuplicatePair(keep.id,did)} title="Mark as not a duplicate — won't appear in future scans">Ignore</button>}
+                        {showUnignore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>unignorePair(keep.id,did)}>Unignore</button>}
+                      </div>
                     </td>
                   </tr>;
                 }))}</tbody>
@@ -2586,15 +2594,15 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
             );
             return <div style={{marginTop:12}}>
               {hasDups&&<>
-                <div style={{fontSize:12,color:'#b45309',marginBottom:8,fontWeight:500}}>{dupGroups.length} duplicate group{dupGroups.length!==1?'s':''} found — click "Merge All" to fix, or "Ignore" for false positives</div>
-                <DupTable rows={dupGroups} showIgnore={true} showUnignore={false}/>
+                <div style={{fontSize:12,color:'#b45309',marginBottom:8,fontWeight:500}}>{dupGroups.length} duplicate pair{dupGroups.length!==1?'s':''} found — use "Merge ▶" to fix each pair individually, or "Ignore" for false positives</div>
+                <DupTable rows={dupGroups} showMerge={true} showIgnore={true} showUnignore={false}/>
                 <div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
-                  "Merge All" keeps the oldest account's name and card links, adopts the new Plaid connection so future syncs work, and moves any new transactions across. Use "Ignore" if two accounts share the same last 4 digits but are genuinely different cards.
+                  Each "Merge ▶" keeps the oldest account's name and card links, adopts the new Plaid connection so future syncs work, and moves any transactions across. Pairs marked ⚠️ have different product names — hover for details, and confirm before merging. Use "Ignore" if two accounts share the same last 4 digits but are genuinely different cards.
                 </div>
               </>}
               {hasIgnored&&<>
                 <div style={{fontSize:12,color:'var(--text-muted)',marginTop:hasDups?20:0,marginBottom:8}}>Ignored pairs (confirmed not duplicates)</div>
-                <DupTable rows={dupIgnored} showIgnore={false} showUnignore={true}/>
+                <DupTable rows={dupIgnored} showMerge={false} showIgnore={false} showUnignore={true}/>
               </>}
             </div>;
           })()}
