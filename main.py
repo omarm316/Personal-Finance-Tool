@@ -639,19 +639,41 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
 
         db.flush()
 
-        # Create Account records — use subtype for better classification
+        # ---------------------------------------------------------------------------
+        # Account adoption — 4-step priority chain (most-reliable → least)
+        #
+        #  Step 1: persistent_account_id — stable across ALL re-links (Plaid-issued)
+        #  Step 2: plaid_account_id      — same connection token reused (no re-link)
+        #  Step 3: institution+mask+type — fallback for institutions without persistent IDs
+        #  Step 4: no match             — create new account
+        #
+        # On adoption (steps 1-3): write plaid_account_id, plaid_item_id, persistent_account_id
+        # and clear any stale holder of the same plaid_account_id first (UNIQUE safety).
+        # ---------------------------------------------------------------------------
+        account_results = []
+
         for a in accounts:
             # Prefer subtype (checking, savings, credit card) over type (depository, credit)
             raw_subtype  = (a.get('subtype') or '').lower().strip()
             raw_type     = (a.get('type') or '').lower().strip()
             account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
 
-            existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
+            existing = None
 
-            # Fallback dedup: match by mask + account_type across any account at this institution.
-            # Uses Plaid's immutable institution_id so user renames of the connection name
-            # (e.g. "Chase" → "Chase (Omer)") don't break matching.
-            # OUTER JOIN means severed accounts (plaid_item_id=NULL) are also found.
+            # Step 1: match by persistent_account_id (survives every re-link)
+            if a.get('persistent_account_id'):
+                existing = (db.query(Account)
+                    .filter(Account.persistent_account_id == a['persistent_account_id'],
+                            Account.is_active == True)
+                    .order_by(Account.id)
+                    .first())
+
+            # Step 2: match by current plaid_account_id (same token, no re-link needed)
+            if not existing:
+                existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
+
+            # Step 3: mask + account_type + institution fallback
+            # OUTER JOIN so severed accounts (plaid_item_id=NULL) are also found.
             if not existing and a.get('mask'):
                 base_filters = [
                     Account.mask == a['mask'],
@@ -659,13 +681,11 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     Account.is_active == True,
                 ]
                 if plaid_item.institution_id:
-                    # Preferred: match on immutable Plaid institution_id
                     inst_match = or_(
                         PlaidItem.institution_id == plaid_item.institution_id,
-                        Account.plaid_item_id == None,   # severed accounts — safe since we're inside this institution's link flow
+                        Account.plaid_item_id == None,
                     )
                 else:
-                    # Fallback: match on institution_name (less reliable if user renamed)
                     inst_match = or_(
                         PlaidItem.institution_name == plaid_item.institution_name,
                         Account.plaid_item_id == None,
@@ -673,24 +693,52 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 existing = (db.query(Account)
                     .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
                     .filter(*base_filters, inst_match)
-                    .order_by(Account.id)   # deterministic: prefer oldest account (most history)
+                    .order_by(Account.id)
                     .first())
 
             if existing:
+                # UNIQUE safety: clear any OTHER row that already holds this plaid_account_id
+                # (can happen if a previous bad merge left stale IDs behind)
+                db.query(Account).filter(
+                    Account.plaid_account_id == a['account_id'],
+                    Account.id != existing.id,
+                ).update({'plaid_account_id': None}, synchronize_session=False)
+                db.flush()
+
                 # Adopt: update Plaid IDs so future transactions flow to the right account
                 existing.plaid_account_id = a['account_id']
                 existing.plaid_item_id    = item_id
                 existing.is_active        = True
+                if a.get('persistent_account_id'):
+                    existing.persistent_account_id = a['persistent_account_id']
+
+                account_results.append({
+                    "name": existing.account_name,
+                    "mask": existing.mask,
+                    "status": "matched",
+                    "account_id": existing.id,
+                })
             else:
-                db.add(Account(
+                # Step 4: create new account
+                new_acct = Account(
                     plaid_account_id=a['account_id'],
+                    persistent_account_id=a.get('persistent_account_id'),
                     plaid_item_id=item_id,
                     account_name=f"{a['name']} {a.get('mask','')}".strip(),
                     account_type=account_type,
                     official_name=a.get('official_name'),
                     mask=a.get('mask'),
                     is_active=True,
-                ))
+                )
+                db.add(new_acct)
+                db.flush()  # get new_acct.id
+
+                account_results.append({
+                    "name": new_acct.account_name,
+                    "mask": new_acct.mask,
+                    "status": "created",
+                    "account_id": new_acct.id,
+                })
 
         # Commit accounts first so sync failures don't lose the account link
         db.commit()
@@ -711,7 +759,8 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         return {
             "message": msg,
             "item_id": item_id,
-            "accounts_linked": len(accounts),
+            "accounts": account_results,        # per-account outcome for post-link modal
+            "accounts_linked": len(accounts),   # kept for backward compat
             "transactions_synced": synced,
         }
 
@@ -1160,7 +1209,7 @@ async def list_items(db: Session = Depends(get_db)):
             "created_at":        item.created_at,
             "is_active":         item.is_active,
             "account_count":     len(accounts),
-            "accounts":          [{"name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
+            "accounts":          [{"id": a.id, "name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
             "transaction_count": txn_count,
             "has_cursor":        bool(item.cursor),
             "environment":       env,

@@ -2629,6 +2629,17 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
 }
 
 function usePlaidLink(toast,onSuccess){
+  const[linkSummary,setLinkSummary]=useState(null); // {accounts:[{name,mask,status}], transactions_synced}
+
+  /* Shared handler called after successful exchange-token */
+  const handleLinkSuccess=async(public_token,afterOAuth)=>{
+    try{
+      const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});
+      setLinkSummary({accounts:r.accounts||[],transactions_synced:r.transactions_synced||0});
+      if(afterOAuth)window.history.replaceState({},'','/');
+    }catch(e){toast('Failed to link: '+(e.message||e),'error');}
+  };
+
   /* Handle OAuth return — bank redirects back to /plaid/oauth-return */
   React.useEffect(()=>{
     if(!window.location.pathname.startsWith('/plaid/oauth-return'))return;
@@ -2638,10 +2649,7 @@ function usePlaidLink(toast,onSuccess){
         const handler=window.Plaid.create({
           token:link_token,
           receivedRedirectUri:window.location.href,
-          onSuccess:async(public_token)=>{
-            try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();window.history.replaceState({},'','/');}
-            catch(e){toast('Failed to link: '+(e.message||e),'error');}
-          },
+          onSuccess:async(public_token)=>handleLinkSuccess(public_token,true),
           onExit:()=>{window.history.replaceState({},'','/');},
         });
         handler.open();
@@ -2649,20 +2657,39 @@ function usePlaidLink(toast,onSuccess){
     })();
   },[]);
 
-  return async()=>{
+  const openPlaid=async()=>{
     try{
       const{link_token}=await apiFetch('/plaid/link-token');
       const handler=window.Plaid.create({
         token:link_token,
-        onSuccess:async(public_token)=>{
-          try{const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});toast(`Linked ${r.accounts_linked} account${r.accounts_linked!==1?'s':''}, synced ${r.transactions_synced} transactions`);onSuccess();}
-          catch(e){toast('Failed to link: '+(e.message||e),'error');}
-        },
+        onSuccess:async(public_token)=>handleLinkSuccess(public_token,false),
         onExit:()=>{},
       });
       handler.open();
     }catch(e){toast('Failed to start connection: '+(e.message||e),'error');}
   };
+
+  /* Post-link summary modal */
+  const summaryModal=linkSummary&&(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'#fff',borderRadius:12,padding:'28px 32px',minWidth:340,maxWidth:480,boxShadow:'0 8px 32px rgba(0,0,0,0.18)'}}>
+        <div style={{fontWeight:700,fontSize:17,marginBottom:16}}>🏦 Accounts linked</div>
+        {linkSummary.accounts.map((a,i)=>(
+          <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid #f0f0f0'}}>
+            <span style={{fontWeight:500}}>{a.name}{a.mask?` ••${a.mask}`:''}</span>
+            {a.status==='matched'
+              ?<span style={{background:'#d1fae5',color:'#065f46',borderRadius:6,padding:'2px 10px',fontSize:12,fontWeight:600}}>✓ matched</span>
+              :<span style={{background:'#dbeafe',color:'#1e40af',borderRadius:6,padding:'2px 10px',fontSize:12,fontWeight:600}}>+ created</span>
+            }
+          </div>
+        ))}
+        <div style={{color:'#6b7280',fontSize:13,marginTop:12}}>{linkSummary.transactions_synced} transaction{linkSummary.transactions_synced!==1?'s':''} synced</div>
+        <button onClick={()=>{setLinkSummary(null);onSuccess();}} style={{marginTop:20,width:'100%',background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:600,fontSize:15,cursor:'pointer'}}>Done</button>
+      </div>
+    </div>
+  );
+
+  return[openPlaid,summaryModal];
 }
 
 
@@ -4536,7 +4563,7 @@ function App(){
     }catch(e){toast('Sync failed: '+(e.message||e),'error');}
   };
 
-  const openPlaid=usePlaidLink(toast,loadMeta);
+  const[openPlaid,linkSummaryModal]=usePlaidLink(toast,loadMeta);
   const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
@@ -4561,6 +4588,7 @@ function App(){
         </div>
       </div>
       <ToastContainer toasts={toasts}/>
+      {linkSummaryModal}
     </div>
   );
 }
