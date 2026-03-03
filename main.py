@@ -1211,6 +1211,7 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
     """
     import traceback as _tb
     from sqlalchemy import text as _text
+    from sqlalchemy.exc import IntegrityError as _IntegrityError
 
     try:
         plaid_svc = setup_plaid_from_env()
@@ -1281,19 +1282,22 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
             })
         db.flush()  # commit updates; now freed IDs are available for creates
 
-        # Pass 2: CREATEs — with conflict-resolving swap for UNIQUE violations
+        # Pass 2: CREATEs — savepoint-based conflict resolution
         # -----------------------------------------------------------------------
         # After a bad merge, some surviving accounts hold wrong plaid_account_ids.
-        # If an account's official_name changed slightly (e.g. "The Platinum Card®"
-        # vs "Platinum Card") it lands in `creates` instead of `updates`, and its
-        # wrongly-held ID blocks the CREATE for the account that really owns it.
-        # We resolve this proactively before each INSERT:
-        #   1. Check if the desired plaid_account_id is already held by another account.
-        #   2. If so, find a pending creates entry whose mask+type matches the conflict
-        #      holder — that entry IS the conflict holder (slightly different name).
-        #   3. UPDATE the conflict holder to that entry's plaid_account_id (freeing the
-        #      blocked ID), record it as updated, remove it from pending creates.
-        #   4. Retry the INSERT — the ID is now free.
+        # If an account's official_name drifted slightly (e.g. "The Platinum Card®"
+        # → "Platinum Card") it lands in `creates` instead of `updates`, and its
+        # wrongly-held ID blocks the INSERT for the account that really owns it.
+        #
+        # Strategy: attempt each INSERT inside a SAVEPOINT so the outer transaction
+        # survives a failure.  On IntegrityError (UNIQUE violation):
+        #   1. Roll back to the savepoint.
+        #   2. Query which DB account holds the conflicting plaid_account_id.
+        #   3. Find a remaining creates entry with the same mask+type — that entry
+        #      IS the conflict holder (name drifted, so it wasn't matched above).
+        #   4. Raw-SQL UPDATE the conflict holder to that entry's plaid_account_id,
+        #      mark it for transaction cleanup, drop it from pending_creates.
+        #   5. Retry the INSERT — the ID is now free.
         # -----------------------------------------------------------------------
         created_account_ids = []
         pending_creates = list(creates)
@@ -1305,71 +1309,79 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
             official_name = (pa.get('official_name') or pa.get('name', '')).strip()
             account_type = pa.get('type', '').lower()
 
-            # Check if this plaid_account_id is already held by an existing account
-            conflict_holder = db.execute(
-                _text(
-                    "SELECT id, mask, account_type, account_name "
-                    "FROM accounts WHERE plaid_account_id = :pid AND is_active = true"
-                ),
-                {"pid": plaid_account_id},
-            ).fetchone()
+            sp = db.begin_nested()  # SAVEPOINT
+            try:
+                new_acct = Account(
+                    plaid_account_id=plaid_account_id,
+                    plaid_item_id=item.item_id,
+                    account_name=official_name or f"Account ···{mask}",
+                    account_type=account_type,
+                    official_name=official_name,
+                    mask=mask,
+                    is_active=True,
+                    is_manual=False,
+                    starting_balance=0,
+                )
+                db.add(new_acct)
+                db.flush()
+                sp.commit()
+                created_account_ids.append(new_acct.id)
+                results.append({
+                    'status': 'created',
+                    'account': new_acct.account_name,
+                    'plaid_id': plaid_account_id,
+                })
+                i += 1
 
-            if conflict_holder:
+            except _IntegrityError:
+                sp.rollback()
+                db.expire_all()  # clear ORM cache so queries see DB truth
+
+                # Find which existing account wrongly holds this plaid_account_id
+                conflict_row = db.execute(
+                    _text(
+                        "SELECT id, mask, account_type, account_name "
+                        "FROM accounts WHERE plaid_account_id = :pid AND is_active = true"
+                    ),
+                    {"pid": plaid_account_id},
+                ).fetchone()
+
+                if conflict_row is None:
+                    raise  # unrelated IntegrityError — surface it
+
                 # Find a pending creates entry whose mask+type matches the conflict holder
-                # — that entry is the holder's true identity from Plaid (name drifted)
                 swap_idx = None
                 for j, other_pa in enumerate(pending_creates):
                     if j == i:
                         continue
-                    if (other_pa.get('mask') == conflict_holder.mask and
-                            other_pa.get('type', '').lower() == conflict_holder.account_type):
+                    if (other_pa.get('mask') == conflict_row.mask and
+                            other_pa.get('type', '').lower() == conflict_row.account_type):
                         swap_idx = j
                         break
 
-                if swap_idx is not None:
-                    other_pa = pending_creates[swap_idx]
-                    # Give the conflict holder its correct plaid_account_id
-                    db.execute(_text(
-                        "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid WHERE id=:id"
-                    ), {"pid": other_pa['account_id'], "iid": item.item_id, "id": conflict_holder.id})
-                    db.flush()
-                    # Its transactions are mixed-up too — include in delete pass
-                    updated_account_ids.append(conflict_holder.id)
-                    results.append({
-                        'status': 'updated (conflict-resolved)',
-                        'account': conflict_holder.account_name,
-                        'new_plaid_id': other_pa['account_id'],
-                    })
-                    # Drop the other entry — its ID is now assigned
-                    pending_creates.pop(swap_idx)
-                    if swap_idx < i:
-                        i -= 1  # list shrank before current position
-                    # Retry same index — the conflict is now gone
-                    continue
-                # else: no swap candidate found — fall through and let flush fail
-                # with a clear IntegrityError rather than silently skipping
+                if swap_idx is None:
+                    raise  # can't resolve — surface original error
 
-            # No conflict (or unresolvable) — INSERT the new account
-            new_acct = Account(
-                plaid_account_id=plaid_account_id,
-                plaid_item_id=item.item_id,
-                account_name=official_name or f"Account ···{mask}",
-                account_type=account_type,
-                official_name=official_name,
-                mask=mask,
-                is_active=True,
-                is_manual=False,
-                starting_balance=0,
-            )
-            db.add(new_acct)
-            db.flush()
-            created_account_ids.append(new_acct.id)
-            results.append({
-                'status': 'created',
-                'account': new_acct.account_name,
-                'plaid_id': plaid_account_id,
-            })
-            i += 1
+                other_pa = pending_creates[swap_idx]
+                # Give the conflict holder its correct plaid_account_id (raw SQL)
+                db.execute(_text(
+                    "UPDATE accounts SET plaid_account_id=:pid, plaid_item_id=:iid WHERE id=:id"
+                ), {"pid": other_pa['account_id'], "iid": item.item_id, "id": conflict_row.id})
+                db.flush()
+                db.expire_all()  # clear cache again after the UPDATE
+
+                # Its transactions are mixed-up too — include in delete pass
+                updated_account_ids.append(conflict_row.id)
+                results.append({
+                    'status': 'updated (conflict-resolved)',
+                    'account': conflict_row.account_name,
+                    'new_plaid_id': other_pa['account_id'],
+                })
+                # Drop the resolved entry from pending list
+                pending_creates.pop(swap_idx)
+                if swap_idx < i:
+                    i -= 1  # list shrank before current position
+                # Don't increment i — retry the INSERT at the same position
 
         # Delete Plaid-sourced transactions from accounts whose plaid_account_id
         # was corrected — their transactions are mixed up after the bad merge.
