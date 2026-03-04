@@ -723,21 +723,27 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
 
             # Step 2.5: match by account_hash — the primary re-link survivor key.
-            # Works even for severed accounts (plaid_account_id=NULL) because the
-            # hash is stored on the account row itself and doesn't need a JOIN.
+            # CRITICAL: only match UNLINKED accounts (plaid_account_id IS NULL).
+            # If we matched a live account, we'd overwrite its Plaid ID, stealing
+            # it from the account it belongs to. This is what caused the Amex 1008
+            # collision: three cards share the same hash, so without this guard the
+            # second and third would clobber the first.
             if not existing and inst_id and a.get('mask'):
                 existing = (db.query(Account)
                     .filter(Account.account_hash == computed_hash,
-                            Account.is_active == True)
+                            Account.is_active == True,
+                            Account.plaid_account_id == None)   # unlinked only
                     .order_by(Account.id)
                     .first())
 
-            # Step 3: institution+mask+type JOIN — fallback for pre-hash accounts
+            # Step 3: institution+mask+type JOIN — fallback for pre-hash accounts.
+            # Same guard: only unlinked accounts are candidates.
             if not existing and a.get('mask'):
                 base_filters = [
                     Account.mask == a['mask'],
                     Account.account_type == account_type,
                     Account.is_active == True,
+                    Account.plaid_account_id == None,   # unlinked only
                 ]
                 if plaid_item.institution_id:
                     inst_match = or_(
