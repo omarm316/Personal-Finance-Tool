@@ -1320,15 +1320,17 @@ async def nuke_everything(db: Session = Depends(get_db)):
     """
     from sqlalchemy import text as _text
 
+    # Null FKs on tables we're KEEPING before deleting what they point to
+    db.execute(_text("UPDATE cards SET account_id = NULL, plaid_account_id = NULL, payment_account_id = NULL"))
+    db.execute(_text("UPDATE loans SET account_id = NULL, payment_account_id = NULL"))
     # FK-safe deletion order
     db.execute(_text("DELETE FROM user_corrections"))
     db.execute(_text("DELETE FROM transaction_splits"))
+    # transactions has a self-referential parent_transaction_id — delete children first
+    db.execute(_text("DELETE FROM transactions WHERE parent_transaction_id IS NOT NULL"))
     db.execute(_text("DELETE FROM transactions"))
     db.execute(_text("DELETE FROM account_monthly_snapshots"))
-    db.execute(_text("DELETE FROM duplicate_ignores"))
-    # Null FK references that point to accounts (keep cards/loans themselves)
-    db.execute(_text("UPDATE cards SET account_id = NULL, plaid_account_id = NULL"))
-    db.execute(_text("UPDATE loans SET account_id = NULL, payment_account_id = NULL"))
+    db.execute(_text("DELETE FROM duplicate_ignore"))   # table name has no trailing 's'
     db.execute(_text("DELETE FROM accounts"))
     db.execute(_text("DELETE FROM plaid_items"))
     db.commit()
