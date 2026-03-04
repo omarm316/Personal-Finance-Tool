@@ -1647,11 +1647,27 @@ function DashboardPage({categories,toast}){
           <h2 style={{fontSize:18,fontWeight:600}}>Good {greeting}</h2>
           <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
         </div>
-        <div style={{display:'flex',gap:6,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
-          <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:7}}>Monthly</button>
-          <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:7}}>Annual YTD</button>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div style={{display:'flex',gap:6,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+            <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
+              onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:7}}>Monthly</button>
+            <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
+              onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:7}}>YTD</button>
+          </div>
+          <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
+            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+            {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          {budgetView==='month'&&(
+            <select value={viewMonth} onChange={e=>{setViewMonth(+e.target.value);setCatDetail(null);}}
+              style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+              {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
+                <option key={i+1} value={i+1}>{m}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -1676,24 +1692,7 @@ function DashboardPage({categories,toast}){
       </div>
 
       {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
-      {/* Year/month selectors */}
-      <div style={{display:'flex',alignItems:'center',gap:8,marginTop:20,marginBottom:12,flexWrap:'wrap'}}>
-        <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
-          style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
-          {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-        {budgetView==='month'&&(
-          <select value={viewMonth} onChange={e=>{setViewMonth(+e.target.value);setCatDetail(null);}}
-            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
-            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
-              <option key={i+1} value={i+1}>{m}</option>
-            ))}
-          </select>
-        )}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch'}}>
+      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch',marginTop:20}}>
         {/* Left: Budget Scorecard */}
         <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals} view={budgetView} ytdActuals={ytdByCat} viewMonth={viewMonth} viewYear={viewYear}/>
 
