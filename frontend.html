@@ -2389,10 +2389,10 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
           <div className="settings-row">
             <div>
               <div className="settings-label">🔄 Fresh Start</div>
-              <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts (severed + empty), clears sync cursors, and triggers a full re-download. Account records, names, categories, rules, and manual transactions are preserved. After this, re-linking any bank will use account_hash for reliable matching — no more duplicates.</div>
+              <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts, clears sync cursors, triggers a full re-download. Account records, categories, and rules are preserved.</div>
             </div>
-            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
-              if(!confirm('Fresh Start will delete ALL Plaid transactions and re-download everything from scratch.\n\nAccount records, categories, rules, and manual transactions are kept.\n\nContinue?'))return;
+            <button className="btn btn-sm" style={{background:'#b45309',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
+              if(!confirm('Fresh Start will delete ALL Plaid transactions and re-download everything from scratch.\n\nAccount records, categories, and rules are kept.\n\nContinue?'))return;
               setBusy(true);
               try{
                 const r=await apiFetch('/reset-all',{method:'POST'});
@@ -2400,6 +2400,23 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               }catch(e){toast('Fresh Start failed: '+(e.message||e),'error');}
               finally{setBusy(false);}
             }}>{busy?'…':'Fresh Start'}</button>
+          </div>
+          <div className="settings-row" style={{borderTop:'1px solid #fecaca',marginTop:8,paddingTop:12}}>
+            <div>
+              <div className="settings-label">💣 Nuke Everything</div>
+              <div className="settings-desc">Deletes ALL transactions, ALL accounts, and ALL bank connections. The app is left completely empty. Reconnect your banks from scratch via + Connect Bank. Categories and rules are preserved.</div>
+            </div>
+            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
+              if(!confirm('⚠️ NUKE EVERYTHING\n\nThis will permanently delete:\n• All transactions\n• All accounts\n• All bank connections\n\nCategories and rules are kept.\n\nType "nuke" to confirm:'))return;
+              const confirm2=window.prompt('Type NUKE to confirm — this cannot be undone:');
+              if(confirm2!=='NUKE')return toast('Cancelled','error');
+              setBusy(true);
+              try{
+                const r=await apiFetch('/nuke',{method:'POST'});
+                toast(`💣 ${r.status}`);
+              }catch(e){toast('Nuke failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'💣 Nuke Everything'}</button>
           </div>
         </div>
         <div className="card" style={{marginBottom:20}}>

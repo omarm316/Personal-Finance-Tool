@@ -1305,6 +1305,37 @@ async def reset_all(background_tasks: BackgroundTasks, db: Session = Depends(get
     }
 
 
+@app.post("/api/nuke")
+async def nuke_everything(db: Session = Depends(get_db)):
+    """
+    Complete wipe: deletes every transaction, every account, and every Plaid
+    connection. The database is left in a pristine state ready for fresh bank
+    connections via Plaid Link.
+
+    Preserved (no data lost):
+      - Categories, categorization rules, budget targets
+      - Cards (account_id nulled out — re-match after re-link)
+      - Loans (account_id nulled out)
+      - Manual transactions are wiped along with everything else
+    """
+    from sqlalchemy import text as _text
+
+    # FK-safe deletion order
+    db.execute(_text("DELETE FROM user_corrections"))
+    db.execute(_text("DELETE FROM transaction_splits"))
+    db.execute(_text("DELETE FROM transactions"))
+    db.execute(_text("DELETE FROM account_monthly_snapshots"))
+    db.execute(_text("DELETE FROM duplicate_ignores"))
+    # Null FK references that point to accounts (keep cards/loans themselves)
+    db.execute(_text("UPDATE cards SET account_id = NULL, plaid_account_id = NULL"))
+    db.execute(_text("UPDATE loans SET account_id = NULL, payment_account_id = NULL"))
+    db.execute(_text("DELETE FROM accounts"))
+    db.execute(_text("DELETE FROM plaid_items"))
+    db.commit()
+
+    return {"status": "Clean slate — all accounts, transactions, and bank connections removed. Connect your banks fresh."}
+
+
 @app.get("/api/plaid/debug/{item_id}")
 async def debug_plaid_item(item_id: str, db: Session = Depends(get_db)):
     """
