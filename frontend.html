@@ -2054,24 +2054,16 @@ function ResetResyncButton({toast,onDone}){
 }
 
 function BankAccountRow({a,institutionName,toast,onSynced}){
-  const[acctBusy,setAcctBusy]=useState(false);
-  const resetResync=async()=>{
-    if(!confirm(`Reset & Resync "${a.name}"?\n\nThis deletes all Plaid-sourced transactions for this account and re-downloads from scratch. Note: cursor reset affects ALL accounts at ${institutionName}.`))return;
-    setAcctBusy('reset');
+  const[busy,setBusy]=useState(false);
+  const redownload=async()=>{
+    if(!confirm(`Re-download "${a.name}"?\n\nResets the sync cursor so all transactions re-download from Plaid. Existing transactions are preserved and matched by content hash — no data lost. Note: cursor reset affects ALL accounts at ${institutionName}.`))return;
+    setBusy(true);
     try{
-      const r=await apiFetch(`/accounts/${a.id}/reset-and-resync`,{method:'POST'});
-      toast(`↺ Reset done — ${r.transactions_deleted} txns deleted, resync started. Refresh in ~30s.`);
+      await apiFetch(`/accounts/${a.id}/reset-and-resync`,{method:'POST'});
+      toast(`⟳ Re-download started for ${a.name} — refresh in ~30s`);
       setTimeout(()=>onSynced&&onSynced(),30000);
-    }catch(e){toast('Reset failed: '+(e.message||e),'error');}
-    finally{setAcctBusy(false);}
-  };
-  const rebuildSnapshots=async()=>{
-    setAcctBusy('snap');
-    try{
-      const r=await apiFetch(`/accounts/${a.id}/rebuild-snapshots`,{method:'POST'});
-      toast(`📊 Rebuilt ${r.months_built} month${r.months_built!==1?'s':''} of balance snapshots for ${a.name}`);
-    }catch(e){toast('Rebuild failed: '+(e.message||e),'error');}
-    finally{setAcctBusy(false);}
+    }catch(e){toast('Re-download failed: '+(e.message||e),'error');}
+    finally{setBusy(false);}
   };
   return(
     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 8px',background:'var(--bg-secondary)',borderRadius:6}}>
@@ -2080,10 +2072,7 @@ function BankAccountRow({a,institutionName,toast,onSynced}){
         <span style={{textTransform:'capitalize',color:'var(--text-muted)'}}>{a.type}</span>
         {a.mask&&<span style={{color:'var(--text-muted)'}}>····{a.mask}</span>}
       </div>
-      <div style={{display:'flex',gap:4}}>
-        <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={!!acctBusy} onClick={rebuildSnapshots} title="Recalculate balance history for this account">{acctBusy==='snap'?'…':'📊'}</button>
-        <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={!!acctBusy} onClick={resetResync} title="Delete Plaid transactions and re-download from scratch">{acctBusy==='reset'?'Resetting…':'↺ Reset'}</button>
-      </div>
+      <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
     </div>
   );
 }
@@ -2093,12 +2082,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
   const[nameVal,setNameVal]=useState(item.institution_name);
   const[resyncing,setResyncing]=useState(false);
   const[expanded,setExpanded]=useState(false);
-  const[debug,setDebug]=useState(null);
-  const[debugging,setDebugging]=useState(false);
   const[confirmingRemove,setConfirmingRemove]=useState(false);
-  const[confirmingRecover,setConfirmingRecover]=useState(false);
-  const[recovering,setRecovering]=useState(false);
-  const[recoverResult,setRecoverResult]=useState(null);
   const save=async()=>{
     try{
       const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
@@ -2115,22 +2099,6 @@ function BankRow({item,toast,onRenamed,onSynced}){
       setTimeout(()=>onSynced&&onSynced(),15000);
     }catch(e){toast(`Resync failed: ${e.message||e}`,'error');}
     finally{setResyncing(false);}
-  };
-  const runDebug=async()=>{
-    setDebugging(true);setDebug(null);
-    try{const r=await apiFetch(`/plaid/debug/${item.item_id}`);setDebug(r);}
-    catch(e){toast('Debug failed: '+(e.message||e),'error');}
-    finally{setDebugging(false);}
-  };
-  const recoverAccounts=async()=>{
-    setConfirmingRecover(false);setRecovering(true);setRecoverResult(null);
-    try{
-      const r=await apiFetch(`/plaid/items/${item.item_id}/recover-accounts`,{method:'POST'});
-      setRecoverResult(r);
-      toast(`Recovery done — ${r.accounts.filter(a=>a.status==='created').length} recreated, ${r.accounts.filter(a=>a.status==='updated').length} fixed, ${r.transactions_deleted} txns cleared. Run Full Resync now.`);
-      onSynced&&onSynced();
-    }catch(e){toast('Recovery failed: '+(e.message||e),'error');}
-    finally{setRecovering(false);}
   };
   const envColor={'production':'#059669','development':'#d97706','sandbox':'#6366f1'}[item.environment]||'#6b7280';
   return(
@@ -2164,9 +2132,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
             ?<span className="bank-badge">Active</span>
             :<span style={{fontSize:11,fontWeight:600,color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:20,padding:'2px 8px'}}>Stale</span>}
           <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>setExpanded(x=>!x)}>{expanded?'▲':'▼'}</button>
-          {item.is_active&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={runDebug} disabled={debugging}>{debugging?'…':'🔍 Debug'}</button>}
-          {item.is_active&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px',borderColor:'#f59e0b',color:'#b45309'}} onClick={()=>setConfirmingRecover(true)} disabled={recovering}>{recovering?'Recovering…':'🔧 Recover'}</button>}
-          {item.is_active&&<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Full Resync'}</button>}
+          {item.is_active&&<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Sync'}</button>}
           <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={async()=>{
             if(item.transaction_count===0){
               if(!confirm(`Remove "${item.institution_name}"? It has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`))return;
@@ -2192,40 +2158,6 @@ function BankRow({item,toast,onRenamed,onSynced}){
               catch(e){toast('Failed: '+(e.message||e),'error');}
             }}>Yes, Remove</button>
           </div>
-        </div>
-      )}
-      {confirmingRecover&&(
-        <div style={{marginTop:10,background:'#fffbeb',border:'1px solid #fde68a',borderRadius:8,padding:'10px 14px'}}>
-          <div style={{fontWeight:700,color:'#92400e',fontSize:13,marginBottom:4}}>🔧 Recover accounts from Plaid?</div>
-          <div style={{fontSize:12,color:'#78350f',marginBottom:8}}>
-            This re-fetches all accounts from Plaid and fixes any that were wrongly merged:<br/>
-            • Re-creates deleted accounts with their correct Plaid IDs<br/>
-            • Fixes mismatched Plaid IDs on surviving accounts<br/>
-            • Clears mixed-up transactions from affected accounts<br/>
-            • Resets the sync cursor — run <strong>↺ Full Resync</strong> afterward to restore all transactions
-          </div>
-          <div style={{display:'flex',gap:8}}>
-            <button className="btn btn-sm btn-ghost" style={{fontSize:12}} onClick={()=>setConfirmingRecover(false)}>Cancel</button>
-            <button className="btn btn-sm" style={{background:'#b45309',color:'#fff',fontSize:12,border:'none'}} onClick={recoverAccounts}>Yes, Recover</button>
-          </div>
-        </div>
-      )}
-      {recoverResult&&(
-        <div style={{marginTop:10,background:'var(--bg-secondary)',borderRadius:8,padding:'10px 14px',fontSize:12}}>
-          <div style={{fontWeight:600,marginBottom:6}}>🔧 Recovery complete — run ↺ Full Resync to restore transactions</div>
-          <div style={{display:'flex',flexDirection:'column',gap:3}}>
-            {recoverResult.accounts.map((a,i)=>(
-              <div key={i} style={{display:'flex',gap:8,alignItems:'center'}}>
-                <span style={{
-                  fontSize:10,fontWeight:600,borderRadius:3,padding:'1px 5px',
-                  background:a.status==='ok'?'var(--bg-subtle)':a.status==='created'?'#dcfce7':a.status==='updated'?'#fef3c7':'var(--bg-subtle)',
-                  color:a.status==='ok'?'var(--text-muted)':a.status==='created'?'#166534':a.status==='updated'?'#92400e':'var(--text-muted)',
-                }}>{a.status}</span>
-                <span style={{color:'var(--text)'}}>{a.account}</span>
-              </div>
-            ))}
-          </div>
-          {recoverResult.transactions_deleted>0&&<div style={{marginTop:6,color:'#b45309',fontWeight:500}}>{recoverResult.transactions_deleted} mixed-up transactions cleared — run Full Resync to get them back correctly assigned</div>}
         </div>
       )}
       {expanded&&item.accounts&&item.accounts.length>0&&(
@@ -2465,6 +2397,24 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               }catch(e){toast('Backfill failed: '+(e.message||e),'error');}
               finally{setBusy(false);}
             }}>{busy?'…':'Run Backfill'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">⚠️ Danger Zone</div></div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">🔄 Fresh Start</div>
+              <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts (severed + empty), clears sync cursors, and triggers a full re-download. Account records, names, categories, rules, and manual transactions are preserved. After this, re-linking any bank will use account_hash for reliable matching — no more duplicates.</div>
+            </div>
+            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
+              if(!confirm('Fresh Start will delete ALL Plaid transactions and re-download everything from scratch.\n\nAccount records, categories, rules, and manual transactions are kept.\n\nContinue?'))return;
+              setBusy(true);
+              try{
+                const r=await apiFetch('/reset-all',{method:'POST'});
+                toast(`🔄 ${r.status}`);
+              }catch(e){toast('Fresh Start failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Fresh Start'}</button>
           </div>
         </div>
         <div className="card" style={{marginBottom:20}}>

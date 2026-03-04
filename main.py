@@ -69,6 +69,20 @@ ACCOUNT_TYPE_MAP = {
 # Content-hash helpers — stable transaction identity across Plaid re-links
 # ---------------------------------------------------------------------------
 
+def _account_hash(institution_id: str, mask: str, account_type: str) -> str:
+    """
+    Stable 12-char identity hash for an account.
+    Formula: SHA256(institution_id|mask|normalised_type)[:12]
+
+    Written once at exchange-token time and stored on the account row.
+    Because it uses Plaid's immutable institution_id (e.g. "ins_3" for Chase)
+    plus the last-4 mask, it survives sever-plaid and is the primary matching
+    key when a user re-links a bank — no database JOIN required.
+    """
+    raw = f"{(institution_id or '').strip()}|{(mask or '').strip()}|{(account_type or '').lower().strip()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
 def _content_base_hash(account_id: int, date, amount: float, description_raw: str) -> str:
     """
     14-character prefix of SHA-256(account_id|date|amount|description_raw).
@@ -690,9 +704,13 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
             raw_type     = (a.get('type') or '').lower().strip()
             account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
 
+            # Pre-compute the account_hash for this Plaid account using the
+            # FRESH institution_id from Plaid (always reliable at exchange time).
+            computed_hash = _account_hash(inst_id or '', a.get('mask') or '', account_type)
+
             existing = None
 
-            # Step 1: match by persistent_account_id (survives every re-link)
+            # Step 1: match by persistent_account_id (survives every re-link, Plaid-issued)
             if a.get('persistent_account_id'):
                 existing = (db.query(Account)
                     .filter(Account.persistent_account_id == a['persistent_account_id'],
@@ -704,12 +722,17 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
             if not existing:
                 existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
 
-            # Step 3: mask + account_type + institution fallback
-            # Uses Account.institution_id (stored on the account itself, survives
-            # sever-plaid) so severed accounts are ONLY matched within the same
-            # institution — fixes the original bug where any severed account at
-            # any institution could match. Falls back to JOIN when institution_id
-            # is not yet populated (pre-migration rows).
+            # Step 2.5: match by account_hash — the primary re-link survivor key.
+            # Works even for severed accounts (plaid_account_id=NULL) because the
+            # hash is stored on the account row itself and doesn't need a JOIN.
+            if not existing and inst_id and a.get('mask'):
+                existing = (db.query(Account)
+                    .filter(Account.account_hash == computed_hash,
+                            Account.is_active == True)
+                    .order_by(Account.id)
+                    .first())
+
+            # Step 3: institution+mask+type JOIN — fallback for pre-hash accounts
             if not existing and a.get('mask'):
                 base_filters = [
                     Account.mask == a['mask'],
@@ -718,9 +741,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 ]
                 if plaid_item.institution_id:
                     inst_match = or_(
-                        # Active accounts: match via plaid_items JOIN
                         PlaidItem.institution_id == plaid_item.institution_id,
-                        # Severed accounts: match via stored institution_id (safe — institution-scoped)
                         and_(
                             Account.plaid_item_id == None,
                             Account.institution_id == plaid_item.institution_id,
@@ -729,7 +750,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 else:
                     inst_match = or_(
                         PlaidItem.institution_name == plaid_item.institution_name,
-                        Account.plaid_item_id == None,  # best-effort without institution_id
+                        Account.plaid_item_id == None,
                     )
                 existing = (db.query(Account)
                     .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
@@ -739,7 +760,6 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
 
             if existing:
                 # UNIQUE safety: clear any OTHER row that already holds this plaid_account_id
-                # (can happen if a previous bad merge left stale IDs behind)
                 db.query(Account).filter(
                     Account.plaid_account_id == a['account_id'],
                     Account.id != existing.id,
@@ -754,6 +774,8 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     existing.persistent_account_id = a['persistent_account_id']
                 if plaid_item.institution_id:
                     existing.institution_id = plaid_item.institution_id
+                # Always refresh the account_hash — keeps it current
+                existing.account_hash = computed_hash
 
                 account_results.append({
                     "name": existing.account_name,
@@ -766,7 +788,8 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 new_acct = Account(
                     plaid_account_id=a['account_id'],
                     persistent_account_id=a.get('persistent_account_id'),
-                    institution_id=inst_id,   # stored so it survives sever-plaid
+                    institution_id=inst_id,
+                    account_hash=computed_hash,
                     plaid_item_id=item_id,
                     account_name=f"{a['name']} {a.get('mask','')}".strip(),
                     account_type=account_type,
@@ -775,7 +798,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     is_active=True,
                 )
                 db.add(new_acct)
-                db.flush()  # get new_acct.id
+                db.flush()
 
                 account_results.append({
                     "name": new_acct.account_name,
@@ -1208,6 +1231,77 @@ async def reset_and_resync(background_tasks: BackgroundTasks, db: Session = Depe
         "transactions_deleted": deleted_txns,
         "items": len(items),
         "status": "started",
+    }
+
+
+@app.post("/api/reset-all")
+async def reset_all(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Fresh start: wipe all Plaid-sourced transactions, delete ghost accounts
+    (severed + no transactions), clear sync cursors, then trigger a full re-sync.
+
+    Preserved: account records (names, types, starting balances, account_hash),
+    categories, rules, card mappings, manual transactions.
+
+    After this call, re-linking any bank will match existing accounts by
+    account_hash — no duplicate accounts, no manual merging needed.
+    """
+    from sqlalchemy import text as _text
+
+    # 1. Delete ghost accounts FIRST (while transaction counts are still accurate).
+    #    Ghost = severed (no plaid_account_id), not manual, zero transactions.
+    ghost_rows = db.execute(_text(
+        "SELECT id FROM accounts "
+        "WHERE plaid_account_id IS NULL AND is_manual = false "
+        "AND id NOT IN (SELECT DISTINCT account_id FROM transactions WHERE account_id IS NOT NULL)"
+    )).fetchall()
+    ghost_ids = [r[0] for r in ghost_rows]
+    if ghost_ids:
+        ids_str = ','.join(str(i) for i in ghost_ids)
+        db.execute(_text(f"DELETE FROM account_monthly_snapshots WHERE account_id IN ({ids_str})"))
+        db.execute(_text(f"DELETE FROM accounts WHERE id IN ({ids_str})"))
+    ghosts_deleted = len(ghost_ids)
+
+    # 2. Delete all Plaid-sourced transactions (FK-safe order)
+    db.execute(_text(
+        "DELETE FROM user_corrections WHERE transaction_id IN "
+        "(SELECT id FROM transactions WHERE plaid_transaction_id IS NOT NULL)"
+    ))
+    db.execute(_text(
+        "DELETE FROM user_corrections WHERE transaction_id IN "
+        "(SELECT id FROM transactions WHERE parent_transaction_id IN "
+        "  (SELECT id FROM transactions WHERE plaid_transaction_id IS NOT NULL))"
+    ))
+    db.execute(_text(
+        "DELETE FROM transaction_splits WHERE parent_transaction_id IN "
+        "(SELECT id FROM transactions WHERE plaid_transaction_id IS NOT NULL)"
+    ))
+    db.execute(_text(
+        "DELETE FROM transactions WHERE parent_transaction_id IN "
+        "(SELECT id FROM transactions WHERE plaid_transaction_id IS NOT NULL)"
+    ))
+    txn_result = db.execute(_text(
+        "DELETE FROM transactions WHERE plaid_transaction_id IS NOT NULL"
+    ))
+    txns_deleted = txn_result.rowcount
+
+    # 3. Clear sync cursors so next sync re-fetches from the beginning
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    for item in items:
+        item.cursor = None
+
+    db.commit()
+    print(f"[reset-all] {txns_deleted} transactions deleted, {ghosts_deleted} ghost accounts removed, {len(items)} cursors cleared")
+
+    # 4. Trigger full re-sync for all active items
+    for item in items:
+        background_tasks.add_task(_sync_item_background, item.item_id, False)
+
+    return {
+        "transactions_deleted": txns_deleted,
+        "ghost_accounts_deleted": ghosts_deleted,
+        "syncs_started": len(items),
+        "status": f"Fresh start — {txns_deleted} transactions cleared, {ghosts_deleted} ghost accounts removed. Re-syncing {len(items)} bank connection(s).",
     }
 
 

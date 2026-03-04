@@ -74,6 +74,10 @@ class Account(Base):
     persistent_account_id = Column(String(200), nullable=True, index=True)  # Stable across re-links (Plaid persistent_account_id); no UNIQUE constraint (edge-case recovery may have duplicates temporarily)
     plaid_item_id = Column(String(100), nullable=True, index=True)  # FK to plaid_items.item_id; NULL for manual
     institution_id = Column(String(50), nullable=True, index=True)  # Copied from PlaidItem; persists after sever-plaid so re-link matching stays institution-scoped
+    # Stable 12-char identity hash: SHA256(institution_id|mask|account_type)[:12]
+    # Written at exchange-token time; used as primary re-link matching key.
+    # Survives sever-plaid because it's stored on the account row itself.
+    account_hash = Column(String(16), nullable=True, index=True)
     account_name = Column(String(100), nullable=False)  # e.g., "Chase 8997"
     account_type = Column(String(50))  # checking, credit, etc.
     official_name = Column(String(200))
@@ -505,6 +509,7 @@ def run_migrations(engine):
             ('notes', 'TEXT'),
             ('persistent_account_id', 'VARCHAR(200)'),
             ('institution_id', 'VARCHAR(50)'),
+            ('account_hash',   'VARCHAR(16)'),
         ],
         'plaid_items': [
             ('institution_id', 'VARCHAR(50)'),
