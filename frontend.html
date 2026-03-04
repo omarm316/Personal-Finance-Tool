@@ -1542,7 +1542,6 @@ function DashboardPage({categories,toast}){
   const[reviewQ,setReviewQ]=useState([]);
   const[netWorth,setNetWorth]=useState(null);
   const[topCats,setTopCats]=useState([]);
-  const[period,setPeriod]=useState('month');
   const[reviewTxn,setReviewTxn]=useState(null);
   const[splitTxn,setSplitTxn]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -1558,16 +1557,17 @@ function DashboardPage({categories,toast}){
 
   const getDates=()=>{
     const now=new Date();
-    if(period==='month'){
-      // Use selected year/month so the budget scorecard and KPI stats stay in sync
+    if(budgetView==='month'){
+      // Use selected year/month so budget scorecard and KPI metrics stay in sync
       const firstDay=`${viewYear}-${String(viewMonth).padStart(2,'0')}-01`;
       const lastDay=new Date(viewYear,viewMonth,0).getDate();
       const lastDayStr=`${viewYear}-${String(viewMonth).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
       return{start:firstDay,end:lastDayStr};
     }
-    if(period==='ytd')return{start:`${now.getFullYear()}-01-01`,end:todayStr()};
-    if(period==='last30'){const d=new Date();d.setDate(d.getDate()-30);return{start:localDateStr(d),end:todayStr()};}
-    return{start:'',end:''};
+    // annual: current year → today; prior year → Dec 31
+    const curY=now.getFullYear();
+    const endStr=viewYear<curY?`${viewYear}-12-31`:todayStr();
+    return{start:`${viewYear}-01-01`,end:endStr};
   };
 
   const load=useCallback(async({silent=false}={})=>{
@@ -1599,7 +1599,7 @@ function DashboardPage({categories,toast}){
       setTopCats(Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6));
     }catch(e){toast('Failed to load','error');}
     finally{if(!silent)setLoading(false);}
-  },[period,viewYear,viewMonth]);
+  },[budgetView,viewYear,viewMonth]);
 
   useEffect(()=>{load();},[load]);
 
@@ -1648,9 +1648,10 @@ function DashboardPage({categories,toast}){
           <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
         </div>
         <div style={{display:'flex',gap:6,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
-          {[['month','This Month'],['last30','Last 30 Days'],['ytd','Year to Date']].map(([v,l])=>(
-            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-ghost'}`} onClick={()=>setPeriod(v)} style={{borderRadius:7}}>{l}</button>
-          ))}
+          <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
+            onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:7}}>Monthly</button>
+          <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
+            onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:7}}>Annual YTD</button>
         </div>
       </div>
 
@@ -1675,15 +1676,8 @@ function DashboardPage({categories,toast}){
       </div>
 
       {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
-      {/* Budget view toggle + year/month selectors */}
+      {/* Year/month selectors */}
       <div style={{display:'flex',alignItems:'center',gap:8,marginTop:20,marginBottom:12,flexWrap:'wrap'}}>
-        <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>Budget view:</span>
-        <div style={{display:'flex',gap:3,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:8,padding:3}}>
-          <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Monthly</button>
-          <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:5,fontSize:12,padding:'4px 12px'}}>Annual YTD</button>
-        </div>
         <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
           style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
           {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
