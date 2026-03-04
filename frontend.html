@@ -2383,6 +2383,21 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               finally{setBusy(false);}
             }}>{busy?'…':'Run Backfill'}</button>
           </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">💰 Fix Account Balances</div>
+              <div className="settings-desc">Fetches the current balance for every linked account from Plaid and sets it as the balance anchor, then rebuilds monthly snapshots. Run this once after re-linking all banks to correct any $0 balances. Safe to run multiple times.</div>
+            </div>
+            <button className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/accounts/backfill-balances',{method:'POST'});
+                const errs=r.errors&&r.errors.length?` (${r.errors.length} warning${r.errors.length!==1?'s':''})`:''
+                toast(`💰 Updated ${r.accounts_updated} account${r.accounts_updated!==1?'s':''}, rebuilt ${r.snapshots_rebuilt} snapshot${r.snapshots_rebuilt!==1?'s':''}${errs}`);
+              }catch(e){toast('Balance fix failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Fix Balances'}</button>
+          </div>
         </div>
         <div className="card" style={{marginBottom:20}}>
           <div className="section-header"><div className="section-title">⚠️ Danger Zone</div></div>

@@ -791,6 +791,9 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 })
             else:
                 # Step 4: create new account
+                # Use Plaid's current balance as the anchor so the balance engine
+                # can compute accurate history immediately without a manual snapshot.
+                plaid_balance = _sign_plaid_balance(a.get('balance'), raw_type)
                 new_acct = Account(
                     plaid_account_id=a['account_id'],
                     persistent_account_id=a.get('persistent_account_id'),
@@ -802,6 +805,8 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     official_name=a.get('official_name'),
                     mask=a.get('mask'),
                     is_active=True,
+                    starting_balance=plaid_balance or 0,
+                    start_date=datetime.utcnow(),
                 )
                 db.add(new_acct)
                 db.flush()
@@ -824,6 +829,21 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         except Exception as sync_exc:
             import traceback; traceback.print_exc()
             sync_error = str(sync_exc)
+
+        # Rebuild monthly snapshots for every account on this item so the
+        # balance engine has accurate month-by-month history immediately.
+        snapshot_errors = []
+        for acct in db.query(Account).filter_by(plaid_item_id=item_id, is_active=True).all():
+            try:
+                rebuild_monthly_snapshots(db, acct.id)
+            except Exception as snap_exc:
+                snapshot_errors.append(f"acct {acct.id}: {snap_exc}")
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        if snapshot_errors:
+            print(f"[exchange-token] snapshot rebuild warnings: {snapshot_errors}")
 
         msg = f"Linked {len(accounts)} account(s) and synced {synced} transaction(s)"
         if sync_error:
@@ -1342,6 +1362,67 @@ async def nuke_everything(db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "Clean slate — all accounts, transactions, and bank connections removed. Connect your banks fresh."}
+
+
+@app.post("/api/accounts/backfill-balances")
+async def backfill_account_balances(db: Session = Depends(get_db)):
+    """
+    One-time fix: fetch current balances from Plaid for every active linked account
+    and write them as the starting_balance anchor. Then rebuild monthly snapshots
+    so the balance engine has accurate history immediately.
+
+    Safe to run multiple times — only updates accounts where start_date is NULL
+    or starting_balance is 0 (i.e. accounts that don't already have a real anchor).
+    """
+    plaid = setup_plaid_from_env()
+    updated = 0
+    errors  = []
+
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    for item in items:
+        try:
+            plaid_accounts = plaid.get_accounts(item.access_token)
+        except Exception as e:
+            errors.append(f"item {item.item_id}: {e}")
+            continue
+
+        for pa in plaid_accounts:
+            acct = db.query(Account).filter_by(
+                plaid_account_id=pa['account_id'], is_active=True
+            ).first()
+            if not acct:
+                continue
+
+            # Only update accounts that lack a real balance anchor
+            if acct.start_date is not None and (acct.starting_balance or 0) != 0:
+                continue
+
+            raw_type      = (pa.get('type') or '').lower().strip()
+            plaid_balance = _sign_plaid_balance(pa.get('balance'), raw_type)
+            if plaid_balance is None:
+                continue
+
+            acct.starting_balance = plaid_balance
+            acct.start_date       = datetime.utcnow()
+            updated += 1
+
+    db.commit()
+
+    # Rebuild snapshots for ALL active accounts now that anchors are set
+    rebuilt = 0
+    for acct in db.query(Account).filter_by(is_active=True).all():
+        try:
+            rebuild_monthly_snapshots(db, acct.id)
+            rebuilt += 1
+        except Exception as e:
+            errors.append(f"snapshot acct {acct.id}: {e}")
+    db.commit()
+
+    return {
+        "accounts_updated": updated,
+        "snapshots_rebuilt": rebuilt,
+        "errors": errors,
+    }
 
 
 @app.get("/api/plaid/debug/{item_id}")
