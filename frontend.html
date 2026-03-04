@@ -2167,21 +2167,6 @@ function BankRow({item,toast,onRenamed,onSynced}){
           ))}
         </div>
       )}
-      {debug&&(
-        <div style={{marginTop:10,marginLeft:28,background:'var(--bg-secondary)',borderRadius:8,padding:12,fontSize:12}}>
-          <div style={{fontWeight:600,marginBottom:6}}>🔍 Plaid Diagnostic — {debug.institution}</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 16px',marginBottom:8}}>
-            <span style={{color:'var(--text-muted)'}}>Environment</span><span>{debug.environment}</span>
-            <span style={{color:'var(--text-muted)'}}>Plaid raw transactions</span><span style={{fontWeight:600,color:debug.raw_added>0?'#059669':'var(--red)'}}>{debug.raw_added} added, {debug.raw_modified} modified</span>
-            <span style={{color:'var(--text-muted)'}}>Has more pages</span><span>{debug.has_more_pages?'Yes':'No'}</span>
-            <span style={{color:'var(--text-muted)'}}>Cursor stored</span><span>{debug.cursor_stored?'Yes (incremental)':'No (full history)'}</span>
-            <span style={{color:'var(--text-muted)'}}>DB accounts</span><span>{debug.db_accounts.length}</span>
-            <span style={{color:'var(--text-muted)'}}>Plaid accounts</span><span>{debug.plaid_accounts.length}</span>
-            {debug.accounts_unmatched.length>0&&<><span style={{color:'var(--red)'}}>Unmatched IDs</span><span style={{color:'var(--red)'}}>{debug.accounts_unmatched.length} — these transactions will be skipped!</span></>}
-          </div>
-          <div style={{padding:'8px 10px',borderRadius:6,background:debug.raw_added===0?'#fef2f2':'#f0fdf4',color:debug.raw_added===0?'var(--red)':'#059669',fontWeight:500}}>{debug.diagnosis}</div>
-        </div>
-      )}
     </div>
   );
 }
