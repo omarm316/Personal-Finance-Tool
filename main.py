@@ -3216,11 +3216,14 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
         Transaction.category_manual == None,
     ).all()
 
-    # In force mode also check locked/manual transactions for new rule matches
+    # In force mode also check system-locked transactions (transfer corrections) for new
+    # rule matches.  Transactions where the user explicitly set category_manual are always
+    # respected — a new rule never clobbers a conscious user edit.
     locked_txns = []
     if force_unlock:
         locked_txns = db.query(Transaction).filter(
-            or_(Transaction.is_locked == True, Transaction.category_manual != None)
+            Transaction.is_locked == True,
+            Transaction.category_manual == None,   # system-locked only, not user-manual edits
         ).all()
 
     updated = 0
