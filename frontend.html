@@ -1000,6 +1000,9 @@ function TransactionsPage({categories,toast}){
   const[showExcluded,setShowExcluded]=useState(false);
   const[quickYear,setQuickYear]=useState('');
   const[quickMonth,setQuickMonth]=useState('');
+  const[sortCol,setSortCol]=useState(null); // null|'date'|'description'|'amount'|'type'|'category'|'account'
+  const[sortDir,setSortDir]=useState('asc');
+  const toggleSort=col=>{if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortCol(col);setSortDir('asc');}};
 
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
@@ -1068,6 +1071,10 @@ function TransactionsPage({categories,toast}){
   if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
   if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
   if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
+  if(sortCol){
+    const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?(t.category_final||'').toLowerCase():(t.account_name||'').toLowerCase();
+    visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
+  }
 
   const visibleExpenses=visible.filter(t=>t.action==='Expense').reduce((s,t)=>s+(-t.amount),0);
   const visibleIncome=visible.filter(t=>t.action==='Income').reduce((s,t)=>s+t.amount,0);
@@ -1204,7 +1211,12 @@ function TransactionsPage({categories,toast}){
                   onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
                   style={{cursor:'pointer'}}/>
               </th>
-              <th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th><th>Actions</th>
+              {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
+                <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+                  {lbl}<span style={{marginLeft:4,opacity:sortCol===col?1:0.25,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
+                </th>
+              ))}
+              <th>Actions</th>
             </tr></thead>
             <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
           </table></div>
