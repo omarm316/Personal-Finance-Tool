@@ -4596,7 +4596,15 @@ function App(){
   const[categories,setCategories]=useState([]);
   const[banks,setBanks]=useState([]);
   const[collapsed,setCollapsed]=useState(()=>{try{return localStorage.getItem('nav-collapsed')==='1';}catch(e){return false;}});
+  const[refreshKey,setRefreshKey]=useState(0);
+  const[refreshing,setRefreshing]=useState(false);
   const{toasts,toast}=useToast();
+
+  const handleRefresh=async()=>{
+    setRefreshing(true);
+    setRefreshKey(k=>k+1);
+    setTimeout(()=>setRefreshing(false),600);
+  };
 
   const loadMeta=useCallback(async()=>{
     try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
@@ -4625,9 +4633,12 @@ function App(){
       <div className="main" style={{marginLeft:collapsed?56:220}}>
         <div className="topbar">
           <div className="topbar-title">{titles[page]}</div>
-          <div>{banks.length>0&&<span className="bank-badge">● {banks.length} account{banks.length!==1?'s':''} connected</span>}</div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            {banks.length>0&&<span className="bank-badge">● {banks.length} account{banks.length!==1?'s':''} connected</span>}
+            <button onClick={handleRefresh} title="Refresh page data" style={{background:'none',border:'1px solid var(--border)',borderRadius:7,padding:'5px 10px',cursor:'pointer',color:'var(--text-muted)',fontSize:15,lineHeight:1,transition:'transform 0.4s',transform:refreshing?'rotate(360deg)':'rotate(0deg)'}}>↻</button>
+          </div>
         </div>
-        <div className="content">
+        <div className="content" key={refreshKey}>
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
