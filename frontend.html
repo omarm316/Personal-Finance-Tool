@@ -622,12 +622,12 @@ function ManualTransactionModal({accounts,onClose,onSaved,toast}){
   const[date,setDate]=useState(todayStr());
   const[desc,setDesc]=useState('');
   const[amount,setAmount]=useState('');
-  const[action,setAction]=useState('Purchase');
+  const[action,setAction]=useState('Expense');
   const[accountId,setAccountId]=useState(accounts[0]?.id||'');
   const[saving,setSaving]=useState(false);
   const[error,setError]=useState('');
-  /* Valid manual transaction actions from Section 2c */
-  const actions=['Purchase','Sale','Unrealized Gain/Loss','Transfer','Depreciation','Other'];
+  /* Use the same canonical list as the filter dropdown and everywhere else */
+  const actions=TXN_TYPES;
   const handleSave=async()=>{
     if(!desc||!amount||!accountId){setError('Fill all required fields');return;}
     setSaving(true);setError('');
