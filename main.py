@@ -27,7 +27,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
-    AccountMonthlySnapshot, UserCorrection, DuplicateIgnore,
+    AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -4654,6 +4654,27 @@ class LoanCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class CashFlowOverlayCreate(BaseModel):
+    description: str
+    amount: float                          # positive = inflow, negative = outflow
+    flow_date: str                         # YYYY-MM-DD
+    source: str = 'manual'                 # manual | cc_payment | loan_payment
+    account_id: Optional[int] = None
+    is_recurring: bool = False
+    recurrence_day: Optional[int] = None   # 1–31
+
+
+class CashFlowOverlayUpdate(BaseModel):
+    description: Optional[str] = None
+    amount: Optional[float] = None
+    flow_date: Optional[str] = None
+    source: Optional[str] = None
+    account_id: Optional[int] = None
+    is_recurring: Optional[bool] = None
+    recurrence_day: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
 def _compute_pmt_split(balance: float, annual_rate: float, monthly_payment: float,
                         property_tax: float = 0.0, insurance: float = 0.0) -> dict:
     """
@@ -5084,6 +5105,213 @@ def todayStr_py():
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Cash Flow Overlays
+# ---------------------------------------------------------------------------
+
+def _overlay_to_dict(o: CashFlowOverlay) -> dict:
+    return {
+        "id":             o.id,
+        "description":    o.description,
+        "amount":         o.amount,
+        "flow_date":      o.flow_date.isoformat() if o.flow_date else None,
+        "source":         o.source,
+        "account_id":     o.account_id,
+        "account_name":   o.account.account_name if o.account else None,
+        "is_recurring":   o.is_recurring,
+        "recurrence_day": o.recurrence_day,
+        "is_active":      o.is_active,
+    }
+
+
+@app.get("/api/cash-flow-overlays")
+async def list_cash_flow_overlays(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Return all active cash flow overlays, optionally filtered by date range."""
+    from sqlalchemy import Date as SA_Date
+    q = db.query(CashFlowOverlay).filter(CashFlowOverlay.is_active == True)
+    if start_date:
+        q = q.filter(CashFlowOverlay.flow_date >= start_date)
+    if end_date:
+        q = q.filter(CashFlowOverlay.flow_date <= end_date)
+    overlays = q.order_by(CashFlowOverlay.flow_date, CashFlowOverlay.id).all()
+    return [_overlay_to_dict(o) for o in overlays]
+
+
+@app.post("/api/cash-flow-overlays")
+async def create_cash_flow_overlay(
+    payload: CashFlowOverlayCreate,
+    db: Session = Depends(get_db),
+):
+    from datetime import date as _date
+    o = CashFlowOverlay(
+        description    = payload.description,
+        amount         = payload.amount,
+        flow_date      = _date.fromisoformat(payload.flow_date),
+        source         = payload.source or 'manual',
+        account_id     = payload.account_id,
+        is_recurring   = payload.is_recurring,
+        recurrence_day = payload.recurrence_day,
+        is_active      = True,
+    )
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return _overlay_to_dict(o)
+
+
+@app.patch("/api/cash-flow-overlays/{overlay_id}")
+async def update_cash_flow_overlay(
+    overlay_id: int,
+    payload: CashFlowOverlayUpdate,
+    db: Session = Depends(get_db),
+):
+    from datetime import date as _date
+    o = db.query(CashFlowOverlay).filter_by(id=overlay_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Overlay not found")
+    if payload.description  is not None: o.description    = payload.description
+    if payload.amount        is not None: o.amount         = payload.amount
+    if payload.flow_date     is not None: o.flow_date      = _date.fromisoformat(payload.flow_date)
+    if payload.source        is not None: o.source         = payload.source
+    if payload.account_id    is not None: o.account_id     = payload.account_id
+    if payload.is_recurring  is not None: o.is_recurring   = payload.is_recurring
+    if payload.recurrence_day is not None: o.recurrence_day = payload.recurrence_day
+    if payload.is_active     is not None: o.is_active      = payload.is_active
+    o.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(o)
+    return _overlay_to_dict(o)
+
+
+@app.delete("/api/cash-flow-overlays/{overlay_id}")
+async def delete_cash_flow_overlay(
+    overlay_id: int,
+    db: Session = Depends(get_db),
+):
+    o = db.query(CashFlowOverlay).filter_by(id=overlay_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Overlay not found")
+    o.is_active = False
+    db.commit()
+    return {"deleted": overlay_id}
+
+
+@app.post("/api/cash-flow-overlays/generate")
+async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
+    """
+    Auto-generate overlay entries for the next 3 months from:
+    - Credit cards with payment_account_id + payment_due_day configured
+    - Loans with payment_account_id + payment_due_day + monthly_payment configured
+    Skips entries that already exist (same source + description + month).
+    Returns counts of created and skipped entries.
+    """
+    from datetime import date as _date
+    import calendar
+
+    today = _date.today()
+    created = 0
+    skipped = 0
+
+    # Build set of existing (source, description, YYYY-MM) to avoid duplicates
+    existing = db.query(CashFlowOverlay).filter(
+        CashFlowOverlay.is_active == True,
+        CashFlowOverlay.source.in_(['cc_payment', 'loan_payment']),
+    ).all()
+    existing_keys = {
+        (o.source, o.description, o.flow_date.strftime('%Y-%m'))
+        for o in existing if o.flow_date
+    }
+
+    def _next_months(n=3):
+        """Yield (year, month) for the next n months including current."""
+        y, m = today.year, today.month
+        for _ in range(n):
+            yield y, m
+            m += 1
+            if m > 12:
+                m = 1; y += 1
+
+    def _safe_date(y, m, day):
+        last = calendar.monthrange(y, m)[1]
+        return _date(y, m, min(day, last))
+
+    # ── Credit cards ──────────────────────────────────────────────────────
+    cards = db.query(Card).filter(
+        Card.is_active == True,
+        Card.account_id != None,
+        Card.payment_account_id != None,
+        Card.payment_due_day != None,
+    ).all()
+
+    for card in cards:
+        desc = f"{card.card_name or 'Card'} Payment"
+        current_balance = get_account_balance(db, card.account_id)
+        if current_balance >= -1.0:       # no meaningful balance, skip
+            continue
+        payment_amount = -abs(current_balance)  # outflow → negative
+
+        for y, m in _next_months(3):
+            due = _safe_date(y, m, card.payment_due_day)
+            if due < today:
+                continue
+            key = ('cc_payment', desc, due.strftime('%Y-%m'))
+            if key in existing_keys:
+                skipped += 1
+                continue
+            db.add(CashFlowOverlay(
+                description    = desc,
+                amount         = payment_amount,
+                flow_date      = due,
+                source         = 'cc_payment',
+                account_id     = card.payment_account_id,
+                is_recurring   = True,
+                recurrence_day = card.payment_due_day,
+                is_active      = True,
+            ))
+            existing_keys.add(key)
+            created += 1
+
+    # ── Loans ─────────────────────────────────────────────────────────────
+    loans = db.query(Loan).filter(
+        Loan.is_active == True,
+        Loan.payment_account_id != None,
+        Loan.payment_due_day != None,
+        Loan.monthly_payment != None,
+    ).all()
+
+    for loan in loans:
+        desc = f"{loan.lender} Payment"
+        payment_amount = -(loan.monthly_payment or 0)  # outflow → negative
+
+        for y, m in _next_months(3):
+            due = _safe_date(y, m, loan.payment_due_day)
+            if due < today:
+                continue
+            key = ('loan_payment', desc, due.strftime('%Y-%m'))
+            if key in existing_keys:
+                skipped += 1
+                continue
+            db.add(CashFlowOverlay(
+                description    = desc,
+                amount         = payment_amount,
+                flow_date      = due,
+                source         = 'loan_payment',
+                account_id     = loan.payment_account_id,
+                is_recurring   = True,
+                recurrence_day = loan.payment_due_day,
+                is_active      = True,
+            ))
+            existing_keys.add(key)
+            created += 1
+
+    db.commit()
+    return {"created": created, "skipped": skipped}
+
+
 # Daily Balances
 # ---------------------------------------------------------------------------
 

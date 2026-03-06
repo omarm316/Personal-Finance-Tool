@@ -1,7 +1,7 @@
 """
 Database models for the finance automation system
 """
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, UniqueConstraint, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -437,6 +437,32 @@ class DuplicateIgnore(Base):
     __table_args__ = (
         UniqueConstraint('account_id_a', 'account_id_b', name='uq_dup_ignore_pair'),
     )
+
+
+class CashFlowOverlay(Base):
+    """
+    Explicit upcoming cash flows displayed below the Daily Balances grid.
+    Sources:
+      'manual'       — user-created entry (paycheck, rent, etc.)
+      'cc_payment'   — auto-generated from card due-date + balance
+      'loan_payment' — auto-generated from loan monthly payment
+    amount is signed: negative = outflow (payment), positive = inflow (paycheck).
+    """
+    __tablename__ = 'cash_flow_overlays'
+
+    id             = Column(Integer, primary_key=True)
+    description    = Column(String(200), nullable=False)
+    amount         = Column(Float, nullable=False)          # + inflow / – outflow
+    flow_date      = Column(Date, nullable=False, index=True)
+    source         = Column(String(20), default='manual')   # manual|cc_payment|loan_payment
+    account_id     = Column(Integer, ForeignKey('accounts.id'), nullable=True)
+    is_recurring   = Column(Boolean, default=False)
+    recurrence_day = Column(Integer, nullable=True)         # day of month (1–31) if recurring
+    is_active      = Column(Boolean, default=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow)
+
+    account = relationship('Account', foreign_keys=[account_id])
 
 
 # ---------------------------------------------------------------------------

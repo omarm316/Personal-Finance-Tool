@@ -4446,6 +4446,15 @@ function DailyBalancesPage({toast}){
   // All groups expanded by default; collapse Others that are less common
   const[collapsed,setCollapsed]=useState({'Other Assets':true,'Other Liabilities':true});
 
+  // Cash flow overlay state
+  const[overlays,setOverlays]=useState([]);
+  const[overlayAccounts,setOverlayAccounts]=useState([]);
+  const[showOverlayForm,setShowOverlayForm]=useState(false);
+  const[editingOverlay,setEditingOverlay]=useState(null);   // null=new, obj=editing
+  const[ovForm,setOvForm]=useState({description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:'',is_recurring:false,recurrence_day:''});
+  const[ovSaving,setOvSaving]=useState(false);
+  const[genBusy,setGenBusy]=useState(false);
+
   const getRange=()=>{
     const n=new Date();
     if(rangeMode==='month'){
@@ -4463,6 +4472,10 @@ function DailyBalancesPage({toast}){
     return{s:customStart,e:customEnd};
   };
 
+  const loadOverlays=useCallback(async()=>{
+    try{setOverlays(await apiFetch('/cash-flow-overlays'));}catch(e){}
+  },[]);
+
   const load=useCallback(async()=>{
     const{s,e}=getRange();
     if(rangeMode==='custom'&&(!s||!e))return;
@@ -4470,7 +4483,14 @@ function DailyBalancesPage({toast}){
     try{
       const ct=todayStr(); // client's local date — avoids UTC midnight drift
       const q=`?client_today=${ct}${s?`&start_date=${s}`:''}${e?`&end_date=${e}`:''}`;
-      setData(await apiFetch(`/daily-balances${q}`));
+      const[balData,accts,ovs]=await Promise.all([
+        apiFetch(`/daily-balances${q}`),
+        apiFetch('/accounts').catch(()=>[]),
+        apiFetch('/cash-flow-overlays').catch(()=>[]),
+      ]);
+      setData(balData);
+      setOverlayAccounts(accts);
+      setOverlays(ovs);
     }catch(err){toast('Failed to load daily balances','error');}
     finally{setLoading(false);}
   },[rangeMode,customStart,customEnd]);
@@ -4478,6 +4498,50 @@ function DailyBalancesPage({toast}){
   useEffect(()=>{load();},[load]);
 
   const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
+
+  // ── Overlay helpers ──────────────────────────────────────────────────────
+  const BLANK_FORM={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:'',is_recurring:false,recurrence_day:''};
+  const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_FORM);setShowOverlayForm(true);};
+  const openEditOverlay=o=>{
+    setEditingOverlay(o);
+    setOvForm({description:o.description,amount:String(o.amount),flow_date:o.flow_date,source:o.source,account_id:String(o.account_id||''),is_recurring:o.is_recurring,recurrence_day:String(o.recurrence_day||'')});
+    setShowOverlayForm(true);
+  };
+  const saveOverlay=async()=>{
+    if(!ovForm.description||!ovForm.amount||!ovForm.flow_date)return toast('Fill in description, amount, and date','error');
+    setOvSaving(true);
+    try{
+      const body={description:ovForm.description,amount:parseFloat(ovForm.amount),flow_date:ovForm.flow_date,source:ovForm.source,account_id:ovForm.account_id?parseInt(ovForm.account_id):null,is_recurring:ovForm.is_recurring,recurrence_day:ovForm.recurrence_day?parseInt(ovForm.recurrence_day):null};
+      if(editingOverlay){
+        const updated=await apiFetch(`/cash-flow-overlays/${editingOverlay.id}`,{method:'PATCH',body:JSON.stringify(body)});
+        setOverlays(prev=>prev.map(o=>o.id===updated.id?updated:o));
+      }else{
+        const created=await apiFetch('/cash-flow-overlays',{method:'POST',body:JSON.stringify(body)});
+        setOverlays(prev=>[...prev,created].sort((a,b)=>a.flow_date.localeCompare(b.flow_date)));
+      }
+      setShowOverlayForm(false);toast('Saved');
+    }catch(e){toast('Save failed','error');}
+    finally{setOvSaving(false);}
+  };
+  const deleteOverlay=async id=>{
+    if(!confirm('Delete this cash flow entry?'))return;
+    try{
+      await apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'});
+      setOverlays(prev=>prev.filter(o=>o.id!==id));
+      toast('Deleted');
+    }catch(e){toast('Delete failed','error');}
+  };
+  const generateOverlays=async()=>{
+    setGenBusy(true);
+    try{
+      const r=await apiFetch('/cash-flow-overlays/generate',{method:'POST'});
+      toast(`⚡ Generated ${r.created} entr${r.created!==1?'ies':'y'}${r.skipped?`, ${r.skipped} already existed`:''}`);
+      const fresh=await apiFetch('/cash-flow-overlays');
+      setOverlays(fresh);
+    }catch(e){toast('Generate failed','error');}
+    finally{setGenBusy(false);}
+  };
+  const SOURCE_BADGE={manual:{label:'Manual',bg:'#e0e7ff',color:'#3730a3'},cc_payment:{label:'CC',bg:'#fce7f3',color:'#9d174d'},loan_payment:{label:'Loan',bg:'#ede9fe',color:'#5b21b6'}};
 
   const fmtBal=v=>{
     if(v==null)return'—';
@@ -4586,6 +4650,128 @@ function DailyBalancesPage({toast}){
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* ── Cash Flow Overlays ─────────────────────────────────────────── */}
+      <div style={{marginTop:28}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💸 Cash Flow Overlays</div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from configured credit card and loan payment schedules">
+              {genBusy?'…':'⚡ Generate from Cards & Loans'}
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={openAddOverlay}>+ Add</button>
+          </div>
+        </div>
+
+        {/* Add / Edit form */}
+        {showOverlayForm&&(
+          <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
+              <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Paycheck, Chase Payment…" style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Amount <span style={{fontWeight:400,opacity:0.7}}>(– outflow, + inflow)</span></label>
+              <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Date</label>
+              <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Source</label>
+              <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                <option value="manual">Manual</option>
+                <option value="cc_payment">CC Payment</option>
+                <option value="loan_payment">Loan Payment</option>
+              </select>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Account (optional)</label>
+              <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                <option value="">— None —</option>
+                {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Recurring?</label>
+              <div style={{display:'flex',alignItems:'center',gap:10,paddingTop:4}}>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                  <input type="checkbox" checked={ovForm.is_recurring} onChange={e=>setOvForm(f=>({...f,is_recurring:e.target.checked}))}/>
+                  Monthly on day:
+                </label>
+                {ovForm.is_recurring&&<input type="number" min="1" max="31" value={ovForm.recurrence_day} onChange={e=>setOvForm(f=>({...f,recurrence_day:e.target.value}))} style={{width:55,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>}
+              </div>
+            </div>
+            <div style={{gridColumn:'1/-1',display:'flex',gap:8,justifyContent:'flex-end',marginTop:4}}>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
+              <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'…':'Save'}</button>
+            </div>
+          </div>
+        )}
+
+        {/* Overlay table */}
+        {overlays.length===0&&!showOverlayForm?(
+          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
+            No cash flow entries yet — add one manually or click ⚡ Generate from Cards & Loans.
+          </div>
+        ):(
+          <div className="table-wrap">
+            <table style={{fontSize:13}}>
+              <thead><tr>
+                <th style={{minWidth:90}}>Date</th>
+                <th>Description</th>
+                <th style={{textAlign:'right',minWidth:100}}>Amount</th>
+                <th>Account</th>
+                <th>Source</th>
+                <th style={{textAlign:'center'}}>Recurring</th>
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr></thead>
+              <tbody>
+                {overlays.map(o=>{
+                  const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
+                  const isOut=o.amount<0;
+                  return(
+                    <tr key={o.id} style={{background:new Date(o.flow_date+'T00:00:00')>=new Date(todayStr()+'T00:00:00')?'var(--card-bg)':'#fafafa'}}>
+                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
+                      <td>{o.description}</td>
+                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                        {isOut?'–':'+'}${Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                      </td>
+                      <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
+                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
+                      <td style={{textAlign:'center',color:'var(--text-muted)',fontSize:12}}>{o.is_recurring?`✓ day ${o.recurrence_day||'?'}`:'—'}</td>
+                      <td style={{textAlign:'center'}}>
+                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* Summary row */}
+                {overlays.length>0&&(()=>{
+                  const future=overlays.filter(o=>o.flow_date>=todayStr());
+                  const netIn=future.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
+                  const netOut=future.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
+                  return(
+                    <tr style={{background:'#f8f9fa',fontWeight:600,borderTop:'2px solid var(--border)'}}>
+                      <td colSpan={2} style={{fontSize:12,color:'var(--text-muted)'}}>Upcoming totals</td>
+                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12}}>
+                        <span style={{color:'var(--green)'}}>+${netIn.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                        {' / '}
+                        <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                      </td>
+                      <td colSpan={4} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
