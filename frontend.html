@@ -4451,7 +4451,7 @@ function DailyBalancesPage({toast}){
   const[overlayAccounts,setOverlayAccounts]=useState([]);
   const[showOverlayForm,setShowOverlayForm]=useState(false);
   const[editingOverlay,setEditingOverlay]=useState(null);   // null=new, obj=editing
-  const[ovForm,setOvForm]=useState({description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:'',is_recurring:false,recurrence_day:''});
+  const[ovForm,setOvForm]=useState({description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''});
   const[ovSaving,setOvSaving]=useState(false);
   const[genBusy,setGenBusy]=useState(false);
 
@@ -4500,18 +4500,18 @@ function DailyBalancesPage({toast}){
   const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
 
   // ── Overlay helpers ──────────────────────────────────────────────────────
-  const BLANK_FORM={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:'',is_recurring:false,recurrence_day:''};
+  const BLANK_FORM={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
   const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_FORM);setShowOverlayForm(true);};
   const openEditOverlay=o=>{
     setEditingOverlay(o);
-    setOvForm({description:o.description,amount:String(o.amount),flow_date:o.flow_date,source:o.source,account_id:String(o.account_id||''),is_recurring:o.is_recurring,recurrence_day:String(o.recurrence_day||'')});
+    setOvForm({description:o.description,amount:String(o.amount),flow_date:o.flow_date,source:o.source,account_id:String(o.account_id||'')});
     setShowOverlayForm(true);
   };
   const saveOverlay=async()=>{
     if(!ovForm.description||!ovForm.amount||!ovForm.flow_date)return toast('Fill in description, amount, and date','error');
     setOvSaving(true);
     try{
-      const body={description:ovForm.description,amount:parseFloat(ovForm.amount),flow_date:ovForm.flow_date,source:ovForm.source,account_id:ovForm.account_id?parseInt(ovForm.account_id):null,is_recurring:ovForm.is_recurring,recurrence_day:ovForm.recurrence_day?parseInt(ovForm.recurrence_day):null};
+      const body={description:ovForm.description,amount:parseFloat(ovForm.amount),flow_date:ovForm.flow_date,source:ovForm.source,account_id:ovForm.account_id?parseInt(ovForm.account_id):null};
       if(editingOverlay){
         const updated=await apiFetch(`/cash-flow-overlays/${editingOverlay.id}`,{method:'PATCH',body:JSON.stringify(body)});
         setOverlays(prev=>prev.map(o=>o.id===updated.id?updated:o));
@@ -4694,16 +4694,6 @@ function DailyBalancesPage({toast}){
                 {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
               </select>
             </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Recurring?</label>
-              <div style={{display:'flex',alignItems:'center',gap:10,paddingTop:4}}>
-                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
-                  <input type="checkbox" checked={ovForm.is_recurring} onChange={e=>setOvForm(f=>({...f,is_recurring:e.target.checked}))}/>
-                  Monthly on day:
-                </label>
-                {ovForm.is_recurring&&<input type="number" min="1" max="31" value={ovForm.recurrence_day} onChange={e=>setOvForm(f=>({...f,recurrence_day:e.target.value}))} style={{width:55,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>}
-              </div>
-            </div>
             <div style={{gridColumn:'1/-1',display:'flex',gap:8,justifyContent:'flex-end',marginTop:4}}>
               <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
               <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'…':'Save'}</button>
@@ -4725,7 +4715,6 @@ function DailyBalancesPage({toast}){
                 <th style={{textAlign:'right',minWidth:100}}>Amount</th>
                 <th>Account</th>
                 <th>Source</th>
-                <th style={{textAlign:'center'}}>Recurring</th>
                 <th style={{textAlign:'center'}}>Actions</th>
               </tr></thead>
               <tbody>
@@ -4741,7 +4730,6 @@ function DailyBalancesPage({toast}){
                       </td>
                       <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
                       <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
-                      <td style={{textAlign:'center',color:'var(--text-muted)',fontSize:12}}>{o.is_recurring?`✓ day ${o.recurrence_day||'?'}`:'—'}</td>
                       <td style={{textAlign:'center'}}>
                         <div style={{display:'flex',gap:4,justifyContent:'center'}}>
                           <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
@@ -4764,7 +4752,7 @@ function DailyBalancesPage({toast}){
                         {' / '}
                         <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                       </td>
-                      <td colSpan={4} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
+                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
                     </tr>
                   );
                 })()}

@@ -5203,11 +5203,13 @@ async def delete_cash_flow_overlay(
 @app.post("/api/cash-flow-overlays/generate")
 async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
     """
-    Auto-generate overlay entries for the next 3 months from:
-    - Credit cards with payment_account_id + payment_due_day configured
-    - Loans with payment_account_id + payment_due_day + monthly_payment configured
-    Skips entries that already exist (same source + description + month).
-    Returns counts of created and skipped entries.
+    Auto-generate ONE upcoming overlay entry per card/loan:
+    - Credit cards: uses balance at the most recent statement close date as
+      the payment amount, scheduled on the next upcoming payment_due_day.
+      Close-date logic: if today.day > close_day → close = this month's close_day,
+      else → close = last month's close_day.
+    - Loans: fixed monthly_payment scheduled on next upcoming payment_due_day.
+    Skips entries that already exist (same source + description + flow_date).
     """
     from datetime import date as _date
     import calendar
@@ -5216,30 +5218,31 @@ async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
     created = 0
     skipped = 0
 
-    # Build set of existing (source, description, YYYY-MM) to avoid duplicates
+    # Build set of existing (source, description, flow_date ISO) to avoid duplicates
     existing = db.query(CashFlowOverlay).filter(
         CashFlowOverlay.is_active == True,
         CashFlowOverlay.source.in_(['cc_payment', 'loan_payment']),
     ).all()
     existing_keys = {
-        (o.source, o.description, o.flow_date.strftime('%Y-%m'))
+        (o.source, o.description, o.flow_date.isoformat())
         for o in existing if o.flow_date
     }
-
-    def _next_months(n=3):
-        """Yield (year, month) for the next n months including current."""
-        y, m = today.year, today.month
-        for _ in range(n):
-            yield y, m
-            m += 1
-            if m > 12:
-                m = 1; y += 1
 
     def _safe_date(y, m, day):
         last = calendar.monthrange(y, m)[1]
         return _date(y, m, min(day, last))
 
-    # ── Credit cards ──────────────────────────────────────────────────────
+    def _next_due(due_day: int) -> _date:
+        """Return the next upcoming date matching due_day (today or later)."""
+        this_month = _safe_date(today.year, today.month, due_day)
+        if this_month >= today:
+            return this_month
+        # Move to next month
+        nm = today.month + 1 if today.month < 12 else 1
+        ny = today.year if today.month < 12 else today.year + 1
+        return _safe_date(ny, nm, due_day)
+
+    # ── Credit cards: ONE upcoming payment per card ────────────────────────
     cards = db.query(Card).filter(
         Card.is_active == True,
         Card.account_id != None,
@@ -5249,33 +5252,41 @@ async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
 
     for card in cards:
         desc = f"{card.card_name or 'Card'} Payment"
-        current_balance = get_account_balance(db, card.account_id)
-        if current_balance >= -1.0:       # no meaningful balance, skip
+        close_day = card.statement_close_day or 25  # fallback if not configured
+
+        # Most recent statement close date
+        if today.day > close_day:
+            close_date = _safe_date(today.year, today.month, close_day)
+        else:
+            pm = today.month - 1 or 12
+            py = today.year if today.month > 1 else today.year - 1
+            close_date = _safe_date(py, pm, close_day)
+
+        balance_at_close = get_account_balance(
+            db, card.account_id,
+            as_of_date=datetime.combine(close_date, datetime.max.time()),
+        )
+        if balance_at_close >= -1.0:       # no meaningful balance, skip
             continue
-        payment_amount = -abs(current_balance)  # outflow → negative
+        payment_amount = -abs(balance_at_close)  # outflow → negative
 
-        for y, m in _next_months(3):
-            due = _safe_date(y, m, card.payment_due_day)
-            if due < today:
-                continue
-            key = ('cc_payment', desc, due.strftime('%Y-%m'))
-            if key in existing_keys:
-                skipped += 1
-                continue
-            db.add(CashFlowOverlay(
-                description    = desc,
-                amount         = payment_amount,
-                flow_date      = due,
-                source         = 'cc_payment',
-                account_id     = card.payment_account_id,
-                is_recurring   = True,
-                recurrence_day = card.payment_due_day,
-                is_active      = True,
-            ))
-            existing_keys.add(key)
-            created += 1
+        due = _next_due(card.payment_due_day)
+        key = ('cc_payment', desc, due.isoformat())
+        if key in existing_keys:
+            skipped += 1
+            continue
+        db.add(CashFlowOverlay(
+            description = desc,
+            amount      = payment_amount,
+            flow_date   = due,
+            source      = 'cc_payment',
+            account_id  = card.payment_account_id,
+            is_active   = True,
+        ))
+        existing_keys.add(key)
+        created += 1
 
-    # ── Loans ─────────────────────────────────────────────────────────────
+    # ── Loans: ONE upcoming payment per loan ──────────────────────────────
     loans = db.query(Loan).filter(
         Loan.is_active == True,
         Loan.payment_account_id != None,
@@ -5287,26 +5298,21 @@ async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
         desc = f"{loan.lender} Payment"
         payment_amount = -(loan.monthly_payment or 0)  # outflow → negative
 
-        for y, m in _next_months(3):
-            due = _safe_date(y, m, loan.payment_due_day)
-            if due < today:
-                continue
-            key = ('loan_payment', desc, due.strftime('%Y-%m'))
-            if key in existing_keys:
-                skipped += 1
-                continue
-            db.add(CashFlowOverlay(
-                description    = desc,
-                amount         = payment_amount,
-                flow_date      = due,
-                source         = 'loan_payment',
-                account_id     = loan.payment_account_id,
-                is_recurring   = True,
-                recurrence_day = loan.payment_due_day,
-                is_active      = True,
-            ))
-            existing_keys.add(key)
-            created += 1
+        due = _next_due(loan.payment_due_day)
+        key = ('loan_payment', desc, due.isoformat())
+        if key in existing_keys:
+            skipped += 1
+            continue
+        db.add(CashFlowOverlay(
+            description = desc,
+            amount      = payment_amount,
+            flow_date   = due,
+            source      = 'loan_payment',
+            account_id  = loan.payment_account_id,
+            is_active   = True,
+        ))
+        existing_keys.add(key)
+        created += 1
 
     db.commit()
     return {"created": created, "skipped": skipped}
@@ -5329,8 +5335,9 @@ async def get_daily_balances(
     Other Assets, Credit Cards, Loans, Other Liabilities) with a balance
     value for each day in the requested range.
 
-    CC payment projections are injected for future payment_due_day dates
-    when a card has payment_account_id, statement_close_day, and payment_due_day set.
+    Future balance projections are driven exclusively by active CashFlowOverlay
+    entries — auto CC/loan projections have been replaced by explicit user-managed
+    overlays (created manually or via POST /api/cash-flow-overlays/generate).
     """
     from datetime import date, timedelta
     import calendar as _cal
@@ -5432,150 +5439,35 @@ async def get_daily_balances(
 
         acct_balances[acct.id] = daily
 
-    # ── CC Payment Projections ────────────────────────────────────────────
-    # For each future payment_due_day in range: project CC balance payment
+    # ── Overlay-Driven Projections ────────────────────────────────────────
+    # Apply active CashFlowOverlay entries to future balance arrays instead of
+    # auto-computing CC/loan projections.  Only overlays whose account_id is
+    # tracked in acct_balances and whose flow_date falls inside the display
+    # range are applied.  The amount is added to every day from the flow_date
+    # forward so the balance chart shows the step-change on the right day.
     projected_dates: dict[int, set] = {}  # {account_id: set of projected date strings}
 
-    cards_with_payment = (
-        db.query(Card)
+    overlays = (
+        db.query(CashFlowOverlay)
         .filter(
-            Card.is_active == True,
-            Card.account_id.isnot(None),
-            Card.payment_account_id.isnot(None),
-            Card.payment_due_day.isnot(None),
+            CashFlowOverlay.is_active == True,
+            CashFlowOverlay.flow_date >= today,
         )
         .all()
     )
 
-    # Collect all months touched by the date range
-    months_in_range: set[tuple] = set()
-    tmp = start_dt.replace(day=1)
-    while tmp <= end_dt:
-        months_in_range.add((tmp.year, tmp.month))
-        m2, y2 = tmp.month + 1, tmp.year
-        if m2 > 12:
-            m2, y2 = 1, y2 + 1
-        tmp = date(y2, m2, 1)
-
-    for card in cards_with_payment:
-        cc_id = card.account_id
-        chk_id = card.payment_account_id
-        due_day = card.payment_due_day
-        close_day = card.statement_close_day
-
-        if cc_id not in acct_balances or chk_id not in acct_balances:
+    for ov in overlays:
+        if not ov.account_id or ov.account_id not in acct_balances:
             continue
-
-        for y, m in months_in_range:
-            # Compute payment_due_date for this month
-            max_day = _cal.monthrange(y, m)[1]
-            payment_date = date(y, m, min(due_day, max_day))
-            pdate_str = payment_date.isoformat()
-
-            if pdate_str not in dates_set:
-                continue
-            if payment_date <= today:
-                continue  # Real transaction should already exist
-
-            # Statement close date = previous calendar month
-            close_y, close_m = y, m - 1
-            if close_m <= 0:
-                close_y -= 1
-                close_m = 12
-            if close_day:
-                max_close = _cal.monthrange(close_y, close_m)[1]
-                close_date = date(close_y, close_m, min(close_day, max_close))
-            else:
-                close_date = date(close_y, close_m, _cal.monthrange(close_y, close_m)[1])
-
-            balance_at_close = get_account_balance(
-                db, cc_id,
-                as_of_date=datetime.combine(close_date, datetime.max.time()),
-            )
-
-            if balance_at_close >= -1.0:
-                continue  # No meaningful debt to project
-
-            payment_amount = abs(balance_at_close)
-            date_idx = dates.index(pdate_str)
-
-            # CC account: +payment_amount from payment date forward (reduces debt)
-            for i in range(date_idx, num_days):
-                acct_balances[cc_id][i] = round(acct_balances[cc_id][i] + payment_amount, 2)
-            projected_dates.setdefault(cc_id, set()).add(pdate_str)
-
-            # Checking account: -payment_amount from payment date forward
-            for i in range(date_idx, num_days):
-                acct_balances[chk_id][i] = round(acct_balances[chk_id][i] - payment_amount, 2)
-            projected_dates.setdefault(chk_id, set()).add(pdate_str)
-
-    # ── Loan Payment Projections ──────────────────────────────────────────
-    # For each loan with payment_account_id + payment_due_day + remaining_term_months > 0:
-    # project the monthly payment as a debit on the checking account and a principal
-    # credit (balance reduction) on the linked loan account.
-    active_loans = (
-        db.query(Loan)
-        .filter(
-            Loan.is_active == True,
-            Loan.payment_account_id.isnot(None),
-            Loan.payment_due_day.isnot(None),
-            Loan.monthly_payment.isnot(None),
-        )
-        .all()
-    )
-
-    for loan in active_loans:
-        chk_id = loan.payment_account_id
-        loan_acct_id = loan.account_id
-        due_day = loan.payment_due_day
-
-        if chk_id not in acct_balances:
+        pdate_str = ov.flow_date.isoformat()
+        if pdate_str not in dates_set:
             continue
-
-        # Work with a running balance copy for amortization across projected months
-        running_loan_balance = loan.current_balance or 0.0
-        running_remaining = loan.remaining_term_months  # may be None
-
-        for y, m in sorted(months_in_range):
-            import calendar as _cal2
-            max_day = _cal2.monthrange(y, m)[1]
-            payment_date = date(y, m, min(due_day, max_day))
-            pdate_str = payment_date.isoformat()
-
-            if pdate_str not in dates_set:
-                continue
-            if payment_date <= today:
-                continue
-            if running_remaining is not None and running_remaining <= 0:
-                break  # Loan paid off
-
-            split = _compute_pmt_split(
-                running_loan_balance,
-                loan.interest_rate or 0,
-                loan.monthly_payment,
-                loan.property_tax_monthly or 0,
-                loan.insurance_monthly or 0,
+        date_idx = dates.index(pdate_str)
+        for i in range(date_idx, num_days):
+            acct_balances[ov.account_id][i] = round(
+                acct_balances[ov.account_id][i] + ov.amount, 2
             )
-
-            date_idx = dates.index(pdate_str)
-
-            # Checking account: debit total payment
-            for i in range(date_idx, num_days):
-                acct_balances[chk_id][i] = round(acct_balances[chk_id][i] - split['total'], 2)
-            projected_dates.setdefault(chk_id, set()).add(pdate_str)
-
-            # Loan liability account: credit principal (reduces negative balance)
-            if loan_acct_id and loan_acct_id in acct_balances:
-                for i in range(date_idx, num_days):
-                    acct_balances[loan_acct_id][i] = round(
-                        acct_balances[loan_acct_id][i] + split['principal'], 2
-                    )
-                projected_dates.setdefault(loan_acct_id, set()).add(pdate_str)
-
-            # Advance amortization state for next month's projection
-            running_loan_balance = round(running_loan_balance - split['principal'], 2)
-            if running_remaining is not None:
-                running_remaining -= 1
+        projected_dates.setdefault(ov.account_id, set()).add(pdate_str)
 
     # ── Group by account type ─────────────────────────────────────────────
     GROUP_ORDER = [
