@@ -161,7 +161,7 @@ function ToastContainer({toasts}){
 }
 
 function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed}){
-  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
+  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'cashplanner',icon:'⊕',label:'Cash Flow'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
   const toggle=()=>{const next=!collapsed;setCollapsed(next);try{localStorage.setItem('nav-collapsed',next?'1':'0');}catch(e){}};
   const[banksOpen,setBanksOpen]=useState(()=>{try{return localStorage.getItem('banks-open')!=='0';}catch(e){return true;}});
@@ -1840,7 +1840,7 @@ function ManualAccountModal({onClose,onSaved,toast}){
         <div className="review-field"><label>Account Type</label>
           <select value={type} onChange={e=>setType(e.target.value)}>
             {/* All valid types — Title Case values match what the backend normalises to */}
-            {[['Checking','Checking'],['Savings','Savings'],['Cash','Cash'],['Gift Card','Gift Card'],
+            {[['Checking','Checking'],['Savings','Savings'],['HSA','HSA'],['FSA','FSA'],['Cash','Cash'],['Gift Card','Gift Card'],
               ['Investment','Investment'],['Real Estate','Real Estate'],['Vehicle','Vehicle'],
               ['Business','Business'],['Credit Card','Credit Card'],['Loan','Loan'],['Other','Other']
             ].map(([v,l])=><option key={v} value={v}>{l}</option>)}
@@ -4436,72 +4436,92 @@ function LoansPage({toast}){
   );
 }
 
-/* ── Daily Balances Page ─────────────────────────────────────────────────── */
-function DailyBalancesPage({toast}){
-  const[data,setData]=useState(null);
-  const[loading,setLoading]=useState(true);
-  const[rangeMode,setRangeMode]=useState('month');
-  const[customStart,setCustomStart]=useState('');
-  const[customEnd,setCustomEnd]=useState('');
-  // All groups expanded by default; collapse Others that are less common
-  const[collapsed,setCollapsed]=useState({'Other Assets':true,'Other Liabilities':true});
+/* ── Cash Flow Planner Page ──────────────────────────────────────────────── */
+function CashFlowPage({toast}){
+  // Account types eligible as salary deposit destinations
+  const SALARY_TYPES=new Set(['Checking','checking','Savings','savings','HSA','hsa','FSA','fsa','Investment','investment','Brokerage','brokerage','IRA','ira','401k','401K']);
 
-  // Cash flow overlay state
+  // ── Salary state ─────────────────────────────────────────────────────
+  const[salaryPayments,setSalaryPayments]=useState([]);
+  const[salaryAccounts,setSalaryAccounts]=useState([]);
+  const[showSalaryForm,setShowSalaryForm]=useState(false);
+  const[editingSalary,setEditingSalary]=useState(null);
+  const blankSF=()=>({payment_date:todayStr(),description:'Salary',person:'',allocations:{}});
+  const[salaryForm,setSalaryForm]=useState(blankSF());
+  const[salarySaving,setSalarySaving]=useState(false);
+
+  // ── Overlay state ─────────────────────────────────────────────────────
   const[overlays,setOverlays]=useState([]);
   const[overlayAccounts,setOverlayAccounts]=useState([]);
   const[showOverlayForm,setShowOverlayForm]=useState(false);
-  const[editingOverlay,setEditingOverlay]=useState(null);   // null=new, obj=editing
+  const[editingOverlay,setEditingOverlay]=useState(null);
   const[ovForm,setOvForm]=useState({description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''});
   const[ovSaving,setOvSaving]=useState(false);
   const[genBusy,setGenBusy]=useState(false);
-
-  const getRange=()=>{
-    const n=new Date();
-    if(rangeMode==='month'){
-      const y=n.getFullYear(),m=n.getMonth()+1;
-      const s=`${y}-${String(m).padStart(2,'0')}-01`;
-      const last=new Date(y,m,0).getDate();
-      return{s,e:`${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
-    }
-    if(rangeMode==='quarter'){
-      const y=n.getFullYear(),m=n.getMonth()+1;
-      const qs=Math.floor((m-1)/3)*3+1,qe=qs+2;
-      const last=new Date(y,qe,0).getDate();
-      return{s:`${y}-${String(qs).padStart(2,'0')}-01`,e:`${y}-${String(qe).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
-    }
-    return{s:customStart,e:customEnd};
-  };
-
-  const loadOverlays=useCallback(async()=>{
-    try{setOverlays(await apiFetch('/cash-flow-overlays'));}catch(e){}
-  },[]);
+  const[loading,setLoading]=useState(true);
 
   const load=useCallback(async()=>{
-    const{s,e}=getRange();
-    if(rangeMode==='custom'&&(!s||!e))return;
     setLoading(true);
     try{
-      const ct=todayStr(); // client's local date — avoids UTC midnight drift
-      const q=`?client_today=${ct}${s?`&start_date=${s}`:''}${e?`&end_date=${e}`:''}`;
-      const[balData,accts,ovs]=await Promise.all([
-        apiFetch(`/daily-balances${q}`),
+      const[payments,accts,ovs]=await Promise.all([
+        apiFetch('/salary-payments').catch(()=>[]),
         apiFetch('/accounts').catch(()=>[]),
         apiFetch('/cash-flow-overlays').catch(()=>[]),
       ]);
-      setData(balData);
+      setSalaryPayments(payments);
+      setSalaryAccounts(accts.filter(a=>a.is_active&&SALARY_TYPES.has(a.account_type)));
       setOverlayAccounts(accts);
       setOverlays(ovs);
-    }catch(err){toast('Failed to load daily balances','error');}
+    }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
-  },[rangeMode,customStart,customEnd]);
+  },[]);
 
   useEffect(()=>{load();},[load]);
 
-  const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
+  // ── Salary helpers ────────────────────────────────────────────────────
+  const openAddSalary=()=>{setEditingSalary(null);setSalaryForm(blankSF());setShowSalaryForm(true);};
+  const openEditSalary=sp=>{
+    setEditingSalary(sp);
+    const allocs={};
+    sp.allocations.forEach(a=>{allocs[a.account_id]=String(a.amount);});
+    setSalaryForm({payment_date:sp.payment_date,description:sp.description,person:sp.person,allocations:allocs});
+    setShowSalaryForm(true);
+  };
+  const saveSalary=async()=>{
+    if(!salaryForm.payment_date||!salaryForm.description||!salaryForm.person)
+      return toast('Fill in date, description, and person','error');
+    const allocations=Object.entries(salaryForm.allocations)
+      .filter(([,v])=>v&&parseFloat(v)!==0)
+      .map(([account_id,amount])=>({account_id:parseInt(account_id),amount:parseFloat(amount)}));
+    if(allocations.length===0)return toast('Enter at least one account amount','error');
+    setSalarySaving(true);
+    try{
+      const body={payment_date:salaryForm.payment_date,description:salaryForm.description,person:salaryForm.person,allocations};
+      if(editingSalary){
+        const u=await apiFetch(`/salary-payments/${editingSalary.id}`,{method:'PATCH',body:JSON.stringify(body)});
+        setSalaryPayments(prev=>prev.map(p=>p.id===u.id?u:p));
+      }else{
+        const c=await apiFetch('/salary-payments',{method:'POST',body:JSON.stringify(body)});
+        setSalaryPayments(prev=>[c,...prev].sort((a,b)=>b.payment_date.localeCompare(a.payment_date)));
+      }
+      setShowSalaryForm(false);toast('Saved');
+    }catch(e){toast('Save failed','error');}
+    finally{setSalarySaving(false);}
+  };
+  const deleteSalary=async id=>{
+    if(!confirm('Delete this salary entry?'))return;
+    try{
+      await apiFetch(`/salary-payments/${id}`,{method:'DELETE'});
+      setSalaryPayments(prev=>prev.filter(p=>p.id!==id));
+      toast('Deleted');
+    }catch(e){toast('Delete failed','error');}
+  };
+  const spTotal=sp=>sp.allocations.reduce((s,a)=>s+a.amount,0);
 
-  // ── Overlay helpers ──────────────────────────────────────────────────────
-  const BLANK_FORM={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
-  const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_FORM);setShowOverlayForm(true);};
+  // ── Overlay helpers ───────────────────────────────────────────────────
+  const BLANK_OV={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
+  const SOURCE_BADGE={manual:{label:'Manual',bg:'#e0e7ff',color:'#3730a3'},cc_payment:{label:'CC',bg:'#fce7f3',color:'#9d174d'},loan_payment:{label:'Loan',bg:'#ede9fe',color:'#5b21b6'}};
+  const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_OV);setShowOverlayForm(true);};
   const openEditOverlay=o=>{
     setEditingOverlay(o);
     setOvForm({description:o.description,amount:String(o.amount),flow_date:o.flow_date,source:o.source,account_id:String(o.account_id||'')});
@@ -4513,11 +4533,11 @@ function DailyBalancesPage({toast}){
     try{
       const body={description:ovForm.description,amount:parseFloat(ovForm.amount),flow_date:ovForm.flow_date,source:ovForm.source,account_id:ovForm.account_id?parseInt(ovForm.account_id):null};
       if(editingOverlay){
-        const updated=await apiFetch(`/cash-flow-overlays/${editingOverlay.id}`,{method:'PATCH',body:JSON.stringify(body)});
-        setOverlays(prev=>prev.map(o=>o.id===updated.id?updated:o));
+        const u=await apiFetch(`/cash-flow-overlays/${editingOverlay.id}`,{method:'PATCH',body:JSON.stringify(body)});
+        setOverlays(prev=>prev.map(o=>o.id===u.id?u:o));
       }else{
-        const created=await apiFetch('/cash-flow-overlays',{method:'POST',body:JSON.stringify(body)});
-        setOverlays(prev=>[...prev,created].sort((a,b)=>a.flow_date.localeCompare(b.flow_date)));
+        const c=await apiFetch('/cash-flow-overlays',{method:'POST',body:JSON.stringify(body)});
+        setOverlays(prev=>[...prev,c].sort((a,b)=>a.flow_date.localeCompare(b.flow_date)));
       }
       setShowOverlayForm(false);toast('Saved');
     }catch(e){toast('Save failed','error');}
@@ -4536,12 +4556,270 @@ function DailyBalancesPage({toast}){
     try{
       const r=await apiFetch('/cash-flow-overlays/generate',{method:'POST'});
       toast(`⚡ Generated ${r.created} entr${r.created!==1?'ies':'y'}${r.skipped?`, ${r.skipped} already existed`:''}`);
-      const fresh=await apiFetch('/cash-flow-overlays');
-      setOverlays(fresh);
+      setOverlays(await apiFetch('/cash-flow-overlays'));
     }catch(e){toast('Generate failed','error');}
     finally{setGenBusy(false);}
   };
-  const SOURCE_BADGE={manual:{label:'Manual',bg:'#e0e7ff',color:'#3730a3'},cc_payment:{label:'CC',bg:'#fce7f3',color:'#9d174d'},loan_payment:{label:'Loan',bg:'#ede9fe',color:'#5b21b6'}};
+
+  const INP={border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'};
+
+  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+
+  return(
+    <div>
+      <h2 style={{fontSize:18,fontWeight:600,marginBottom:20}}>Cash Flow</h2>
+
+      {/* ── Salary & Income ────────────────────────────────────────────── */}
+      <div className="card" style={{marginBottom:24}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💰 Salary & Income</div>
+          <button className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+        </div>
+
+        {showSalaryForm&&(
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Pay Date</label>
+                <input type="date" value={salaryForm.payment_date} onChange={e=>setSalaryForm(f=>({...f,payment_date:e.target.value}))} style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
+                <input value={salaryForm.description} onChange={e=>setSalaryForm(f=>({...f,description:e.target.value}))} placeholder="Salary, HSA Contribution…" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Person</label>
+                <input value={salaryForm.person} onChange={e=>setSalaryForm(f=>({...f,person:e.target.value}))} placeholder="Omer, Daniella…" style={INP}/>
+              </div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:8}}>Deposit amounts per account</label>
+              {salaryAccounts.length===0
+                ?<div style={{fontSize:12,color:'var(--text-muted)'}}>No eligible accounts found (add Checking / Savings / HSA / FSA / Investment accounts first).</div>
+                :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
+                  {salaryAccounts.map(a=>(
+                    <div key={a.id} style={{display:'flex',flexDirection:'column',gap:3}}>
+                      <label style={{fontSize:11,color:'var(--text-secondary)'}}>{a.account_name} <span style={{opacity:0.5,fontSize:10}}>({a.account_type})</span></label>
+                      <input type="number" step="0.01" min="0" value={salaryForm.allocations[a.id]||''} onChange={e=>setSalaryForm(f=>({...f,allocations:{...f.allocations,[a.id]:e.target.value}}))} placeholder="0.00" style={{...INP,padding:'5px 8px'}}/>
+                    </div>
+                  ))}
+                </div>
+              }
+            </div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setShowSalaryForm(false)}>Cancel</button>
+              <button className="btn btn-sm btn-primary" onClick={saveSalary} disabled={salarySaving}>{salarySaving?'…':'Save'}</button>
+            </div>
+          </div>
+        )}
+
+        {salaryPayments.length===0&&!showSalaryForm?(
+          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
+            No salary entries yet — click <strong>+ Add Payment</strong> to add a pay date.
+          </div>
+        ):(
+          <div className="table-wrap">
+            <table style={{fontSize:13}}>
+              <thead><tr>
+                <th style={{minWidth:100}}>Date</th>
+                <th>Description</th>
+                <th>Person</th>
+                {salaryAccounts.map(a=>(
+                  <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${a.account_type})`}>{a.account_name}</th>
+                ))}
+                <th style={{textAlign:'right',minWidth:100}}>Total</th>
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr></thead>
+              <tbody>
+                {salaryPayments.map(sp=>{
+                  const allocMap={};
+                  sp.allocations.forEach(a=>{allocMap[a.account_id]=a.amount;});
+                  const isPast=sp.payment_date<todayStr();
+                  return(
+                    <tr key={sp.id} style={{opacity:isPast?0.65:1,background:isPast?'#fafafa':'var(--card-bg)'}}>
+                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'inherit'}}>{sp.payment_date}</td>
+                      <td style={{fontWeight:500}}>{sp.description}</td>
+                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:'#dcfce7',color:'#166534'}}>{sp.person}</span></td>
+                      {salaryAccounts.map(a=>{
+                        const amt=allocMap[a.account_id];
+                        return(
+                          <td key={a.id} style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>
+                            {amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}
+                          </td>
+                        );
+                      })}
+                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                      <td style={{textAlign:'center'}}>
+                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteSalary(sp.id)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Expected Outflows & One-Time Income ────────────────────────── */}
+      <div className="card">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💸 Expected Outflows &amp; One-Time Income</div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from configured credit card and loan payment schedules">
+              {genBusy?'…':'⚡ Generate from Cards &amp; Loans'}
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={openAddOverlay}>+ Add</button>
+          </div>
+        </div>
+
+        {showOverlayForm&&(
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
+              <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Tax Refund, Chase Payment…" style={INP}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Amount <span style={{fontWeight:400,opacity:0.7}}>(– outflow, + inflow)</span></label>
+              <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={INP}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Date</label>
+              <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={INP}/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Source</label>
+              <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={INP}>
+                <option value="manual">Manual</option>
+                <option value="cc_payment">CC Payment</option>
+                <option value="loan_payment">Loan Payment</option>
+              </select>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Account (optional)</label>
+              <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={INP}>
+                <option value="">— None —</option>
+                {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+              </select>
+            </div>
+            <div style={{gridColumn:'1/-1',display:'flex',gap:8,justifyContent:'flex-end',marginTop:4}}>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
+              <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'…':'Save'}</button>
+            </div>
+          </div>
+        )}
+
+        {overlays.length===0&&!showOverlayForm?(
+          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
+            No cash flow entries yet — add one manually or click ⚡ Generate from Cards &amp; Loans.
+          </div>
+        ):(
+          <div className="table-wrap">
+            <table style={{fontSize:13}}>
+              <thead><tr>
+                <th style={{minWidth:90}}>Date</th>
+                <th>Description</th>
+                <th style={{textAlign:'right',minWidth:100}}>Amount</th>
+                <th>Account</th>
+                <th>Source</th>
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr></thead>
+              <tbody>
+                {overlays.map(o=>{
+                  const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
+                  const isOut=o.amount<0;
+                  return(
+                    <tr key={o.id} style={{background:o.flow_date>=todayStr()?'var(--card-bg)':'#fafafa'}}>
+                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
+                      <td>{o.description}</td>
+                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                        {isOut?'–':'+'}${Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                      </td>
+                      <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
+                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
+                      <td style={{textAlign:'center'}}>
+                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
+                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {overlays.length>0&&(()=>{
+                  const future=overlays.filter(o=>o.flow_date>=todayStr());
+                  const netIn=future.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
+                  const netOut=future.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
+                  return(
+                    <tr style={{background:'#f8f9fa',fontWeight:600,borderTop:'2px solid var(--border)'}}>
+                      <td colSpan={2} style={{fontSize:12,color:'var(--text-muted)'}}>Upcoming totals</td>
+                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12}}>
+                        <span style={{color:'var(--green)'}}>+${netIn.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                        {' / '}
+                        <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                      </td>
+                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Daily Balances Page ─────────────────────────────────────────────────── */
+function DailyBalancesPage({toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[rangeMode,setRangeMode]=useState('month');
+  const[customStart,setCustomStart]=useState('');
+  const[customEnd,setCustomEnd]=useState('');
+  // All groups expanded by default; collapse Others that are less common
+  const[collapsed,setCollapsed]=useState({'Other Assets':true,'Other Liabilities':true});
+
+  // Balance-detail modal state {acct_name, date, raw_balance, projected_balance, entries}
+  const[cellModal,setCellModal]=useState(null);
+
+  const getRange=()=>{
+    const n=new Date();
+    if(rangeMode==='month'){
+      const y=n.getFullYear(),m=n.getMonth()+1;
+      const s=`${y}-${String(m).padStart(2,'0')}-01`;
+      const last=new Date(y,m,0).getDate();
+      return{s,e:`${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    }
+    if(rangeMode==='quarter'){
+      const y=n.getFullYear(),m=n.getMonth()+1;
+      const qs=Math.floor((m-1)/3)*3+1,qe=qs+2;
+      const last=new Date(y,qe,0).getDate();
+      return{s:`${y}-${String(qs).padStart(2,'0')}-01`,e:`${y}-${String(qe).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    }
+    return{s:customStart,e:customEnd};
+  };
+
+  const load=useCallback(async()=>{
+    const{s,e}=getRange();
+    if(rangeMode==='custom'&&(!s||!e))return;
+    setLoading(true);
+    try{
+      const ct=todayStr();
+      const q=`?client_today=${ct}${s?`&start_date=${s}`:''}${e?`&end_date=${e}`:''}`;
+      setData(await apiFetch(`/daily-balances${q}`));
+    }catch(err){toast('Failed to load daily balances','error');}
+    finally{setLoading(false);}
+  },[rangeMode,customStart,customEnd]);
+
+  useEffect(()=>{load();},[load]);
+
+  const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
+
 
   const fmtBal=v=>{
     if(v==null)return'—';
@@ -4554,14 +4832,14 @@ function DailyBalancesPage({toast}){
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
   if(!data||!data.dates)return<div style={{padding:20,color:'var(--text-muted)'}}>No data</div>;
 
-  const{dates,groups,today}=data;
+  const{dates,groups,today,projection_details={}}=data;
   const numDays=dates.length;
 
   return(
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:8}}>
         <div><h2 style={{fontSize:18,fontWeight:600}}>Daily Balances</h2>
-          <p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{numDays} days · end-of-day · italic = projected CC payment</p>
+          <p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{numDays} days · end-of-day · italic = projected · <span style={{color:'#ca8a04'}}>◈</span> = click for detail</p>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
@@ -4632,8 +4910,16 @@ function DailyBalancesPage({toast}){
                         const rawVal=acct.balances[di];
                         const dispVal=isLiab?-Math.abs(rawVal??0):(rawVal??0);
                         const isProj=acct.projected_dates&&acct.projected_dates.length>0&&d>=acct.projected_dates[0];
+                        const projEntries=(projection_details[String(acct.id)]||{})[d];
+                        const hasProj=!!(projEntries&&projEntries.length>0);
+                        const handleClick=hasProj?()=>{
+                          const rawBal=isLiab?-Math.abs((acct.raw_balances||acct.balances)[di]??0):((acct.raw_balances||acct.balances)[di]??0);
+                          setCellModal({acct_name:acct.account_name,date:d,raw_balance:rawBal,projected_balance:dispVal,entries:projEntries});
+                        }:undefined;
                         return(
-                          <td key={acct.id} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap'}}>{fmtBal(dispVal)}</td>
+                          <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'#fefce8':undefined}}>
+                            {fmtBal(dispVal)}{hasProj&&<span style={{marginLeft:2,fontSize:8,color:'#ca8a04',verticalAlign:'super'}}>◈</span>}
+                          </td>
                         );
                       }):[];
                       return[totCell,...acctCells];
@@ -4652,114 +4938,48 @@ function DailyBalancesPage({toast}){
         </table>
       </div>
 
-      {/* ── Cash Flow Overlays ─────────────────────────────────────────── */}
-      <div style={{marginTop:28}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💸 Cash Flow Overlays</div>
-          <div style={{display:'flex',gap:8}}>
-            <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from configured credit card and loan payment schedules">
-              {genBusy?'…':'⚡ Generate from Cards & Loans'}
-            </button>
-            <button className="btn btn-sm btn-primary" onClick={openAddOverlay}>+ Add</button>
+      {/* ── Balance-detail modal ─────────────────────────────────────────── */}
+      {cellModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setCellModal(null)}>
+          <div style={{background:'var(--card-bg)',borderRadius:12,padding:24,minWidth:340,maxWidth:480,boxShadow:'0 20px 60px rgba(0,0,0,0.2)',width:'90%'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:15,color:'var(--text-primary)'}}>{cellModal.acct_name}</div>
+                <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{cellModal.date}</div>
+              </div>
+              <button onClick={()=>setCellModal(null)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-muted)',lineHeight:1,padding:0}}>×</button>
+            </div>
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                <span style={{fontSize:13,color:'var(--text-secondary)'}}>System balance</span>
+                <span style={{fontFamily:'DM Mono',fontSize:13}}>{fmtBal(cellModal.raw_balance)}</span>
+              </div>
+              {cellModal.entries.map((e,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,paddingLeft:10,borderLeft:'3px solid '+(e.amount>=0?'var(--green)':'var(--red)')}}>
+                  <div>
+                    <div style={{fontSize:13,color:'var(--text-primary)'}}>{e.description}</div>
+                    <div style={{fontSize:10,color:'var(--text-muted)',textTransform:'capitalize',marginTop:1}}>{e.source.replace(/_/g,' ')}</div>
+                  </div>
+                  <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:600,color:e.amount>=0?'var(--green)':'var(--red)',marginLeft:16,whiteSpace:'nowrap'}}>
+                    {e.amount>=0?'+':'–'}${Math.abs(e.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  </span>
+                </div>
+              ))}
+              <div style={{borderTop:'2px solid var(--border)',marginTop:12,paddingTop:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:14,fontWeight:700,color:'var(--text-primary)'}}>Projected balance</span>
+                <span style={{fontFamily:'DM Mono',fontSize:15,fontWeight:700,color:cellModal.projected_balance>=0?'inherit':'var(--red)'}}>{fmtBal(cellModal.projected_balance)}</span>
+              </div>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Add / Edit form */}
-        {showOverlayForm&&(
-          <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
-              <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Paycheck, Chase Payment…" style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Amount <span style={{fontWeight:400,opacity:0.7}}>(– outflow, + inflow)</span></label>
-              <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Date</label>
-              <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Source</label>
-              <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
-                <option value="manual">Manual</option>
-                <option value="cc_payment">CC Payment</option>
-                <option value="loan_payment">Loan Payment</option>
-              </select>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Account (optional)</label>
-              <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
-                <option value="">— None —</option>
-                {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
-              </select>
-            </div>
-            <div style={{gridColumn:'1/-1',display:'flex',gap:8,justifyContent:'flex-end',marginTop:4}}>
-              <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
-              <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'…':'Save'}</button>
-            </div>
-          </div>
-        )}
+      {/* ── Overlay section moved to Cash Flow page ──────────────────────── */}
+      <div style={{marginTop:28}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <div style={{fontSize:13,color:'var(--text-muted)'}}>💡 Manage overlays &amp; salary projections in the <strong>Cash Flow</strong> page.</div>
+        </div>
 
-        {/* Overlay table */}
-        {overlays.length===0&&!showOverlayForm?(
-          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
-            No cash flow entries yet — add one manually or click ⚡ Generate from Cards & Loans.
-          </div>
-        ):(
-          <div className="table-wrap">
-            <table style={{fontSize:13}}>
-              <thead><tr>
-                <th style={{minWidth:90}}>Date</th>
-                <th>Description</th>
-                <th style={{textAlign:'right',minWidth:100}}>Amount</th>
-                <th>Account</th>
-                <th>Source</th>
-                <th style={{textAlign:'center'}}>Actions</th>
-              </tr></thead>
-              <tbody>
-                {overlays.map(o=>{
-                  const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
-                  const isOut=o.amount<0;
-                  return(
-                    <tr key={o.id} style={{background:new Date(o.flow_date+'T00:00:00')>=new Date(todayStr()+'T00:00:00')?'var(--card-bg)':'#fafafa'}}>
-                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
-                      <td>{o.description}</td>
-                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
-                        {isOut?'–':'+'}${Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
-                      </td>
-                      <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
-                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
-                      <td style={{textAlign:'center'}}>
-                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {/* Summary row */}
-                {overlays.length>0&&(()=>{
-                  const future=overlays.filter(o=>o.flow_date>=todayStr());
-                  const netIn=future.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
-                  const netOut=future.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
-                  return(
-                    <tr style={{background:'#f8f9fa',fontWeight:600,borderTop:'2px solid var(--border)'}}>
-                      <td colSpan={2} style={{fontSize:12,color:'var(--text-muted)'}}>Upcoming totals</td>
-                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12}}>
-                        <span style={{color:'var(--green)'}}>+${netIn.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                        {' / '}
-                        <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                      </td>
-                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
-                    </tr>
-                  );
-                })()}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -4817,6 +5037,7 @@ function App(){
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
           {page==='cashflow'&&<DailyBalancesPage toast={toast}/>}
+          {page==='cashplanner'&&<CashFlowPage toast={toast}/>}
           {page==='networth'&&<NetWorthPage toast={toast}/>}
           {page==='loans'&&<LoansPage toast={toast}/>}
           {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}

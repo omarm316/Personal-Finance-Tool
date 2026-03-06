@@ -465,6 +465,41 @@ class CashFlowOverlay(Base):
     account = relationship('Account', foreign_keys=[account_id])
 
 
+class SalaryPayment(Base):
+    """
+    One income event (paycheck, HSA/FSA contribution, etc.) for one person on one date.
+    Each SalaryPayment has one or more SalaryAllocation rows that specify how much
+    is deposited into each account.  Future payments are projected in the daily-balance
+    grid via get_daily_balances.
+    """
+    __tablename__ = 'salary_payments'
+
+    id           = Column(Integer, primary_key=True)
+    payment_date = Column(Date, nullable=False, index=True)
+    description  = Column(String(200), nullable=False)   # "Salary", "HSA Contribution", …
+    person       = Column(String(100), nullable=False)   # "Omer", "Daniella", …
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    allocations = relationship(
+        'SalaryAllocation', back_populates='salary_payment',
+        cascade='all, delete-orphan',
+    )
+
+
+class SalaryAllocation(Base):
+    """Per-account deposit amount for a SalaryPayment (always a positive inflow)."""
+    __tablename__ = 'salary_allocations'
+
+    id                = Column(Integer, primary_key=True)
+    salary_payment_id = Column(Integer, ForeignKey('salary_payments.id'), nullable=False)
+    account_id        = Column(Integer, ForeignKey('accounts.id'), nullable=False)
+    amount            = Column(Float, nullable=False)    # always positive
+
+    salary_payment = relationship('SalaryPayment', back_populates='allocations')
+    account        = relationship('Account', foreign_keys=[account_id])
+
+
 # ---------------------------------------------------------------------------
 # Category clean-up remap — old name → new canonical name.
 # Applied once per startup; idempotent (re-running is safe).

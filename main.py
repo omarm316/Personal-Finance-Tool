@@ -28,6 +28,7 @@ from database import (
     seed_points_categories, import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
+    SalaryPayment, SalaryAllocation,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -5318,6 +5319,118 @@ async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
     return {"created": created, "skipped": skipped}
 
 
+# Salary Payments
+# ---------------------------------------------------------------------------
+
+class SalaryAllocationIn(BaseModel):
+    account_id: int
+    amount: float
+
+class SalaryPaymentCreate(BaseModel):
+    payment_date: str          # YYYY-MM-DD
+    description: str
+    person: str
+    allocations: List[SalaryAllocationIn]
+
+class SalaryPaymentUpdate(BaseModel):
+    payment_date: Optional[str] = None
+    description:  Optional[str] = None
+    person:       Optional[str] = None
+    allocations:  Optional[List[SalaryAllocationIn]] = None
+
+
+def _salary_to_dict(sp: SalaryPayment) -> dict:
+    return {
+        "id":           sp.id,
+        "payment_date": sp.payment_date.isoformat(),
+        "description":  sp.description,
+        "person":       sp.person,
+        "is_active":    sp.is_active,
+        "allocations":  [
+            {
+                "id":           a.id,
+                "account_id":   a.account_id,
+                "account_name": a.account.account_name if a.account else None,
+                "amount":       a.amount,
+            }
+            for a in (sp.allocations or [])
+        ],
+    }
+
+
+@app.get("/api/salary-payments")
+async def list_salary_payments(db: Session = Depends(get_db)):
+    """Return all active salary payments with their per-account allocations."""
+    rows = (
+        db.query(SalaryPayment)
+        .filter(SalaryPayment.is_active == True)
+        .order_by(SalaryPayment.payment_date.desc(), SalaryPayment.id)
+        .all()
+    )
+    return [_salary_to_dict(r) for r in rows]
+
+
+@app.post("/api/salary-payments")
+async def create_salary_payment(body: SalaryPaymentCreate, db: Session = Depends(get_db)):
+    from datetime import date as _date
+    sp = SalaryPayment(
+        payment_date = _date.fromisoformat(body.payment_date),
+        description  = body.description,
+        person       = body.person,
+        is_active    = True,
+    )
+    db.add(sp)
+    db.flush()   # get sp.id before adding child rows
+    for a in body.allocations:
+        if a.amount and a.amount != 0:
+            db.add(SalaryAllocation(
+                salary_payment_id = sp.id,
+                account_id        = a.account_id,
+                amount            = abs(a.amount),   # always stored positive
+            ))
+    db.commit()
+    db.refresh(sp)
+    return _salary_to_dict(sp)
+
+
+@app.patch("/api/salary-payments/{payment_id}")
+async def update_salary_payment(
+    payment_id: int, body: SalaryPaymentUpdate, db: Session = Depends(get_db)
+):
+    from datetime import date as _date
+    sp = db.query(SalaryPayment).filter_by(id=payment_id).first()
+    if not sp:
+        raise HTTPException(404, "Salary payment not found")
+    if body.payment_date is not None:
+        sp.payment_date = _date.fromisoformat(body.payment_date)
+    if body.description is not None:
+        sp.description = body.description
+    if body.person is not None:
+        sp.person = body.person
+    if body.allocations is not None:
+        db.query(SalaryAllocation).filter_by(salary_payment_id=sp.id).delete()
+        for a in body.allocations:
+            if a.amount and a.amount != 0:
+                db.add(SalaryAllocation(
+                    salary_payment_id = sp.id,
+                    account_id        = a.account_id,
+                    amount            = abs(a.amount),
+                ))
+    db.commit()
+    db.refresh(sp)
+    return _salary_to_dict(sp)
+
+
+@app.delete("/api/salary-payments/{payment_id}")
+async def delete_salary_payment(payment_id: int, db: Session = Depends(get_db)):
+    sp = db.query(SalaryPayment).filter_by(id=payment_id).first()
+    if not sp:
+        raise HTTPException(404, "Salary payment not found")
+    db.delete(sp)
+    db.commit()
+    return {"deleted": payment_id}
+
+
 # Daily Balances
 # ---------------------------------------------------------------------------
 
@@ -5439,14 +5552,26 @@ async def get_daily_balances(
 
         acct_balances[acct.id] = daily
 
-    # ── Overlay-Driven Projections ────────────────────────────────────────
-    # Apply active CashFlowOverlay entries to future balance arrays instead of
-    # auto-computing CC/loan projections.  Only overlays whose account_id is
-    # tracked in acct_balances and whose flow_date falls inside the display
-    # range are applied.  The amount is added to every day from the flow_date
-    # forward so the balance chart shows the step-change on the right day.
-    projected_dates: dict[int, set] = {}  # {account_id: set of projected date strings}
+    # ── Snapshot raw balances (before any projections) ───────────────────
+    # Stored per-account so the balance-detail modal can show "system balance"
+    # (what the balance would be without any overlay / salary projections).
+    raw_balances: dict[int, list] = {aid: list(bal) for aid, bal in acct_balances.items()}
 
+    # ── Projection step: CashFlowOverlays + SalaryAllocations ────────────
+    # Both types are applied as step-changes: the amount is added to every day
+    # from flow_date forward.  projection_details records per-account per-date
+    # entries so the frontend modal can break down each projected cell.
+    projected_dates:    dict[int, set]  = {}   # {account_id: {date_str, …}}
+    projection_details: dict[int, dict] = {}   # {account_id: {date_str: [entries]}}
+
+    def _apply_projection(acct_id: int, pdate_str: str, entry: dict):
+        date_idx = dates.index(pdate_str)
+        for i in range(date_idx, num_days):
+            acct_balances[acct_id][i] = round(acct_balances[acct_id][i] + entry["amount"], 2)
+        projected_dates.setdefault(acct_id, set()).add(pdate_str)
+        projection_details.setdefault(acct_id, {}).setdefault(pdate_str, []).append(entry)
+
+    # CashFlowOverlay entries
     overlays = (
         db.query(CashFlowOverlay)
         .filter(
@@ -5455,24 +5580,48 @@ async def get_daily_balances(
         )
         .all()
     )
-
     for ov in overlays:
         if not ov.account_id or ov.account_id not in acct_balances:
             continue
         pdate_str = ov.flow_date.isoformat()
         if pdate_str not in dates_set:
             continue
-        date_idx = dates.index(pdate_str)
-        for i in range(date_idx, num_days):
-            acct_balances[ov.account_id][i] = round(
-                acct_balances[ov.account_id][i] + ov.amount, 2
-            )
-        projected_dates.setdefault(ov.account_id, set()).add(pdate_str)
+        _apply_projection(ov.account_id, pdate_str, {
+            "description": ov.description,
+            "amount":      ov.amount,
+            "source":      ov.source,
+        })
+
+    # SalaryAllocation entries (future pay dates only)
+    from sqlalchemy.orm import joinedload as _jl
+    salary_allocs = (
+        db.query(SalaryAllocation)
+        .options(_jl(SalaryAllocation.salary_payment))
+        .join(SalaryPayment)
+        .filter(
+            SalaryPayment.is_active   == True,
+            SalaryPayment.payment_date >= today,
+        )
+        .all()
+    )
+    for alloc in salary_allocs:
+        if alloc.account_id not in acct_balances:
+            continue
+        pdate_str = alloc.salary_payment.payment_date.isoformat()
+        if pdate_str not in dates_set:
+            continue
+        desc = f"{alloc.salary_payment.description} ({alloc.salary_payment.person})"
+        _apply_projection(alloc.account_id, pdate_str, {
+            "description": desc,
+            "amount":      alloc.amount,   # always positive
+            "source":      "salary",
+        })
 
     # ── Group by account type ─────────────────────────────────────────────
     GROUP_ORDER = [
         ("Checking & Savings", {"Checking", "Savings", "checking", "savings",
-                                 "money market", "Money Market", "cd", "CD"}),
+                                 "money market", "Money Market", "cd", "CD",
+                                 "HSA", "hsa", "FSA", "fsa"}),
         ("Investments",        {"Brokerage", "Investment", "brokerage", "investment",
                                  "401k", "401K", "ira", "IRA"}),
         ("Other Assets",       {"vehicle", "Vehicle", "real_estate", "business_owned", "Other"}),
@@ -5496,11 +5645,12 @@ async def get_daily_balances(
         grp = _get_group(acct.account_type)
         p_dates = projected_dates.get(acct.id, set())
         groups_map[grp].append({
-            "id": acct.id,
-            "account_name": acct.account_name,
-            "account_type": acct.account_type,
-            "mask": acct.mask,
-            "balances": acct_balances[acct.id],
+            "id":              acct.id,
+            "account_name":    acct.account_name,
+            "account_type":    acct.account_type,
+            "mask":            acct.mask,
+            "balances":        acct_balances[acct.id],
+            "raw_balances":    raw_balances[acct.id],
             "projected_dates": sorted(p_dates),
         })
 
@@ -5519,11 +5669,14 @@ async def get_daily_balances(
         })
 
     return {
-        "start_date": start_date,
-        "end_date": end_date,
-        "today": today.isoformat(),
-        "dates": dates,
-        "groups": result_groups,
+        "start_date":         start_date,
+        "end_date":           end_date,
+        "today":              today.isoformat(),
+        "dates":              dates,
+        "groups":             result_groups,
+        # projection_details: {str(account_id): {date_str: [{description, amount, source}]}}
+        # Used by the frontend balance-detail modal.
+        "projection_details": {str(k): v for k, v in projection_details.items()},
     }
 
 
