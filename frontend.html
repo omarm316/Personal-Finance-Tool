@@ -4945,8 +4945,13 @@ function DailyBalancesPage({toast}){
                         const projEntries=(projection_details[String(acct.id)]||{})[d];
                         const hasProj=!!(projEntries&&projEntries.length>0);
                         const handleClick=hasProj?()=>{
-                          const rawBal=isLiab?-Math.abs((acct.raw_balances||acct.balances)[di]??0):((acct.raw_balances||acct.balances)[di]??0);
-                          setCellModal({acct_name:acct.account_name,date:d,raw_balance:rawBal,projected_balance:dispVal,entries:projEntries});
+                          // Compute "balance before today's entries" by subtracting this date's
+                          // entries from the projected balance.  This guarantees the modal math
+                          // always reconciles even when earlier-date overlays have already shifted
+                          // the running balance (those prior entries aren't shown here).
+                          const entriesSum=projEntries.reduce((s,e)=>s+e.amount,0);
+                          const balBefore=Math.round((dispVal-entriesSum)*100)/100;
+                          setCellModal({acct_name:acct.account_name,date:d,raw_balance:balBefore,projected_balance:dispVal,entries:projEntries});
                         }:undefined;
                         return(
                           <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'#fefce8':undefined}}>
@@ -4983,7 +4988,7 @@ function DailyBalancesPage({toast}){
             </div>
             <div style={{borderTop:'1px solid var(--border)',paddingTop:14}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                <span style={{fontSize:13,color:'var(--text-secondary)'}}>System balance</span>
+                <span style={{fontSize:13,color:'var(--text-secondary)'}}>Balance before today's entries</span>
                 <span style={{fontFamily:'DM Mono',fontSize:13}}>{fmtBal(cellModal.raw_balance)}</span>
               </div>
               {cellModal.entries.map((e,i)=>(
