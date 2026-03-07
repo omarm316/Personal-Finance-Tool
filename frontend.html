@@ -14,7 +14,7 @@
 :root{
   --sidebar-w:220px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
-  --card-bg:#f5f7fa;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
+  --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
   --radius:12px;--shadow:0 2px 8px rgba(0,0,0,0.07),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.1);
 }
@@ -46,7 +46,7 @@ body{overflow:hidden}
 .topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
 .content{flex:1;overflow-y:auto;padding:24px 28px}
-.card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card{background:#ffffff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
 .metric-label{font-size:12px;font-weight:600;letter-spacing:0;color:var(--text-primary);margin-bottom:8px}
@@ -1498,7 +1498,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
     const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
     return(
       <div style={{padding:'5px 14px',borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',display:'flex',alignItems:'center',gap:10}}>
-        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'rgba(0,0,0,0.04)',height:32}}>
+        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'rgba(0,0,0,0.03)',height:32,border:'1px solid var(--border)'}}>
           {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,background:pillFill,transition:'width 0.35s ease'}}/>}
           <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',height:'100%',gap:8}}>
             <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
