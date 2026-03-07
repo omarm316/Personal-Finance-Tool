@@ -2218,7 +2218,7 @@ async def get_stats(
                 if s.is_gcb:
                     continue
                 if t.action == 'Expense':
-                    cat = s.category or t.category_final or 'Unclassified'
+                    cat = s.category or t.category_final or 'Other'
                     # charges (s.amount < 0) → -s.amount is positive; credits → negative (nets correctly)
                     contrib = -s.amount
                     total_expenses += contrib
@@ -2229,7 +2229,7 @@ async def get_stats(
             if t.is_gcb or t.gcb_tagged:
                 continue
             if t.action == 'Expense':
-                cat = t.category_final or 'Unclassified'
+                cat = t.category_final or 'Other'
                 contrib = -t.amount
                 total_expenses += contrib
                 by_category[cat] = by_category.get(cat, 0) + contrib
@@ -2292,7 +2292,7 @@ async def get_stats_detail(
             for s in splits_map.get(t.id, []):
                 if s.is_gcb:
                     continue
-                cat = s.category or t.category_final or 'Unclassified'
+                cat = s.category or t.category_final or 'Other'
                 if cat != category:
                     continue
                 contrib = -s.amount if t.action == 'Expense' else s.amount
@@ -2306,7 +2306,7 @@ async def get_stats_detail(
                     "split_amount": s.amount, "contrib": round(contrib, 2),
                 })
         else:
-            cat = t.category_final or 'Unclassified'
+            cat = t.category_final or 'Other'
             if cat != category:
                 continue
             contrib = -t.amount if t.action == 'Expense' else t.amount
@@ -4249,7 +4249,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
             for s in splits:
                 if s.is_gcb:
                     continue  # Skip GCB-tagged splits
-                cat = s.category or t.category_final or 'Unclassified'
+                cat = s.category or t.category_final or 'Other'
                 month = str(t.month)
                 contrib = (-s.amount) if t.action == 'Expense' else s.amount
                 if cat not in actuals:
@@ -4259,7 +4259,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
             # Skip GCB-tagged whole transactions
             if t.is_gcb or t.gcb_tagged:
                 continue
-            cat = t.category_final or 'Unclassified'
+            cat = t.category_final or 'Other'
             month = str(t.month)
             contrib = (-t.amount) if t.action == 'Expense' else t.amount
             if cat not in actuals:
@@ -4306,13 +4306,13 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
                 for s in splits:
                     if s.is_gcb:
                         continue
-                    cat = s.category or t.category_final or 'Unclassified'
+                    cat = s.category or t.category_final or 'Other'
                     contrib = (-s.amount) if t.action == 'Expense' else s.amount
                     month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
             else:
                 if t.is_gcb or t.gcb_tagged:
                     continue
-                cat = t.category_final or 'Unclassified'
+                cat = t.category_final or 'Other'
                 contrib = (-t.amount) if t.action == 'Expense' else t.amount
                 month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
         for cat, amt in month_totals.items():
@@ -4448,7 +4448,7 @@ async def reconcile_account(
         excluded = bool(t.is_excluded)
         if not excluded:
             running = round(running + t.amount, 2)
-        cat = t.category_manual or t.category_auto or 'Unclassified'
+        cat = t.category_manual or t.category_auto or 'Other'
         rows.append({
             'id':              t.id,
             'date':            t.date.strftime('%Y-%m-%d'),

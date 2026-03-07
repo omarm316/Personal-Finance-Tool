@@ -125,6 +125,10 @@ td{padding:11px 14px;font-size:13.5px}
 .content::-webkit-scrollbar{width:6px}
 .content::-webkit-scrollbar-track{background:transparent}
 .content::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+.sel-pill{display:flex;gap:2px;background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:4px;height:34px;box-sizing:border-box;align-items:center}
+.sel-pill button{border:none;cursor:pointer;border-radius:7px;padding:3px 12px;font-size:12px;font-weight:500;height:26px;font-family:inherit;transition:background 0.15s,color 0.15s}
+.sel-drop{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;background:#ffffff;color:var(--text-primary);cursor:pointer;height:34px;box-sizing:border-box;font-family:inherit;outline:none}
+.sel-drop:focus{border-color:var(--sidebar-active-color);box-shadow:0 0 0 2px rgba(37,99,235,0.12)}
 </style>
 </head>
 <body>
@@ -136,6 +140,12 @@ const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).fo
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
 const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','#fca5a5','#bef264'];
+const CATEGORY_COLORS={'Groceries':'#16a34a','Supermarket':'#16a34a','Dining':'#ea580c','Restaurants':'#ea580c','Food & Drink':'#ea580c','Transportation':'#2563eb','Auto':'#2563eb','Gas':'#7c3aed','Fuel':'#7c3aed','Utilities':'#0891b2','Electric':'#0891b2','Water':'#0891b2','Internet':'#0891b2','Shopping':'#db2777','Clothing':'#db2777','Entertainment':'#9333ea','Streaming':'#9333ea','Travel':'#0284c7','Hotel':'#0284c7','Flights':'#0284c7','Health':'#dc2626','Medical':'#dc2626','Pharmacy':'#dc2626','Insurance':'#4f46e5','Subscriptions':'#0d9488','Personal Care':'#c026d3','Education':'#ca8a04','Tuition':'#ca8a04','Rent':'#b45309','Mortgage':'#b45309','Coffee':'#92400e','Pets':'#65a30d','Gifts':'#e11d48','Charity':'#e11d48','Taxes':'#475569','Fees':'#475569','Income':'#15803d','Paycheck':'#15803d','Other':'#6b7280'};
+const _FALLBACK_COLORS=['#2563eb','#16a34a','#ea580c','#7c3aed','#0891b2','#db2777','#9333ea','#ca8a04','#0d9488','#c026d3','#dc2626','#b45309'];
+const _hashStr=s=>Math.abs(s.split('').reduce((a,c)=>(a*31+c.charCodeAt(0))|0,0));
+const getCatColor=cat=>CATEGORY_COLORS[cat]||_FALLBACK_COLORS[_hashStr(cat||'')%_FALLBACK_COLORS.length];
+const hexToRgba=(hex,alpha)=>{const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${alpha})`;};
+const normalizeCat=cat=>(!cat||cat==='Unclassified')?'Other':cat;
 const monthStart=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
 const todayStr=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const localDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -239,7 +249,7 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
 }
 
 /* Sort categories: alphabetical, with "For Others", "Other", "Unclassified" pinned to the bottom */
-const _CATS_LAST=new Set(['For Others','Other','Unclassified']);
+const _CATS_LAST=new Set(['For Others','Other','Unclassified','other']);
 const sortedCats=(cats)=>{
   const regular=[...cats].filter(c=>!_CATS_LAST.has(c.name)).sort((a,b)=>a.name.localeCompare(b.name));
   const last=[...cats].filter(c=>_CATS_LAST.has(c.name)).sort((a,b)=>a.name.localeCompare(b.name));
@@ -413,8 +423,8 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               <option value="">Unclassified</option>
               {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
-            :<span className={`badge ${!txn.category_final||txn.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`}>
-              {txn.category_final||'Unclassified'}
+            :<span className={`badge ${normalizeCat(txn.category_final)==='Other'?'badge-unclassified':'badge-category'}`}>
+              {normalizeCat(txn.category_final)}
               {txn.category_manual&&<span style={{marginLeft:4,opacity:0.5}}>✎</span>}
             </span>
         }
@@ -568,7 +578,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
                 ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
                 ['Account',txn.account_name],
                 ['Type',txn.action_display||cap(txn.action)],
-                ['Category',txn.category_final||'Unclassified'],
+                ['Category',normalizeCat(txn.category_final)],
                 ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
                 ['Import Source',importLabel[src]||cap(src)],
                 ['Enrichment',enr?(enrichLabel[enr]||cap(enr)):'—'],
@@ -1440,7 +1450,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
   const mo=viewMonth||(now.getMonth()+1);
   const mStr=String(mo);
   const monthLabel=new Date(yr,mo-1,1).toLocaleString('default',{month:'long'});
-  const SKIP=new Set(['Transfer','Unclassified','Work']);
+  const SKIP=new Set(['Transfer','Work']);
   const isAnnual=view==='annual';
   const title=isAnnual?`Budget vs. Actual — ${yr} YTD`:`Budget vs. Actual — ${monthLabel} ${yr}`;
 
@@ -1531,6 +1541,158 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
           <PillRow key={cat} cat={cat} budget={budget} actual={actual}/>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ── Budget vs. Actual + Spending combined table ─────────────────────────── */
+function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYear,onSetView,onSetYear,onSetMonth}){
+  const[sortBy,setSortBy]=React.useState('pct');
+  const[sortDir,setSortDir]=React.useState('desc');
+  const now=new Date();
+  const yr=viewYear||now.getFullYear();
+  const mo=viewMonth||(now.getMonth()+1);
+  const mStr=String(mo);
+  const monthLabel=new Date(yr,mo-1,1).toLocaleString('default',{month:'long'});
+  const SKIP=new Set(['Transfer','Work']);
+  const isAnnual=view==='annual';
+  const periodLabel=isAnnual?`${yr} Year-to-Date`:`${monthLabel} ${yr}`;
+  const fmt0=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
+
+  const allCats=new Set([...Object.keys(targets),...(isAnnual?Object.keys(ytdActuals):Object.keys(actuals))]);
+  const rows=[];
+  allCats.forEach(cat=>{
+    if(SKIP.has(cat))return;
+    const dCat=normalizeCat(cat);
+    let budget,actual;
+    if(isAnnual){
+      budget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=(targets[cat]?.[String(m)]?.amount||0);return s;})();
+      actual=ytdActuals[cat]||0;
+    }else{
+      budget=targets[cat]?.[mStr]?.amount||0;
+      actual=actuals[cat]?.[mStr]||0;
+    }
+    if(budget===0&&actual===0)return;
+    rows.push({cat:dCat,budget,actual});
+  });
+
+  const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
+  const totalActual=rows.reduce((s,r)=>s+r.actual,0);
+
+  const handleSort=col=>{
+    if(sortBy===col)setSortDir(d=>d==='desc'?'asc':'desc');
+    else{setSortBy(col);setSortDir('desc');}
+  };
+
+  const sortedRows=[...rows].sort((a,b)=>{
+    const aBot=a.cat==='Other'||a.budget===0;
+    const bBot=b.cat==='Other'||b.budget===0;
+    if(aBot&&!bBot)return 1;if(!aBot&&bBot)return -1;
+    let aV,bV;
+    if(sortBy==='pct'){aV=a.budget>0?a.actual/a.budget:0;bV=b.budget>0?b.actual/b.budget:0;}
+    else if(sortBy==='actual'){aV=a.actual;bV=b.actual;}
+    else{aV=a.budget;bV=b.budget;}
+    return sortDir==='desc'?bV-aV:aV-bV;
+  });
+
+  const SortBtn=({col,label})=>(
+    <button onClick={()=>handleSort(col)} style={{background:'none',border:'none',cursor:'pointer',padding:0,
+      display:'flex',alignItems:'center',justifyContent:'flex-end',gap:3,
+      fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em',
+      color:sortBy===col?'var(--text-primary)':'var(--text-muted)'}}>
+      {label}<span style={{fontSize:9,opacity:sortBy===col?1:0.35}}>{sortBy===col?(sortDir==='desc'?'↓':'↑'):'↕'}</span>
+    </button>
+  );
+
+  const COLS='150px 1fr 100px 80px 52px';
+
+  const RowEl=({cat,budget,actual,isTotal=false})=>{
+    const color=isTotal?'#374151':getCatColor(cat);
+    const isCredit=actual<0;
+    const pct=!isCredit&&budget>0?actual/budget:null;
+    const over=pct!==null&&pct>=1;
+    const barPct=pct!==null?Math.min(pct*100,100):0;
+    const pctColor=pct===null?'var(--text-muted)':over?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
+    return(
+      <div style={{display:'flex',alignItems:'stretch',
+        borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',
+        background:isTotal?'rgba(0,0,0,0.015)':'transparent'}}>
+        <div style={{width:4,background:color,flexShrink:0}}/>
+        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'9px 16px',gap:14}}>
+          <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+            {isTotal?'Total':cat}
+          </span>
+          {!isCredit&&budget>0?(
+            <div style={{position:'relative',height:8,borderRadius:4,
+              background:hexToRgba(color,0.12),border:`1px solid ${hexToRgba(color,0.22)}`,overflow:'hidden'}}>
+              <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
+                background:over?'var(--red)':color,opacity:over?0.7:0.72,
+                borderRadius:4,transition:'width 0.4s ease'}}/>
+            </div>
+          ):(
+            <span style={{fontSize:11,color:isCredit?'var(--green)':'var(--text-muted)',fontStyle:'italic'}}>
+              {isCredit?'credit':'no budget'}
+            </span>
+          )}
+          <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
+            color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
+            {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
+          </span>
+          <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
+            color:budget>0?'var(--text-secondary)':'var(--text-muted)'}}>
+            {budget>0?fmt0(budget):'—'}
+          </span>
+          <span style={{textAlign:'right',fontSize:11.5,fontWeight:600,color:pctColor}}>
+            {pct!==null?`${Math.round(pct*100)}%`:isCredit?'':'—'}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div className="card">
+      <div className="section-header">
+        <div>
+          <div className="section-title">Budget vs. Actual</div>
+          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{periodLabel}</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div className="sel-pill">
+            {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
+              <button key={v} onClick={()=>onSetView(v)}
+                style={{background:view===v?'var(--sidebar-active-bg)':'transparent',
+                  color:view===v?'var(--sidebar-active-color)':'var(--text-primary)'}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <select value={yr} onChange={e=>onSetYear(+e.target.value)} className="sel-drop">
+            {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          {!isAnnual&&(
+            <select value={mo} onChange={e=>onSetMonth(+e.target.value)} className="sel-drop">
+              {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
+                <option key={i+1} value={i+1}>{m}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+      <div style={{display:'flex',alignItems:'stretch',borderBottom:'1px solid var(--border)',background:'rgba(0,0,0,0.018)'}}>
+        <div style={{width:4,flexShrink:0}}/>
+        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14}}>
+          <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Category</span>
+          <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Progress</span>
+          <SortBtn col="actual" label="Actual"/>
+          <SortBtn col="budget" label="Budget"/>
+          <SortBtn col="pct" label="%"/>
+        </div>
+      </div>
+      <RowEl cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
+      {sortedRows.length===0
+        ?<div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'24px 0'}}>No data for this period yet.</div>
+        :sortedRows.map(({cat,budget,actual})=><RowEl key={cat} cat={cat} budget={budget} actual={actual}/>)}
     </div>
   );
 }
@@ -1747,38 +1909,9 @@ function DashboardPage({categories,toast}){
       {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
 
       {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
-        <div>
-          <h2 style={{fontSize:18,fontWeight:600}}>Good {greeting}</h2>
-          <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <div style={{display:'flex',gap:2,background:'#ffffff',border:'1px solid var(--border)',borderRadius:10,padding:4,height:34,boxSizing:'border-box',alignItems:'center'}}>
-            {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
-              <button key={v} onClick={()=>{setBudgetView(v);setCatDetail(null);}}
-                style={{border:'none',cursor:'pointer',borderRadius:7,padding:'3px 12px',fontSize:12,fontWeight:500,height:26,
-                  background:budgetView===v?'var(--sidebar-active-bg)':'transparent',
-                  color:budgetView===v?'var(--sidebar-active-color)':'var(--text-primary)',
-                  transition:'background 0.15s,color 0.15s'}}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
-            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'#ffffff',color:'var(--text-primary)',cursor:'pointer',height:34,boxSizing:'border-box'}}>
-            {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          {budgetView==='month'&&(
-            <select value={viewMonth} onChange={e=>{setViewMonth(+e.target.value);setCatDetail(null);}}
-              style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'#ffffff',color:'var(--text-primary)',cursor:'pointer',height:34,boxSizing:'border-box'}}>
-              {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
-                <option key={i+1} value={i+1}>{m}</option>
-              ))}
-            </select>
-          )}
-        </div>
+      <div style={{marginBottom:20}}>
+        <h2 style={{fontSize:18,fontWeight:600}}>Good {greeting}</h2>
+        <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
       </div>
 
       {/* KPI row — 5 cards */}
@@ -1811,65 +1944,62 @@ function DashboardPage({categories,toast}){
         );
       })()}
 
-      {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
-      <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch',marginTop:20}}>
-        {/* Left: Budget Scorecard */}
-        <BudgetScorecardCard targets={budgetTargets} actuals={budgetActuals} view={budgetView} ytdActuals={ytdByCat} viewMonth={viewMonth} viewYear={viewYear}/>
+      {/* ── Section 1: Full-width Budget & Spending ──────────────────────────── */}
+      <div style={{marginTop:20}}>
+        <BudgetAndSpendingCard
+          targets={budgetTargets} actuals={budgetActuals}
+          view={budgetView} ytdActuals={ytdByCat}
+          viewMonth={viewMonth} viewYear={viewYear}
+          onSetView={v=>{setBudgetView(v);setCatDetail(null);}}
+          onSetYear={v=>{setViewYear(v);setCatDetail(null);}}
+          onSetMonth={v=>{setViewMonth(v);setCatDetail(null);}}/>
+      </div>
 
-        {/* Right: Spending Breakdown → Recent Transactions → Net Worth Summary */}
-        <div style={{display:'flex',flexDirection:'column',gap:20}}>
-          <SpendingBreakdownCard topCats={
-            budgetView==='annual'
-              ? Object.entries(ytdByCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6)
-              : topCats
-          } onCategoryClick={openCatDetail} selectedCat={catDetail?.cat}/>
-
-
-          {catDetail&&<CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>}
-
-          {/* Recent Transactions */}
-          <div className="card">
-            <div className="section-header"><div className="section-title">Recent Transactions</div></div>
-            {recent.length===0
-              ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
-              :<table style={{width:'100%',tableLayout:'auto'}}><tbody>{recent
-                .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
-                .map(t=>{
-                const dateStr=(t.date||'').substring(0,10);
-                const dt=new Date(dateStr+'T12:00:00');
-                const shortDate=`${dt.getMonth()+1}/${dt.getDate()}`;
-                const amtDisplay=t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount);
-                return(
-                <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
-                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap',width:36}}>{shortDate}</td>
-                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,width:'50%'}}>{t.description_display||t.description_raw}</td>
-                  <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap',width:90}}>
-                    <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{amtDisplay}</span>
-                  </td>
-                  <td style={{padding:'9px 10px',whiteSpace:'nowrap',width:1}}>
-                    {showCategoryForType(t.action)&&<span className={`badge ${!t.category_final||t.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{t.category_final||'Unclassified'}</span>}
-                  </td>
-                  <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap',width:1}}>{t.account_name}</td>
-                </tr>
-                );
-              })}</tbody></table>
-            }
-          </div>
-
-          {/* Net Worth Summary — marginTop:auto pushes it to bottom of the column */}
-          {netWorth&&<div className="card" style={{marginTop:'auto'}}>
-            <div className="section-header"><div className="section-title">Net Worth Summary</div></div>
-            {Object.entries(netWorth.buckets||{}).map(([bucket,bData])=>{
-              const total=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
+      {/* ── Section 2: Recent Transactions (left) + Net Worth (right) ─────────── */}
+      <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:20,marginTop:20}}>
+        {/* Recent Transactions */}
+        <div className="card">
+          <div className="section-header"><div className="section-title">Recent Transactions</div></div>
+          {recent.length===0
+            ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
+            :<table style={{width:'100%',tableLayout:'auto'}}><tbody>{recent
+              .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
+              .map(t=>{
+              const dateStr=(t.date||'').substring(0,10);
+              const dt=new Date(dateStr+'T12:00:00');
+              const shortDate=`${dt.getMonth()+1}/${dt.getDate()}`;
+              const amtDisplay=t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount);
+              const cat=normalizeCat(t.category_final);
               return(
-                <div key={bucket} style={{padding:'10px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between'}}>
-                  <span style={{fontSize:13,fontWeight:500}}>{bucket}</span>
-                  <span style={{fontFamily:'Inter',fontSize:12,fontWeight:500,color:bData.is_asset?'var(--green)':'var(--red)'}}>{bData.is_asset?'':'-'}{fmt(total)}</span>
-                </div>
+              <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
+                <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap',width:36}}>{shortDate}</td>
+                <td style={{padding:'9px 8px',fontSize:13,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,width:'50%'}}>{t.description_display||t.description_raw}</td>
+                <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap',width:90}}>
+                  <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{amtDisplay}</span>
+                </td>
+                <td style={{padding:'9px 10px',whiteSpace:'nowrap',width:1}}>
+                  {showCategoryForType(t.action)&&<span className={`badge ${cat==='Other'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{cat}</span>}
+                </td>
+                <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap',width:1}}>{t.account_name}</td>
+              </tr>
               );
-            })}
-          </div>}
+            })}</tbody></table>
+          }
         </div>
+
+        {/* Net Worth Summary */}
+        {netWorth&&<div className="card">
+          <div className="section-header"><div className="section-title">Net Worth Summary</div></div>
+          {Object.entries(netWorth.buckets||{}).map(([bucket,bData])=>{
+            const total=bData.accounts.reduce((s,a)=>s+(bData.is_asset?a.balance:Math.abs(a.balance)),0);
+            return(
+              <div key={bucket} style={{padding:'10px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between'}}>
+                <span style={{fontSize:13,fontWeight:500}}>{bucket}</span>
+                <span style={{fontFamily:'Inter',fontSize:12,fontWeight:500,color:bData.is_asset?'var(--green)':'var(--red)'}}>{bData.is_asset?'':'-'}{fmt(total)}</span>
+              </div>
+            );
+          })}
+        </div>}
       </div>
 
       {/* ── Section 2: Budget vs. Actual — Last 12 Months ───────────────────── */}
