@@ -12,11 +12,11 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;--bg:#f8fafc;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
+  --sidebar-w:220px;--bg:#f1f5f9;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
   --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
-  --blue:#0070d2;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
-  --radius:12px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 12px rgba(0,0,0,0.08);
+  --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
+  --radius:12px;--shadow:0 2px 8px rgba(0,0,0,0.07),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.1);
 }
 html,body,#root{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-primary)}
 body{overflow:hidden}
@@ -46,15 +46,15 @@ body{overflow:hidden}
 .topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
 .content{flex:1;overflow-y:auto;padding:24px 28px}
-.card{background:var(--card-bg);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)}
-.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.metric-card{padding:20px 22px}
-.metric-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px}
-.metric-value{font-size:28px;font-weight:600;font-family:'DM Mono',monospace;letter-spacing:-1px}
-.metric-sub{font-size:12px;color:var(--text-muted);margin-top:4px}
+.card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow)}
+.metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
+.metric-card{padding:18px 20px}
+.metric-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px}
+.metric-value{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:-0.5px;color:var(--text-primary)}
+.metric-sub{font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
 .btn-primary{background:var(--blue);color:#fff}
-.btn-primary:hover{background:#005bb5}
+.btn-primary:hover{background:#2563eb}
 .btn-secondary{background:#f3f4f6;color:var(--text-primary);border:1px solid var(--border)}
 .btn-secondary:hover{background:#e9eaec}
 .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
@@ -1597,6 +1597,9 @@ function DashboardPage({categories,toast}){
   const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
   const[viewYear,setViewYear]=useState(new Date().getFullYear());
   const[viewMonth,setViewMonth]=useState(new Date().getMonth()+1);
+  const[kpiStats,setKpiStats]=useState(null);
+  const[kpiPriorStats,setKpiPriorStats]=useState(null);
+  const[kpiLabel,setKpiLabel]=useState('');
 
   const getDates=()=>{
     const now=new Date();
@@ -1613,6 +1616,36 @@ function DashboardPage({categories,toast}){
     return{start:`${viewYear}-01-01`,end:endStr};
   };
 
+  // Returns date range for the KPI cards (MTD for current month, full period for past)
+  // and the comparison label like "vs Feb 6"
+  const getKpiDates=()=>{
+    const now=new Date();
+    const cy=now.getFullYear(),cm=now.getMonth()+1,cd=now.getDate();
+    const pad=n=>String(n).padStart(2,'0');
+    const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if(budgetView==='annual'){
+      const yr=viewYear,pYr=yr-1;
+      const isCY=yr===cy;
+      const kpiEnd=isCY?todayStr():`${yr}-12-31`;
+      const kpiStart=`${yr}-01-01`;
+      const pEnd=isCY?`${pYr}-${pad(cm)}-${pad(cd)}`:`${pYr}-12-31`;
+      const pStart=`${pYr}-01-01`;
+      const label=isCY?`vs ${pYr} thru ${MONS[cm-1]} ${cd}`:`vs ${pYr}`;
+      return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:label};
+    }
+    const yr=viewYear,mo=viewMonth;
+    const isCM=yr===cy&&mo===cm;
+    const endDay=isCM?cd:new Date(yr,mo,0).getDate();
+    const kpiEnd=`${yr}-${pad(mo)}-${pad(endDay)}`;
+    const kpiStart=`${yr}-${pad(mo)}-01`;
+    const pYr=mo===1?yr-1:yr,pMo=mo===1?12:mo-1;
+    const pMaxDay=new Date(pYr,pMo,0).getDate();
+    const pDay=Math.min(endDay,pMaxDay);
+    const pEnd=`${pYr}-${pad(pMo)}-${pad(pDay)}`;
+    const pStart=`${pYr}-${pad(pMo)}-01`;
+    return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:`vs ${MONS[pMo-1]} ${pDay}`};
+  };
+
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
     try{
@@ -1623,7 +1656,11 @@ function DashboardPage({categories,toast}){
       // YTD stats: for current year use today; for past years use Dec 31
       const ytdEnd=yr<curY?`${yr}-12-31`:todayStr();
       const ytdQ=`/stats?start_date=${yr}-01-01&end_date=${ytdEnd}`;
-      const[s,r,rv,nw,bt,ba,bt2,ba2,ytdS]=await Promise.all([
+      // KPI card stats: MTD vs same day last period
+      const{kpiStart,kpiEnd,priorKpiStart,priorKpiEnd,kpiLabel:kLabel}=getKpiDates();
+      const kpiQ=`/stats?start_date=${kpiStart}&end_date=${kpiEnd}`;
+      const kpiPriorQ=`/stats?start_date=${priorKpiStart}&end_date=${priorKpiEnd}`;
+      const[s,r,rv,nw,bt,ba,bt2,ba2,ytdS,kpiS,kpiPS]=await Promise.all([
         apiFetch(statsQ),
         apiFetch('/transactions?limit=12'),
         apiFetch('/transactions?needs_review=true&limit=50'),
@@ -1633,11 +1670,14 @@ function DashboardPage({categories,toast}){
         apiFetch(`/budget/targets?year=${yr-1}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr-1}`).catch(()=>({categories:{}})),
         apiFetch(ytdQ).catch(()=>({by_category:{}})),
+        apiFetch(kpiQ).catch(()=>null),
+        apiFetch(kpiPriorQ).catch(()=>null),
       ]);
       setStats(s);setRecent(r);setReviewQ(rv);setNetWorth(nw);
       setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
       setBudgetTargetsPrior(bt2.categories||{});setBudgetActualsPrior(ba2.categories||{});
       setYtdByCat(ytdS.by_category||{});
+      setKpiStats(kpiS);setKpiPriorStats(kpiPS);setKpiLabel(kLabel);
       const byCat=s?.by_category||{};
       setTopCats(Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6));
     }catch(e){toast('Failed to load','error');}
@@ -1673,11 +1713,23 @@ function DashboardPage({categories,toast}){
 
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
 
-  const income=stats?.total_income??0;
-  const expenses=stats?.total_expenses??0;
   const hr=new Date().getHours();
   const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
   const expCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name);
+  // KPI card values
+  const kpiIncome=kpiStats?.total_income??0;
+  const kpiExpenses=kpiStats?.total_expenses??0;
+  const kpiNet=kpiIncome-kpiExpenses;
+  const priorIncome=kpiPriorStats?.total_income??null;
+  const priorExpenses=kpiPriorStats?.total_expenses??null;
+  const priorNet=(priorIncome!==null&&priorExpenses!==null)?priorIncome-priorExpenses:null;
+  const kpiCalcPct=(curr,prior)=>(prior===null||Math.abs(prior)<0.01)?null:Math.round(((curr-prior)/Math.abs(prior))*100);
+  const incomePct=kpiCalcPct(kpiIncome,priorIncome);
+  const expensesPct=kpiCalcPct(kpiExpenses,priorExpenses);
+  const netPct=kpiCalcPct(kpiNet,priorNet);
+  const _bSum=key=>netWorth?.buckets?.[key]?.accounts?.reduce((s,a)=>s+a.balance,0)??0;
+  const csBal=netWorth?_bSum('Checking & Savings'):null;
+  const invBal=netWorth?(_bSum('Investments')+_bSum('Retirement')+_bSum('Brokerage')):null;
 
   return(
     <div>
@@ -1714,25 +1766,35 @@ function DashboardPage({categories,toast}){
         </div>
       </div>
 
-      {/* KPI row */}
-      <div className="metric-grid">
-        <div className="card metric-card" style={{borderLeft:'3px solid var(--green)'}}>
-          <div className="metric-label">Total Income</div>
-          <div className="metric-value" style={{color:'var(--green)'}}>{fmt(income)}</div>
-        </div>
-        <div className="card metric-card" style={{borderLeft:'3px solid var(--red)'}}>
-          <div className="metric-label">Total Expenses</div>
-          <div className="metric-value" style={{color:'var(--red)'}}>-{fmt(expenses)}</div>
-        </div>
-        <div className="card metric-card" style={{borderLeft:`3px solid ${(income-expenses)>=0?'var(--green)':'var(--red)'}`}}>
-          <div className="metric-label">Net Cash Flow</div>
-          <div className="metric-value" style={{color:(income-expenses)>=0?'var(--green)':'var(--red)'}}>{income-expenses>=0?'+':''}{fmt(income-expenses)}</div>
-        </div>
-        <div className="card metric-card" style={{borderLeft:`3px solid ${netWorth&&netWorth.net_worth>=0?'var(--green)':'var(--red)'}`}}>
-          <div className="metric-label">Net Worth</div>
-          <div className="metric-value" style={{color:netWorth&&netWorth.net_worth>=0?'var(--green)':'var(--red)'}}>{netWorth?fmt(netWorth.net_worth):'—'}</div>
-        </div>
-      </div>
+      {/* KPI row — 5 cards */}
+      {(()=>{
+        const PctBadge=({pct,invert=false})=>{
+          if(pct===null)return<span style={{fontSize:11,color:'var(--text-muted)'}}>—</span>;
+          const good=invert?pct<=0:pct>=0;
+          return<span style={{background:good?'#dcfce7':'#fee2e2',color:good?'#16a34a':'#dc2626',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{pct>0?'+':''}{pct}%</span>;
+        };
+        const cards=[
+          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',sub:'Current balance',bg:'#ffffff'},
+          {label:'Investments',value:invBal!==null?fmt(invBal):'—',sub:'Current balance',bg:'#ffffff'},
+          {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false,bg:'#f0fdf8'},
+          {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true,bg:'#fff9f9'},
+          {label:'Net',value:`${kpiNet>=0?'+':''}${fmt(kpiNet)}`,pct:netPct,invert:false,bg:kpiNet>=0?'#f0fdf8':'#fff0f0'},
+        ];
+        return(
+          <div className="metric-grid">
+            {cards.map(c=>(
+              <div key={c.label} className="card metric-card" style={{background:c.bg}}>
+                <div className="metric-label">{c.label}</div>
+                <div className="metric-value">{c.value}</div>
+                <div className="metric-sub">
+                  {c.pct!==undefined?<PctBadge pct={c.pct} invert={c.invert}/>:null}
+                  <span style={{fontSize:11,color:'var(--text-muted)'}}>{c.pct!==undefined?(kpiLabel||'vs prior'):c.sub}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* ── Section 1: Budget Scorecard (left) + stacked cards (right) ──────── */}
       <div style={{display:'grid',gridTemplateColumns:'5fr 8fr',gap:20,alignItems:'stretch',marginTop:20}}>
