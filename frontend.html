@@ -317,6 +317,42 @@ function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   );
 }
 
+/* ── ConfirmModal — replaces all browser confirm()/prompt() ─────────────── */
+function ConfirmModal({title,body,confirmLabel='Confirm',danger=false,requiredInput=null,onConfirm,onClose}){
+  const[inputVal,setInputVal]=useState('');
+  const[busy,setBusy]=useState(false);
+  const canConfirm=!requiredInput||inputVal===requiredInput;
+  const handleConfirm=async()=>{
+    if(!canConfirm||busy)return;
+    setBusy(true);
+    try{await onConfirm();}
+    finally{setBusy(false);onClose();}
+  };
+  return ReactDOM.createPortal(
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'var(--card-bg)',borderRadius:12,padding:'24px 28px',width:420,maxWidth:'92vw',boxShadow:'0 8px 40px rgba(0,0,0,0.22)'}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:body?10:16,color:danger?'#b91c1c':'var(--text)'}}>{title}</div>
+        {body&&<div style={{fontSize:13,color:'var(--text-secondary)',marginBottom:16,lineHeight:1.55,whiteSpace:'pre-wrap'}}>{body}</div>}
+        {requiredInput&&<div style={{marginBottom:16}}>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:6}}>Type <strong>{requiredInput}</strong> to confirm:</div>
+          <input className="form-input" value={inputVal} onChange={e=>setInputVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter')handleConfirm();if(e.key==='Escape')onClose();}}
+            placeholder={requiredInput} autoFocus style={{width:'100%',boxSizing:'border-box'}}/>
+        </div>}
+        <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:requiredInput?0:4}}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={busy} style={{fontSize:13}}>Cancel</button>
+          <button className="btn" disabled={!canConfirm||busy} onClick={handleConfirm}
+            style={{background:danger?'#b91c1c':'var(--primary)',color:'#fff',border:'none',fontSize:13,opacity:canConfirm?1:0.4,cursor:canConfirm?'pointer':'default'}}>
+            {busy?'…':confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
   const[locked,setLocked]=useState(txn.is_locked);
   const[gcb,setGcb]=useState(txn.is_gcb||false);
@@ -341,6 +377,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
   const[showRulePrompt,setShowRulePrompt]=useState(false);
   const[ruleCreating,setRuleCreating]=useState(false);
+  const[cm,setCm]=useState(null);
   const isLlmSource=txn.enrichment_source==='llm'||txn.enrichment_source==='override';
   const save=async()=>{
     setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setLocked(true);setSaving(false);setEditing(false);
@@ -635,15 +672,17 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               </button>
               <button className="btn btn-sm"
                 style={{background:'#fef2f2',color:'#991b1b',border:'1px solid #fca5a5',fontSize:12}}
-                onClick={async()=>{
-                  if(!confirm(`Permanently delete this transaction?\n\n"${txn.description_display||txn.description_raw}"\n${fmtDate(txn.date)} · ${txn.amount<0?'–':'+'}${fmt(txn.amount)}\n\nThis cannot be undone.`))return;
-                  try{
+                onClick={()=>setCm({
+                  title:'Delete Transaction',
+                  body:`Permanently delete "${txn.description_display||txn.description_raw}" (${fmtDate(txn.date)} · ${fmt(Math.abs(txn.amount))})?\n\nThis cannot be undone.`,
+                  confirmLabel:'Delete',danger:true,
+                  onConfirm:async()=>{
                     await apiFetch(`/transactions/${txn.id}`,{method:'DELETE'});
                     setShowTxnInfo(false);
                     toast&&toast('Transaction deleted');
                     onSave(txn.id,{__deleted:true});
-                  }catch(e){toast&&toast('Delete failed: '+(e.message||e),'error');}
-                }}
+                  }
+                })}
                 title="Permanently delete this transaction">
                 🗑 Delete
               </button>
@@ -654,6 +693,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
       </div>,
       document.body
     )}
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
     </React.Fragment>
   );
 }
@@ -2252,6 +2292,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
   const[editVals,setEditVals]=useState({});
   const[mergeAccount,setMergeAccount]=useState(null);
   const[deleteAccount,setDeleteAccount]=useState(null);
+  const[cm,setCm]=useState(null);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -2269,10 +2310,16 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
     try{await apiFetch(`/accounts/${id}`,{method:'PATCH',body:JSON.stringify(editVals)});toast('Account updated');setEditingId(null);await load();}
     catch(e){toast('Failed to save','error');}
   };
-  const severPlaid=async(a)=>{
-    if(!confirm(`Sever Plaid connection for "${a.account_name}"? Transactions will be kept.`))return;
-    try{await apiFetch(`/accounts/${a.id}/sever-plaid`,{method:'POST'});toast('Plaid connection severed');await load();}
-    catch(e){toast('Failed: '+(e.message||'error'),'error');}
+  const severPlaid=(a)=>{
+    setCm({
+      title:'Sever Plaid Connection',
+      body:`Disconnect Plaid from "${a.account_name}"? Your transactions will be kept, but this account will no longer sync automatically.`,
+      confirmLabel:'Sever Connection',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/accounts/${a.id}/sever-plaid`,{method:'POST'});toast('Plaid connection severed');await load();}
+        catch(e){toast('Failed: '+(e.message||'error'),'error');}
+      }
+    });
   };
   const handleMergeDone=(msg,err)=>{setMergeAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
   const handleDeleteDone=(msg,err)=>{setDeleteAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
@@ -2281,6 +2328,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
 
   return(
     <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
       {showManual&&<ManualAccountModal onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
       {mergeAccount&&<MergeAccountModal source={mergeAccount} allAccounts={accounts} onDone={handleMergeDone} onClose={()=>setMergeAccount(null)}/>}
       {deleteAccount&&<DeleteAccountModal account={deleteAccount} onDone={handleDeleteDone} onClose={()=>setDeleteAccount(null)}/>}
@@ -2309,40 +2357,60 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
 
 function ResetResyncButton({toast,onDone}){
   const[busy,setBusy]=useState(false);
-  const run=async()=>{
-    if(!confirm('This will delete ALL Plaid-synced transactions and re-fetch everything from scratch. Manually entered transactions are kept. Continue?'))return;
-    setBusy(true);
-    try{
-      const r=await apiFetch('/plaid/reset-and-resync',{method:'POST'});
-      toast(`${r.message} — refreshing in 15s`);
-      setTimeout(()=>onDone&&onDone(),15000);
-    }catch(e){toast('Reset failed: '+(e.message||e),'error');}
-    finally{setBusy(false);}
+  const[cm,setCm]=useState(null);
+  const run=()=>{
+    setCm({
+      title:'Reset & Full Resync',
+      body:'This will delete ALL Plaid-synced transactions and re-fetch everything from scratch.\n\nManually entered transactions are kept.',
+      confirmLabel:'Reset & Resync',danger:true,
+      onConfirm:async()=>{
+        setBusy(true);
+        try{
+          const r=await apiFetch('/plaid/reset-and-resync',{method:'POST'});
+          toast(`${r.message} — refreshing in 15s`);
+          setTimeout(()=>onDone&&onDone(),15000);
+        }catch(e){toast('Reset failed: '+(e.message||e),'error');}
+        finally{setBusy(false);}
+      }
+    });
   };
-  return<button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={run} disabled={busy}>{busy?'Resetting…':'⟳ Reset & Full Resync'}</button>;
+  return<React.Fragment>
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+    <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={run} disabled={busy}>{busy?'Resetting…':'⟳ Reset & Full Resync'}</button>
+  </React.Fragment>;
 }
 
 function BankAccountRow({a,institutionName,toast,onSynced}){
   const[busy,setBusy]=useState(false);
-  const redownload=async()=>{
-    if(!confirm(`Re-download "${a.name}"?\n\nResets the sync cursor so all transactions re-download from Plaid. Existing transactions are preserved and matched by content hash — no data lost. Note: cursor reset affects ALL accounts at ${institutionName}.`))return;
-    setBusy(true);
-    try{
-      await apiFetch(`/accounts/${a.id}/reset-and-resync`,{method:'POST'});
-      toast(`⟳ Re-download started for ${a.name} — refresh in ~30s`);
-      setTimeout(()=>onSynced&&onSynced(),30000);
-    }catch(e){toast('Re-download failed: '+(e.message||e),'error');}
-    finally{setBusy(false);}
+  const[cm,setCm]=useState(null);
+  const redownload=()=>{
+    setCm({
+      title:`Re-download "${a.name}"`,
+      body:`Resets the sync cursor so all transactions re-download from Plaid.\n\nExisting transactions are preserved and matched by content hash — no data lost.\n\nNote: cursor reset affects ALL accounts at ${institutionName}.`,
+      confirmLabel:'Re-download',danger:false,
+      onConfirm:async()=>{
+        setBusy(true);
+        try{
+          await apiFetch(`/accounts/${a.id}/reset-and-resync`,{method:'POST'});
+          toast(`⟳ Re-download started for ${a.name} — refresh in ~30s`);
+          setTimeout(()=>onSynced&&onSynced(),30000);
+        }catch(e){toast('Re-download failed: '+(e.message||e),'error');}
+        finally{setBusy(false);}
+      }
+    });
   };
   return(
-    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 8px',background:'var(--bg-secondary)',borderRadius:6}}>
-      <div style={{display:'flex',gap:8,fontSize:12,alignItems:'center'}}>
-        <span style={{fontWeight:500,color:'var(--text)'}}>{a.name}</span>
-        <span style={{textTransform:'capitalize',color:'var(--text-muted)'}}>{a.type}</span>
-        {a.mask&&<span style={{color:'var(--text-muted)'}}>····{a.mask}</span>}
+    <React.Fragment>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 8px',background:'var(--bg-secondary)',borderRadius:6}}>
+        <div style={{display:'flex',gap:8,fontSize:12,alignItems:'center'}}>
+          <span style={{fontWeight:500,color:'var(--text)'}}>{a.name}</span>
+          <span style={{textTransform:'capitalize',color:'var(--text-muted)'}}>{a.type}</span>
+          {a.mask&&<span style={{color:'var(--text-muted)'}}>····{a.mask}</span>}
+        </div>
+        <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
       </div>
-      <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
-    </div>
+    </React.Fragment>
   );
 }
 
@@ -2352,6 +2420,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
   const[resyncing,setResyncing]=useState(false);
   const[expanded,setExpanded]=useState(false);
   const[confirmingRemove,setConfirmingRemove]=useState(false);
+  const[cm,setCm]=useState(null);
   const save=async()=>{
     try{
       const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
@@ -2371,6 +2440,8 @@ function BankRow({item,toast,onRenamed,onSynced}){
   };
   const envColor={'production':'#059669','development':'#d97706','sandbox':'#6366f1'}[item.environment]||'#6b7280';
   return(
+    <React.Fragment>
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
     <div style={{borderBottom:'1px solid var(--border)',paddingBottom:12,marginBottom:12}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -2402,11 +2473,17 @@ function BankRow({item,toast,onRenamed,onSynced}){
             :<span style={{fontSize:11,fontWeight:600,color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:20,padding:'2px 8px'}}>Stale</span>}
           <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>setExpanded(x=>!x)}>{expanded?'▲':'▼'}</button>
           {item.is_active&&<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Sync'}</button>}
-          <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={async()=>{
+          <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={()=>{
             if(item.transaction_count===0){
-              if(!confirm(`Remove "${item.institution_name}"? It has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`))return;
-              try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Removed');}
-              catch(e){toast('Failed: '+(e.message||e),'error');}
+              setCm({
+                title:`Remove "${item.institution_name}"`,
+                body:`This institution has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`,
+                confirmLabel:'Remove',danger:true,
+                onConfirm:async()=>{
+                  try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Removed');}
+                  catch(e){toast('Failed: '+(e.message||e),'error');}
+                }
+              });
             }else{
               setConfirmingRemove(true);
             }
@@ -2437,12 +2514,14 @@ function BankRow({item,toast,onRenamed,onSynced}){
         </div>
       )}
     </div>
+    </React.Fragment>
   );
 }
 
 function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
   const[tab,setTab]=useState('data');
   const[busy,setBusy]=useState(false);
+  const[cm,setCm]=useState(null);
   const[items,setItems]=useState([]);
   /* Rules tab state */
   const[rules,setRules]=useState([]);
@@ -2542,10 +2621,16 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
     try{const r=await apiFetch(`/rules/${id}`,{method:'PATCH',body:JSON.stringify(ruleEditVals)});toast(`Rule updated${_reapplyMsg(r)}`);setRuleEditing(null);await loadRules();}
     catch(e){toast('Failed to save','error');}
   };
-  const deleteRule=async(id)=>{
-    if(!confirm('Deactivate this rule?'))return;
-    try{await apiFetch(`/rules/${id}`,{method:'DELETE'});toast('Rule deactivated');await loadRules();}
-    catch(e){toast('Failed','error');}
+  const deleteRule=(id)=>{
+    setCm({
+      title:'Deactivate Rule',
+      body:'This rule will be deactivated and will no longer apply to new transactions.',
+      confirmLabel:'Deactivate',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/rules/${id}`,{method:'DELETE'});toast('Rule deactivated');await loadRules();}
+        catch(e){toast('Failed','error');}
+      }
+    });
   };
   const addRule=async()=>{
     try{const r=await apiFetch('/rules',{method:'POST',body:JSON.stringify(ruleEditVals)});toast(`Rule created${_reapplyMsg(r)}`);setShowAddRule(false);setRuleEditVals({});await loadRules();}
@@ -2588,6 +2673,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
 
   return(
     <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
       <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4,marginBottom:20,width:'fit-content'}}>
         {tabs.map(t=>(<button key={t.id} className={`btn btn-sm ${tab===t.id?'btn-primary':'btn-ghost'}`} onClick={()=>setTab(t.id)} style={{borderRadius:7}}>{t.label}</button>))}
       </div>
@@ -2675,32 +2761,34 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
               <div className="settings-label">🔄 Fresh Start</div>
               <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts, clears sync cursors, triggers a full re-download. Account records, categories, and rules are preserved.</div>
             </div>
-            <button className="btn btn-sm" style={{background:'#b45309',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
-              if(!confirm('Fresh Start will delete ALL Plaid transactions and re-download everything from scratch.\n\nAccount records, categories, and rules are kept.\n\nContinue?'))return;
-              setBusy(true);
-              try{
-                const r=await apiFetch('/reset-all',{method:'POST'});
-                toast(`🔄 ${r.status}`);
-              }catch(e){toast('Fresh Start failed: '+(e.message||e),'error');}
-              finally{setBusy(false);}
-            }}>{busy?'…':'Fresh Start'}</button>
+            <button className="btn btn-sm" style={{background:'#b45309',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+              title:'Fresh Start',
+              body:'This will delete ALL Plaid-synced transactions and re-download everything from scratch.\n\nAccount records, categories, and rules are kept.',
+              confirmLabel:'Fresh Start',danger:true,
+              onConfirm:async()=>{
+                setBusy(true);
+                try{const r=await apiFetch('/reset-all',{method:'POST'});toast(`🔄 ${r.status}`);}
+                catch(e){toast('Fresh Start failed: '+(e.message||e),'error');}
+                finally{setBusy(false);}
+              }
+            })}>{busy?'…':'Fresh Start'}</button>
           </div>
           <div className="settings-row" style={{borderTop:'1px solid #fecaca',marginTop:8,paddingTop:12}}>
             <div>
               <div className="settings-label">💣 Nuke Everything</div>
               <div className="settings-desc">Deletes ALL transactions, ALL accounts, and ALL bank connections. The app is left completely empty. Reconnect your banks from scratch via + Connect Bank. Categories and rules are preserved.</div>
             </div>
-            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={async()=>{
-              if(!confirm('⚠️ NUKE EVERYTHING\n\nThis will permanently delete:\n• All transactions\n• All accounts\n• All bank connections\n\nCategories and rules are kept.\n\nType "nuke" to confirm:'))return;
-              const confirm2=window.prompt('Type NUKE to confirm — this cannot be undone:');
-              if(confirm2!=='NUKE')return toast('Cancelled','error');
-              setBusy(true);
-              try{
-                const r=await apiFetch('/nuke',{method:'POST'});
-                toast(`💣 ${r.status}`);
-              }catch(e){toast('Nuke failed: '+(e.message||e),'error');}
-              finally{setBusy(false);}
-            }}>{busy?'…':'💣 Nuke Everything'}</button>
+            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+              title:'⚠️ Nuke Everything',
+              body:'This will permanently delete:\n• All transactions\n• All accounts\n• All bank connections\n\nCategories and rules are kept. This cannot be undone.',
+              confirmLabel:'💣 Nuke Everything',danger:true,requiredInput:'NUKE',
+              onConfirm:async()=>{
+                setBusy(true);
+                try{const r=await apiFetch('/nuke',{method:'POST'});toast(`💣 ${r.status}`);}
+                catch(e){toast('Nuke failed: '+(e.message||e),'error');}
+                finally{setBusy(false);}
+              }
+            })}>{busy?'…':'💣 Nuke Everything'}</button>
           </div>
         </div>
         <div className="card" style={{marginBottom:20}}>
@@ -2803,7 +2891,12 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
             </div>
             <div style={{display:'flex',gap:8,alignItems:'center'}}>
               <button className="btn btn-sm btn-secondary" onClick={()=>syncBalances(false)} disabled={balanceSyncing}>{balanceSyncing?'Syncing…':'↺ Sync Balances'}</button>
-              <button className="btn btn-sm btn-secondary" onClick={()=>{if(window.confirm("Force resync will re-anchor all accounts to today's Plaid balance. Only do this when Plaid's balance is fully up to date. Continue?"))syncBalances(true);}} disabled={balanceSyncing} style={{borderColor:'#f59e0b',color:'#b45309'}}>⚡ Force Resync</button>
+              <button className="btn btn-sm btn-secondary" onClick={()=>setCm({
+                title:'Force Balance Resync',
+                body:"Re-anchors all accounts to today's Plaid balance.\n\nOnly do this when Plaid's balance is fully up to date (not right after a long weekend when transactions may not have posted yet).",
+                confirmLabel:'Force Resync',danger:false,
+                onConfirm:async()=>syncBalances(true)
+              })} disabled={balanceSyncing} style={{borderColor:'#f59e0b',color:'#b45309'}}>⚡ Force Resync</button>
             </div>
           </div>
           {balanceSyncResult&&<div style={{marginTop:12}}>
@@ -2892,7 +2985,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
                     </td>
                     <td style={{textAlign:'right',padding:'5px 0 5px 8px',whiteSpace:'nowrap'}}>
                       <div style={{display:'flex',gap:4,justifyContent:'flex-end',flexWrap:'nowrap'}}>
-                        {showMerge&&<button className="btn btn-xs btn-primary" style={{fontSize:10,padding:'2px 8px'}} onClick={()=>{if(g.warning){if(!window.confirm(`⚠️ ${g.warning}\n\nMerge anyway? This will keep "${keep.name}" and remove "${discard.name}".`))return;}mergeOnePair(keep.id,did);}}>Merge ▶</button>}
+                        {showMerge&&<button className="btn btn-xs btn-primary" style={{fontSize:10,padding:'2px 8px'}} onClick={()=>{if(g.warning){setCm({title:'Confirm Merge',body:`⚠️ ${g.warning}\n\nThis will keep "${keep.name}" and remove "${discard.name}".`,confirmLabel:'Merge Anyway',danger:true,onConfirm:async()=>mergeOnePair(keep.id,did)});}else mergeOnePair(keep.id,did);}}>Merge ▶</button>}
                         {showIgnore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>ignoreDuplicatePair(keep.id,did)} title="Mark as not a duplicate — won't appear in future scans">Ignore</button>}
                         {showUnignore&&<button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>unignorePair(keep.id,did)}>Unignore</button>}
                       </div>
@@ -4533,6 +4626,7 @@ function LoansPage({toast}){
   const[linkPreview,setLinkPreview]=useState(null);
   const[linking,setLinking]=useState(false);
   const[linkedTxns,setLinkedTxns]=useState([]);
+  const[cm,setCm]=useState(null);
 
   const loanTypes=['Mortgage','Auto','Student','Personal','Other'];
   const blankLoan={lender:'',loan_type:'Mortgage',original_principal:'',current_balance:'',
@@ -4569,10 +4663,16 @@ function LoansPage({toast}){
     }catch(e){toast('Failed to save: '+e.message,'error');}
   };
 
-  const deleteLoan=async(id)=>{
-    if(!confirm('Deactivate this loan?'))return;
-    try{await apiFetch(`/loans/${id}`,{method:'DELETE'});toast('Loan deactivated');await load();}
-    catch(e){toast('Failed','error');}
+  const deleteLoan=(id)=>{
+    setCm({
+      title:'Deactivate Loan',
+      body:'This loan will be deactivated. Linked transactions will not be affected.',
+      confirmLabel:'Deactivate',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/loans/${id}`,{method:'DELETE'});toast('Loan deactivated');await load();}
+        catch(e){toast('Failed','error');}
+      }
+    });
   };
 
   const openLinkModal=async(loan)=>{
@@ -4598,20 +4698,26 @@ function LoansPage({toast}){
     finally{setLinking(false);}
   };
 
-  const doUnlink=async(txnId)=>{
+  const doUnlink=(txnId)=>{
     if(!linkModal)return;
-    if(!confirm('Unlink this payment? The loan balance will be restored.'))return;
-    try{
-      await apiFetch(`/loans/${linkModal.id}/unlink-transaction/${txnId}`,{method:'DELETE'});
-      toast('Payment unlinked');
-      const[cands,preview,linked]=await Promise.all([
-        apiFetch(`/loans/${linkModal.id}/candidate-transactions`),
-        apiFetch(`/loans/${linkModal.id}/compute-split`),
-        apiFetch(`/loans/${linkModal.id}/linked-transactions`),
-      ]);
-      setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
-      await load();
-    }catch(e){toast('Unlink failed: '+e.message,'error');}
+    setCm({
+      title:'Unlink Payment',
+      body:'This payment will be unlinked and the loan balance will be restored.',
+      confirmLabel:'Unlink',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/loans/${linkModal.id}/unlink-transaction/${txnId}`,{method:'DELETE'});
+          toast('Payment unlinked');
+          const[cands,preview,linked]=await Promise.all([
+            apiFetch(`/loans/${linkModal.id}/candidate-transactions`),
+            apiFetch(`/loans/${linkModal.id}/compute-split`),
+            apiFetch(`/loans/${linkModal.id}/linked-transactions`),
+          ]);
+          setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
+          await load();
+        }catch(e){toast('Unlink failed: '+e.message,'error');}
+      }
+    });
   };
 
   const totalPrincipal=loans.reduce((s,l)=>s+l.original_principal,0);
@@ -4620,6 +4726,7 @@ function LoansPage({toast}){
 
   return(
     <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
       {linkModal&&<div className="review-overlay" onClick={e=>e.target===e.currentTarget&&setLinkModal(null)}>
         <div className="review-panel" style={{width:620,maxHeight:'80vh',overflowY:'auto'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
@@ -4746,6 +4853,7 @@ function CashFlowPage({toast}){
   const[ovSaving,setOvSaving]=useState(false);
   const[genBusy,setGenBusy]=useState(false);
   const[loading,setLoading]=useState(true);
+  const[cm,setCm]=useState(null);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -4808,13 +4916,19 @@ function CashFlowPage({toast}){
     }catch(e){toast('Save failed','error');}
     finally{setSalarySaving(false);}
   };
-  const deleteSalary=async id=>{
-    if(!confirm('Delete this salary entry?'))return;
-    try{
-      await apiFetch(`/salary-payments/${id}`,{method:'DELETE'});
-      setSalaryPayments(prev=>prev.filter(p=>p.id!==id));
-      toast('Deleted');
-    }catch(e){toast('Delete failed','error');}
+  const deleteSalary=id=>{
+    setCm({
+      title:'Delete Salary Entry',
+      body:'This salary entry will be permanently deleted.',
+      confirmLabel:'Delete',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/salary-payments/${id}`,{method:'DELETE'});
+          setSalaryPayments(prev=>prev.filter(p=>p.id!==id));
+          toast('Deleted');
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
   };
   const spTotal=sp=>sp.allocations.reduce((s,a)=>s+a.amount,0);
 
@@ -4843,13 +4957,19 @@ function CashFlowPage({toast}){
     }catch(e){toast('Save failed','error');}
     finally{setOvSaving(false);}
   };
-  const deleteOverlay=async id=>{
-    if(!confirm('Delete this cash flow entry?'))return;
-    try{
-      await apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'});
-      setOverlays(prev=>prev.filter(o=>o.id!==id));
-      toast('Deleted');
-    }catch(e){toast('Delete failed','error');}
+  const deleteOverlay=id=>{
+    setCm({
+      title:'Delete Cash Flow Entry',
+      body:'This cash flow entry will be permanently deleted.',
+      confirmLabel:'Delete',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'});
+          setOverlays(prev=>prev.filter(o=>o.id!==id));
+          toast('Deleted');
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
   };
   const generateOverlays=async()=>{
     setGenBusy(true);
@@ -4877,6 +4997,7 @@ function CashFlowPage({toast}){
 
   return(
     <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
       <h2 style={{fontSize:18,fontWeight:600,marginBottom:20}}>Cash Flow</h2>
 
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
