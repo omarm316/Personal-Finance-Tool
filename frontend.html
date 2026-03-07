@@ -1589,11 +1589,11 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
   };
 
   const sortedRows=[...rows].sort((a,b)=>{
-    const aBot=a.cat==='Other'||a.budget===0;
-    const bBot=b.cat==='Other'||b.budget===0;
+    const aBot=a.cat==='Other';
+    const bBot=b.cat==='Other';
     if(aBot&&!bBot)return 1;if(!aBot&&bBot)return -1;
     let aV,bV;
-    if(sortBy==='pct'){aV=a.budget>0?a.actual/a.budget:0;bV=b.budget>0?b.actual/b.budget:0;}
+    if(sortBy==='pct'){aV=a.budget>0?a.actual/a.budget:(a.actual>0?Infinity:0);bV=b.budget>0?b.actual/b.budget:(b.actual>0?Infinity:0);}
     else if(sortBy==='actual'){aV=a.actual;bV=b.actual;}
     else{aV=a.budget;bV=b.budget;}
     return sortDir==='desc'?bV-aV:aV-bV;
@@ -1611,47 +1611,44 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
   const COLS='150px 1fr 100px 80px';
 
   const RowEl=({cat,budget,actual,isTotal=false})=>{
-    const accentColor=isTotal?'#374151':BLUE;
     const isCredit=actual<0;
-    const pct=!isCredit&&budget>0?actual/budget:null;
-    const over=pct!==null&&pct>=1;
-    const barPct=pct!==null?Math.min(pct*100,100):0;
-    const pctLabel=pct!==null?`${Math.round(pct*100)}%`:null;
+    const hasBudget=budget>0;
+    const hasActual=actual>0;
+    const showBar=!isCredit&&(hasBudget||hasActual);
+    const pct=hasBudget?actual/budget:(hasActual?1:0);
+    const over=pct>=1;
+    const barPct=Math.min(pct*100,100);
+    const pctLabel=hasBudget?`${Math.round(pct*100)}%`:null;
     return(
-      <div style={{display:'flex',alignItems:'stretch',
+      <div style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14,
         borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',
         background:isTotal?'rgba(0,0,0,0.015)':'transparent'}}>
-        <div style={{width:4,background:accentColor,flexShrink:0}}/>
-        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14}}>
-          <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',
-            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-            {isTotal?'Total':cat}
-          </span>
-          {!isCredit&&budget>0?(
-            <div style={{position:'relative',height:30,borderRadius:8,overflow:'hidden',
-              background:BLUE_BG,border:'1px solid var(--border)'}}>
-              {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
-                background:over?'var(--red)':BLUE,opacity:over?0.75:0.7,
-                borderRadius:8,transition:'width 0.4s ease'}}/>}
-              <div style={{position:'relative',display:'flex',alignItems:'center',
-                justifyContent:'flex-end',padding:'0 10px',height:'100%'}}>
-                {pctLabel&&<span style={{fontSize:11.5,fontWeight:700,color:'#1e3a8a'}}>{pctLabel}</span>}
-              </div>
+        <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',
+          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          {isTotal?'Total':cat}
+        </span>
+        {showBar?(
+          <div style={{position:'relative',height:30,borderRadius:8,overflow:'hidden',
+            background:BLUE_BG,border:'1px solid var(--border)'}}>
+            {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
+              background:over?'var(--red)':BLUE,opacity:over?0.75:0.7,
+              borderRadius:8,transition:'width 0.4s ease'}}/>}
+            <div style={{position:'relative',display:'flex',alignItems:'center',
+              justifyContent:'flex-end',padding:'0 10px',height:'100%'}}>
+              {pctLabel&&<span style={{fontSize:11.5,fontWeight:700,color:'#1e3a8a'}}>{pctLabel}</span>}
             </div>
-          ):(
-            <span style={{fontSize:11,color:isCredit?'var(--green)':'var(--text-muted)',fontStyle:'italic',paddingLeft:4}}>
-              {isCredit?'credit':'no budget'}
-            </span>
-          )}
-          <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
-            color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
-            {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
-          </span>
-          <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
-            color:budget>0?'var(--text-secondary)':'var(--text-muted)'}}>
-            {budget>0?fmt0(budget):'—'}
-          </span>
-        </div>
+          </div>
+        ):(
+          <span style={{fontSize:11,color:'var(--green)',fontStyle:'italic',paddingLeft:4}}>credit</span>
+        )}
+        <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
+          color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
+          {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
+        </span>
+        <span style={{textAlign:'right',fontSize:12.5,fontFamily:'Inter Tight',fontWeight:isTotal?700:400,
+          color:'var(--text-secondary)'}}>
+          {fmt0(budget)}
+        </span>
       </div>
     );
   };
@@ -1680,14 +1677,11 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
           </select>
         </div>
       </div>
-      <div style={{display:'flex',alignItems:'stretch',borderBottom:'1px solid var(--border)',background:'rgba(0,0,0,0.018)'}}>
-        <div style={{width:4,flexShrink:0}}/>
-        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14}}>
-          <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Category</span>
-          <SortBtn col="pct" label="Progress" align="left"/>
-          <SortBtn col="actual" label="Actual"/>
-          <SortBtn col="budget" label="Budget"/>
-        </div>
+      <div style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14,borderBottom:'1px solid var(--border)',background:'rgba(0,0,0,0.018)'}}>
+        <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Category</span>
+        <SortBtn col="pct" label="Progress" align="left"/>
+        <SortBtn col="actual" label="Actual"/>
+        <SortBtn col="budget" label="Budget"/>
       </div>
       <RowEl cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
       {sortedRows.length===0
@@ -3548,7 +3542,7 @@ function BudgetsPage({categories,toast}){
     const editVal=edits[cat]?.[String(month)]||'';
     const suggestion=suggestions[cat];
 
-    if(!isEditing&&budget===0) return null; // hide empty rows when not editing
+    if(!isEditing&&budget===0&&actual===0) return null; // hide rows with neither budget nor actuals
 
     return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
@@ -3563,7 +3557,7 @@ function BudgetsPage({categories,toast}){
               {suggestion&&!editVal&&<span style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--text-muted)',pointerEvents:'none'}}>{Math.round(suggestion)}</span>}
             </div>
           ):(
-            <span style={{color:budget>0?'var(--text-primary)':'var(--text-muted)'}}>{budget>0?fmt(budget):'—'}</span>
+            <span style={{color:'var(--text-secondary)'}}>{fmt(budget)}</span>
           )}
         </td>
       </tr>
@@ -3580,7 +3574,7 @@ function BudgetsPage({categories,toast}){
   const renderSectionTotal=(label,totalBudget)=>(
     <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
       <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
-      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px'}}>{fmt(totalBudget)}</td>
     </tr>
   );
 
