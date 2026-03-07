@@ -1590,6 +1590,7 @@ function DashboardPage({categories,toast}){
   const[reviewTxn,setReviewTxn]=useState(null);
   const[splitTxn,setSplitTxn]=useState(null);
   const[loading,setLoading]=useState(true);
+  const hasLoaded=React.useRef(false);
   const[budgetTargets,setBudgetTargets]=useState({});
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
@@ -1685,7 +1686,11 @@ function DashboardPage({categories,toast}){
     finally{if(!silent)setLoading(false);}
   },[budgetView,viewYear,viewMonth]);
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{
+    const isFirst=!hasLoaded.current;
+    hasLoaded.current=true;
+    load({silent:!isFirst});
+  },[load]);
 
   const handleSave=async(id,updates)=>{
     if(updates.__deleted){await load();return;}
