@@ -8,39 +8,39 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;--bg:#f0f3f8;--sidebar-bg:#00245d;--sidebar-text:#a8bcd8;
-  --sidebar-hover-bg:rgba(255,255,255,0.09);--sidebar-active-bg:rgba(255,255,255,0.15);
-  --card-bg:#ffffff;--border:#dde3ee;--text-primary:#0d1b2e;--text-secondary:#6b7280;--text-muted:#9ca3af;
+  --sidebar-w:220px;--bg:#f8fafc;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
+  --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
+  --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#0070d2;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
   --radius:12px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 12px rgba(0,0,0,0.08);
 }
-html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
+html,body,#root{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-primary)}
 body{overflow:hidden}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:none;box-shadow:2px 0 12px rgba(0,36,93,0.18);transition:width 0.22s ease;overflow:hidden}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--border);box-shadow:none;transition:width 0.22s ease;overflow:hidden}
 .sidebar.collapsed{width:56px}
-.sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:8px;min-height:72px}
+.sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;min-height:72px}
 .sidebar.collapsed .sidebar-logo{justify-content:center;padding:18px 0 16px}
-.sidebar-logo h1{font-size:15px;font-weight:700;color:#fff;letter-spacing:-0.3px}
-.sidebar-logo p{font-size:11px;color:var(--sidebar-text);margin-top:2px}
-.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--sidebar-text);font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto}
+.sidebar-logo h1{font-size:15px;font-weight:700;color:var(--text-primary);letter-spacing:-0.3px}
+.sidebar-logo p{font-size:11px;color:var(--text-muted);margin-top:2px}
+.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center}
 .sidebar.collapsed .sidebar-toggle{margin-left:0}
-.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:#fff}
+.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
 .sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
 .sidebar.collapsed .sidebar-nav{padding:12px 6px}
-.nav-section-label{font-size:10px;font-weight:600;color:rgba(168,188,216,0.55);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px;white-space:nowrap;overflow:hidden}
+.nav-section-label{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px;white-space:nowrap;overflow:hidden}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;white-space:nowrap;overflow:hidden}
 .sidebar.collapsed .nav-item{justify-content:center;padding:9px 0;gap:0}
-.nav-item:hover{background:var(--sidebar-hover-bg);color:#e8eef8}
-.nav-item.active{background:var(--sidebar-active-bg);color:#ffffff;font-weight:600;box-shadow:inset 3px 0 0 rgba(255,255,255,0.6)}
+.nav-item:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
+.nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-color);font-weight:600}
 .sidebar.collapsed .nav-item.active{box-shadow:none}
-.nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0}
-.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.1);overflow:hidden}
+.nav-icon{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.sidebar-footer{padding:16px 10px;border-top:1px solid var(--border);overflow:hidden}
 .sidebar.collapsed .sidebar-footer{padding:12px 6px}
-.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:#c8d8ee;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
+.sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
 .topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -63,8 +63,8 @@ body{overflow:hidden}
 .btn-ghost{background:transparent;color:var(--text-secondary)}
 .btn-ghost:hover{background:#f3f4f6}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
-.btn-outline-white{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.35)}
-.btn-outline-white:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.6)}
+.btn-outline-white{background:transparent;color:var(--text-secondary);border:1px solid var(--border)}
+.btn-outline-white:hover{background:var(--sidebar-hover-bg);border-color:var(--text-muted)}
 .filters{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;width:200px}
 .search-input:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
@@ -160,8 +160,40 @@ function ToastContainer({toasts}){
   return<div className="toast-container">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>;
 }
 
+const ICON_PATHS={
+  home:`<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
+  arrowUpDown:`<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>`,
+  target:`<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>`,
+  trendingUp:`<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>`,
+  calendar:`<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>`,
+  banknote:`<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>`,
+  building:`<rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/>`,
+  star:`<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>`,
+  creditCard:`<rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/>`,
+  wallet:`<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>`,
+  settings:`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
+  chevronLeft:`<polyline points="15 18 9 12 15 6"/>`,
+  chevronRight:`<polyline points="9 18 15 12 9 6"/>`,
+};
+function Icon({name,size=16,style}){
+  const p=ICON_PATHS[name]||'';
+  return<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} dangerouslySetInnerHTML={{__html:p}}/>;
+}
+
 function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed}){
-  const nav=[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'transactions',icon:'↕',label:'Transactions'},{id:'budgets',icon:'◉',label:'Budgets'},{id:'networth',icon:'△',label:'Net Worth'},{id:'cashflow',icon:'⇄',label:'Daily Balances'},{id:'cashplanner',icon:'⊕',label:'Cash Flow'},{id:'loans',icon:'⌂',label:'Loans'},{id:'gcb',icon:'$',label:'GCB'},{id:'cards',icon:'▭',label:'Cards'},{id:'accounts',icon:'◫',label:'Accounts'},{id:'settings',icon:'⚙',label:'Settings'}];
+  const nav=[
+    {id:'dashboard',icon:<Icon name="home"/>,label:'Dashboard'},
+    {id:'transactions',icon:<Icon name="arrowUpDown"/>,label:'Transactions'},
+    {id:'budgets',icon:<Icon name="target"/>,label:'Budgets'},
+    {id:'networth',icon:<Icon name="trendingUp"/>,label:'Net Worth'},
+    {id:'cashflow',icon:<Icon name="calendar"/>,label:'Daily Balances'},
+    {id:'cashplanner',icon:<Icon name="banknote"/>,label:'Cash Flow'},
+    {id:'loans',icon:<Icon name="building"/>,label:'Loans'},
+    {id:'gcb',icon:<Icon name="star"/>,label:'GCB'},
+    {id:'cards',icon:<Icon name="creditCard"/>,label:'Cards'},
+    {id:'accounts',icon:<Icon name="wallet"/>,label:'Accounts'},
+    {id:'settings',icon:<Icon name="settings"/>,label:'Settings'},
+  ];
   const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
   const toggle=()=>{const next=!collapsed;setCollapsed(next);try{localStorage.setItem('nav-collapsed',next?'1':'0');}catch(e){}};
   const[banksOpen,setBanksOpen]=useState(()=>{try{return localStorage.getItem('banks-open')!=='0';}catch(e){return true;}});
@@ -170,10 +202,9 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
     <div className={`sidebar${collapsed?' collapsed':''}`}>
       <div className="sidebar-logo">
         {!collapsed&&<div style={{flex:1}}><h1>Finance</h1><p>Personal dashboard</p></div>}
-        <button className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand menu':'Collapse menu'}>{collapsed?'›':'‹'}</button>
+        <button className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand menu':'Collapse menu'}><Icon name={collapsed?'chevronRight':'chevronLeft'} size={16}/></button>
       </div>
       <nav className="sidebar-nav">
-        {!collapsed&&<div className="nav-section-label">Menu</div>}
         {nav.map(n=>(
           <button key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>setPage(n.id)} title={collapsed?n.label:''}>
             <span className="nav-icon">{n.icon}</span>
@@ -188,7 +219,7 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
               <button className="btn btn-sm btn-outline-white" style={{justifyContent:'center',padding:'7px 0',width:'100%'}} onClick={onSync} title="Sync">↻</button>
             </div>
           :<>
-            <button onClick={toggleBanks} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 10px 6px',color:'rgba(168,188,216,0.55)'}}>
+            <button onClick={toggleBanks} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 10px 6px',color:'var(--text-muted)'}}>
               <span style={{fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:1}}>Connected Banks</span>
               <span style={{fontSize:11,lineHeight:1,transition:'transform 0.18s',display:'inline-block',transform:banksOpen?'rotate(0deg)':'rotate(-90deg)'}}>{banksOpen?'▾':'▾'}</span>
             </button>
