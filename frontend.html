@@ -1748,26 +1748,26 @@ function DashboardPage({categories,toast}){
           <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <div style={{display:'flex',gap:2,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+          <div style={{display:'flex',gap:2,background:'#ffffff',border:'1px solid var(--border)',borderRadius:10,padding:4,height:34,boxSizing:'border-box',alignItems:'center'}}>
             {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
               <button key={v} onClick={()=>{setBudgetView(v);setCatDetail(null);}}
-                style={{border:'none',cursor:'pointer',borderRadius:7,padding:'4px 14px',fontSize:13,fontWeight:500,
+                style={{border:'none',cursor:'pointer',borderRadius:7,padding:'3px 12px',fontSize:12,fontWeight:500,height:26,
                   background:budgetView===v?'var(--sidebar-active-bg)':'transparent',
-                  color:budgetView===v?'var(--sidebar-active-color)':'var(--text-secondary)',
+                  color:budgetView===v?'var(--sidebar-active-color)':'var(--text-primary)',
                   transition:'background 0.15s,color 0.15s'}}>
                 {label}
               </button>
             ))}
           </div>
           <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
-            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+            style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'#ffffff',color:'var(--text-primary)',cursor:'pointer',height:34,boxSizing:'border-box'}}>
             {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=>(
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
           {budgetView==='month'&&(
             <select value={viewMonth} onChange={e=>{setViewMonth(+e.target.value);setCatDetail(null);}}
-              style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
+              style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'#ffffff',color:'var(--text-primary)',cursor:'pointer',height:34,boxSizing:'border-box'}}>
               {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
                 <option key={i+1} value={i+1}>{m}</option>
               ))}
@@ -1827,23 +1827,24 @@ function DashboardPage({categories,toast}){
             <div className="section-header"><div className="section-title">Recent Transactions</div></div>
             {recent.length===0
               ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
-              :<table style={{width:'100%'}}><tbody>{recent.map(t=>{
-                const dt=new Date(t.date+'T12:00:00');
+              :<table style={{width:'100%',tableLayout:'auto'}}><tbody>{recent
+                .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
+                .map(t=>{
+                const dateStr=(t.date||'').substring(0,10);
+                const dt=new Date(dateStr+'T12:00:00');
                 const shortDate=`${dt.getMonth()+1}/${dt.getDate()}`;
-                const amtDisplay=t.action==='Transfer'
-                  ?(t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount))
-                  :t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount);
+                const amtDisplay=t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount);
                 return(
                 <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
-                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap'}}>{shortDate}</td>
-                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:400}}>{t.description_display||t.description_raw}</td>
-                  <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap'}}>
+                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap',width:36}}>{shortDate}</td>
+                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,width:'50%'}}>{t.description_display||t.description_raw}</td>
+                  <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap',width:90}}>
                     <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{amtDisplay}</span>
                   </td>
-                  <td style={{padding:'9px 10px'}}>
+                  <td style={{padding:'9px 10px',whiteSpace:'nowrap',width:1}}>
                     {showCategoryForType(t.action)&&<span className={`badge ${!t.category_final||t.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{t.category_final||'Unclassified'}</span>}
                   </td>
-                  <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.account_name}>{t.account_name}</td>
+                  <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap',width:1}}>{t.account_name}</td>
                 </tr>
                 );
               })}</tbody></table>

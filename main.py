@@ -477,6 +477,7 @@ class TransactionResponse(BaseModel):
     points_category: Optional[str] = None
     account_name: str
     account_id: int = 0
+    account_type: Optional[str] = None
     enrichment_source: Optional[str] = None
     import_source: Optional[str] = None
     splits: Optional[list] = None
