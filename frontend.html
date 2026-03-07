@@ -4182,22 +4182,44 @@ function NetWorthPage({toast}){
 
     return(<>
       {/* KPI strip */}
-      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
-        <div className="card metric-card">
-          <div className="metric-label">Total Assets</div>
-          <div className="metric-value" style={{color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</div>
-        </div>
-        <div className="card metric-card">
-          <div className="metric-label">Total Liabilities</div>
-          <div className="metric-value" style={{color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</div>
-        </div>
-        <div className="card metric-card">
-          <div className="metric-label">Net Worth</div>
-          <div className="metric-value" style={{color:(nwData?.net_worth||0)>=0?'var(--green)':'var(--red)'}}>
-            {(nwData?.net_worth||0)<0?'-':''}{fmt(Math.abs(nwData?.net_worth||0))}
+      {(()=>{
+        const currNW=nwData?.net_worth||0;
+        const prevMo=tlData.length>=2?tlData[tlData.length-2]?.net_worth:null;
+        const start12=tlData.length>=1?tlData[0]?.net_worth:null;
+        const moChg=prevMo!=null?currNW-prevMo:null;
+        const yr12Chg=start12!=null?currNW-start12:null;
+        const moChgPct=moChg!=null&&Math.abs(prevMo)>1?Math.round(moChg/Math.abs(prevMo)*100):null;
+        const yr12ChgPct=yr12Chg!=null&&Math.abs(start12)>1?Math.round(yr12Chg/Math.abs(start12)*100):null;
+        const NWTrendBadge=({chg,pct})=>{
+          if(chg==null)return<span style={{fontSize:11,color:'var(--text-muted)'}}>—</span>;
+          const pos=chg>=0;
+          return<span style={{background:pos?'#dcfce7':'#fee2e2',color:pos?'#16a34a':'#dc2626',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{chg>0?'+':''}{fmt(chg)}{pct!=null?` (${pct>0?'+':''}${pct}%)`:''}</span>;
+        };
+        return(
+          <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+            <div className="card metric-card">
+              <div className="metric-label">Net Worth</div>
+              <div className="metric-value" style={{color:currNW>=0?'var(--green)':'var(--red)'}}>{currNW<0?'-':''}{fmt(Math.abs(currNW))}</div>
+              <div className="metric-sub"><NWTrendBadge chg={moChg} pct={moChgPct}/><span style={{fontSize:11,color:'var(--text-muted)'}}>vs last month</span></div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">Total Assets</div>
+              <div className="metric-value" style={{color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</div>
+              <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>as of {asOf}</span></div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">Total Liabilities</div>
+              <div className="metric-value" style={{color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</div>
+              <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>as of {asOf}</span></div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">12-Month Change</div>
+              <div className="metric-value" style={{color:yr12Chg!=null?(yr12Chg>=0?'var(--green)':'var(--red)'):'var(--text-primary)'}}>{yr12Chg!=null?(yr12Chg>0?'+':yr12Chg<0?'-':'')+fmt(Math.abs(yr12Chg)):'—'}</div>
+              <div className="metric-sub">{yr12ChgPct!=null&&<span style={{fontSize:11,color:'var(--text-muted)'}}>{yr12ChgPct>0?'+':''}{yr12ChgPct}% · since {tlData[0]?.date}</span>}</div>
+            </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Timeline chart */}
       {tlData.length>1&&<div className="card" style={{padding:16,marginBottom:16}}>
@@ -5151,6 +5173,49 @@ function DailyBalancesPage({toast}){
           </>}
         </div>
       </div>
+
+      {/* ── KPI strip ────────────────────────────────────────────────────── */}
+      {(()=>{
+        const computeNW=(di)=>{
+          let s=0;
+          groups.forEach(g=>{const v=g.totals[di]??0;s+=g.is_asset?v:-Math.abs(v);});
+          return Math.round(s*100)/100;
+        };
+        const todayDi=dates.indexOf(today);
+        const lastActualDi=todayDi>=0?todayDi:dates.reduce((best,d,i)=>d<=today?i:best,-1);
+        if(lastActualDi<0)return null;
+        const nwStart=computeNW(0);
+        const nwNow=computeNW(lastActualDi);
+        const nwChg=nwNow-nwStart;
+        const nwChgPct=Math.abs(nwStart)>1?Math.round(nwChg/Math.abs(nwStart)*100):null;
+        const nwPeak=Math.max(...Array.from({length:lastActualDi+1},(_,i)=>computeNW(i)));
+        const fmtNW=v=>{const abs=fmt(Math.abs(v));return v<0?`(${abs})`:abs;};
+        const chgPos=nwChg>=0;
+        return(
+          <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+            <div className="card metric-card">
+              <div className="metric-label">Net Worth — Today</div>
+              <div className="metric-value" style={{color:nwNow>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwNow)}</div>
+              <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>{today}</span></div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">Start of Period</div>
+              <div className="metric-value" style={{color:nwStart>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwStart)}</div>
+              <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>{dates[0]}</span></div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">Period Change</div>
+              <div className="metric-value" style={{color:chgPos?'var(--green)':'var(--red)'}}>{nwChg>0?'+':''}{fmtNW(nwChg)}</div>
+              <div className="metric-sub">{nwChgPct!=null&&<span style={{background:chgPos?'#dcfce7':'#fee2e2',color:chgPos?'#16a34a':'#dc2626',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{nwChgPct>0?'+':''}{nwChgPct}%</span>}</div>
+            </div>
+            <div className="card metric-card">
+              <div className="metric-label">Period High</div>
+              <div className="metric-value" style={{color:nwPeak>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwPeak)}</div>
+              <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>actual high in range</span></div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{overflowX:'auto',borderRadius:10,border:'1px solid var(--border)',background:'var(--card-bg)',maxHeight:'75vh',overflowY:'auto'}}>
         <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
