@@ -1553,28 +1553,32 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
   const yr=viewYear||now.getFullYear();
   const mo=viewMonth||(now.getMonth()+1);
   const mStr=String(mo);
-  const monthLabel=new Date(yr,mo-1,1).toLocaleString('default',{month:'long'});
   const SKIP=new Set(['Transfer','Work']);
   const isAnnual=view==='annual';
-  const periodLabel=isAnnual?`${yr} Year-to-Date`:`${monthLabel} ${yr}`;
   const fmt0=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
+  const BLUE='var(--sidebar-active-color)';
+  const BLUE_BG='var(--sidebar-active-bg)';
 
+  // Build rows, merging any keys that normalize to the same display name (fixes duplicate "Other")
   const allCats=new Set([...Object.keys(targets),...(isAnnual?Object.keys(ytdActuals):Object.keys(actuals))]);
-  const rows=[];
+  const catMap=new Map();
   allCats.forEach(cat=>{
     if(SKIP.has(cat))return;
     const dCat=normalizeCat(cat);
     let budget,actual;
     if(isAnnual){
-      budget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=(targets[cat]?.[String(m)]?.amount||0);return s;})();
+      // Budget: sum Jan through selected month (not full year)
+      budget=(()=>{let s=0;for(let m=1;m<=mo;m++)s+=(targets[cat]?.[String(m)]?.amount||0);return s;})();
       actual=ytdActuals[cat]||0;
     }else{
       budget=targets[cat]?.[mStr]?.amount||0;
       actual=actuals[cat]?.[mStr]||0;
     }
     if(budget===0&&actual===0)return;
-    rows.push({cat:dCat,budget,actual});
+    if(catMap.has(dCat)){const e=catMap.get(dCat);catMap.set(dCat,{cat:dCat,budget:e.budget+budget,actual:e.actual+actual});}
+    else catMap.set(dCat,{cat:dCat,budget,actual});
   });
+  const rows=[...catMap.values()];
 
   const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
   const totalActual=rows.reduce((s,r)=>s+r.actual,0);
@@ -1595,42 +1599,47 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
     return sortDir==='desc'?bV-aV:aV-bV;
   });
 
-  const SortBtn=({col,label})=>(
+  const SortBtn=({col,label,align='right'})=>(
     <button onClick={()=>handleSort(col)} style={{background:'none',border:'none',cursor:'pointer',padding:0,
-      display:'flex',alignItems:'center',justifyContent:'flex-end',gap:3,
+      display:'flex',alignItems:'center',justifyContent:align==='left'?'flex-start':'flex-end',gap:3,
       fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em',
       color:sortBy===col?'var(--text-primary)':'var(--text-muted)'}}>
       {label}<span style={{fontSize:9,opacity:sortBy===col?1:0.35}}>{sortBy===col?(sortDir==='desc'?'↓':'↑'):'↕'}</span>
     </button>
   );
 
-  const COLS='150px 1fr 100px 80px 52px';
+  const COLS='150px 1fr 100px 80px';
 
   const RowEl=({cat,budget,actual,isTotal=false})=>{
-    const color=isTotal?'#374151':getCatColor(cat);
+    const accentColor=isTotal?'#374151':BLUE;
     const isCredit=actual<0;
     const pct=!isCredit&&budget>0?actual/budget:null;
     const over=pct!==null&&pct>=1;
     const barPct=pct!==null?Math.min(pct*100,100):0;
-    const pctColor=pct===null?'var(--text-muted)':over?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
+    const pctLabel=pct!==null?`${Math.round(pct*100)}%`:null;
     return(
       <div style={{display:'flex',alignItems:'stretch',
         borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',
         background:isTotal?'rgba(0,0,0,0.015)':'transparent'}}>
-        <div style={{width:4,background:color,flexShrink:0}}/>
-        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'9px 16px',gap:14}}>
-          <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+        <div style={{width:4,background:accentColor,flexShrink:0}}/>
+        <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14}}>
+          <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',
+            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
             {isTotal?'Total':cat}
           </span>
           {!isCredit&&budget>0?(
-            <div style={{position:'relative',height:8,borderRadius:4,
-              background:hexToRgba(color,0.12),border:`1px solid ${hexToRgba(color,0.22)}`,overflow:'hidden'}}>
-              <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
-                background:over?'var(--red)':color,opacity:over?0.7:0.72,
-                borderRadius:4,transition:'width 0.4s ease'}}/>
+            <div style={{position:'relative',height:30,borderRadius:8,overflow:'hidden',
+              background:BLUE_BG,border:'1px solid var(--border)'}}>
+              {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
+                background:over?'var(--red)':BLUE,opacity:over?0.75:0.7,
+                borderRadius:8,transition:'width 0.4s ease'}}/>}
+              <div style={{position:'relative',display:'flex',alignItems:'center',
+                justifyContent:'flex-end',padding:'0 10px',height:'100%'}}>
+                {pctLabel&&<span style={{fontSize:11.5,fontWeight:700,color:'#1e3a8a'}}>{pctLabel}</span>}
+              </div>
             </div>
           ):(
-            <span style={{fontSize:11,color:isCredit?'var(--green)':'var(--text-muted)',fontStyle:'italic'}}>
+            <span style={{fontSize:11,color:isCredit?'var(--green)':'var(--text-muted)',fontStyle:'italic',paddingLeft:4}}>
               {isCredit?'credit':'no budget'}
             </span>
           )}
@@ -1642,9 +1651,6 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
             color:budget>0?'var(--text-secondary)':'var(--text-muted)'}}>
             {budget>0?fmt0(budget):'—'}
           </span>
-          <span style={{textAlign:'right',fontSize:11.5,fontWeight:600,color:pctColor}}>
-            {pct!==null?`${Math.round(pct*100)}%`:isCredit?'':'—'}
-          </span>
         </div>
       </div>
     );
@@ -1653,10 +1659,7 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
   return(
     <div className="card">
       <div className="section-header">
-        <div>
-          <div className="section-title">Budget vs. Actual</div>
-          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{periodLabel}</div>
-        </div>
+        <div className="section-title">Budget vs. Actual</div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <div className="sel-pill">
             {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
@@ -1670,23 +1673,20 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
           <select value={yr} onChange={e=>onSetYear(+e.target.value)} className="sel-drop">
             {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
           </select>
-          {!isAnnual&&(
-            <select value={mo} onChange={e=>onSetMonth(+e.target.value)} className="sel-drop">
-              {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
-                <option key={i+1} value={i+1}>{m}</option>
-              ))}
-            </select>
-          )}
+          <select value={mo} onChange={e=>onSetMonth(+e.target.value)} className="sel-drop">
+            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
+              <option key={i+1} value={i+1}>{m}</option>
+            ))}
+          </select>
         </div>
       </div>
       <div style={{display:'flex',alignItems:'stretch',borderBottom:'1px solid var(--border)',background:'rgba(0,0,0,0.018)'}}>
         <div style={{width:4,flexShrink:0}}/>
         <div style={{flex:1,display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14}}>
           <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Category</span>
-          <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Progress</span>
+          <SortBtn col="pct" label="Progress" align="left"/>
           <SortBtn col="actual" label="Actual"/>
           <SortBtn col="budget" label="Budget"/>
-          <SortBtn col="pct" label="%"/>
         </div>
       </div>
       <RowEl cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
@@ -1817,8 +1817,10 @@ function DashboardPage({categories,toast}){
       const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
       const yr=viewYear;
       const curY=new Date().getFullYear();
-      // YTD stats: for current year use today; for past years use Dec 31
-      const ytdEnd=yr<curY?`${yr}-12-31`:todayStr();
+      // YTD stats: Jan 1 → end of viewMonth (capped at today so future months don't show zeros)
+      const ytdMoEndDay=new Date(yr,viewMonth,0).getDate();
+      const ytdMoEnd=`${yr}-${String(viewMonth).padStart(2,'0')}-${String(ytdMoEndDay).padStart(2,'0')}`;
+      const ytdEnd=ytdMoEnd<todayStr()?ytdMoEnd:todayStr();
       const ytdQ=`/stats?start_date=${yr}-01-01&end_date=${ytdEnd}`;
       // KPI card stats: MTD vs same day last period
       const{kpiStart,kpiEnd,priorKpiStart,priorKpiEnd,kpiLabel:kLabel}=getKpiDates();
