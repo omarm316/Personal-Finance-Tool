@@ -8,13 +8,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --sidebar-w:220px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
-  --card-bg:#f1f5f9;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
+  --card-bg:#f5f7fa;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
   --radius:12px;--shadow:0 2px 8px rgba(0,0,0,0.07),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.1);
 }
@@ -50,7 +50,7 @@ body{overflow:hidden}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
 .metric-label{font-size:12px;font-weight:600;letter-spacing:0;color:var(--text-primary);margin-bottom:8px}
-.metric-value{font-size:22px;font-weight:700;font-family:'Inter',sans-serif;letter-spacing:-1.2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.metric-value{font-size:22px;font-weight:700;font-family:'Inter Tight',sans-serif;letter-spacing:-0.5px;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
 .btn-primary{background:var(--blue);color:#fff}
@@ -94,9 +94,9 @@ td{padding:11px 14px;font-size:13.5px}
 .badge-category{background:#eff6ff;color:#2563eb}
 .badge-unclassified{background:#fef2f2;color:#dc2626}
 .edit-actions{display:flex;gap:6px;align-items:center}
-.amount-neg{color:var(--red);font-family:'DM Mono',monospace;font-size:13.5px;font-weight:500}
-.amount-pos{color:var(--green);font-family:'DM Mono',monospace;font-size:13.5px;font-weight:500}
-.amount-neutral{color:var(--text-secondary);font-family:'DM Mono',monospace;font-size:13.5px}
+.amount-neg{color:var(--red);font-family:'Inter',sans-serif;font-size:13.5px;font-weight:500}
+.amount-pos{color:var(--green);font-family:'Inter',sans-serif;font-size:13.5px;font-weight:500}
+.amount-neutral{color:var(--text-secondary);font-family:'Inter',sans-serif;font-size:13.5px}
 .toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
 .toast{background:#0f1117;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-md);animation:slideUp 0.2s ease;max-width:320px}
 .toast.success{border-left:3px solid var(--green)}
@@ -894,7 +894,7 @@ function ImportModal({accounts,onClose,onImported,toast}){
                     <tr key={i} style={{borderTop:'1px solid var(--border)',opacity:r.duplicate?0.45:1}}>
                       <td style={{padding:'5px 8px',color:'var(--text-secondary)'}}>{r.date}</td>
                       <td style={{padding:'5px 8px',maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.description}</td>
-                      <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'DM Mono',color:r.amount<0?'var(--red)':'var(--green)'}}>{r.amount<0?'-':'+'}{fmt(Math.abs(r.amount))}</td>
+                      <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'Inter',color:r.amount<0?'var(--red)':'var(--green)'}}>{r.amount<0?'-':'+'}{fmt(Math.abs(r.amount))}</td>
                       <td style={{padding:'5px 8px',textAlign:'center'}}>
                         {r.duplicate
                           ?<span style={{fontSize:10,color:'var(--text-muted)',background:'#f3f4f6',borderRadius:4,padding:'2px 6px'}}>skip</span>
@@ -1208,8 +1208,8 @@ function TransactionsPage({categories,toast}){
         {/* ── Totals bar: Expenses (net of credits) + Income shown separately ── */}
         <div style={{padding:'6px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',flexWrap:'wrap'}}>
           <span><b style={{color:'var(--text-primary)',fontWeight:600}}>{visible.length}</b> transactions</span>
-          {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
-          {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'DM Mono,monospace',fontWeight:600}}>{fmt(visibleIncome)}</b></span>}
+          {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'Inter',fontWeight:600}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
+          {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'Inter',fontWeight:600}}>{fmt(visibleIncome)}</b></span>}
         </div>
         {enrichJob&&(
           <div style={{padding:'8px 16px',background:enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
@@ -1337,7 +1337,7 @@ function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
             );
           })}
           <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
-          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="DM Mono,monospace">{fmt(hd?hd.amount:total)}</text>
+          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={700} fill="#0d1b2e" fontFamily="Inter">{fmt(hd?hd.amount:total)}</text>
           {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
         </svg>
         {/* Category list — hover syncs with donut */}
@@ -1356,8 +1356,8 @@ function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
                 onClick={()=>onCategoryClick&&onCategoryClick(cat)}>
                 <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
                 <span style={{flex:1,fontSize:12,fontWeight:isSel||isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
-                <span style={{fontFamily:'DM Mono',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
-                <span style={{fontFamily:'DM Mono',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
+                <span style={{fontFamily:'Inter',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
+                <span style={{fontFamily:'Inter',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
               </div>
             );
           })}
@@ -1486,7 +1486,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
     <div className="card">
       <div className="section-header">
         <div className="section-title">{title}</div>
-        <span style={{fontFamily:'DM Mono',fontSize:12,color:'var(--text-muted)'}}>
+        <span style={{fontFamily:'Inter',fontSize:12,color:'var(--text-muted)'}}>
           {fmt(totalActual)}{totalBudget>0?<> / {fmt(totalBudget)}</>:''}
         </span>
       </div>
@@ -1505,7 +1505,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,gap:8}}>
                   <span style={{fontSize:13,fontWeight:500}}>{cat}</span>
-                  <span style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>
+                  <span style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap'}}>
                     {isCredit
                       ?<span style={{color:'var(--green)'}}>{fmtSigned(actual)}{budget>0&&<span style={{color:'var(--text-muted)',fontWeight:400}}> / {fmt(budget)}</span>}<span style={{opacity:0.6,fontSize:11}}> (credit)</span></span>
                       :budget>0
@@ -1521,7 +1521,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
                 )}
               </div>
               {!isCredit&&pct!==null&&(
-                <span style={{fontFamily:'DM Mono',fontSize:12,color,minWidth:36,textAlign:'right',fontWeight:pct>=1?600:400}}>
+                <span style={{fontFamily:'Inter',fontSize:12,color,minWidth:36,textAlign:'right',fontWeight:pct>=1?600:400}}>
                   {Math.round(pct*100)}%
                 </span>
               )}
@@ -1540,7 +1540,7 @@ function CategoryDetailPanel({detail,onClose}){
       <div className="section-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
         <div style={{display:'flex',alignItems:'baseline',gap:10}}>
           <div className="section-title">{cat}</div>
-          {!loading&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:700,color:'var(--red)'}}>{fmt(total)}</span>}
+          {!loading&&<span style={{fontFamily:'Inter',fontSize:13,fontWeight:700,color:'var(--red)'}}>{fmt(total)}</span>}
           {!loading&&<span style={{fontSize:11,color:'var(--text-muted)'}}>{rows.length} transactions</span>}
         </div>
         <button className="btn btn-sm btn-ghost" onClick={onClose} style={{fontSize:13,padding:'2px 8px'}}>✕</button>
@@ -1565,7 +1565,7 @@ function CategoryDetailPanel({detail,onClose}){
                         ?<span>{r.description} <span style={{fontSize:10,background:'#eff6ff',color:'#2563eb',borderRadius:3,padding:'1px 4px',marginLeft:4}}>split{r.split_description?': '+r.split_description:''}</span></span>
                         :r.description}
                     </td>
-                    <td style={{padding:'7px 14px',textAlign:'right',fontFamily:'DM Mono',fontSize:12,
+                    <td style={{padding:'7px 14px',textAlign:'right',fontFamily:'Inter',fontSize:12,
                       color:r.contrib>=0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
                       {r.contrib>=0?'+':''}{fmt(Math.abs(r.contrib))}
                     </td>
@@ -1727,8 +1727,8 @@ function DashboardPage({categories,toast}){
   const expensesPct=kpiCalcPct(kpiExpenses,priorExpenses);
   const netPct=kpiCalcPct(kpiNet,priorNet);
   const _bSum=key=>netWorth?.buckets?.[key]?.accounts?.reduce((s,a)=>s+a.balance,0)??0;
-  const csBal=netWorth?_bSum('Checking & Savings'):null;
-  const invBal=netWorth?(_bSum('Investments')+_bSum('Retirement')+_bSum('Brokerage')):null;
+  const csBal=netWorth?_bSum('Cash & Savings'):null;
+  const invBal=netWorth?_bSum('Investments'):null;
   // Estimated prior-period balance = current - net flows this period
   const csPct=(csBal!==null&&Math.abs(csBal-kpiNet)>1)?kpiCalcPct(csBal,csBal-kpiNet):null;
   const invPct=(invBal!==null&&Math.abs(invBal-kpiNet)>1)?kpiCalcPct(invBal,invBal-kpiNet):null;
@@ -1844,7 +1844,7 @@ function DashboardPage({categories,toast}){
               return(
                 <div key={bucket} style={{padding:'10px 18px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between'}}>
                   <span style={{fontSize:13,fontWeight:500}}>{bucket}</span>
-                  <span style={{fontFamily:'DM Mono',fontSize:12,fontWeight:500,color:bData.is_asset?'var(--green)':'var(--red)'}}>{bData.is_asset?'':'-'}{fmt(total)}</span>
+                  <span style={{fontFamily:'Inter',fontSize:12,fontWeight:500,color:bData.is_asset?'var(--green)':'var(--red)'}}>{bData.is_asset?'':'-'}{fmt(total)}</span>
                 </div>
               );
             })}
@@ -2059,7 +2059,7 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
         </>}
       </div>
       {!a.is_manual&&<span className="bank-badge">● Connected</span>}
-      {a.is_manual&&<span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
+      {a.is_manual&&<span style={{fontFamily:'Inter',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
       <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{a.transaction_count} txns</span>
       <div style={{display:'flex',gap:6,flexShrink:0}}>
         {isEditing?<>
@@ -2607,7 +2607,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
                   <td></td>
                   <td><div style={{display:'flex',gap:4}}><button className="btn btn-sm btn-success" onClick={()=>saveRuleEdit(r.id)} style={{fontSize:10,padding:'2px 6px'}}>Save</button><button className="btn btn-sm btn-ghost" onClick={()=>setRuleEditing(null)} style={{fontSize:10,padding:'2px 6px'}}>×</button></div></td>
                 </tr>:<tr key={r.id}>
-                  <td style={{fontFamily:'DM Mono',color:'var(--text-muted)'}}>{r.priority}</td>
+                  <td style={{fontFamily:'Inter',color:'var(--text-muted)'}}>{r.priority}</td>
                   <td style={{color:'var(--text-muted)'}}>{r.match_type}</td>
                   <td style={{fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.pattern}>{r.pattern}</td>
                   <td>{r.set_action&&<span className="badge badge-income" style={{fontSize:10}}>{r.set_action}</span>}</td>
@@ -2939,15 +2939,15 @@ function CardsPage({toast}){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:16}}>
             <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
               <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Credit Limit</div>
-              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono'}}>{detail.card.credit_limit?`$${detail.card.credit_limit.toLocaleString()}`:'—'}</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'Inter'}}>{detail.card.credit_limit?`$${detail.card.credit_limit.toLocaleString()}`:'—'}</div>
             </div>
             <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
               <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Stmt Balance</div>
-              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono',color:detail.statement_balance!=null?'var(--red)':'var(--text-muted)'}}>{detail.statement_balance!=null?fmt(Math.abs(detail.statement_balance)):'—'}</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'Inter',color:detail.statement_balance!=null?'var(--red)':'var(--text-muted)'}}>{detail.statement_balance!=null?fmt(Math.abs(detail.statement_balance)):'—'}</div>
             </div>
             <div style={{background:'#f9fafb',borderRadius:8,padding:'10px 14px'}}>
               <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Utilization</div>
-              <div style={{fontSize:16,fontWeight:600,fontFamily:'DM Mono',color:detail.utilization>80?'var(--red)':detail.utilization>50?'var(--amber)':'var(--green)'}}>{detail.utilization!=null?`${detail.utilization}%`:'—'}</div>
+              <div style={{fontSize:16,fontWeight:600,fontFamily:'Inter',color:detail.utilization>80?'var(--red)':detail.utilization>50?'var(--amber)':'var(--green)'}}>{detail.utilization!=null?`${detail.utilization}%`:'—'}</div>
             </div>
           </div>
           {detail.linked_account&&<div style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>Linked: {detail.linked_account.name} · Balance: {fmt(detail.linked_account.balance||0)}</div>}
@@ -2957,7 +2957,7 @@ function CardsPage({toast}){
               <div key={t.id} style={{padding:'8px 0',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:8}}>
                 <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap',width:70}}>{t.date}</span>
                 <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</span>
-                <span style={{fontFamily:'DM Mono',fontSize:12,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+                <span style={{fontFamily:'Inter',fontSize:12,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
               </div>
             ))}</div>
           }
@@ -3013,12 +3013,12 @@ function CardsPage({toast}){
             </tr></thead>
             <tbody>{visible.map(c=>(
               <tr key={c.id} style={{opacity:c.is_active?1:0.5,cursor:'pointer'}} onClick={()=>{if(editing!==c.id)loadDetail(c.id);}}>
-                <td><span style={{fontFamily:'DM Mono',fontSize:12,fontWeight:600}}>{c.card_id}</span></td>
+                <td><span style={{fontFamily:'Inter',fontSize:12,fontWeight:600}}>{c.card_id}</span></td>
                 {editing===c.id?<>
                   <td onClick={e=>e.stopPropagation()}><input value={editVals.card_name} onChange={e=>setEditVals(v=>({...v,card_name:e.target.value}))} style={{width:120,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                 </>:<td style={{fontWeight:500}}>{c.card_name}</td>}
                 <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.issuer}</td>
-                <td><span style={{fontFamily:'DM Mono',fontSize:11,fontWeight:700,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                <td><span style={{fontFamily:'Inter',fontSize:11,fontWeight:700,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
                 {editing===c.id?<>
                   <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.last_four} onChange={e=>setEditVals(v=>({...v,last_four:e.target.value}))} style={{width:60,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}} placeholder="Last 4"/></td>
                   <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.statement_close_day} onChange={e=>setEditVals(v=>({...v,statement_close_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
@@ -3041,10 +3041,10 @@ function CardsPage({toast}){
                     <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>Cancel</button>
                   </div></td>
                 </>:<>
-                  <td style={{textAlign:'center',fontSize:12,fontFamily:'DM Mono'}}>{c.last_four||<span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                  <td style={{textAlign:'center',fontSize:13}}>{c.statement_close_day?<span style={{fontFamily:'DM Mono'}}>{c.statement_close_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                  <td style={{textAlign:'center',fontSize:13}}>{c.payment_due_day?<span style={{fontFamily:'DM Mono'}}>{c.payment_due_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                  <td style={{fontSize:13,fontFamily:'DM Mono'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{textAlign:'center',fontSize:12,fontFamily:'Inter'}}>{c.last_four||<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{textAlign:'center',fontSize:13}}>{c.statement_close_day?<span style={{fontFamily:'Inter'}}>{c.statement_close_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{textAlign:'center',fontSize:13}}>{c.payment_due_day?<span style={{fontFamily:'Inter'}}>{c.payment_due_day}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                  <td style={{fontSize:13,fontFamily:'Inter'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
                   <td style={{fontSize:12}}>
                     {c.account_id
                       ?<span style={{display:'flex',alignItems:'center',gap:4}}>
@@ -3401,12 +3401,12 @@ function BudgetsPage({categories,toast}){
     return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
         <td style={{fontWeight:500,fontSize:13,minWidth:140,paddingLeft:12}}>{cat}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,minWidth:90,padding:'6px 8px',position:'relative'}}>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,minWidth:90,padding:'6px 8px',position:'relative'}}>
           {isEditing?(
             <div style={{position:'relative'}}>
               <input type="number" step="1" min="0" value={editVal}
                 onChange={e=>{const v=e.target.value;setEdits(prev=>({...prev,[cat]:{...prev[cat],[String(month)]:v}}));}}
-                style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 24px 4px 6px',fontSize:12,textAlign:'right',fontFamily:'DM Mono',background:'var(--card-bg)'}}
+                style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 24px 4px 6px',fontSize:12,textAlign:'right',fontFamily:'Inter',background:'var(--card-bg)'}}
                 placeholder={suggestion?Math.round(suggestion).toString():'0'}/>
               {suggestion&&!editVal&&<span style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--text-muted)',pointerEvents:'none'}}>{Math.round(suggestion)}</span>}
             </div>
@@ -3428,7 +3428,7 @@ function BudgetsPage({categories,toast}){
   const renderSectionTotal=(label,totalBudget)=>(
     <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
       <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
-      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,padding:'6px 8px'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
     </tr>
   );
 
@@ -3436,7 +3436,7 @@ function BudgetsPage({categories,toast}){
   const renderNetRow=(budgetNet)=>(
     <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
       <td style={{fontWeight:800,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8}}>NET</td>
-      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:13,fontWeight:700,color:budgetNet>=0?'var(--green)':'var(--red)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:budgetNet>=0?'var(--green)':'var(--red)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
     </tr>
   );
 
@@ -3525,16 +3525,16 @@ function BudgetsPage({categories,toast}){
                       onBlur={()=>commitInlineEdit(cat,m,inlineEditVal)}
                       onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitInlineEdit(cat,m,inlineEditVal);}if(e.key==='Escape'){e.preventDefault();cancelInlineEdit();}}}
                       onClick={e=>e.stopPropagation()}
-                      style={{width:68,border:'1px solid var(--blue)',borderRadius:4,padding:'2px 4px',fontSize:11,textAlign:'right',fontFamily:'DM Mono',background:'#eef2ff',outline:'none'}}/>
+                      style={{width:68,border:'1px solid var(--blue)',borderRadius:4,padding:'2px 4px',fontSize:11,textAlign:'right',fontFamily:'Inter',background:'#eef2ff',outline:'none'}}/>
                   ):b>0?(
-                    <span style={{fontFamily:'DM Mono',fontSize:11,fontWeight:500,color:'var(--text-primary)'}}>{fmt(b)}</span>
+                    <span style={{fontFamily:'Inter',fontSize:11,fontWeight:500,color:'var(--text-primary)'}}>{fmt(b)}</span>
                   ):(
                     <span style={{color:'var(--border)',fontSize:9,opacity:0.4}}>+</span>
                   )}
                 </td>
               );
             })}
-            <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:11,fontWeight:600,padding:'4px 10px',minWidth:90,borderLeft:'2px solid var(--border)',color:'var(--text-primary)'}}>{annualBudget>0?fmt(annualBudget):'—'}</td>
+            <td style={{textAlign:'right',fontFamily:'Inter',fontSize:11,fontWeight:600,padding:'4px 10px',minWidth:90,borderLeft:'2px solid var(--border)',color:'var(--text-primary)'}}>{annualBudget>0?fmt(annualBudget):'—'}</td>
           </tr>
         );
       })}
@@ -3550,11 +3550,11 @@ function BudgetsPage({categories,toast}){
               const isCur=m===curMonth&&year===curYear;
               return(
                 <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'rgba(99,102,241,0.06)':'transparent'}}>
-                  <span style={{fontFamily:'DM Mono',fontSize:11,fontWeight:700}}>{tb>0?fmt(tb):'—'}</span>
+                  <span style={{fontFamily:'Inter',fontSize:11,fontWeight:700}}>{tb>0?fmt(tb):'—'}</span>
                 </td>
               );
             })}
-            <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:11,fontWeight:700,padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{totBudget>0?fmt(totBudget):'—'}</td>
+            <td style={{textAlign:'right',fontFamily:'Inter',fontSize:11,fontWeight:700,padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{totBudget>0?fmt(totBudget):'—'}</td>
           </tr>
         );
       })()}
@@ -3603,11 +3603,11 @@ function BudgetsPage({categories,toast}){
                       const isCur=m===curMonth&&year===curYear;
                       return(
                         <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'rgba(99,102,241,0.06)':'transparent'}}>
-                          {nb!==0?<span style={{fontFamily:'DM Mono',fontSize:11,fontWeight:700,color:nb>=0?'var(--green)':'var(--red)'}}>{nb>=0?fmt(nb):`-${fmt(Math.abs(nb))}`}</span>:<span style={{color:'var(--border)',fontSize:10}}>—</span>}
+                          {nb!==0?<span style={{fontFamily:'Inter',fontSize:11,fontWeight:700,color:nb>=0?'var(--green)':'var(--red)'}}>{nb>=0?fmt(nb):`-${fmt(Math.abs(nb))}`}</span>:<span style={{color:'var(--border)',fontSize:10}}>—</span>}
                         </td>
                       );
                     })}
-                    <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,fontWeight:800,color:netBudget>=0?'var(--green)':'var(--red)',padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{netBudget>=0?fmt(netBudget):`-${fmt(Math.abs(netBudget))}`}</td>
+                    <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,fontWeight:800,color:netBudget>=0?'var(--green)':'var(--red)',padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{netBudget>=0?fmt(netBudget):`-${fmt(Math.abs(netBudget))}`}</td>
                   </tr>
                 );
               })()}
@@ -3644,7 +3644,7 @@ function BudgetsPage({categories,toast}){
                 <td key={m} style={{padding:'3px 3px',background:isCur?'rgba(99,102,241,0.05)':'transparent',minWidth:82}}>
                   <input type="number" step="1" min="0" value={val}
                     onChange={e=>setCell(cat,m,e.target.value)}
-                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'DM Mono',
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'Inter',
                       background:isCur?'rgba(99,102,241,0.06)':'var(--card-bg)',
                       outline:isCur?'1px solid var(--blue)':undefined}}
                     placeholder={actual>0?String(Math.round(actual)):''}/>
@@ -3761,7 +3761,7 @@ function BudgetsPage({categories,toast}){
               Copy from Excel/Sheets and paste below. Expected format: <strong>Category</strong> in column A, then one column per month (Jan–Dec). A header row is automatically detected and skipped. Category names must match exactly.
             </p>
             <textarea
-              style={{width:'100%',height:110,border:'1px solid var(--border)',borderRadius:6,padding:8,fontSize:12,fontFamily:'DM Mono',resize:'vertical',boxSizing:'border-box',background:'var(--sidebar-bg)'}}
+              style={{width:'100%',height:110,border:'1px solid var(--border)',borderRadius:6,padding:8,fontSize:12,fontFamily:'Inter',resize:'vertical',boxSizing:'border-box',background:'var(--sidebar-bg)'}}
               placeholder={"Category\tJan\tFeb\tMar\tApr\tMay\tJun\tJul\tAug\tSep\tOct\tNov\tDec\nGroceries\t1200\t1200\t1300\t1200\t1200\t1200\t1200\t1200\t1200\t1200\t1200\t1400\nRent\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500"}
               value={pasteText}
               onChange={e=>{setPasteText(e.target.value);parsePasteText(e.target.value);}}
@@ -3783,7 +3783,7 @@ function BudgetsPage({categories,toast}){
                     <thead>
                       <tr style={{background:'var(--sidebar-bg)'}}>
                         <th style={{textAlign:'left',padding:'5px 10px',fontWeight:600,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:1}}>Category</th>
-                        {MO.map(mo=><th key={mo} style={{textAlign:'right',padding:'5px 7px',fontWeight:600,fontFamily:'DM Mono',minWidth:60}}>{mo}</th>)}
+                        {MO.map(mo=><th key={mo} style={{textAlign:'right',padding:'5px 7px',fontWeight:600,fontFamily:'Inter',minWidth:60}}>{mo}</th>)}
                       </tr>
                     </thead>
                     <tbody>
@@ -3791,7 +3791,7 @@ function BudgetsPage({categories,toast}){
                         <tr key={cat} style={{borderTop:'1px solid var(--border)'}}>
                           <td style={{padding:'4px 10px',fontWeight:500,position:'sticky',left:0,background:'var(--card-bg)',zIndex:1}}>{cat}</td>
                           {values.map((v,i)=>(
-                            <td key={i} style={{textAlign:'right',padding:'4px 7px',fontFamily:'DM Mono',color:v!=null?'var(--text-primary)':'var(--border)',background:v!=null?undefined:'var(--sidebar-bg)'}}>
+                            <td key={i} style={{textAlign:'right',padding:'4px 7px',fontFamily:'Inter',color:v!=null?'var(--text-primary)':'var(--border)',background:v!=null?undefined:'var(--sidebar-bg)'}}>
                               {v!=null?fmt(v):'—'}
                             </td>
                           ))}
@@ -3960,7 +3960,7 @@ function NetWorthPage({toast}){
                   <span style={{fontSize:13,fontWeight:600}}>{bucketName}</span>
                   <span style={{fontSize:11,color:'var(--text-muted)'}}>({bData.accounts.length})</span>
                 </div>
-                <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:700,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
+                <span style={{fontFamily:'Inter',fontSize:13,fontWeight:700,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
               </div>
               {/* Account rows */}
               {isExp&&bData.accounts.map(a=>{
@@ -3978,7 +3978,7 @@ function NetWorthPage({toast}){
                         <div style={{display:'flex',alignItems:'center',gap:6}}>
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>Balance $</span>
                           <input type="number" step="0.01" min="0" value={editBal} onChange={e=>setEditBal(e.target.value)}
-                            style={{width:110,border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',fontSize:12,fontFamily:'DM Mono',textAlign:'right'}}/>
+                            style={{width:110,border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',fontSize:12,fontFamily:'Inter',textAlign:'right'}}/>
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>as of</span>
                           <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)}
                             style={{border:'1px solid var(--border)',borderRadius:4,padding:'3px 6px',fontSize:12}}/>
@@ -3998,7 +3998,7 @@ function NetWorthPage({toast}){
                           </div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:10}}>
-                          <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:600,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
+                          <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
                           <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>startEditAcct(a)}>Edit anchor</button>
                         </div>
                       </div>
@@ -4050,14 +4050,14 @@ function NetWorthPage({toast}){
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <div style={{padding:'12px 16px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontWeight:700,fontSize:14}}>Assets</span>
-            <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:700,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
+            <span style={{fontFamily:'Inter',fontSize:14,fontWeight:700,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
           </div>
           <BucketPanel bucketList={assetBuckets} isAsset={true}/>
         </div>
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <div style={{padding:'12px 16px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontWeight:700,fontSize:14}}>Liabilities</span>
-            <span style={{fontFamily:'DM Mono',fontSize:14,fontWeight:700,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
+            <span style={{fontFamily:'Inter',fontSize:14,fontWeight:700,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
           </div>
           <BucketPanel bucketList={liabBuckets} isAsset={false}/>
         </div>
@@ -4189,7 +4189,7 @@ function NetWorthPage({toast}){
                               <td style={{color:'var(--text-muted)',fontSize:12}}>{reconcileData.anchor_date||'—'}</td>
                               <td style={{fontSize:12,color:'var(--text-muted)',fontStyle:'italic'}}>⚓ Anchor — starting balance</td>
                               <td/>
-                              <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600}}>{fmtBal(reconcileData.anchor_balance)}</td>
+                              <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:600}}>{fmtBal(reconcileData.anchor_balance)}</td>
                             </tr>
                             {/* Transactions oldest→newest */}
                             {reconcileData.transactions.map(t=>(
@@ -4208,7 +4208,7 @@ function NetWorthPage({toast}){
                                     {t.amount>0?'+':''}{fmt(Math.abs(t.amount))}
                                   </span>
                                 </td>
-                                <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
+                                <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
                                   {t.is_excluded?'—':fmtBal(t.running_balance)}
                                 </td>
                               </tr>
@@ -4227,7 +4227,7 @@ function NetWorthPage({toast}){
                           <tr key={d.date}>
                             <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
                             <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
-                            <td><span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                            <td><span style={{fontFamily:'Inter',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
                           </tr>
                         ))}</tbody>
                       </table>
@@ -4318,10 +4318,10 @@ function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel
       </div>
       {pmt>0&&<div style={{background:'#fff',border:'1px solid #bbf7d0',borderRadius:6,padding:'8px 12px',marginBottom:8,fontSize:12,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
         <span style={{fontWeight:600,color:'var(--text-muted)'}}>Next payment preview:</span>
-        <span>Principal <b style={{fontFamily:'DM Mono'}}>${prevPrin.toLocaleString()}</b></span>
-        <span>Interest <b style={{fontFamily:'DM Mono',color:'var(--red)'}}>${prevInt.toLocaleString()}</b></span>
-        {tax>0&&<span>Prop Tax <b style={{fontFamily:'DM Mono'}}>${tax.toLocaleString()}</b></span>}
-        {ins>0&&<span>Insurance <b style={{fontFamily:'DM Mono'}}>${ins.toLocaleString()}</b></span>}
+        <span>Principal <b style={{fontFamily:'Inter'}}>${prevPrin.toLocaleString()}</b></span>
+        <span>Interest <b style={{fontFamily:'Inter',color:'var(--red)'}}>${prevInt.toLocaleString()}</b></span>
+        {tax>0&&<span>Prop Tax <b style={{fontFamily:'Inter'}}>${tax.toLocaleString()}</b></span>}
+        {ins>0&&<span>Insurance <b style={{fontFamily:'Inter'}}>${ins.toLocaleString()}</b></span>}
       </div>}
       <div style={{marginBottom:8}}>{lbl('Notes')}{inp('notes')}</div>
       <div style={{display:'flex',gap:8}}>
@@ -4447,10 +4447,10 @@ function LoansPage({toast}){
                 const principal=t.splits.find(s=>s.description==='Principal');
                 return(
                   <tr key={t.id}>
-                    <td style={{fontFamily:'DM Mono',fontSize:12}}>{t.date}</td>
+                    <td style={{fontFamily:'Inter',fontSize:12}}>{t.date}</td>
                     <td style={{fontSize:12}}>{t.description}</td>
-                    <td style={{fontFamily:'DM Mono',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
-                    <td style={{fontFamily:'DM Mono',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
+                    <td style={{fontFamily:'Inter',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                    <td style={{fontFamily:'Inter',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
                     <td><button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>doUnlink(t.id)}>Unlink</button></td>
                   </tr>
                 );
@@ -4461,7 +4461,7 @@ function LoansPage({toast}){
             {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
               <div key={lbl} style={{textAlign:'center'}}>
                 <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>{lbl}</div>
-                <div style={{fontSize:15,fontWeight:600,fontFamily:'DM Mono',color}}>{fmt(val)}</div>
+                <div style={{fontSize:15,fontWeight:600,fontFamily:'Inter',color}}>{fmt(val)}</div>
               </div>
             ))}
           </div>}
@@ -4474,9 +4474,9 @@ function LoansPage({toast}){
               <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th></th></tr></thead>
               <tbody>{candidates.map(t=>(
                 <tr key={t.id}>
-                  <td style={{fontFamily:'DM Mono',fontSize:12}}>{t.date}</td>
+                  <td style={{fontFamily:'Inter',fontSize:12}}>{t.date}</td>
                   <td style={{fontSize:12}}>{t.description_clean||t.description_raw}</td>
-                  <td style={{fontFamily:'DM Mono',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                  <td style={{fontFamily:'Inter',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
                   <td><button className="btn btn-sm btn-primary" onClick={()=>doLink(t.id)} disabled={linking}>Link</button></td>
                 </tr>
               ))}</tbody>
@@ -4509,10 +4509,10 @@ function LoansPage({toast}){
               <tr key={l.id}>
                 <td style={{fontWeight:500}}>{l.lender}</td>
                 <td><span className="badge badge-category" style={{fontSize:11}}>{toTitleCase(l.loan_type||'')}</span></td>
-                <td style={{fontFamily:'DM Mono',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(Math.abs(l.current_balance)):'—'}{l.balance_date&&<span style={{fontSize:10,color:'var(--text-muted)',display:'block'}}>as of {l.balance_date}</span>}</td>
-                <td style={{fontFamily:'DM Mono',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
+                <td style={{fontFamily:'Inter',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(Math.abs(l.current_balance)):'—'}{l.balance_date&&<span style={{fontSize:10,color:'var(--text-muted)',display:'block'}}>as of {l.balance_date}</span>}</td>
+                <td style={{fontFamily:'Inter',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
                 <td style={{fontSize:12}}>
-                  {l.next_split?<span style={{fontFamily:'DM Mono'}}>
+                  {l.next_split?<span style={{fontFamily:'Inter'}}>
                     {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)}{l.next_split.property_tax>0?` / ${fmt(l.next_split.property_tax)}`:''}
                   </span>:<span style={{color:'var(--text-muted)'}}>—</span>}
                 </td>
@@ -4765,18 +4765,18 @@ function CashFlowPage({toast}){
                   const isPast=sp.payment_date<todayStr();
                   return(
                     <tr key={sp.id} style={{opacity:isPast?0.65:1,background:isPast?'#fafafa':'var(--card-bg)'}}>
-                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'inherit'}}>{sp.payment_date}</td>
+                      <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'inherit'}}>{sp.payment_date}</td>
                       <td style={{fontWeight:500}}>{sp.description}</td>
                       <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:'#dcfce7',color:'#166534'}}>{sp.person}</span></td>
                       {salaryAccounts.map(a=>{
                         const amt=allocMap[a.account_id];
                         return(
-                          <td key={a.id} style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>
+                          <td key={a.id} style={{textAlign:'right',fontFamily:'Inter',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>
                             {amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}
                           </td>
                         );
                       })}
-                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                      <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                       <td style={{textAlign:'center'}}>
                         <div style={{display:'flex',gap:4,justifyContent:'center'}}>
                           <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
@@ -4861,9 +4861,9 @@ function CashFlowPage({toast}){
                   const isOut=o.amount<0;
                   return(
                     <tr key={o.id} style={{background:o.flow_date>=todayStr()?'var(--card-bg)':'#fafafa'}}>
-                      <td style={{fontFamily:'DM Mono',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
+                      <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
                       <td>{o.description}</td>
-                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                      <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
                         {isOut?'–':'+'}${Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
                       </td>
                       <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
@@ -4884,12 +4884,12 @@ function CashFlowPage({toast}){
                   return(
                     <tr style={{background:'#f8f9fa',fontWeight:600,borderTop:'2px solid var(--border)'}}>
                       <td colSpan={2} style={{fontSize:12,color:'var(--text-muted)'}}>Upcoming totals</td>
-                      <td style={{textAlign:'right',fontFamily:'DM Mono',fontSize:12}}>
+                      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12}}>
                         <span style={{color:'var(--green)'}}>+${netIn.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                         {' / '}
                         <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                       </td>
-                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'DM Mono',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
+                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'Inter',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
                     </tr>
                   );
                 })()}
@@ -5019,7 +5019,7 @@ function DailyBalancesPage({toast}){
               const rowBg=isToday?'#fef9c3':isFuture?'#fafafa':'transparent';
               return(
                 <tr key={d} style={{background:rowBg}}>
-                  <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'#fef9c3':isFuture?'#fafafa':'var(--card-bg)',padding:'3px 10px',fontFamily:'DM Mono',fontSize:11,borderRight:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap',color:isToday?'#92400e':isFuture?'var(--text-muted)':'var(--text-secondary)',fontWeight:isToday?700:400}}>
+                  <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'#fef9c3':isFuture?'#fafafa':'var(--card-bg)',padding:'3px 10px',fontFamily:'Inter',fontSize:11,borderRight:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap',color:isToday?'#92400e':isFuture?'var(--text-muted)':'var(--text-secondary)',fontWeight:isToday?700:400}}>
                     {d.slice(5)}{isToday&&<span style={{marginLeft:5,fontSize:9,fontWeight:800,background:'#fbbf24',color:'#fff',borderRadius:3,padding:'1px 4px'}}>TODAY</span>}
                   </td>
                   {(()=>{
@@ -5032,7 +5032,7 @@ function DailyBalancesPage({toast}){
                       grandTotal+=isLiab?-Math.abs(rawTot??0):(rawTot??0);
                       const dispTot=isLiab?-Math.abs(rawTot??0):(rawTot??0);
                       const totCell=(
-                        <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontWeight:600,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispTot<0?'var(--red)':'inherit',background:isLiab?'#fff5f5':dispTot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(dispTot)}</td>
+                        <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'Inter',fontWeight:600,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispTot<0?'var(--red)':'inherit',background:isLiab?'#fff5f5':dispTot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(dispTot)}</td>
                       );
                       const acctCells=!collapsed[grp.group]?grp.accounts.map(acct=>{
                         const rawVal=acct.balances[di];
@@ -5050,7 +5050,7 @@ function DailyBalancesPage({toast}){
                           setCellModal({acct_name:acct.account_name,date:d,raw_balance:balBefore,projected_balance:dispVal,entries:projEntries});
                         }:undefined;
                         return(
-                          <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Mono',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'#fefce8':undefined}}>
+                          <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'Inter',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'#fefce8':undefined}}>
                             {fmtBal(dispVal)}{hasProj&&<span style={{marginLeft:2,fontSize:8,color:'#ca8a04',verticalAlign:'super'}}>◈</span>}
                           </td>
                         );
@@ -5060,7 +5060,7 @@ function DailyBalancesPage({toast}){
                     grandTotal=Math.round(grandTotal*100)/100;
                     const gtColor=grandTotal>=0?'var(--green)':'var(--red)';
                     cells.push(
-                      <td key="grand-total" style={{padding:'3px 10px',textAlign:'right',fontFamily:'DM Mono',fontWeight:700,fontSize:12,borderLeft:'3px solid #6366f1',borderBottom:'1px solid #f0f0f0',color:gtColor,background:'#eef2ff',whiteSpace:'nowrap'}}>{fmtBal(grandTotal)}</td>
+                      <td key="grand-total" style={{padding:'3px 10px',textAlign:'right',fontFamily:'Inter',fontWeight:700,fontSize:12,borderLeft:'3px solid #6366f1',borderBottom:'1px solid #f0f0f0',color:gtColor,background:'#eef2ff',whiteSpace:'nowrap'}}>{fmtBal(grandTotal)}</td>
                     );
                     return cells;
                   })()}
@@ -5085,7 +5085,7 @@ function DailyBalancesPage({toast}){
             <div style={{borderTop:'1px solid var(--border)',paddingTop:14}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
                 <span style={{fontSize:13,color:'var(--text-secondary)'}}>Balance before today's entries</span>
-                <span style={{fontFamily:'DM Mono',fontSize:13}}>{fmtBal(cellModal.raw_balance)}</span>
+                <span style={{fontFamily:'Inter',fontSize:13}}>{fmtBal(cellModal.raw_balance)}</span>
               </div>
               {cellModal.entries.map((e,i)=>(
                 <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,paddingLeft:10,borderLeft:'3px solid '+(e.amount>=0?'var(--green)':'var(--red)')}}>
@@ -5093,14 +5093,14 @@ function DailyBalancesPage({toast}){
                     <div style={{fontSize:13,color:'var(--text-primary)'}}>{e.description}</div>
                     <div style={{fontSize:10,color:'var(--text-muted)',textTransform:'capitalize',marginTop:1}}>{e.source.replace(/_/g,' ')}</div>
                   </div>
-                  <span style={{fontFamily:'DM Mono',fontSize:13,fontWeight:600,color:e.amount>=0?'var(--green)':'var(--red)',marginLeft:16,whiteSpace:'nowrap'}}>
+                  <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:e.amount>=0?'var(--green)':'var(--red)',marginLeft:16,whiteSpace:'nowrap'}}>
                     {e.amount>=0?'+':'–'}${Math.abs(e.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
                   </span>
                 </div>
               ))}
               <div style={{borderTop:'2px solid var(--border)',marginTop:12,paddingTop:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <span style={{fontSize:14,fontWeight:700,color:'var(--text-primary)'}}>Projected balance</span>
-                <span style={{fontFamily:'DM Mono',fontSize:15,fontWeight:700,color:cellModal.projected_balance>=0?'inherit':'var(--red)'}}>{fmtBal(cellModal.projected_balance)}</span>
+                <span style={{fontFamily:'Inter',fontSize:15,fontWeight:700,color:cellModal.projected_balance>=0?'inherit':'var(--red)'}}>{fmtBal(cellModal.projected_balance)}</span>
               </div>
             </div>
           </div>
