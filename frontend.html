@@ -12,9 +12,9 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;--bg:#f1f5f9;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
+  --sidebar-w:220px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
-  --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
+  --card-bg:#f1f5f9;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
   --radius:12px;--shadow:0 2px 8px rgba(0,0,0,0.07),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.1);
 }
@@ -43,14 +43,14 @@ body{overflow:hidden}
 .sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
-.topbar{background:var(--card-bg);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
 .content{flex:1;overflow-y:auto;padding:24px 28px}
 .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow)}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
-.metric-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:8px}
-.metric-value{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:-0.5px;color:var(--text-primary)}
+.metric-label{font-size:12px;font-weight:600;letter-spacing:0;color:var(--text-primary);margin-bottom:8px}
+.metric-value{font-size:22px;font-weight:700;font-family:'Inter',sans-serif;letter-spacing:-1.2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
 .btn-primary{background:var(--blue);color:#fff}
@@ -74,7 +74,7 @@ body{overflow:hidden}
 .filter-count{margin-left:auto;font-size:12px;color:var(--text-muted);white-space:nowrap}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
-thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;background:#fafafa}
+thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;background:transparent}
 tbody tr{border-bottom:1px solid #f3f4f6;transition:background 0.1s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:#f9faff}
@@ -1630,8 +1630,7 @@ function DashboardPage({categories,toast}){
       const kpiStart=`${yr}-01-01`;
       const pEnd=isCY?`${pYr}-${pad(cm)}-${pad(cd)}`:`${pYr}-12-31`;
       const pStart=`${pYr}-01-01`;
-      const label=isCY?`vs ${pYr} thru ${MONS[cm-1]} ${cd}`:`vs ${pYr}`;
-      return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:label};
+      return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:'vs. Last Year'};
     }
     const yr=viewYear,mo=viewMonth;
     const isCM=yr===cy&&mo===cm;
@@ -1643,7 +1642,7 @@ function DashboardPage({categories,toast}){
     const pDay=Math.min(endDay,pMaxDay);
     const pEnd=`${pYr}-${pad(pMo)}-${pad(pDay)}`;
     const pStart=`${pYr}-${pad(pMo)}-01`;
-    return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:`vs ${MONS[pMo-1]} ${pDay}`};
+    return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:'vs. Last Month'};
   };
 
   const load=useCallback(async({silent=false}={})=>{
@@ -1730,6 +1729,10 @@ function DashboardPage({categories,toast}){
   const _bSum=key=>netWorth?.buckets?.[key]?.accounts?.reduce((s,a)=>s+a.balance,0)??0;
   const csBal=netWorth?_bSum('Checking & Savings'):null;
   const invBal=netWorth?(_bSum('Investments')+_bSum('Retirement')+_bSum('Brokerage')):null;
+  // Estimated prior-period balance = current - net flows this period
+  const csPct=(csBal!==null&&Math.abs(csBal-kpiNet)>1)?kpiCalcPct(csBal,csBal-kpiNet):null;
+  const invPct=(invBal!==null&&Math.abs(invBal-kpiNet)>1)?kpiCalcPct(invBal,invBal-kpiNet):null;
+  const netValue=kpiNet<0?`(${fmt(Math.abs(kpiNet))})`:fmt(kpiNet);
 
   return(
     <div>
@@ -1774,21 +1777,21 @@ function DashboardPage({categories,toast}){
           return<span style={{background:good?'#dcfce7':'#fee2e2',color:good?'#16a34a':'#dc2626',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{pct>0?'+':''}{pct}%</span>;
         };
         const cards=[
-          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',sub:'Current balance',bg:'#ffffff'},
-          {label:'Investments',value:invBal!==null?fmt(invBal):'—',sub:'Current balance',bg:'#ffffff'},
-          {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false,bg:'#f0fdf8'},
-          {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true,bg:'#fff9f9'},
-          {label:'Net',value:`${kpiNet>=0?'+':''}${fmt(kpiNet)}`,pct:netPct,invert:false,bg:kpiNet>=0?'#f0fdf8':'#fff0f0'},
+          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',pct:csPct,invert:false},
+          {label:'Investments',value:invBal!==null?fmt(invBal):'—',pct:invPct,invert:false},
+          {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false},
+          {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true},
+          {label:'Net',value:netValue,pct:netPct,invert:false},
         ];
         return(
           <div className="metric-grid">
             {cards.map(c=>(
-              <div key={c.label} className="card metric-card" style={{background:c.bg}}>
+              <div key={c.label} className="card metric-card">
                 <div className="metric-label">{c.label}</div>
                 <div className="metric-value">{c.value}</div>
                 <div className="metric-sub">
-                  {c.pct!==undefined?<PctBadge pct={c.pct} invert={c.invert}/>:null}
-                  <span style={{fontSize:11,color:'var(--text-muted)'}}>{c.pct!==undefined?(kpiLabel||'vs prior'):c.sub}</span>
+                  <PctBadge pct={c.pct} invert={c.invert}/>
+                  <span style={{fontSize:11,color:'var(--text-muted)'}}>{kpiLabel}</span>
                 </div>
               </div>
             ))}
