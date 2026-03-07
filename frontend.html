@@ -4865,177 +4865,210 @@ function CashFlowPage({toast}){
 
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
 
+  const today=todayStr();
+  const futureOvs=overlays.filter(o=>o.flow_date>=today);
+  const futureSals=salaryPayments.filter(sp=>sp.payment_date>=today).sort((a,b)=>a.payment_date.localeCompare(b.payment_date));
+  const ovUpIn=futureOvs.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
+  const ovUpOut=futureOvs.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
+  const salUpIn=futureSals.reduce((s,sp)=>s+spTotal(sp),0);
+  const totalUpIn=ovUpIn+salUpIn;
+  const netCF=totalUpIn+ovUpOut;
+  const nextPayEntry=futureSals[0]||null;
+
   return(
     <div>
       <h2 style={{fontSize:18,fontWeight:600,marginBottom:20}}>Cash Flow</h2>
 
-      {/* ── Salary & Income ────────────────────────────────────────────── */}
-      <div className="card" style={{marginBottom:24}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💰 Salary & Income</div>
-          <button className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+      {/* ── KPI strip ──────────────────────────────────────────────────────── */}
+      <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:24}}>
+        <div className="card metric-card">
+          <div className="metric-label">Upcoming Income</div>
+          <div className="metric-value" style={{color:'var(--green)'}}>+{fmt(totalUpIn)}</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>salary + one-time</span></div>
         </div>
+        <div className="card metric-card">
+          <div className="metric-label">Upcoming Outflows</div>
+          <div className="metric-value" style={{color:'var(--red)'}}>({fmt(Math.abs(ovUpOut))})</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>bills & payments</span></div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Cash Flow</div>
+          <div className="metric-value" style={{color:netCF>=0?'var(--green)':'var(--red)'}}>{netCF>=0?'+':''}{netCF<0?`(${fmt(Math.abs(netCF))})`:fmt(netCF)}</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>income − outflows</span></div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Next Pay Date</div>
+          <div className="metric-value" style={{fontSize:18,fontFamily:'Inter Tight'}}>{nextPayEntry?nextPayEntry.payment_date:'—'}</div>
+          {nextPayEntry&&<div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)'}}>+{fmt(spTotal(nextPayEntry))} · {nextPayEntry.person}</span></div>}
+        </div>
+      </div>
 
-        {showSalaryForm&&(
-          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16}}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+      {/* ── Salary modal ───────────────────────────────────────────────────── */}
+      {showSalaryForm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowSalaryForm(false)}>
+          <div style={{background:'var(--card-bg)',borderRadius:12,padding:28,minWidth:520,maxWidth:720,width:'90%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div style={{fontWeight:700,fontSize:16}}>{editingSalary?'Edit Salary Payment':'New Salary Payment'}</div>
+              <button onClick={()=>setShowSalaryForm(false)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-muted)',lineHeight:1,padding:0}}>×</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
-                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</label>
                 <input value={salaryForm.description} onChange={e=>setSalaryForm(f=>({...f,description:e.target.value}))} placeholder="Salary, HSA Contribution…" style={INP}/>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
-                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Person</label>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Person</label>
                 <input value={salaryForm.person} onChange={e=>setSalaryForm(f=>({...f,person:e.target.value}))} placeholder="Omer, Daniella…" style={INP}/>
               </div>
             </div>
-            {/* Pay dates — single picker in edit mode, multi-picker in add mode */}
-            <div style={{marginBottom:14}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>{editingSalary?'Pay Date':'Pay Dates'}</label>
-                {!editingSalary&&<button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={addDate}>＋ Add Date</button>}
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>{editingSalary?'Pay Date':'Pay Dates'}</label>
+                {!editingSalary&&<button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 10px',fontSize:11}} onClick={addDate}>＋ Add Date</button>}
               </div>
               <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
                 {salaryForm.payment_dates.map((d,i)=>(
                   <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
                     <input type="date" value={d} onChange={e=>setDate(i,e.target.value)} style={{...INP,padding:'5px 8px'}}/>
                     {!editingSalary&&salaryForm.payment_dates.length>1&&(
-                      <button type="button" onClick={()=>removeDate(i)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1,padding:'0 2px'}} title="Remove this date">×</button>
+                      <button type="button" onClick={()=>removeDate(i)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text-muted)',lineHeight:1,padding:'0 2px'}}>×</button>
                     )}
                   </div>
                 ))}
               </div>
               {!editingSalary&&salaryForm.payment_dates.filter(d=>d).length>1&&(
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:5}}>
-                  Will create <strong>{[...new Set(salaryForm.payment_dates.filter(d=>d))].length}</strong> separate entr{[...new Set(salaryForm.payment_dates.filter(d=>d))].length===1?'y':'ies'}, one per date.
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>
+                  Will create <strong>{[...new Set(salaryForm.payment_dates.filter(d=>d))].length}</strong> separate entr{[...new Set(salaryForm.payment_dates.filter(d=>d))].length===1?'y':'ies'}.
                 </div>
               )}
             </div>
-            <div style={{marginBottom:14}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:8}}>Deposit amounts per account</label>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:10}}>Deposit Amounts Per Account</label>
               {salaryAccounts.length===0
-                ?<div style={{fontSize:12,color:'var(--text-muted)'}}>No eligible accounts found (add Checking / Savings / HSA / FSA / Investment accounts first).</div>
-                :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
+                ?<div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>No eligible accounts (add Checking / Savings / HSA / FSA / Investment accounts first).</div>
+                :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(210px,1fr))',gap:10}}>
                   {salaryAccounts.map(a=>(
                     <div key={a.id} style={{display:'flex',flexDirection:'column',gap:3}}>
-                      <label style={{fontSize:11,color:'var(--text-secondary)'}}>{a.account_name} <span style={{opacity:0.5,fontSize:10}}>({a.account_type})</span></label>
+                      <label style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500}}>{a.account_name} <span style={{opacity:0.55,fontSize:10}}>({a.account_type})</span></label>
                       <input type="number" step="0.01" min="0" value={salaryForm.allocations[a.id]||''} onChange={e=>setSalaryForm(f=>({...f,allocations:{...f.allocations,[a.id]:e.target.value}}))} placeholder="0.00" style={{...INP,padding:'5px 8px'}}/>
                     </div>
                   ))}
                 </div>
               }
             </div>
-            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:16}}>
               <button className="btn btn-sm btn-ghost" onClick={()=>setShowSalaryForm(false)}>Cancel</button>
-              <button className="btn btn-sm btn-primary" onClick={saveSalary} disabled={salarySaving}>{salarySaving?'…':'Save'}</button>
+              <button className="btn btn-sm btn-primary" onClick={saveSalary} disabled={salarySaving}>{salarySaving?'Saving…':'Save'}</button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {salaryPayments.length===0&&!showSalaryForm?(
-          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
-            No salary entries yet — click <strong>+ Add Payment</strong> to add a pay date.
+      {/* ── Overlay modal ──────────────────────────────────────────────────── */}
+      {showOverlayForm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setShowOverlayForm(false)}>
+          <div style={{background:'var(--card-bg)',borderRadius:12,padding:28,minWidth:420,maxWidth:560,width:'90%',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div style={{fontWeight:700,fontSize:16}}>{editingOverlay?'Edit Cash Flow Entry':'New Cash Flow Entry'}</div>
+              <button onClick={()=>setShowOverlayForm(false)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-muted)',lineHeight:1,padding:0}}>×</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:20}}>
+              <div style={{gridColumn:'1/-1',display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</label>
+                <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Tax Refund, Chase Payment…" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Amount <span style={{fontWeight:400,opacity:0.7,textTransform:'none'}}>(– outflow, + inflow)</span></label>
+                <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Date</label>
+                <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Source</label>
+                <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={INP}>
+                  <option value="manual">Manual</option>
+                  <option value="cc_payment">CC Payment</option>
+                  <option value="loan_payment">Loan Payment</option>
+                </select>
+              </div>
+              <div style={{gridColumn:'1/-1',display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Account <span style={{fontWeight:400,opacity:0.7,textTransform:'none'}}>(optional)</span></label>
+                <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={INP}>
+                  <option value="">— None —</option>
+                  {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:16}}>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
+              <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'Saving…':'Save'}</button>
+            </div>
           </div>
-        ):(
-          <div className="table-wrap">
-            <table style={{fontSize:13}}>
-              <thead><tr>
-                <th style={{minWidth:100}}>Date</th>
-                <th>Description</th>
-                <th>Person</th>
-                {salaryAccounts.map(a=>(
-                  <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${a.account_type})`}>{a.account_name}</th>
-                ))}
-                <th style={{textAlign:'right',minWidth:100}}>Total</th>
-                <th style={{textAlign:'center'}}>Actions</th>
-              </tr></thead>
-              <tbody>
-                {salaryPayments.map(sp=>{
-                  const allocMap={};
-                  sp.allocations.forEach(a=>{allocMap[a.account_id]=a.amount;});
-                  const isPast=sp.payment_date<todayStr();
-                  return(
-                    <tr key={sp.id} style={{opacity:isPast?0.65:1,background:isPast?'#fafafa':'var(--card-bg)'}}>
-                      <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'inherit'}}>{sp.payment_date}</td>
-                      <td style={{fontWeight:500}}>{sp.description}</td>
-                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:'#dcfce7',color:'#166534'}}>{sp.person}</span></td>
-                      {salaryAccounts.map(a=>{
-                        const amt=allocMap[a.account_id];
-                        return(
-                          <td key={a.id} style={{textAlign:'right',fontFamily:'Inter',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>
-                            {amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}
-                          </td>
-                        );
-                      })}
-                      <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                      <td style={{textAlign:'center'}}>
-                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteSalary(sp.id)}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        </div>
+      )}
+
+      {/* ── Salary & Income card ───────────────────────────────────────────── */}
+      <div className="card" style={{marginBottom:20}}>
+        <div className="section-header">
+          <div className="section-title">Salary & Income</div>
+          <button className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+        </div>
+        {salaryPayments.length===0
+          ?<div style={{textAlign:'center',padding:'28px 0',color:'var(--text-muted)',fontSize:13}}>No salary entries yet — click <strong>+ Add Payment</strong> to add a pay date.</div>
+          :<div className="table-wrap"><table style={{fontSize:13}}>
+            <thead><tr>
+              <th style={{minWidth:100}}>Date</th>
+              <th>Description</th>
+              <th>Person</th>
+              {salaryAccounts.map(a=>(
+                <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${a.account_type})`}>{a.account_name}</th>
+              ))}
+              <th style={{textAlign:'right',minWidth:100}}>Total</th>
+              <th style={{textAlign:'center'}}>Actions</th>
+            </tr></thead>
+            <tbody>{salaryPayments.map(sp=>{
+              const allocMap={};
+              sp.allocations.forEach(a=>{allocMap[a.account_id]=a.amount;});
+              const isPast=sp.payment_date<today;
+              return(
+                <tr key={sp.id} style={{opacity:isPast?0.55:1,background:isPast?'rgba(0,0,0,0.015)':'transparent'}}>
+                  <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{sp.payment_date}</td>
+                  <td style={{fontWeight:500}}>{sp.description}</td>
+                  <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:600,background:'#dcfce7',color:'#166534'}}>{sp.person}</span></td>
+                  {salaryAccounts.map(a=>{
+                    const amt=allocMap[a.account_id];
+                    return<td key={a.id} style={{textAlign:'right',fontFamily:'Inter',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>{amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>;
+                  })}
+                  <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  <td style={{textAlign:'center'}}>
+                    <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                      <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
+                      <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteSalary(sp.id)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}</tbody>
+          </table></div>
+        }
       </div>
 
-      {/* ── Expected Outflows & One-Time Income ────────────────────────── */}
+      {/* ── Expected Outflows & One-Time Income card ───────────────────────── */}
       <div className="card">
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-          <div style={{fontSize:14,fontWeight:600,color:'var(--text-primary)'}}>💸 Expected Outflows &amp; One-Time Income</div>
+        <div className="section-header">
+          <div className="section-title">Expected Outflows & One-Time Income</div>
           <div style={{display:'flex',gap:8}}>
-            <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from configured credit card and loan payment schedules">
-              {genBusy?'…':'⚡ Generate from Cards &amp; Loans'}
+            <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from credit card and loan payment schedules">
+              {genBusy?'Generating…':'Generate from Cards & Loans'}
             </button>
             <button className="btn btn-sm btn-primary" onClick={openAddOverlay}>+ Add</button>
           </div>
         </div>
-
-        {showOverlayForm&&(
-          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:16,marginBottom:16,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Description</label>
-              <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Tax Refund, Chase Payment…" style={INP}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Amount <span style={{fontWeight:400,opacity:0.7}}>(– outflow, + inflow)</span></label>
-              <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={INP}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Date</label>
-              <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={INP}/>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Source</label>
-              <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={INP}>
-                <option value="manual">Manual</option>
-                <option value="cc_payment">CC Payment</option>
-                <option value="loan_payment">Loan Payment</option>
-              </select>
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)'}}>Account (optional)</label>
-              <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={INP}>
-                <option value="">— None —</option>
-                {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
-              </select>
-            </div>
-            <div style={{gridColumn:'1/-1',display:'flex',gap:8,justifyContent:'flex-end',marginTop:4}}>
-              <button className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
-              <button className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'…':'Save'}</button>
-            </div>
-          </div>
-        )}
-
-        {overlays.length===0&&!showOverlayForm?(
-          <div style={{textAlign:'center',padding:'24px 0',color:'var(--text-muted)',fontSize:13}}>
-            No cash flow entries yet — add one manually or click ⚡ Generate from Cards &amp; Loans.
-          </div>
-        ):(
-          <div className="table-wrap">
+        {overlays.length===0
+          ?<div style={{textAlign:'center',padding:'28px 0',color:'var(--text-muted)',fontSize:13}}>No entries yet — add one manually or click <strong>Generate from Cards &amp; Loans</strong>.</div>
+          :<div className="table-wrap">
             <table style={{fontSize:13}}>
               <thead><tr>
                 <th style={{minWidth:90}}>Date</th>
@@ -5045,48 +5078,41 @@ function CashFlowPage({toast}){
                 <th>Source</th>
                 <th style={{textAlign:'center'}}>Actions</th>
               </tr></thead>
-              <tbody>
-                {overlays.map(o=>{
-                  const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
-                  const isOut=o.amount<0;
-                  return(
-                    <tr key={o.id} style={{background:o.flow_date>=todayStr()?'var(--card-bg)':'#fafafa'}}>
-                      <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap'}}>{o.flow_date}</td>
-                      <td>{o.description}</td>
-                      <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
-                        {isOut?'–':'+'}${Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
-                      </td>
-                      <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
-                      <td><span style={{display:'inline-block',padding:'2px 7px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
-                      <td style={{textAlign:'center'}}>
-                        <div style={{display:'flex',gap:4,justifyContent:'center'}}>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
-                          <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {overlays.length>0&&(()=>{
-                  const future=overlays.filter(o=>o.flow_date>=todayStr());
-                  const netIn=future.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
-                  const netOut=future.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
-                  return(
-                    <tr style={{background:'#f8f9fa',fontWeight:600,borderTop:'2px solid var(--border)'}}>
-                      <td colSpan={2} style={{fontSize:12,color:'var(--text-muted)'}}>Upcoming totals</td>
-                      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12}}>
-                        <span style={{color:'var(--green)'}}>+${netIn.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                        {' / '}
-                        <span style={{color:'var(--red)'}}>–${Math.abs(netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                      </td>
-                      <td colSpan={3} style={{fontSize:12,color:'var(--text-muted)'}}>Net: <span style={{fontFamily:'Inter',color:(netIn+netOut)>=0?'var(--green)':'var(--red)'}}>{(netIn+netOut)>=0?'+':'–'}${Math.abs(netIn+netOut).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></td>
-                    </tr>
-                  );
-                })()}
-              </tbody>
+              <tbody>{overlays.map(o=>{
+                const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
+                const isOut=o.amount<0;
+                const isPast=o.flow_date<today;
+                return(
+                  <tr key={o.id} style={{opacity:isPast?0.55:1,background:isPast?'rgba(0,0,0,0.015)':'transparent'}}>
+                    <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{o.flow_date}</td>
+                    <td style={{fontWeight:500}}>{o.description}</td>
+                    <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                      {isOut?'(':'+'}{isOut?'':'$'}{Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}{isOut?')':''}
+                    </td>
+                    <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
+                    <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:600,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
+                    <td style={{textAlign:'center'}}>
+                      <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                        <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
+                        <button className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}</tbody>
             </table>
+            {overlays.length>0&&(()=>{
+              const net=ovUpIn+ovUpOut;
+              return(
+                <div style={{display:'flex',gap:28,padding:'10px 18px',borderTop:'2px solid var(--border)',background:'rgba(0,0,0,0.018)',fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>
+                  <span>Upcoming inflows: <span style={{color:'var(--green)',fontFamily:'Inter Tight'}}>+{fmt(ovUpIn)}</span></span>
+                  <span>Outflows: <span style={{color:'var(--red)',fontFamily:'Inter Tight'}}>({fmt(Math.abs(ovUpOut))})</span></span>
+                  <span>Net: <span style={{color:net>=0?'var(--green)':'var(--red)',fontFamily:'Inter Tight'}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
+                </div>
+              );
+            })()}
           </div>
-        )}
+        }
       </div>
     </div>
   );
