@@ -91,7 +91,7 @@ td{padding:11px 14px;font-size:13.5px}
 .badge-transfer{background:#f3f4f6;color:#6b7280}
 .badge-income{background:#f0fdf4;color:#059669}
 .badge-expense{background:#fef2f2;color:#dc2626}
-.badge-category{background:#eff6ff;color:#2563eb}
+.badge-category{background:#e9ecef;color:var(--text-primary)}
 .badge-unclassified{background:#fef2f2;color:#dc2626}
 .edit-actions{display:flex;gap:6px;align-items:center}
 .amount-neg{color:var(--red);font-family:'Inter',sans-serif;font-size:13.5px;font-weight:500}
@@ -135,7 +135,7 @@ const API='/api';
 const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(n??0));
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
-const CHART_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ef4444','#84cc16'];
+const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','#fca5a5','#bef264'];
 const monthStart=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
 const todayStr=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const localDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -1482,52 +1482,54 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
   const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
   const totalActual=rows.reduce((s,r)=>s+r.actual,0);
   const fmtSigned=(n)=>n<0?`-${fmt(n)}`:fmt(n);
+  const totalPct=totalBudget>0?totalActual/totalBudget:null;
+  const totalOver=totalBudget>0&&totalActual>totalBudget;
+  const totalDotColor=totalPct===null?'var(--text-muted)':totalPct>=1?'var(--red)':totalPct>=0.8?'var(--amber)':'var(--green)';
+  const totalFill=totalPct===null?'transparent':totalPct>=1?'rgba(239,68,68,0.15)':totalPct>=0.8?'rgba(245,158,11,0.15)':'rgba(16,185,129,0.15)';
+  const totalBarPct=totalBudget>0?Math.min(totalActual/totalBudget*100,100):0;
+
+  const PillRow=({cat,budget,actual,isTotal=false})=>{
+    const isCredit=actual<0;
+    const pct=(!isCredit&&budget>0)?actual/budget:null;
+    const over=budget>0&&actual>budget;
+    const overAmt=over?actual-budget:0;
+    const dotColor=isCredit?'var(--green)':pct===null?'var(--text-muted)':over?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
+    const pillFill=isCredit?'rgba(16,185,129,0.12)':pct===null?'transparent':over?'rgba(239,68,68,0.15)':pct>=0.8?'rgba(245,158,11,0.15)':'rgba(16,185,129,0.12)';
+    const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
+    return(
+      <div style={{padding:'5px 14px',borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',display:'flex',alignItems:'center',gap:10}}>
+        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'rgba(0,0,0,0.04)',height:32}}>
+          {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,background:pillFill,transition:'width 0.35s ease'}}/>}
+          <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',height:'100%',gap:8}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:dotColor,flexShrink:0}}/>
+              <span style={{fontSize:isTotal?12.5:12,fontWeight:isTotal?700:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cat}</span>
+            </div>
+            {!isCredit&&pct!==null&&<span style={{fontSize:11,fontWeight:600,color:dotColor,flexShrink:0}}>{Math.round(pct*100)}%</span>}
+            {isCredit&&<span style={{fontSize:11,fontWeight:500,color:'var(--green)',flexShrink:0}}>credit</span>}
+          </div>
+        </div>
+        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0}}>
+          {isCredit
+            ?<span style={{color:'var(--green)',fontWeight:500}}>{fmtSigned(actual)}</span>
+            :budget>0
+              ?<span style={{fontWeight:isTotal?700:500}}>{fmt(actual)}<span style={{color:'var(--text-muted)',fontWeight:400}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:700}}> +{fmt(overAmt)}</span>}</span>
+              :<span style={{color:'var(--text-muted)'}}>{fmt(actual)}</span>}
+        </div>
+      </div>
+    );
+  };
+
   return(
     <div className="card">
       <div className="section-header">
         <div className="section-title">{title}</div>
-        <span style={{fontFamily:'Inter',fontSize:12,color:'var(--text-muted)'}}>
-          {fmt(totalActual)}{totalBudget>0?<> / {fmt(totalBudget)}</>:''}
-        </span>
       </div>
       <div style={{padding:'4px 0 8px'}}>
-        {rows.map(({cat,budget,actual})=>{
-          const isCredit=actual<0;
-          const pct=(!isCredit&&budget>0)?actual/budget:null;
-          const over=budget>0&&actual>budget;
-          const color=isCredit?'var(--green)':pct===null?'#9ca3af':pct>=1?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
-          const dot=isCredit?'●':pct===null?'●':pct>=1?'🔴':pct>=0.8?'🟡':'🟢';
-          const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
-          const overAmt=over?actual-budget:0;
-          return(
-            <div key={cat} style={{padding:'9px 18px',borderBottom:'1px solid #f9fafb',display:'flex',alignItems:'center',gap:12}}>
-              <span style={{fontSize:11,lineHeight:1,color}}>{dot}</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,gap:8}}>
-                  <span style={{fontSize:13,fontWeight:500}}>{cat}</span>
-                  <span style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap'}}>
-                    {isCredit
-                      ?<span style={{color:'var(--green)'}}>{fmtSigned(actual)}{budget>0&&<span style={{color:'var(--text-muted)',fontWeight:400}}> / {fmt(budget)}</span>}<span style={{opacity:0.6,fontSize:11}}> (credit)</span></span>
-                      :budget>0
-                        ?<>{fmt(actual)}<span style={{color:'var(--text-muted)'}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:600}}> +{fmt(overAmt)}</span>}</>
-                        :<span style={{color:'#9ca3af'}}>{fmt(actual)}<span style={{opacity:0.6,fontSize:11}}> (no budget)</span></span>
-                    }
-                  </span>
-                </div>
-                {!isCredit&&budget>0&&(
-                  <div style={{background:'#f3f4f6',borderRadius:4,height:5,overflow:'hidden'}}>
-                    <div style={{width:`${barPct}%`,height:'100%',background:color,borderRadius:4,transition:'width 0.3s ease'}}/>
-                  </div>
-                )}
-              </div>
-              {!isCredit&&pct!==null&&(
-                <span style={{fontFamily:'Inter',fontSize:12,color,minWidth:36,textAlign:'right',fontWeight:pct>=1?600:400}}>
-                  {Math.round(pct*100)}%
-                </span>
-              )}
-            </div>
-          );
-        })}
+        <PillRow cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
+        {rows.map(({cat,budget,actual})=>(
+          <PillRow key={cat} cat={cat} budget={budget} actual={actual}/>
+        ))}
       </div>
     </div>
   );
@@ -1746,11 +1748,16 @@ function DashboardPage({categories,toast}){
           <p style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>Here's your financial overview</p>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <div style={{display:'flex',gap:6,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
-            <button className={`btn btn-sm ${budgetView==='month'?'btn-primary':'btn-ghost'}`}
-              onClick={()=>{setBudgetView('month');setCatDetail(null);}} style={{borderRadius:7}}>Monthly</button>
-            <button className={`btn btn-sm ${budgetView==='annual'?'btn-primary':'btn-ghost'}`}
-              onClick={()=>{setBudgetView('annual');setCatDetail(null);}} style={{borderRadius:7}}>YTD</button>
+          <div style={{display:'flex',gap:2,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+            {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
+              <button key={v} onClick={()=>{setBudgetView(v);setCatDetail(null);}}
+                style={{border:'none',cursor:'pointer',borderRadius:7,padding:'4px 14px',fontSize:13,fontWeight:500,
+                  background:budgetView===v?'var(--sidebar-active-bg)':'transparent',
+                  color:budgetView===v?'var(--sidebar-active-color)':'var(--text-secondary)',
+                  transition:'background 0.15s,color 0.15s'}}>
+                {label}
+              </button>
+            ))}
           </div>
           <select value={viewYear} onChange={e=>{setViewYear(+e.target.value);setCatDetail(null);}}
             style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--card-bg)',color:'var(--text-primary)',cursor:'pointer',height:30}}>
@@ -1820,19 +1827,26 @@ function DashboardPage({categories,toast}){
             <div className="section-header"><div className="section-title">Recent Transactions</div></div>
             {recent.length===0
               ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
-              :<table style={{width:'100%'}}><tbody>{recent.map(t=>(
+              :<table style={{width:'100%'}}><tbody>{recent.map(t=>{
+                const dt=new Date(t.date+'T12:00:00');
+                const shortDate=`${dt.getMonth()+1}/${dt.getDate()}`;
+                const amtDisplay=t.action==='Transfer'
+                  ?(t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount))
+                  :t.amount<0?`(${fmt(Math.abs(t.amount))})`:fmt(t.amount);
+                return(
                 <tr key={t.id} style={{borderBottom:'1px solid #f3f4f6'}}>
-                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
-                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:500}}>{t.description_display||t.description_raw}</td>
+                  <td style={{padding:'9px 14px',color:'var(--text-muted)',fontSize:11.5,whiteSpace:'nowrap'}}>{shortDate}</td>
+                  <td style={{padding:'9px 8px',fontSize:13,fontWeight:400}}>{t.description_display||t.description_raw}</td>
                   <td style={{padding:'9px 14px',textAlign:'right',whiteSpace:'nowrap'}}>
-                    <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+                    <span className={t.action==='Transfer'?'amount-neutral':t.amount<0?'amount-neg':'amount-pos'}>{amtDisplay}</span>
                   </td>
                   <td style={{padding:'9px 10px'}}>
                     {showCategoryForType(t.action)&&<span className={`badge ${!t.category_final||t.category_final==='Unclassified'?'badge-unclassified':'badge-category'}`} style={{fontSize:11}}>{t.category_final||'Unclassified'}</span>}
                   </td>
                   <td style={{padding:'9px 12px',fontSize:11,color:'var(--text-muted)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.account_name}>{t.account_name}</td>
                 </tr>
-              ))}</tbody></table>
+                );
+              })}</tbody></table>
             }
           </div>
 
