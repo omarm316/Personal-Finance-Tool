@@ -770,6 +770,7 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
 
   const total=splits.reduce((s,r)=>s+parseFloat(r.amount||0),0);
   const balanced=Math.abs(Math.round(total*100)-Math.round(txn.amount*100))===0;
+  const remaining=Math.round((txn.amount-total)*100)/100;
 
   const handleSave=async()=>{
     if(!balanced){setError(`Splits sum to ${total.toFixed(2)}, need ${txn.amount.toFixed(2)}`);return;}
@@ -820,9 +821,26 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
           <td style={{padding:'4px'}}><button className="btn btn-sm btn-ghost" onClick={()=>removeRow(i)} style={{padding:'2px 6px',fontSize:13}}>×</button></td></tr>
         ))}</tbody></table>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-          <button className="btn btn-sm btn-secondary" onClick={addRow}>+ Add Row</button>
-          <div style={{fontSize:13,color:balanced?'var(--green)':'var(--red)',fontWeight:500}}>
-            Total: {total.toFixed(2)} / {txn.amount.toFixed(2)} {balanced?'✓':'✗'}
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <button className="btn btn-sm btn-secondary" onClick={addRow}>+ Add Row</button>
+            {!balanced&&splits.length>0&&<button className="btn btn-sm btn-ghost"
+              style={{fontSize:11,color:'#1d4ed8',border:'1px solid #bfdbfe',padding:'3px 9px'}}
+              title={`Adjust last row to cover the ${remaining>0?'unallocated':'excess'} ${fmt(Math.abs(remaining))}`}
+              onClick={()=>{
+                const s=[...splits];
+                const last=parseFloat(s[s.length-1].amount||0);
+                s[s.length-1]={...s[s.length-1],amount:Math.round((last+remaining)*100)/100};
+                setSplits(s);
+              }}>↓ Fill Last</button>}
+          </div>
+          <div style={{textAlign:'right'}}>
+            {balanced
+              ?<span style={{fontSize:13,fontWeight:600,color:'var(--green)'}}>✓ Balanced</span>
+              :remaining>0
+                ?<span style={{fontSize:13,fontWeight:600,color:'#b45309'}}>{fmt(remaining)} remaining</span>
+                :<span style={{fontSize:13,fontWeight:600,color:'var(--red)'}}>{fmt(Math.abs(remaining))} over</span>
+            }
+            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>{fmt(total)} of {fmt(txn.amount)}</div>
           </div>
         </div>
         <div className="review-actions">
@@ -1172,17 +1190,17 @@ function TransactionsPage({categories,toast}){
   const startEnrich=async()=>{
     try{
       const r=await apiFetch('/llm/enrich-transactions',{method:'POST',body:JSON.stringify({limit:300,overwrite_existing:false})});
-      setEnrichJob({job_id:r.job_id,status:'running',processed:0,total:0,llm_calls:0,override_hits:0,errors:0});
+      setEnrichJob({job_id:r.job_id,status:'running',processed:0,total:0,llm_calls:0,override_hits:0,errors:0,startedAt:Date.now()});
     }catch(e){toast('Failed to start enrichment: '+e.message,'error');}
   };
 
-  /* Poll job status every 2s while running */
+  /* Poll job status every 2s while running — preserve client-only startedAt across updates */
   useEffect(()=>{
     if(!enrichJob||enrichJob.status!=='running')return;
     const id=setInterval(async()=>{
       try{
         const s=await apiFetch(`/llm/enrich-status/${enrichJob.job_id}`);
-        setEnrichJob(s);
+        setEnrichJob(prev=>({...s,startedAt:prev?.startedAt}));
         if(s.status==='done'||s.status==='error'){
           clearInterval(id);
           if(s.status==='done'){load();toast(`Enriched ${s.processed} transactions`);}
@@ -1261,8 +1279,11 @@ function TransactionsPage({categories,toast}){
           {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'Inter',fontWeight:600}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
           {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'Inter',fontWeight:600}}>{fmt(visibleIncome)}</b></span>}
         </div>
-        {enrichJob&&(
-          <div style={{padding:'8px 16px',background:enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+        {enrichJob&&(()=>{
+          const elapsed=enrichJob.startedAt?Math.round((Date.now()-enrichJob.startedAt)/1000):0;
+          const timedOut=enrichJob.status==='running'&&elapsed>90;
+          return(
+          <div style={{padding:'8px 16px',background:timedOut?'#fffbeb':enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
             {enrichJob.status==='running'&&<div className="spinner" style={{width:14,height:14,flexShrink:0}}/>}
             {enrichJob.status==='done'&&<span style={{color:'#15803d',fontWeight:600}}>✓</span>}
             {enrichJob.status==='error'&&<span style={{color:'#dc2626',fontWeight:600}}>✗</span>}
@@ -1272,9 +1293,13 @@ function TransactionsPage({categories,toast}){
               {enrichJob.status==='error'&&`Enrichment failed: ${enrichJob.error||'unknown error'}`}
             </span>
             {enrichJob.status==='running'&&enrichJob.last&&<span style={{color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}}>last: {enrichJob.last.merchant||enrichJob.last.raw}</span>}
-            {(enrichJob.status==='done'||enrichJob.status==='error')&&<button className="btn btn-sm btn-ghost" style={{marginLeft:'auto'}} onClick={()=>setEnrichJob(null)}>Dismiss</button>}
+            {timedOut&&<span style={{color:'#b45309',fontSize:12,fontWeight:500,flexShrink:0}}>Taking longer than usual ({elapsed}s)</span>}
+            <button className="btn btn-sm btn-ghost" style={{marginLeft:'auto',fontSize:11,flexShrink:0}} onClick={()=>setEnrichJob(null)}>
+              {enrichJob.status==='running'?'Hide':'Dismiss'}
+            </button>
           </div>
-        )}
+          );
+        })()}
         {selectedIds.size>0&&(
           <div style={{padding:'8px 16px',background:'#eff6ff',borderBottom:'1px solid #bfdbfe',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
             <span style={{fontWeight:600,color:'#1d4ed8'}}>{selectedIds.size} selected</span>
@@ -2527,6 +2552,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
   const[rules,setRules]=useState([]);
   const[rulesLoading,setRulesLoading]=useState(false);
   const[ruleSearch,setRuleSearch]=useState('');
+  const[debouncedSearch,setDebouncedSearch]=useState('');
   const[ruleEditing,setRuleEditing]=useState(null);
   const[ruleEditVals,setRuleEditVals]=useState({});
   const[showAddRule,setShowAddRule]=useState(false);
@@ -2606,13 +2632,19 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories}){
 
   const run=async(path,msg)=>{setBusy(true);try{const r=await apiFetch(path,{method:'POST'});toast(msg);return r;}catch(e){toast('Failed: '+(e.message||'unknown error'),'error');}finally{setBusy(false);}};
 
-  /* Load rules */
+  /* Debounce ruleSearch → debouncedSearch (350ms) to avoid an API call per keystroke */
+  useEffect(()=>{
+    const id=setTimeout(()=>setDebouncedSearch(ruleSearch),350);
+    return()=>clearTimeout(id);
+  },[ruleSearch]);
+
+  /* Load rules — keyed on debouncedSearch so the API is only called after typing pauses */
   const loadRules=useCallback(async()=>{
     setRulesLoading(true);
-    try{setRules(await apiFetch(`/rules?limit=200${ruleSearch?`&search=${encodeURIComponent(ruleSearch)}`:''}`));}
+    try{setRules(await apiFetch(`/rules?limit=200${debouncedSearch?`&search=${encodeURIComponent(debouncedSearch)}`:''}`));}
     catch(e){toast('Failed to load rules','error');}
     finally{setRulesLoading(false);}
-  },[ruleSearch]);
+  },[debouncedSearch]);
   useEffect(()=>{if(tab==='rules')loadRules();},[tab,loadRules]);
 
   const startRuleEdit=(r)=>{setRuleEditing(r.id);setRuleEditVals({priority:r.priority,match_type:r.match_type,pattern:r.pattern,set_action:r.set_action||'',set_category:r.set_category||'',set_description:r.set_description||'',clean_description:r.clean_description||'',notes:r.notes||''});};
