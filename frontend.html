@@ -1546,7 +1546,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
 }
 
 /* ── Budget vs. Actual + Spending combined table ─────────────────────────── */
-function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYear,onSetView,onSetYear,onSetMonth}){
+function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYear,onSetView,onSetYear,onSetMonth,onCatClick,activeCat}){
   const[sortBy,setSortBy]=React.useState('pct');
   const[sortDir,setSortDir]=React.useState('desc');
   const now=new Date();
@@ -1619,10 +1619,16 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
     const over=pct>=1;
     const barPct=Math.min(pct*100,100);
     const pctLabel=hasBudget?`${Math.round(pct*100)}%`:null;
+    const isActive=!isTotal&&activeCat===cat;
+    const clickable=!isTotal&&onCatClick;
     return(
-      <div style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14,
+      <div onClick={clickable?()=>onCatClick(cat):undefined}
+        style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'7px 16px',gap:14,
         borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',
-        background:isTotal?'rgba(0,0,0,0.015)':'transparent'}}>
+        background:isActive?'var(--sidebar-active-bg)':isTotal?'rgba(0,0,0,0.015)':'transparent',
+        cursor:clickable?'pointer':'default',transition:'background 0.1s'}}
+        onMouseEnter={clickable?e=>{if(!isActive)e.currentTarget.style.background='var(--sidebar-hover-bg)';}:undefined}
+        onMouseLeave={clickable?e=>{e.currentTarget.style.background=isActive?'var(--sidebar-active-bg)':'transparent';}:undefined}>
         <span style={{fontSize:12.5,fontWeight:isTotal?700:500,color:'var(--text-primary)',
           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
           {isTotal?'Total':cat}
@@ -1862,17 +1868,26 @@ function DashboardPage({categories,toast}){
   };
   const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});};
 
-  const openCatDetail=async(cat)=>{
-    if(catDetail?.cat===cat){setCatDetail(null);return;}
-    const yr=new Date().getFullYear();
-    const{start,end}=budgetView==='annual'
+  // Generation counter prevents stale async responses from overwriting newer state
+  const catDetailGen=React.useRef(0);
+  const loadCatDetail=async(cat,view,yr,mo)=>{
+    const gen=++catDetailGen.current;
+    const moStr=String(mo).padStart(2,'0');
+    const lastDay=new Date(yr,mo,0).getDate();
+    const{start,end}=view==='annual'
       ?{start:`${yr}-01-01`,end:todayStr()}
-      :getDates();
+      :{start:`${yr}-${moStr}-01`,end:`${yr}-${moStr}-${String(lastDay).padStart(2,'0')}`};
     setCatDetail({cat,loading:true,rows:[],total:0});
     try{
       const d=await apiFetch(`/stats/detail?category=${encodeURIComponent(cat)}&start_date=${start}&end_date=${end}`);
-      setCatDetail({cat,loading:false,rows:d.rows||[],total:d.total||0});
-    }catch(e){setCatDetail(null);toast('Failed to load detail','error');}
+      if(gen===catDetailGen.current)setCatDetail({cat,loading:false,rows:d.rows||[],total:d.total||0});
+    }catch(e){
+      if(gen===catDetailGen.current){setCatDetail(null);toast('Failed to load detail','error');}
+    }
+  };
+  const openCatDetail=(cat)=>{
+    if(catDetail?.cat===cat){setCatDetail(null);return;}
+    loadCatDetail(cat,budgetView,viewYear,viewMonth);
   };
 
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
@@ -1946,10 +1961,17 @@ function DashboardPage({categories,toast}){
           targets={budgetTargets} actuals={budgetActuals}
           view={budgetView} ytdActuals={ytdByCat}
           viewMonth={viewMonth} viewYear={viewYear}
-          onSetView={v=>{setBudgetView(v);setCatDetail(null);}}
-          onSetYear={v=>{setViewYear(v);setCatDetail(null);}}
-          onSetMonth={v=>{setViewMonth(v);setCatDetail(null);}}/>
+          onCatClick={openCatDetail}
+          activeCat={catDetail?.cat||null}
+          onSetView={v=>{setBudgetView(v);if(catDetail)loadCatDetail(catDetail.cat,v,viewYear,viewMonth);}}
+          onSetYear={v=>{setViewYear(v);if(catDetail)loadCatDetail(catDetail.cat,budgetView,v,viewMonth);}}
+          onSetMonth={v=>{setViewMonth(v);if(catDetail)loadCatDetail(catDetail.cat,budgetView,viewYear,v);}}/>
       </div>
+
+      {/* Category Detail Panel — slides in below the budget table when a row is clicked */}
+      {catDetail&&<div style={{marginTop:12}}>
+        <CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>
+      </div>}
 
       {/* ── Section 2: Recent Transactions (left) + Net Worth (right) ─────────── */}
       <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:20,marginTop:20}}>
