@@ -1822,11 +1822,14 @@ function DashboardPage({categories,toast}){
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
   const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
-  const[budgetView,setBudgetView]=useState('month'); // 'month' | 'annual'
+  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'month');
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
   const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
-  const[viewYear,setViewYear]=useState(new Date().getFullYear());
-  const[viewMonth,setViewMonth]=useState(new Date().getMonth()+1);
+  const[viewYear,_setViewYear]=useState(()=>parseInt(parseHash().params.get('year'))||new Date().getFullYear());
+  const[viewMonth,_setViewMonth]=useState(()=>parseInt(parseHash().params.get('month'))||new Date().getMonth()+1);
+  const setBudgetView=useCallback(v=>{_setBudgetView(v);syncHashParams({view:v,year:viewYear,month:viewMonth});},[viewYear,viewMonth]);
+  const setViewYear=useCallback(y=>{_setViewYear(y);syncHashParams({view:budgetView,year:y,month:viewMonth});},[budgetView,viewMonth]);
+  const setViewMonth=useCallback(m=>{_setViewMonth(m);syncHashParams({view:budgetView,year:viewYear,month:m});},[budgetView,viewYear]);
   const[kpiStats,setKpiStats]=useState(null);
   const[kpiPriorStats,setKpiPriorStats]=useState(null);
   const[kpiLabel,setKpiLabel]=useState('');
@@ -3496,9 +3499,12 @@ function BudgetsPage({categories,toast}){
   const curMonth=now.getMonth()+1; // 1-based
 
   /* ── State ─────────────────────────────────────────────────────────────── */
-  const[view,setView]=useState('annual');          // 'month' | 'annual' | 'edit-year'
-  const[year,setYear]=useState(curYear);
-  const[month,setMonth]=useState(curMonth);
+  const[view,_setView]=useState(()=>parseHash().params.get('view')||'annual');
+  const[year,_setYear]=useState(()=>parseInt(parseHash().params.get('year'))||curYear);
+  const[month,_setMonth]=useState(()=>parseInt(parseHash().params.get('month'))||curMonth);
+  const setView=useCallback(v=>{_setView(v);syncHashParams({view:v,year,month});},[year,month]);
+  const setYear=useCallback(y=>{_setYear(y);syncHashParams({view,year:y,month});},[view,month]);
+  const setMonth=useCallback(m=>{_setMonth(m);syncHashParams({view,year,month:m});},[view,year]);
   const[editing,setEditing]=useState(false);
   const[targets,setTargets]=useState({});         // {cat:{m:{id,amount}}}
   const[actuals,setActuals]=useState({});          // {cat:{m:amount}}
@@ -5575,8 +5581,43 @@ function DailyBalancesPage({toast}){
   );
 }
 
+/* ── Hash-based URL routing ─────────────────────────────────────────────── */
+const PAGES=['dashboard','transactions','budgets','networth','cashflow',
+             'cashplanner','loans','gcb','cards','accounts','settings'];
+function parseHash(){
+  const raw=window.location.hash.slice(1)||'';
+  const qi=raw.indexOf('?');
+  const path=qi>=0?raw.slice(0,qi):raw;
+  const search=qi>=0?raw.slice(qi+1):'';
+  return{page:PAGES.includes(path)?path:'dashboard',params:new URLSearchParams(search)};
+}
+function syncHashParams(newParams){
+  const{page}=parseHash();
+  const qs=new URLSearchParams(
+    Object.fromEntries(Object.entries(newParams).filter(([,v])=>v!=null&&String(v)!==''))
+  ).toString();
+  window.history.replaceState(null,'','#'+page+(qs?'?'+qs:''));
+}
+function useHashRouter(){
+  const[route,setRoute]=useState(parseHash);
+  useEffect(()=>{
+    const h=()=>setRoute(parseHash());
+    window.addEventListener('hashchange',h);
+    return()=>window.removeEventListener('hashchange',h);
+  },[]);
+  const navigate=useCallback((page,params={})=>{
+    const filtered=Object.fromEntries(
+      Object.entries(params).filter(([,v])=>v!=null&&String(v)!=='')
+    );
+    const qs=new URLSearchParams(filtered).toString();
+    window.location.hash=qs?`${page}?${qs}`:page;
+  },[]);
+  return{page:route.page,params:route.params,navigate};
+}
+
 function App(){
-  const[page,setPage]=useState('dashboard');
+  const{page,navigate}=useHashRouter();
+  const setPage=useCallback((p)=>navigate(p),[navigate]);
   const[categories,setCategories]=useState([]);
   const[banks,setBanks]=useState([]);
   const[collapsed,setCollapsed]=useState(()=>{try{return localStorage.getItem('nav-collapsed')==='1';}catch(e){return false;}});
