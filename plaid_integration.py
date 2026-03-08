@@ -58,24 +58,34 @@ class PlaidClient:
         api_client = ApiClient(configuration)
         self.client = plaid_api.PlaidApi(api_client)
     
-    def create_link_token(self, user_id: str, redirect_uri: str = None) -> str:
+    def create_link_token(self, user_id: str, redirect_uri: str = None,
+                          access_token: str = None) -> str:
         """
         Create a Link token for Plaid Link (used in frontend).
 
         Args:
-            user_id: Unique user identifier
+            user_id:      Unique user identifier
             redirect_uri: Required for OAuth institutions (Chase, Amex, etc.).
                           Must be a registered redirect URI in your Plaid dashboard.
+            access_token: When provided, creates an *update-mode* link token that
+                          re-authenticates an existing item in-place (e.g. after
+                          ITEM_LOGIN_REQUIRED). The item_id and access_token are
+                          unchanged after the user completes the update flow.
 
         Returns: link_token to use in Plaid Link
         """
         kwargs = dict(
             user=LinkTokenCreateRequestUser(client_user_id=user_id),
             client_name="Finance Automation",
-            products=[Products("transactions")],
             country_codes=[CountryCode('US')],
             language='en',
         )
+        if access_token:
+            # Update mode — pass existing access_token; products must NOT be set
+            kwargs['access_token'] = access_token
+        else:
+            # New connection — specify products
+            kwargs['products'] = [Products("transactions")]
         if redirect_uri:
             kwargs['redirect_uri'] = redirect_uri
 

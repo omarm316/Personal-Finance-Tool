@@ -679,6 +679,54 @@ async def create_link_token(request: Request, user_id: str = "default_user"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/plaid/update-link-token/{item_id}")
+async def create_update_link_token(item_id: str, request: Request, db: Session = Depends(get_db)):
+    """
+    Create a Plaid Link token in *update mode* for an existing item.
+    Used when an item has ITEM_LOGIN_REQUIRED — re-authenticates the same
+    item in-place without changing the access_token or item_id.
+    """
+    item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        plaid_client = setup_plaid_from_env()
+        base_url = os.getenv("PLAID_REDIRECT_URI")
+        if not base_url:
+            scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+            host = request.headers.get("host", request.url.netloc)
+            base_url = f"{scheme}://{host}/plaid/oauth-return"
+        access_token = decrypt_token(item.access_token_enc)
+        link_token = plaid_client.create_link_token(
+            "default_user", redirect_uri=base_url, access_token=access_token
+        )
+        return {"link_token": link_token, "item_id": item_id,
+                "institution_name": item.institution_name}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/plaid/update-complete/{item_id}")
+async def plaid_update_complete(item_id: str, background_tasks: BackgroundTasks,
+                                db: Session = Depends(get_db)):
+    """
+    Called after a successful Plaid Link update-mode flow.
+    Clears the stored error, marks the item healthy, and kicks off a fresh sync.
+    No public_token exchange is needed — the access_token is unchanged.
+    """
+    item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.last_error_code    = None
+    item.last_error_message = None
+    item.last_error_at      = None
+    db.commit()
+    background_tasks.add_task(_sync_item_background, item_id, False)
+    return {"message": f"{item.institution_name} reconnected — sync started",
+            "institution_name": item.institution_name}
+
+
 # ---------------------------------------------------------------------------
 # Plaid: exchange token
 # ---------------------------------------------------------------------------
@@ -1262,15 +1310,34 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
 async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     if not items:
-        return {"message": "No connected accounts.", "items_synced": 0, "status": "idle"}
+        return {"message": "No connected accounts.", "items_queued": 0, "status": "idle"}
+    item_statuses = []
+    queued = 0
+    errored = []
     for item in items:
-        background_tasks.add_task(_sync_item_background, item.item_id, False)
+        if item.last_error_code:
+            # Skip items with known errors — syncing them would just fail again
+            errored.append({"institution_name": item.institution_name,
+                            "error_code": item.last_error_code})
+            item_statuses.append({"institution_name": item.institution_name,
+                                  "status": "skipped", "error_code": item.last_error_code})
+        else:
+            background_tasks.add_task(_sync_item_background, item.item_id, False)
+            queued += 1
+            item_statuses.append({"institution_name": item.institution_name, "status": "queued"})
+    parts = []
+    if queued:
+        parts.append(f"Sync started for {queued} bank{'' if queued == 1 else 's'}")
+    if errored:
+        names = ", ".join(e["institution_name"] for e in errored)
+        parts.append(f"{len(errored)} skipped ({names} — reconnect required)")
     return {
-        "message": f"Sync started for {len(items)} bank(s) — transactions will appear shortly",
-        "items_synced": len(items),
-        "items_failed": 0,
-        "transactions_added": 0,
-        "status": "started",
+        "message": " — ".join(parts) or "Nothing to sync",
+        "items": item_statuses,
+        "items_queued": queued,
+        "items_errored": len(errored),
+        "errored": errored,
+        "status": "started" if queued else "idle",
     }
 
 
@@ -1722,7 +1789,12 @@ async def list_items(db: Session = Depends(get_db)):
             "created_at":         item.created_at,
             "is_active":          item.is_active,
             "account_count":      len(accounts),
-            "accounts":           [{"id": a.id, "name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
+            "accounts":           [{
+                "id": a.id, "name": a.account_name, "type": a.account_type, "mask": a.mask,
+                "start_date": a.start_date.strftime('%Y-%m-%d') if a.start_date else None,
+                "anchor_age_days": (datetime.utcnow() - a.start_date).days if a.start_date else None,
+                "starting_balance": a.starting_balance,
+            } for a in accounts],
             "transaction_count":  txn_count,
             "has_cursor":         bool(item.cursor),
             "environment":        env,

@@ -2610,6 +2610,22 @@ function BankAccountRow({a,institutionName,toast,onSynced}){
             <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
           </div>
         </div>
+        {/* Balance anchor row */}
+        {(()=>{
+          const ageDays=a.anchor_age_days;
+          if(ageDays==null)return null;
+          const stale=ageDays>180;
+          const warn=ageDays>90&&ageDays<=180;
+          const color=stale?'#b91c1c':warn?'#b45309':'var(--text-muted)';
+          return(
+            <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:4,fontSize:11,color:'var(--text-muted)'}}>
+              <span>Balance anchor: <strong style={{color}}>{a.start_date}</strong>
+                <span style={{color,marginLeft:4}}>({ageDays}d ago{stale?' — stale, consider Force Resync':warn?' — getting old':''})</span>
+              </span>
+              {a.starting_balance!=null&&<span>Anchor value: <strong style={{color:'var(--text)'}}>{a.starting_balance<0?'-':''}{fmt(Math.abs(a.starting_balance))}</strong></span>}
+            </div>
+          );
+        })()}
         {/* Liability details row — shown for credit/loan accounts with Plaid data */}
         {a.is_liability&&(a.liability_min_payment!=null||a.liability_next_due_date)&&(
           <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:4,fontSize:11,color:'var(--text-muted)'}}>
@@ -2634,9 +2650,29 @@ function BankRow({item,toast,onRenamed,onSynced}){
   const[editing,setEditing]=useState(false);
   const[nameVal,setNameVal]=useState(item.institution_name);
   const[resyncing,setResyncing]=useState(false);
+  const[reconnecting,setReconnecting]=useState(false);
   const[expanded,setExpanded]=useState(false);
   const[confirmingRemove,setConfirmingRemove]=useState(false);
   const[cm,setCm]=useState(null);
+  const openReconnect=async()=>{
+    setReconnecting(true);
+    try{
+      const{link_token}=await apiFetch(`/plaid/update-link-token/${item.item_id}`);
+      const handler=window.Plaid.create({
+        token:link_token,
+        onSuccess:async()=>{
+          try{
+            await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
+            toast(`✓ ${item.institution_name} reconnected — syncing transactions…`);
+            setTimeout(()=>onSynced&&onSynced(),10000);
+          }catch(e){toast('Reconnect complete but sync failed to start','error');}
+          finally{setReconnecting(false);}
+        },
+        onExit:()=>setReconnecting(false),
+      });
+      handler.open();
+    }catch(e){toast('Failed to start reconnect: '+(e.message||e),'error');setReconnecting(false);}
+  };
   const save=async()=>{
     try{
       const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
@@ -2711,21 +2747,25 @@ function BankRow({item,toast,onRenamed,onSynced}){
       </div>
       {item.last_error_code&&(
         <div style={{marginTop:10,background:'#fff1f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px'}}>
-          <div style={{fontWeight:700,color:'#b91c1c',fontSize:13,marginBottom:2}}>
-            ⚠️ Sync error: {item.last_error_code}
-          </div>
-          <div style={{fontSize:12,color:'#7f1d1d',marginBottom:6}}>
-            {item.last_error_code==='ITEM_LOGIN_REQUIRED'
-              ?'Chase (or this institution) revoked Plaid access — typically happens when OAuth consent expires (~90 days). Re-connect to resume syncing.'
-              :item.last_error_message||'Plaid returned an error during the last sync attempt.'
-            }
-            {item.last_error_at&&<span style={{opacity:0.7}}> First seen: {item.last_error_at.slice(0,10)}.</span>}
-          </div>
-          {item.last_error_code==='ITEM_LOGIN_REQUIRED'&&(
-            <div style={{fontSize:12,color:'#92400e',fontWeight:500}}>
-              Click <strong>"+ Connect Bank"</strong> and choose {item.institution_name} — existing transactions are preserved.
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,color:'#b91c1c',fontSize:13,marginBottom:4}}>
+                ⚠️ Sync error: {item.last_error_code}
+                {item.last_error_at&&<span style={{fontWeight:400,fontSize:11,color:'#b91c1c',opacity:0.7,marginLeft:8}}>since {item.last_error_at.slice(0,10)}</span>}
+              </div>
+              <div style={{fontSize:12,color:'#7f1d1d'}}>
+                {item.last_error_code==='ITEM_LOGIN_REQUIRED'
+                  ?`${item.institution_name}'s OAuth consent expired (~90-day limit). Click Reconnect to re-authenticate in place — no data is lost.`
+                  :item.last_error_message||'Plaid returned an error during the last sync attempt.'
+                }
+              </div>
             </div>
-          )}
+            {item.last_error_code==='ITEM_LOGIN_REQUIRED'&&(
+              <button className="btn btn-sm btn-primary" style={{flexShrink:0,background:'#b91c1c',border:'none'}} onClick={openReconnect} disabled={reconnecting}>
+                {reconnecting?'Opening…':'🔗 Reconnect'}
+              </button>
+            )}
+          </div>
         </div>
       )}
       {confirmingRemove&&(
@@ -6073,7 +6113,13 @@ function App(){
   const sync=async()=>{
     try{
       const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});
-      toast(`Sync started for ${r.items_synced} bank${r.items_synced!==1?'s':''} — transactions will appear shortly`);
+      if(r.items_errored>0&&r.items_queued===0){
+        toast(`Sync skipped — ${r.items_errored} bank${r.items_errored!==1?'s need':'needs'} reconnecting (Settings → Connected Banks)`,'error');
+      }else if(r.items_errored>0){
+        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — ${r.items_errored} skipped (reconnect required in Settings)`);
+      }else{
+        toast(`Sync started for ${r.items_queued} bank${r.items_queued!==1?'s':''} — transactions will appear shortly`);
+      }
       loadMeta();
       setTimeout(loadMeta,15000);
     }catch(e){toast('Sync failed: '+(e.message||e),'error');}
