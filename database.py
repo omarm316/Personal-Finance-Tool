@@ -50,6 +50,9 @@ class PlaidItem(Base):
     access_token_enc = Column(Text, nullable=False) # AES-encrypted via Fernet
     cursor = Column(Text, nullable=True)            # Plaid sync cursor — persisted here
     last_synced_at = Column(DateTime, nullable=True)
+    last_error_code = Column(String(100), nullable=True)    # e.g. ITEM_LOGIN_REQUIRED
+    last_error_message = Column(Text, nullable=True)        # Human-readable error detail
+    last_error_at = Column(DateTime, nullable=True)         # When the error was first recorded
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -588,7 +591,10 @@ def run_migrations(engine):
             ('liability_purchase_apr',     'FLOAT'),
         ],
         'plaid_items': [
-            ('institution_id', 'VARCHAR(50)'),
+            ('institution_id',    'VARCHAR(50)'),
+            ('last_error_code',   'VARCHAR(100)'),
+            ('last_error_message','TEXT'),
+            ('last_error_at',     'TIMESTAMP'),
         ],
         'cards': [
             ('account_id', 'INTEGER'),

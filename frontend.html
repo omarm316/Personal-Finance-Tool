@@ -2684,9 +2684,12 @@ function BankRow({item,toast,onRenamed,onSynced}){
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em',color:envColor,background:`${envColor}18`,border:`1px solid ${envColor}40`,borderRadius:20,padding:'2px 8px'}}>{item.environment}</span>
-          {item.is_active
-            ?<span className="bank-badge">Active</span>
-            :<span style={{fontSize:11,fontWeight:600,color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:20,padding:'2px 8px'}}>Stale</span>}
+          {item.last_error_code
+            ?<span style={{fontSize:11,fontWeight:600,color:'#b91c1c',background:'#fee2e2',border:'1px solid #fecaca',borderRadius:20,padding:'2px 8px'}} title={item.last_error_message||''}>🔴 {item.last_error_code}</span>
+            :item.is_active
+              ?<span className="bank-badge">Active</span>
+              :<span style={{fontSize:11,fontWeight:600,color:'#b45309',background:'#fef3c7',border:'1px solid #fde68a',borderRadius:20,padding:'2px 8px'}}>Stale</span>
+          }
           <button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'1px 6px'}} onClick={()=>setExpanded(x=>!x)}>{expanded?'▲':'▼'}</button>
           {item.is_active&&<button className="btn btn-sm btn-secondary" onClick={forceResync} disabled={resyncing}>{resyncing?'Syncing…':'↺ Sync'}</button>}
           <button className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid #fecaca',fontSize:11}} onClick={()=>{
@@ -2706,6 +2709,25 @@ function BankRow({item,toast,onRenamed,onSynced}){
           }}>Remove</button>
         </div>
       </div>
+      {item.last_error_code&&(
+        <div style={{marginTop:10,background:'#fff1f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px'}}>
+          <div style={{fontWeight:700,color:'#b91c1c',fontSize:13,marginBottom:2}}>
+            ⚠️ Sync error: {item.last_error_code}
+          </div>
+          <div style={{fontSize:12,color:'#7f1d1d',marginBottom:6}}>
+            {item.last_error_code==='ITEM_LOGIN_REQUIRED'
+              ?'Chase (or this institution) revoked Plaid access — typically happens when OAuth consent expires (~90 days). Re-connect to resume syncing.'
+              :item.last_error_message||'Plaid returned an error during the last sync attempt.'
+            }
+            {item.last_error_at&&<span style={{opacity:0.7}}> First seen: {item.last_error_at.slice(0,10)}.</span>}
+          </div>
+          {item.last_error_code==='ITEM_LOGIN_REQUIRED'&&(
+            <div style={{fontSize:12,color:'#92400e',fontWeight:500}}>
+              Click <strong>"+ Connect Bank"</strong> and choose {item.institution_name} — existing transactions are preserved.
+            </div>
+          )}
+        </div>
+      )}
       {confirmingRemove&&(
         <div style={{marginTop:10,background:'#fff1f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
           <div>

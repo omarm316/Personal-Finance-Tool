@@ -33,6 +33,7 @@ from database import (
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
 from plaid_integration import setup_plaid_from_env
+from plaid.exceptions import ApiException as PlaidApiException
 
 # ---------------------------------------------------------------------------
 # Account classification helpers
@@ -1216,12 +1217,40 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             db.commit()
         added = await _sync_item(item, plaid, db)
         print(f"[sync] {item.institution_name}: {added} transaction(s) added")
+        # Clear any previous error now that sync succeeded
+        if item.last_error_code:
+            item.last_error_code    = None
+            item.last_error_message = None
+            item.last_error_at      = None
+            db.commit()
         # Refresh current-month balance snapshots for all accounts in this item
         item_accounts = db.query(Account).filter_by(plaid_item_id=item_id, is_active=True).all()
         for acct in item_accounts:
             _refresh_current_month_snapshot(db, acct.id)
         if item_accounts:
             db.commit()
+    except PlaidApiException as e:
+        # Structured Plaid error — extract code and store for UI display
+        import traceback; traceback.print_exc()
+        try:
+            import json as _json
+            body = _json.loads(e.body) if isinstance(e.body, str) else (e.body or {})
+            err_code = body.get('error_code') or 'PLAID_ERROR'
+            err_msg  = body.get('display_message') or body.get('error_message') or str(e)
+        except Exception:
+            err_code = 'PLAID_ERROR'
+            err_msg  = str(e)
+        print(f"[sync] {item_id} Plaid error {err_code}: {err_msg}")
+        # Persist error on item so the UI can show a reconnect warning
+        try:
+            if item:
+                item.last_error_code    = err_code
+                item.last_error_message = err_msg
+                if not item.last_error_at:   # Record when error first appeared
+                    item.last_error_at = datetime.utcnow()
+                db.commit()
+        except Exception:
+            pass
     except Exception as e:
         import traceback; traceback.print_exc()
         print(f"[sync] background sync failed for {item_id}: {e}")
@@ -1687,16 +1716,20 @@ async def list_items(db: Session = Depends(get_db)):
             Transaction.account_id.in_([a.id for a in accounts])
         ).count() if accounts else 0
         result.append({
-            "item_id":           item.item_id,
-            "institution_name":  item.institution_name,
-            "last_synced_at":    item.last_synced_at,
-            "created_at":        item.created_at,
-            "is_active":         item.is_active,
-            "account_count":     len(accounts),
-            "accounts":          [{"id": a.id, "name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
-            "transaction_count": txn_count,
-            "has_cursor":        bool(item.cursor),
-            "environment":       env,
+            "item_id":            item.item_id,
+            "institution_name":   item.institution_name,
+            "last_synced_at":     item.last_synced_at,
+            "created_at":         item.created_at,
+            "is_active":          item.is_active,
+            "account_count":      len(accounts),
+            "accounts":           [{"id": a.id, "name": a.account_name, "type": a.account_type, "mask": a.mask} for a in accounts],
+            "transaction_count":  txn_count,
+            "has_cursor":         bool(item.cursor),
+            "environment":        env,
+            # Sync error state — set when Plaid returns an API error during sync
+            "last_error_code":    item.last_error_code,
+            "last_error_message": item.last_error_message,
+            "last_error_at":      item.last_error_at.isoformat() if item.last_error_at else None,
         })
     return result
 
