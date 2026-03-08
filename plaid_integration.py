@@ -13,6 +13,7 @@ from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 from plaid.model.accounts_get_request import AccountsGetRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
@@ -160,7 +161,48 @@ class PlaidClient:
             })
         
         return accounts
-    
+
+    def get_liabilities(self, access_token: str) -> dict:
+        """
+        Call Plaid's /liabilities/get endpoint and return parsed liability details.
+
+        Returns a dict with optional keys 'credit', 'mortgage', 'student' —
+        each a list of account-level dicts from Plaid's response.
+        Returns an empty dict silently when:
+          - The item doesn't have the Liabilities product enabled
+          - The institution doesn't support liabilities
+          - A network/API error occurs
+
+        Each credit entry has: account_id, minimum_payment_amount,
+          next_payment_due_date, last_statement_balance, last_payment_amount,
+          last_payment_date, aprs (list of {apr_type, apr_percentage}).
+        Each student entry has: account_id, minimum_payment_amount,
+          next_payment_due_date, last_statement_balance, last_payment_amount,
+          last_payment_date, interest_rate_percentage.
+        Each mortgage entry has: account_id, next_monthly_payment,
+          next_payment_due_date, last_payment_amount, last_payment_date,
+          interest_rate (dict with 'percentage'), origination_principal_amount.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            request  = LiabilitiesGetRequest(access_token=access_token)
+            response = self.client.liabilities_get(request)
+            raw      = response.get('liabilities') or {}
+            # The Plaid SDK may return model objects — convert to plain dicts
+            def _to_dict(obj):
+                if hasattr(obj, 'to_dict'):
+                    return obj.to_dict()
+                if isinstance(obj, list):
+                    return [_to_dict(i) for i in obj]
+                if isinstance(obj, dict):
+                    return {k: _to_dict(v) for k, v in obj.items()}
+                return obj
+            return _to_dict(raw)
+        except Exception as e:
+            logger.info(f"get_liabilities skipped ({type(e).__name__}): {e}")
+            return {}
+
     def sync_transactions(self, access_token: str, cursor: Optional[str] = None) -> Dict:
         """
         Sync transactions using Plaid's Transactions Sync API (recommended approach)

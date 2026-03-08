@@ -89,6 +89,15 @@ class Account(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Plaid Liabilities product — populated by POST /api/plaid/sync-liabilities
+    # Applies to credit cards and loan accounts; NULL for depository/investment accounts.
+    liability_min_payment     = Column(Float,    nullable=True)   # Minimum amount due this cycle
+    liability_next_due_date   = Column(DateTime, nullable=True)   # When next payment is due
+    liability_last_statement_bal = Column(Float, nullable=True)   # Balance as of last statement
+    liability_last_payment    = Column(Float,    nullable=True)   # Last payment amount
+    liability_last_payment_date = Column(DateTime, nullable=True) # Date of last payment
+    liability_purchase_apr    = Column(Float,    nullable=True)   # Purchase APR % (credit cards)
+
     transactions = relationship("Transaction", back_populates="account")
     card = relationship("Card", back_populates="account", uselist=False, foreign_keys="Card.account_id")
 
@@ -571,6 +580,12 @@ def run_migrations(engine):
             ('persistent_account_id', 'VARCHAR(200)'),
             ('institution_id', 'VARCHAR(50)'),
             ('account_hash',   'VARCHAR(16)'),
+            ('liability_min_payment',      'FLOAT'),
+            ('liability_next_due_date',    'DATE'),
+            ('liability_last_statement_bal', 'FLOAT'),
+            ('liability_last_payment',     'FLOAT'),
+            ('liability_last_payment_date', 'DATE'),
+            ('liability_purchase_apr',     'FLOAT'),
         ],
         'plaid_items': [
             ('institution_id', 'VARCHAR(50)'),

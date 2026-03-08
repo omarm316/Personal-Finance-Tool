@@ -184,6 +184,13 @@ def serialize_account(a: Account, transaction_count: int = 0) -> dict:
         'is_credit': flags['is_credit'],
         'bucket': flags['bucket'],
         'transaction_count': transaction_count,
+        # Plaid Liabilities product — populated by POST /api/plaid/sync-liabilities
+        'liability_min_payment':      getattr(a, 'liability_min_payment', None),
+        'liability_next_due_date':    a.liability_next_due_date.strftime('%Y-%m-%d') if getattr(a, 'liability_next_due_date', None) else None,
+        'liability_last_statement_bal': getattr(a, 'liability_last_statement_bal', None),
+        'liability_last_payment':     getattr(a, 'liability_last_payment', None),
+        'liability_last_payment_date': a.liability_last_payment_date.strftime('%Y-%m-%d') if getattr(a, 'liability_last_payment_date', None) else None,
+        'liability_purchase_apr':     getattr(a, 'liability_purchase_apr', None),
     }
 
 
@@ -1273,6 +1280,120 @@ async def remove_plaid_item(item_id: str, db: Session = Depends(get_db)):
         "removed": True,
         "deleted_empty_accounts": deleted_accounts,
         "remaining_accounts": len(accounts) - deleted_accounts,
+    }
+
+
+@app.post("/api/plaid/sync-liabilities")
+async def sync_liabilities(db: Session = Depends(get_db)):
+    """
+    Pull the Plaid Liabilities product for every active item and write
+    liability details (minimum payment, next due date, APR, last statement
+    balance, etc.) onto the matching Account rows.
+
+    Also updates Loan.interest_rate for any Loan record whose account_id
+    matches a mortgage or student-loan account returned by Plaid.
+
+    Safe to call repeatedly — all writes are idempotent overwrites.
+    Institutions that don't support the Liabilities product are skipped silently.
+    """
+    def _plaid_date(raw) -> Optional[datetime]:
+        """Parse a Plaid date value (date object, datetime, or YYYY-MM-DD string)."""
+        if raw is None:
+            return None
+        if isinstance(raw, datetime):
+            return raw
+        try:
+            from datetime import date as _date
+            if isinstance(raw, _date):
+                return datetime(raw.year, raw.month, raw.day)
+        except Exception:
+            pass
+        try:
+            return datetime.strptime(str(raw)[:10], '%Y-%m-%d')
+        except Exception:
+            return None
+
+    plaid = setup_plaid_from_env()
+    items = db.query(PlaidItem).filter(PlaidItem.is_active.is_(True)).all()
+
+    accounts_updated = 0
+    loans_updated    = 0
+    errors: list[str] = []
+
+    for item in items:
+        try:
+            liab = plaid.get_liabilities(item.access_token)
+        except Exception as e:
+            errors.append(f"{item.institution_name or item.item_id}: {e}")
+            continue
+
+        # ── Credit cards ──────────────────────────────────────────────────────
+        for cc in liab.get('credit') or []:
+            acct = db.query(Account).filter_by(
+                plaid_account_id=cc.get('account_id')
+            ).first()
+            if not acct:
+                continue
+            acct.liability_min_payment        = cc.get('minimum_payment_amount')
+            acct.liability_next_due_date      = _plaid_date(cc.get('next_payment_due_date'))
+            acct.liability_last_statement_bal = cc.get('last_statement_balance')
+            acct.liability_last_payment       = cc.get('last_payment_amount')
+            acct.liability_last_payment_date  = _plaid_date(cc.get('last_payment_date'))
+            # Purchase APR (first match in aprs list)
+            for apr in cc.get('aprs') or []:
+                if apr.get('apr_type') == 'purchase_apr':
+                    acct.liability_purchase_apr = apr.get('apr_percentage')
+                    break
+            accounts_updated += 1
+
+        # ── Student loans ─────────────────────────────────────────────────────
+        for sl in liab.get('student') or []:
+            acct = db.query(Account).filter_by(
+                plaid_account_id=sl.get('account_id')
+            ).first()
+            if not acct:
+                continue
+            acct.liability_min_payment        = sl.get('minimum_payment_amount')
+            acct.liability_next_due_date      = _plaid_date(sl.get('next_payment_due_date'))
+            acct.liability_last_statement_bal = sl.get('last_statement_balance')
+            acct.liability_last_payment       = sl.get('last_payment_amount')
+            acct.liability_last_payment_date  = _plaid_date(sl.get('last_payment_date'))
+            accounts_updated += 1
+            # Back-fill Loan.interest_rate if we have a linked Loan record
+            rate = sl.get('interest_rate_percentage')
+            if rate is not None:
+                loan = db.query(Loan).filter_by(account_id=acct.id).first()
+                if loan:
+                    loan.interest_rate = rate
+                    loans_updated += 1
+
+        # ── Mortgages ─────────────────────────────────────────────────────────
+        for mtg in liab.get('mortgage') or []:
+            acct = db.query(Account).filter_by(
+                plaid_account_id=mtg.get('account_id')
+            ).first()
+            if not acct:
+                continue
+            acct.liability_min_payment       = mtg.get('next_monthly_payment')
+            acct.liability_next_due_date     = _plaid_date(mtg.get('next_payment_due_date'))
+            acct.liability_last_payment      = mtg.get('last_payment_amount')
+            acct.liability_last_payment_date = _plaid_date(mtg.get('last_payment_date'))
+            accounts_updated += 1
+            # Back-fill Loan interest rate
+            ir = mtg.get('interest_rate') or {}
+            rate = ir.get('percentage') if isinstance(ir, dict) else None
+            if rate is not None:
+                loan = db.query(Loan).filter_by(account_id=acct.id).first()
+                if loan:
+                    loan.interest_rate = rate
+                    loans_updated += 1
+
+    db.commit()
+    return {
+        "accounts_updated": accounts_updated,
+        "loans_updated":    loans_updated,
+        "items_processed":  len(items),
+        "errors":           errors,
     }
 
 

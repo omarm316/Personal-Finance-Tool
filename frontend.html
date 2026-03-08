@@ -2431,6 +2431,21 @@ function ResetResyncButton({toast,onDone}){
   </React.Fragment>;
 }
 
+function SyncLiabilitiesButton({toast,onDone}){
+  const[busy,setBusy]=useState(false);
+  const run=async()=>{
+    setBusy(true);
+    try{
+      const r=await apiFetch('/plaid/sync-liabilities',{method:'POST'});
+      const msg=`Liability sync done — ${r.accounts_updated} account${r.accounts_updated!==1?'s':''} updated`;
+      toast(r.errors&&r.errors.length?msg+` (${r.errors.length} skipped)`:msg);
+      onDone&&onDone();
+    }catch(e){toast('Liability sync failed: '+(e.message||e),'error');}
+    finally{setBusy(false);}
+  };
+  return<button className="btn btn-sm btn-secondary" style={{fontSize:11}} onClick={run} disabled={busy} title="Pull minimum payments, due dates, and APRs from Plaid">{busy?'Syncing…':'💳 Sync Liabilities'}</button>;
+}
+
 function BankAccountRow({a,institutionName,toast,onSynced}){
   const[busy,setBusy]=useState(false);
   const[rebuilding,setRebuilding]=useState(false);
@@ -2463,16 +2478,33 @@ function BankAccountRow({a,institutionName,toast,onSynced}){
   return(
     <React.Fragment>
       {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 8px',background:'var(--bg-secondary)',borderRadius:6}}>
-        <div style={{display:'flex',gap:8,fontSize:12,alignItems:'center'}}>
-          <span style={{fontWeight:500,color:'var(--text)'}}>{a.name}</span>
-          <span style={{textTransform:'capitalize',color:'var(--text-muted)'}}>{a.type}</span>
-          {a.mask&&<span style={{color:'var(--text-muted)'}}>····{a.mask}</span>}
+      <div style={{padding:'5px 8px',background:'var(--bg-secondary)',borderRadius:6}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{display:'flex',gap:8,fontSize:12,alignItems:'center'}}>
+            <span style={{fontWeight:500,color:'var(--text)'}}>{a.name}</span>
+            <span style={{textTransform:'capitalize',color:'var(--text-muted)'}}>{a.type}</span>
+            {a.mask&&<span style={{color:'var(--text-muted)'}}>····{a.mask}</span>}
+          </div>
+          <div style={{display:'flex',gap:4}}>
+            <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={rebuilding} onClick={rebuildSnapshots} title="Rebuild monthly balance snapshots for this account">{rebuilding?'…':'↺ Snapshots'}</button>
+            <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
+          </div>
         </div>
-        <div style={{display:'flex',gap:4}}>
-          <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={rebuilding} onClick={rebuildSnapshots} title="Rebuild monthly balance snapshots for this account">{rebuilding?'…':'↺ Snapshots'}</button>
-          <button className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 7px'}} disabled={busy} onClick={redownload} title="Re-download all transactions from Plaid (non-destructive)">{busy?'…':'⟳ Re-download'}</button>
-        </div>
+        {/* Liability details row — shown for credit/loan accounts with Plaid data */}
+        {a.is_liability&&(a.liability_min_payment!=null||a.liability_next_due_date)&&(
+          <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:4,fontSize:11,color:'var(--text-muted)'}}>
+            {a.liability_min_payment!=null&&<span style={{color:a.liability_next_due_date&&new Date(a.liability_next_due_date)<new Date()?'#ef4444':'var(--text-muted)'}}>
+              Min due: <strong style={{color:'var(--text)'}}>${a.liability_min_payment.toFixed(2)}</strong>
+            </span>}
+            {a.liability_next_due_date&&<span>
+              Due: <strong style={{color:'var(--text)'}}>{new Date(a.liability_next_due_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</strong>
+            </span>}
+            {a.liability_last_statement_bal!=null&&<span>
+              Stmt bal: <strong style={{color:'var(--text)'}}>${Math.abs(a.liability_last_statement_bal).toFixed(2)}</strong>
+            </span>}
+            {a.liability_purchase_apr!=null&&<span>APR: <strong style={{color:'var(--text)'}}>{a.liability_purchase_apr}%</strong></span>}
+          </div>
+        )}
       </div>
     </React.Fragment>
   );
@@ -3093,6 +3125,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
           <div className="section-header">
             <div className="section-title">Connected Banks ({items.length})</div>
             <div style={{display:'flex',gap:8}}>
+              {items.length>0&&<SyncLiabilitiesButton toast={toast} onDone={refreshItems}/>}
               {items.length>0&&<ResetResyncButton toast={toast} onDone={refreshItems}/>}
               <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
             </div>
