@@ -117,6 +117,51 @@ class PlaidClient:
             pass
         return None
 
+    def get_item_status(self, access_token: str) -> dict:
+        """
+        Call /item/get and return a diagnostic dict with error code,
+        last successful/failed update timestamps, and consent expiration.
+        Never raises — always returns a dict with at least 'ok': False on error.
+        """
+        try:
+            r = self.client.item_get(ItemGetRequest(access_token=access_token))
+            item = r['item']
+            status = r.get('status') or {}
+
+            # Extract error (None when healthy)
+            err = item.get('error')
+            error_info = None
+            if err:
+                error_info = {
+                    'error_type': getattr(err, 'error_type', None) or str(err.get('error_type', '')),
+                    'error_code': getattr(err, 'error_code', None) or str(err.get('error_code', '')),
+                    'display_message': getattr(err, 'display_message', None) or err.get('display_message'),
+                }
+
+            # Extract transaction sync timestamps
+            txn_status = status.get('transactions') or {}
+            def _ts(v):
+                if v is None:
+                    return None
+                if hasattr(v, 'isoformat'):
+                    return v.isoformat()
+                return str(v)
+
+            return {
+                'ok': error_info is None,
+                'item_id': item.get('item_id'),
+                'institution_id': item.get('institution_id'),
+                'consent_expiration_time': _ts(item.get('consent_expiration_time')),
+                'update_type': str(item.get('update_type', '')),
+                'error': error_info,
+                'last_successful_update': _ts(txn_status.get('last_successful_update')),
+                'last_failed_update': _ts(txn_status.get('last_failed_update')),
+                'available_products': [str(p) for p in (item.get('available_products') or [])],
+                'billed_products': [str(p) for p in (item.get('billed_products') or [])],
+            }
+        except Exception as e:
+            return {'ok': False, 'error': {'error_code': 'CLIENT_ERROR', 'display_message': str(e)}}
+
     def exchange_public_token(self, public_token: str) -> Dict[str, str]:
         """
         Exchange a public token for an access token

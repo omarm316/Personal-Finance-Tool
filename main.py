@@ -1283,6 +1283,32 @@ async def remove_plaid_item(item_id: str, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/plaid/item-status")
+async def plaid_item_status(db: Session = Depends(get_db)):
+    """
+    Diagnostic endpoint: calls Plaid /item/get for every active PlaidItem and
+    returns health info — error codes, last successful/failed update timestamps,
+    consent expiration time, and update_type (background vs user_present).
+    Use this to identify stale or broken Plaid connections (e.g. ITEM_LOGIN_REQUIRED).
+    """
+    if plaid is None:
+        return {"error": "Plaid not configured"}
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    results = []
+    for item in items:
+        access_token = decrypt_token(item.access_token_enc)
+        status = plaid.get_item_status(access_token)
+        results.append({
+            "institution_name": item.institution_name,
+            "item_id": item.item_id,
+            "last_synced_at": item.last_synced_at.isoformat() if item.last_synced_at else None,
+            **status,
+        })
+    # Sort: broken items first, then by institution name
+    results.sort(key=lambda r: (r.get('ok', False), r.get('institution_name', '')))
+    return results
+
+
 @app.post("/api/plaid/sync-liabilities")
 async def sync_liabilities(db: Session = Depends(get_db)):
     """

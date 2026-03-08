@@ -2751,6 +2751,14 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
 
   const[balanceSyncing,setBalanceSyncing]=useState(false);
   const[balanceSyncResult,setBalanceSyncResult]=useState(null);
+  const[healthChecking,setHealthChecking]=useState(false);
+  const[healthResults,setHealthResults]=useState(null);
+  const checkPlaidHealth=async()=>{
+    setHealthChecking(true);
+    try{const r=await apiFetch('/plaid/item-status');setHealthResults(r);}
+    catch(e){toast('Health check failed: '+(e.message||e),'error');}
+    finally{setHealthChecking(false);}
+  };
   const syncBalances=async(force=false)=>{
     setBalanceSyncing(true);
     try{
@@ -3245,11 +3253,48 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
           <div className="section-header">
             <div className="section-title">Connected Banks ({items.length})</div>
             <div style={{display:'flex',gap:8}}>
+              {items.length>0&&<button className="btn btn-sm btn-secondary" style={{fontSize:11}} onClick={checkPlaidHealth} disabled={healthChecking} title="Check Plaid connection health for all institutions">{healthChecking?'Checking…':'🔍 Check Health'}</button>}
               {items.length>0&&<SyncLiabilitiesButton toast={toast} onDone={refreshItems}/>}
               {items.length>0&&<ResetResyncButton toast={toast} onDone={refreshItems}/>}
               <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
             </div>
           </div>
+          {healthResults&&(
+            <div style={{marginBottom:16,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 14px',background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Plaid Connection Health</div>
+                <button onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
+              </div>
+              {healthResults.map((r,i)=>{
+                const healthy=r.ok;
+                const errCode=r.error?.error_code;
+                const needsRelink=errCode==='ITEM_LOGIN_REQUIRED'||errCode==='ITEM_NOT_FOUND'||errCode==='INVALID_ACCESS_TOKEN';
+                const expiring=errCode==='PENDING_EXPIRATION';
+                const bgColor=healthy?'#f0fdf4':needsRelink||expiring?'#fff7ed':'#fef2f2';
+                const dot=healthy?'🟢':needsRelink||expiring?'🟡':'🔴';
+                const fmtTs=ts=>ts?ts.replace('T',' ').slice(0,16)+' UTC':'—';
+                return(
+                  <div key={i} style={{padding:'10px 14px',background:bgColor,borderBottom:i<healthResults.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                      <span>{dot}</span>
+                      <span style={{fontWeight:600,fontSize:13}}>{r.institution_name}</span>
+                      {errCode&&<span style={{fontSize:11,fontWeight:700,padding:'1px 8px',borderRadius:20,background:needsRelink||expiring?'#fef3c7':'#fee2e2',color:needsRelink||expiring?'#92400e':'#b91c1c'}}>{errCode}</span>}
+                    </div>
+                    <div style={{display:'flex',gap:24,fontSize:11,color:'var(--text-muted)',flexWrap:'wrap',marginLeft:24}}>
+                      <span>Last sync: <strong style={{color:'var(--text-primary)'}}>{fmtTs(r.last_synced_at)}</strong></span>
+                      <span>Last successful update: <strong style={{color:r.last_successful_update?'var(--green)':'var(--text-muted)'}}>{fmtTs(r.last_successful_update)}</strong></span>
+                      {r.last_failed_update&&<span>Last failed: <strong style={{color:'var(--red)'}}>{fmtTs(r.last_failed_update)}</strong></span>}
+                      {r.consent_expiration_time&&<span>Consent expires: <strong style={{color:'#b45309'}}>{fmtTs(r.consent_expiration_time)}</strong></span>}
+                      <span>Update type: <strong>{r.update_type||'—'}</strong></span>
+                    </div>
+                    {r.error?.display_message&&<div style={{marginTop:4,marginLeft:24,fontSize:11,color:'#b91c1c'}}>{r.error.display_message}</div>}
+                    {needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'#92400e',fontWeight:500}}>⚠️ Reconnect required — use "+ Connect Bank" to re-link this institution.</div>}
+                    {expiring&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'#92400e',fontWeight:500}}>⚠️ OAuth consent is expiring soon — re-link soon to keep syncing.</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
             :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>{setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it));onBanksChanged&&onBanksChanged();}} onSynced={refreshItems}/>)
           }
