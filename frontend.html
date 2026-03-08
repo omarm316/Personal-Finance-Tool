@@ -129,6 +129,37 @@ td{padding:11px 14px;font-size:13.5px}
 .sel-pill button{border:none;cursor:pointer;border-radius:7px;padding:3px 12px;font-size:12px;font-weight:500;height:26px;font-family:inherit;transition:background 0.15s,color 0.15s}
 .sel-drop{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;background:#ffffff;color:var(--text-primary);cursor:pointer;height:34px;box-sizing:border-box;font-family:inherit;outline:none}
 .sel-drop:focus{border-color:var(--sidebar-active-color);box-shadow:0 0 0 2px rgba(37,99,235,0.12)}
+/* ── Mobile bottom nav bar ────────────────────────────────────────────────── */
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;
+  background:var(--card-bg);border-top:1px solid var(--border);z-index:200;
+  justify-content:space-around;align-items:stretch;}
+.mobile-nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;border:none;background:none;cursor:pointer;
+  color:var(--text-muted);font-size:9px;font-weight:500;padding:6px 0;
+  border-top:2px solid transparent;transition:color 0.15s,border-color 0.15s;}
+.mobile-nav-btn.active{color:var(--blue);border-top-color:var(--blue);}
+.mobile-nav-btn span.nav-icon{font-size:19px;line-height:1;}
+/* Mobile budget scorecard */
+.mobile-budget-row{display:flex;justify-content:space-between;align-items:center;
+  padding:9px 14px;border-bottom:1px solid var(--border);}
+.mobile-budget-bar{height:5px;border-radius:3px;background:#e5e7eb;flex:1;margin:0 10px;overflow:hidden;}
+/* ── Responsive breakpoint ────────────────────────────────────────────────── */
+@media(max-width:768px){
+  .sidebar{display:none!important;}
+  .main{margin-left:0!important;}
+  .content{padding:12px 12px 68px;}
+  .topbar{padding:0 14px;}
+  .mobile-nav{display:flex;}
+  .toast-container{bottom:68px;right:12px;left:12px;}
+  .toast{max-width:100%;}
+  /* Filters: wrap aggressively */
+  .filters{padding:10px 12px;gap:8px;}
+  .search-input{width:100%;min-width:0;}
+  /* Hide non-essential table columns on mobile — applied per-page */
+  .hide-mobile{display:none!important;}
+  /* Show mobile-only elements */
+  .mobile-month-nav{display:flex!important;align-items:center;gap:4px;}
+}
 </style>
 </head>
 <body>
@@ -181,6 +212,35 @@ function useToast(){
     setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);
   };
   return{toasts,toast:add};
+}
+
+function useIsMobile(){
+  const[m,setM]=useState(()=>typeof window!=='undefined'&&window.innerWidth<768);
+  useEffect(()=>{
+    const fn=()=>setM(window.innerWidth<768);
+    window.addEventListener('resize',fn,{passive:true});
+    return()=>window.removeEventListener('resize',fn);
+  },[]);
+  return m;
+}
+
+function MobileNav({page,setPage}){
+  const tabs=[
+    {id:'dashboard',icon:'⊟',label:'Home'},
+    {id:'budgets',icon:'◎',label:'Budget'},
+    {id:'transactions',icon:'↕',label:'Txns'},
+    {id:'settings',icon:'⚙',label:'Settings'},
+  ];
+  return(
+    <nav className="mobile-nav">
+      {tabs.map(t=>(
+        <button key={t.id} className={`mobile-nav-btn${page===t.id?' active':''}`} onClick={()=>setPage(t.id)}>
+          <span className="nav-icon">{t.icon}</span>
+          <span>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
 }
 
 async function apiFetch(path,opts={}){
@@ -1100,6 +1160,82 @@ function BatchEditModal({count,categories,onSave,onClose}){
   );
 }
 
+/* ── Mobile transaction list: replaces full table on narrow screens ─────── */
+function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
+  const isMobile=useIsMobile();
+  // Desktop: full table
+  if(!isMobile) return(
+    <div className="table-wrap"><table>
+      <thead><tr>
+        <th style={{width:28,paddingLeft:12,paddingRight:4}}>
+          <input type="checkbox" title="Select / deselect all visible"
+            checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
+            onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
+            style={{cursor:'pointer'}}/>
+        </th>
+        {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
+          <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+            {lbl}<span style={{marginLeft:4,opacity:sortCol===col?1:0.25,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
+          </th>
+        ))}
+        <th>Actions</th>
+      </tr></thead>
+      <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
+    </table></div>
+  );
+  // Mobile: card list with quick category selector
+  const sortedCats=categories.filter(c=>c.is_active).sort((a,b)=>a.name.localeCompare(b.name));
+  return(
+    <div>
+      {visible.map(t=>{
+        const isExpense=t.action==='Expense';
+        const isIncome=t.action==='Income';
+        const needsRev=t.needs_review&&!t.is_locked;
+        return(
+          <div key={t.id}
+            style={{padding:'11px 14px',borderBottom:'1px solid var(--border)',
+              background:needsRev?'#fffbeb':t.is_locked?'#eff6ff':'var(--card-bg)',
+              display:'flex',flexDirection:'column',gap:6}}>
+            {/* Top row: description + amount */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+              <div style={{fontWeight:500,fontSize:13.5,color:'var(--text)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {t.description_clean||t.description_raw}
+              </div>
+              <span style={{fontFamily:'Inter',fontWeight:600,fontSize:13.5,flexShrink:0,
+                color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
+                {t.amount<0?'–':'+'}{fmt(t.amount)}
+              </span>
+            </div>
+            {/* Bottom row: date, account, quick-reclassify */}
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+              <span style={{fontSize:11,color:'var(--text-muted)'}}>{fmtDate(t.date)}</span>
+              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',maxWidth:100,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+              {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:8,background:'#fef3c7',color:'#92400e',fontWeight:600}}>Review</span>}
+              {/* Quick category selector */}
+              {t.action!=='Transfer'&&(
+                <select
+                  value={t.category_final||''}
+                  onChange={async e=>{
+                    const cat=e.target.value;
+                    try{await onSave(t.id,{category_manual:cat,needs_review:false});t.category_final=cat;t.needs_review=false;}
+                    catch(err){toast('Save failed: '+(err.message||err),'error');}
+                  }}
+                  style={{fontSize:11,border:'1px solid var(--border)',borderRadius:6,padding:'2px 6px',
+                    background:'var(--card-bg)',color:'var(--text)',cursor:'pointer',
+                    maxWidth:130,flex:'1 1 auto'}}>
+                  <option value="">Unclassified</option>
+                  {sortedCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              )}
+              {t.action==='Transfer'&&<span style={{fontSize:11,padding:'1px 7px',borderRadius:8,background:'#f3f4f6',color:'#6b7280',fontWeight:500}}>Transfer</span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TransactionsPage({categories,toast}){
   const[txns,setTxns]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -1332,23 +1468,7 @@ function TransactionsPage({categories,toast}){
         )}
         {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
           :visible.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
-          :<div className="table-wrap"><table>
-            <thead><tr>
-              <th style={{width:28,paddingLeft:12,paddingRight:4}}>
-                <input type="checkbox" title="Select / deselect all visible"
-                  checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
-                  onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
-                  style={{cursor:'pointer'}}/>
-              </th>
-              {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
-                <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
-                  {lbl}<span style={{marginLeft:4,opacity:sortCol===col?1:0.25,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
-                </th>
-              ))}
-              <th>Actions</th>
-            </tr></thead>
-            <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
-          </table></div>
+          :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
         }
       </div>
     </div>
@@ -3800,8 +3920,18 @@ function BudgetsPage({categories,toast}){
 
     return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-        <td style={{fontWeight:500,fontSize:13,minWidth:140,paddingLeft:12}}>{cat}</td>
-        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,minWidth:90,padding:'6px 8px',position:'relative'}}>
+        <td style={{fontWeight:500,fontSize:13,minWidth:120,paddingLeft:12}}>{cat}</td>
+        {/* Actual — always visible; progress bar shows budget utilisation */}
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 4px'}}>
+          {actual!==0&&<span style={{color:over?'var(--red)':isIncome?'var(--green)':'var(--text-primary)',fontWeight:500}}>{fmt(actual)}</span>}
+          {actual!==0&&budget>0&&(
+            <div className="mobile-budget-bar" style={{width:60,display:'inline-block',verticalAlign:'middle',marginLeft:6}}>
+              <div style={{height:'100%',width:`${pct*100}%`,background:barColor,borderRadius:3,transition:'width 0.3s'}}/>
+            </div>
+          )}
+        </td>
+        {/* Budget — shows input in edit mode */}
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,minWidth:80,padding:'6px 8px',position:'relative'}}>
           {isEditing?(
             <div style={{position:'relative'}}>
               <input type="number" step="1" min="0" value={editVal}
@@ -3811,9 +3941,14 @@ function BudgetsPage({categories,toast}){
               {suggestion&&!editVal&&<span style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--text-muted)',pointerEvents:'none'}}>{Math.round(suggestion)}</span>}
             </div>
           ):(
-            <span style={{color:'var(--text-secondary)'}}>{fmt(budget)}</span>
+            <span style={{color:budget>0?'var(--text-secondary)':'#d1d5db'}}>{budget>0?fmt(budget):'—'}</span>
           )}
         </td>
+        {/* Variance — hide on very narrow screens */}
+        {!isEditing&&<td className="hide-mobile" style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:variance!==0?varColor:'#d1d5db'}}>
+          {variance!==0?(variance>0?'+':'')+fmt(variance):'—'}
+        </td>}
+        {isEditing&&<td/>}
       </tr>
     );
   };
@@ -3821,42 +3956,60 @@ function BudgetsPage({categories,toast}){
   /* ── Month View: section separator ─────────────────────────────────────── */
   const renderSectionHeader=(label)=>(
     <tr style={{background:'var(--sidebar-bg)',borderTop:'2px solid var(--border)'}}>
-      <td colSpan={2} style={{fontWeight:700,fontSize:12,textTransform:'uppercase',letterSpacing:'0.05em',color:'var(--text-muted)',paddingLeft:12,paddingTop:8,paddingBottom:4}}>{label}</td>
+      <td colSpan={4} style={{fontWeight:700,fontSize:12,textTransform:'uppercase',letterSpacing:'0.05em',color:'var(--text-muted)',paddingLeft:12,paddingTop:8,paddingBottom:4}}>{label}</td>
     </tr>
   );
 
-  const renderSectionTotal=(label,totalBudget)=>(
-    <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
-      <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
-      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px'}}>{fmt(totalBudget)}</td>
-    </tr>
-  );
+  const renderSectionTotal=(label,totalBudget,totalActual)=>{
+    const diff=totalBudget-totalActual;
+    return(
+      <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
+        <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 4px',color:'var(--text-primary)'}}>{fmt(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px',color:'var(--text-muted)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmt(diff):'—'}</td>
+      </tr>
+    );
+  };
 
   /* ── NET row ───────────────────────────────────────────────────────────── */
-  const renderNetRow=(budgetNet)=>(
+  const renderNetRow=(budgetNet,actualNet)=>(
     <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
       <td style={{fontWeight:800,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8}}>NET</td>
-      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:budgetNet>=0?'var(--green)':'var(--red)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmt(actualNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,fontWeight:600,color:'var(--text-muted)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td className="hide-mobile"/>
     </tr>
   );
 
   /* ═══════════════════════════════════════════════════════════════════════
      VIEW A — MONTH VIEW
   ═══════════════════════════════════════════════════════════════════════ */
-  const renderMonthView=()=>(
+  const renderMonthView=()=>{
+    const isMob=typeof window!=='undefined'&&window.innerWidth<768;
+    const prevMonth=()=>{if(month>1)setMonth(month-1);else{setYear(year-1);setMonth(12);}};
+    const nextMonth=()=>{if(month<12)setMonth(month+1);else{setYear(year+1);setMonth(1);}};
+    return(
     <div>
       {/* Month selector + action buttons */}
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,flexWrap:'wrap',justifyContent:'space-between'}}>
-        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+        {/* Desktop: 12-button pill row */}
+        <div className="hide-mobile" style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
           {MO.map((label,i)=>(
             <button key={i} className={`btn btn-sm ${month===i+1?'btn-primary':'btn-ghost'}`}
               onClick={()=>{setMonth(i+1);if(editing){loadSuggestions(year,i+1);const e={};[...allIncomeCats,...allExpenseCats].forEach(cat=>{e[cat]={[String(i+1)]:targets[cat]?.[String(i+1)]?.amount?.toString()||''};});setEdits(e);}}}
               style={{borderRadius:7,minWidth:36}}>{label}</button>
           ))}
         </div>
+        {/* Mobile: compact prev/next navigator */}
+        <div style={{display:'none'}} className="mobile-month-nav">
+          <button className="btn btn-sm btn-ghost" onClick={prevMonth} style={{padding:'5px 12px',fontSize:18,lineHeight:1}}>‹</button>
+          <span style={{fontWeight:600,fontSize:14,color:'var(--text)',minWidth:100,textAlign:'center'}}>{MO[month-1]} {year}</span>
+          <button className="btn btn-sm btn-ghost" onClick={nextMonth} style={{padding:'5px 12px',fontSize:18,lineHeight:1}}>›</button>
+        </div>
         <div style={{display:'flex',gap:8}}>
-          {!editing&&<button className="btn btn-sm btn-secondary" onClick={copyFromPrior} disabled={saving}>Copy from {year-1}</button>}
-          {!editing&&<button className="btn btn-sm btn-primary" onClick={startEdit}>Edit {MO[month-1]}</button>}
+          {!editing&&<button className="btn btn-sm btn-secondary hide-mobile" onClick={copyFromPrior} disabled={saving}>Copy from {year-1}</button>}
+          {!editing&&<button className="btn btn-sm btn-primary hide-mobile" onClick={startEdit}>Edit {MO[month-1]}</button>}
           {editing&&<button className="btn btn-sm btn-ghost" onClick={()=>{setEditing(false);setSuggestions({});}}>Cancel</button>}
           {editing&&<button className="btn btn-sm btn-success" onClick={saveEdits} disabled={saving}>{saving?'Saving…':'Save'}</button>}
         </div>
@@ -3872,28 +4025,30 @@ function BudgetsPage({categories,toast}){
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
-              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:160}}>Category</th>
-              <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:90}}>{MO[month-1]} Budget</th>
+              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:120}}>Category</th>
+              <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)'}}>Actual</th>
+              <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>{MO[month-1]} Budget</th>
+              <th className="hide-mobile" style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>Variance</th>
             </tr>
           </thead>
           <tbody>
             {/* INCOME */}
             {renderSectionHeader('Income')}
             {allIncomeCats.map(cat=>renderPLRow(cat,true,editing))}
-            {renderSectionTotal('Total Income',monthIncomeBudget)}
+            {renderSectionTotal('Total Income',monthIncomeBudget,monthIncomeActual)}
 
             {/* EXPENSES */}
             {renderSectionHeader('Expenses')}
             {allExpenseCats.map(cat=>renderPLRow(cat,false,editing))}
-            {renderSectionTotal('Total Expenses',monthExpenseBudget)}
+            {renderSectionTotal('Total Expenses',monthExpenseBudget,monthExpenseActual)}
 
             {/* NET */}
-            {renderNetRow(monthNetBudget)}
+            {renderNetRow(monthNetBudget,monthNetActual)}
           </tbody>
         </table>
       </div>
     </div>
-  );
+  );};
 
   /* ═══════════════════════════════════════════════════════════════════════
      VIEW B — ANNUAL VIEW  (read-only 12-column merged table)
@@ -5743,6 +5898,7 @@ function App(){
       </div>
       <ToastContainer toasts={toasts}/>
       {linkSummaryModal}
+      <MobileNav page={page} setPage={setPage}/>
     </div>
   );
 }
