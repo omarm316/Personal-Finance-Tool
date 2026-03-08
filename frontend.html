@@ -5134,9 +5134,12 @@ function CashFlowPage({toast}){
   const[showSalaryForm,setShowSalaryForm]=useState(false);
   const[editingSalary,setEditingSalary]=useState(null);
   // payment_dates is always an array (multi-select on add, single-element on edit)
-  const blankSF=()=>({payment_dates:[todayStr()],description:'Salary',person:'',allocations:{}});
+  const blankSF=()=>({payment_dates:[todayStr()],description:'Salary',person:'',allocations:{},frequency:'',freqConfig:{startDate:todayStr(),dayOfWeek:4,day1:15,day2:0,monthsAhead:3}});
   const[salaryForm,setSalaryForm]=useState(blankSF());
   const[salarySaving,setSalarySaving]=useState(false);
+  // ── Selection state ───────────────────────────────────────────────────
+  const[salSel,setSalSel]=useState(new Set());
+  const[ovSel,setOvSel]=useState(new Set());
 
   // ── Overlay state ─────────────────────────────────────────────────────
   const[overlays,setOverlays]=useState([]);
@@ -5149,7 +5152,7 @@ function CashFlowPage({toast}){
   const[loading,setLoading]=useState(true);
   const[cm,setCm]=useState(null);
 
-  const load=useCallback(async()=>{
+  const load=useCallback(async(autoGen=false)=>{
     setLoading(true);
     try{
       const[payments,accts,ovs]=await Promise.all([
@@ -5161,11 +5164,22 @@ function CashFlowPage({toast}){
       setSalaryAccounts(accts.filter(a=>a.is_active&&SALARY_TYPES.has(a.account_type)));
       setOverlayAccounts(accts);
       setOverlays(ovs);
+      if(autoGen){
+        // Silently regenerate CC/loan overlays for the next 30 days
+        try{
+          const r=await apiFetch('/cash-flow-overlays/generate',{method:'POST'});
+          if(r.created>0){
+            const fresh=await apiFetch('/cash-flow-overlays').catch(()=>ovs);
+            setOverlays(fresh);
+            toast(`⚡ Auto-refreshed ${r.created} upcoming payment${r.created!==1?'s':''}`);
+          }
+        }catch(_){}
+      }
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
   },[]);
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load(true);},[load]);
 
   // ── Salary helpers ────────────────────────────────────────────────────
   const openAddSalary=()=>{setEditingSalary(null);setSalaryForm(blankSF());setShowSalaryForm(true);};
@@ -5225,6 +5239,73 @@ function CashFlowPage({toast}){
     });
   };
   const spTotal=sp=>sp.allocations.reduce((s,a)=>s+a.amount,0);
+
+  // ── Frequency date generator ──────────────────────────────────────────
+  const genFreqDates=(freq,cfg)=>{
+    const out=[];
+    const now=new Date();
+    const end=new Date(now.getFullYear(),now.getMonth()+( cfg.monthsAhead||3),now.getDate());
+    if(freq==='weekly'||freq==='biweekly'){
+      const step=freq==='weekly'?7:14;
+      let d=new Date(cfg.startDate||todayStr());
+      while(d<=end){out.push(d.toISOString().slice(0,10));d=new Date(d);d.setDate(d.getDate()+step);}
+    }else if(freq==='semimonthly'){
+      let d=new Date(now.getFullYear(),now.getMonth(),1);
+      while(d<=end){
+        const yr=d.getFullYear(),mo=d.getMonth();
+        const lastD=new Date(yr,mo+1,0).getDate();
+        const d1=Math.min(cfg.day1||15,lastD);
+        const d2=cfg.day2===0?lastD:Math.min(cfg.day2||lastD,lastD);
+        const dt1=new Date(yr,mo,d1);if(dt1>=now&&dt1<=end)out.push(dt1.toISOString().slice(0,10));
+        if(d1!==d2){const dt2=new Date(yr,mo,d2);if(dt2>=now&&dt2<=end)out.push(dt2.toISOString().slice(0,10));}
+        d=new Date(yr,mo+1,1);
+      }
+    }else if(freq==='monthly'){
+      let d=new Date(now.getFullYear(),now.getMonth(),1);
+      while(d<=end){
+        const yr=d.getFullYear(),mo=d.getMonth();
+        const lastD=new Date(yr,mo+1,0).getDate();
+        const day=cfg.day1===0?lastD:Math.min(cfg.day1||1,lastD);
+        const dt=new Date(yr,mo,day);if(dt>=now&&dt<=end)out.push(dt.toISOString().slice(0,10));
+        d=new Date(yr,mo+1,1);
+      }
+    }
+    return[...new Set(out)].sort();
+  };
+
+  // ── Multi-select helpers ──────────────────────────────────────────────
+  const toggleSalSel=id=>setSalSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleAllSal=()=>setSalSel(s=>s.size===salaryPayments.length?new Set():new Set(salaryPayments.map(p=>p.id)));
+  const deleteSelectedSalary=()=>{
+    const ids=[...salSel];
+    if(!ids.length)return;
+    setCm({title:`Delete ${ids.length} Salary Entr${ids.length===1?'y':'ies'}`,body:`${ids.length} salary entr${ids.length===1?'y':'ies'} will be permanently deleted.`,confirmLabel:'Delete All',danger:true,
+      onConfirm:async()=>{
+        try{
+          await Promise.all(ids.map(id=>apiFetch(`/salary-payments/${id}`,{method:'DELETE'})));
+          setSalaryPayments(prev=>prev.filter(p=>!salSel.has(p.id)));
+          setSalSel(new Set());
+          toast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}`);
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
+  const toggleOvSel=id=>setOvSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleAllOv=()=>setOvSel(s=>s.size===overlays.length?new Set():new Set(overlays.map(o=>o.id)));
+  const deleteSelectedOverlays=()=>{
+    const ids=[...ovSel];
+    if(!ids.length)return;
+    setCm({title:`Delete ${ids.length} Entr${ids.length===1?'y':'ies'}`,body:`${ids.length} cash flow entr${ids.length===1?'y':'ies'} will be permanently deleted.`,confirmLabel:'Delete All',danger:true,
+      onConfirm:async()=>{
+        try{
+          await Promise.all(ids.map(id=>apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'})));
+          setOverlays(prev=>prev.filter(o=>!ovSel.has(o.id)));
+          setOvSel(new Set());
+          toast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}`);
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
 
   // ── Overlay helpers ───────────────────────────────────────────────────
   const BLANK_OV={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
@@ -5336,25 +5417,87 @@ function CashFlowPage({toast}){
                 <input value={salaryForm.person} onChange={e=>setSalaryForm(f=>({...f,person:e.target.value}))} placeholder="Omer, Daniella…" style={INP}/>
               </div>
             </div>
+            {/* ── Frequency picker (add mode only) ── */}
+            {!editingSalary&&(
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:8}}>Frequency</label>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  {[['','One-time'],['weekly','Weekly'],['biweekly','Bi-weekly'],['semimonthly','Semi-monthly'],['monthly','Monthly']].map(([f,label])=>(
+                    <button key={f} type="button" onClick={()=>{
+                      if(f===''){setSalaryForm(sf=>({...sf,frequency:'',payment_dates:[todayStr()]}));}
+                      else{setSalaryForm(sf=>{const dates=genFreqDates(f,sf.freqConfig);return{...sf,frequency:f,payment_dates:dates.length?dates:[todayStr()]};});}
+                    }} style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:600,cursor:'pointer',border:'1.5px solid',borderColor:salaryForm.frequency===f?'var(--primary)':'var(--border)',background:salaryForm.frequency===f?'var(--primary)':'transparent',color:salaryForm.frequency===f?'#fff':'var(--text-secondary)'}}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {salaryForm.frequency&&(
+                  <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',marginTop:10,padding:'10px 12px',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+                    {(salaryForm.frequency==='weekly'||salaryForm.frequency==='biweekly')&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Start date</label>
+                        <input type="date" value={salaryForm.freqConfig.startDate} onChange={e=>{const cfg={...salaryForm.freqConfig,startDate:e.target.value};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}/>
+                      </div>
+                    )}
+                    {(salaryForm.frequency==='semimonthly'||salaryForm.frequency==='monthly')&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>{salaryForm.frequency==='semimonthly'?'1st day of month':'Day of month'}</label>
+                        <select value={salaryForm.freqConfig.day1} onChange={e=>{const cfg={...salaryForm.freqConfig,day1:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                          {Array.from({length:28},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}
+                          <option value={0}>Last day</option>
+                        </select>
+                      </div>
+                    )}
+                    {salaryForm.frequency==='semimonthly'&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>2nd day of month</label>
+                        <select value={salaryForm.freqConfig.day2} onChange={e=>{const cfg={...salaryForm.freqConfig,day2:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                          {Array.from({length:28},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}
+                          <option value={0}>Last day</option>
+                        </select>
+                      </div>
+                    )}
+                    <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                      <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Months ahead</label>
+                      <select value={salaryForm.freqConfig.monthsAhead} onChange={e=>{const cfg={...salaryForm.freqConfig,monthsAhead:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                        {[1,2,3,6,12].map(m=><option key={m} value={m}>{m} mo</option>)}
+                      </select>
+                    </div>
+                    <div style={{fontSize:12,color:'var(--text-muted)',alignSelf:'center',paddingBottom:2}}>
+                      → <strong style={{color:'var(--text-primary)'}}>{salaryForm.payment_dates.filter(d=>d).length}</strong> pay dates
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* ── Pay date(s) ── */}
             <div style={{marginBottom:16}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
                 <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>{editingSalary?'Pay Date':'Pay Dates'}</label>
-                {!editingSalary&&<button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 10px',fontSize:11}} onClick={addDate}>＋ Add Date</button>}
+                {!editingSalary&&!salaryForm.frequency&&<button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 10px',fontSize:11}} onClick={addDate}>＋ Add Date</button>}
               </div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-                {salaryForm.payment_dates.map((d,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
-                    <input type="date" value={d} onChange={e=>setDate(i,e.target.value)} style={{...INP,padding:'5px 8px'}}/>
-                    {!editingSalary&&salaryForm.payment_dates.length>1&&(
-                      <button type="button" onClick={()=>removeDate(i)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text-muted)',lineHeight:1,padding:'0 2px'}}>×</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {!editingSalary&&salaryForm.payment_dates.filter(d=>d).length>1&&(
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>
-                  Will create <strong>{[...new Set(salaryForm.payment_dates.filter(d=>d))].length}</strong> separate entr{[...new Set(salaryForm.payment_dates.filter(d=>d))].length===1?'y':'ies'}.
+              {(!editingSalary&&salaryForm.frequency)?(
+                <div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:6,padding:'6px 10px'}}>
+                  {salaryForm.payment_dates.filter(d=>d).length} dates will be created &mdash; {salaryForm.payment_dates[0]} through {salaryForm.payment_dates[salaryForm.payment_dates.length-1]}
                 </div>
+              ):(
+                <>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                    {salaryForm.payment_dates.map((d,i)=>(
+                      <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
+                        <input type="date" value={d} onChange={e=>setDate(i,e.target.value)} style={{...INP,padding:'5px 8px'}}/>
+                        {!editingSalary&&salaryForm.payment_dates.length>1&&(
+                          <button type="button" onClick={()=>removeDate(i)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text-muted)',lineHeight:1,padding:'0 2px'}}>×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {!editingSalary&&salaryForm.payment_dates.filter(d=>d).length>1&&(
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>
+                      Will create <strong>{[...new Set(salaryForm.payment_dates.filter(d=>d))].length}</strong> separate entr{[...new Set(salaryForm.payment_dates.filter(d=>d))].length===1?'y':'ies'}.
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div style={{marginBottom:20}}>
@@ -5428,12 +5571,16 @@ function CashFlowPage({toast}){
       <div className="card" style={{marginBottom:20}}>
         <div className="section-header">
           <div className="section-title">Salary & Income</div>
-          <button className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {salSel.size>0&&<button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={deleteSelectedSalary}>Delete Selected ({salSel.size})</button>}
+            <button className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+          </div>
         </div>
         {salaryPayments.length===0
           ?<div style={{textAlign:'center',padding:'28px 0',color:'var(--text-muted)',fontSize:13}}>No salary entries yet — click <strong>+ Add Payment</strong> to add a pay date.</div>
           :<div className="table-wrap"><table style={{fontSize:13}}>
             <thead><tr>
+              <th style={{width:32,textAlign:'center'}}><input type="checkbox" checked={salSel.size>0&&salSel.size===salaryPayments.length} onChange={toggleAllSal} style={{cursor:'pointer'}}/></th>
               <th style={{minWidth:100}}>Date</th>
               <th>Description</th>
               <th>Person</th>
@@ -5449,11 +5596,12 @@ function CashFlowPage({toast}){
               const isPast=sp.payment_date<today;
               return(
                 <tr key={sp.id} style={{opacity:isPast?0.55:1,background:isPast?'rgba(0,0,0,0.015)':'transparent'}}>
+                  <td style={{textAlign:'center'}}><input type="checkbox" checked={salSel.has(sp.id)} onChange={()=>toggleSalSel(sp.id)} style={{cursor:'pointer'}}/></td>
                   <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{sp.payment_date}</td>
                   <td style={{fontWeight:500}}>{sp.description}</td>
                   <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:600,background:'#dcfce7',color:'#166534'}}>{sp.person}</span></td>
                   {salaryAccounts.map(a=>{
-                    const amt=allocMap[a.account_id];
+                    const amt=allocMap[a.id];
                     return<td key={a.id} style={{textAlign:'right',fontFamily:'Inter',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>{amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>;
                   })}
                   <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:700,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
@@ -5474,7 +5622,8 @@ function CashFlowPage({toast}){
       <div className="card">
         <div className="section-header">
           <div className="section-title">Expected Outflows & One-Time Income</div>
-          <div style={{display:'flex',gap:8}}>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {ovSel.size>0&&<button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={deleteSelectedOverlays}>Delete Selected ({ovSel.size})</button>}
             <button className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from credit card and loan payment schedules">
               {genBusy?'Generating…':'Generate from Cards & Loans'}
             </button>
@@ -5486,6 +5635,7 @@ function CashFlowPage({toast}){
           :<div className="table-wrap">
             <table style={{fontSize:13}}>
               <thead><tr>
+                <th style={{width:32,textAlign:'center'}}><input type="checkbox" checked={ovSel.size>0&&ovSel.size===overlays.length} onChange={toggleAllOv} style={{cursor:'pointer'}}/></th>
                 <th style={{minWidth:90}}>Date</th>
                 <th>Description</th>
                 <th style={{textAlign:'right',minWidth:100}}>Amount</th>
@@ -5499,6 +5649,7 @@ function CashFlowPage({toast}){
                 const isPast=o.flow_date<today;
                 return(
                   <tr key={o.id} style={{opacity:isPast?0.55:1,background:isPast?'rgba(0,0,0,0.015)':'transparent'}}>
+                    <td style={{textAlign:'center'}}><input type="checkbox" checked={ovSel.has(o.id)} onChange={()=>toggleOvSel(o.id)} style={{cursor:'pointer'}}/></td>
                     <td style={{fontFamily:'Inter',fontSize:12,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{o.flow_date}</td>
                     <td style={{fontWeight:500}}>{o.description}</td>
                     <td style={{textAlign:'right',fontFamily:'Inter',fontWeight:600,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
