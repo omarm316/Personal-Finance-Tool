@@ -23,18 +23,51 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL   = "claude-haiku-4-5"   # Fast, cheap, great at structured output
 ANTHROPIC_VERSION = "2023-06-01"
 
-# ── Valid categories (must match your Category table) ────────────────────────
+# ── Valid categories (canonical — must match database.py seed_categories) ─────
+# This is the single source of truth for category names used in LLM validation.
+# If you add/remove a category from the DB, update this list to match.
 VALID_CATEGORIES = [
-    "Groceries", "Dining", "Transportation", "Housing", "Healthcare",
-    "Education", "Entertainment", "Clothing", "Electronics", "Phone",
-    "Internet", "Streaming", "Insurance", "Fitness", "Self Care",
-    "Vehicle", "Travel", "Gifts", "Books", "Kids", "Parents",
-    "Siblings", "For Others", "Home", "Water", "Electricity",
-    "Fees and Interest", "Consulting", "Studies", "Music Lessons",
-    "Tutoring", "Events", "Lottery", "Dry Cleaning", "Investments",
-    "Other", "Leisure", "Work", "Investment Income", "Interest Income",
+    # Expense
+    "Groceries", "Dining", "Transportation", "Housing", "Utilities",
+    "Healthcare", "Insurance", "Vehicle", "Fitness", "Self Care",
+    "Clothing", "Electronics", "Streaming", "Travel", "Home",
+    "Kids", "Entertainment", "Gifts", "For Others", "Education",
+    "Fees & Interest", "Other",
+    # Both (expense or income depending on sign)
+    "Business", "Investment Gain (Loss)",
+    # Income
+    "Work",
+    # System / special
     "Transfer", "Unclassified",
 ]
+
+# Remap deprecated or alternate category names → canonical names.
+# Applied to LLM output AND override-table lookups so old data stays valid.
+_CATEGORY_REMAP: dict[str, str] = {
+    "Fees and Interest": "Fees & Interest",
+    "Phone":             "Utilities",
+    "Internet":          "Utilities",
+    "Water":             "Utilities",
+    "Electricity":       "Utilities",
+    "Books":             "Entertainment",
+    "Leisure":           "Entertainment",
+    "Events":            "Entertainment",
+    "Lottery":           "Entertainment",
+    "Music Lessons":     "Education",
+    "Tutoring":          "Education",
+    "Studies":           "Education",
+    "Parents":           "For Others",
+    "Siblings":          "For Others",
+    "Consulting":        "Business",
+    "Dry Cleaning":      "Self Care",
+    "Investments":       "Investment Gain (Loss)",
+    "Investment Income": "Investment Gain (Loss)",
+    "Interest Income":   "Investment Gain (Loss)",
+    "Rent":              "Housing",
+    "Mortgage":          "Housing",
+    "Paycheck":          "Work",
+    "Income":            "Work",
+}
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = f"""You are an expert at decoding raw bank transaction strings into clean merchant names and categories.
@@ -169,10 +202,11 @@ def enrich_transaction(
 
     if override:
         logger.info(f"Override hit for '{lookup_key}': {override.merchant_name} → {override.category}")
+        canonical_cat = _CATEGORY_REMAP.get(override.category, override.category)
         return {
             "merchant_name": override.merchant_name,
             "description_clean": override.description_clean or override.merchant_name,
-            "category": override.category,
+            "category": canonical_cat,
             "source": "override",
         }
 
@@ -188,6 +222,7 @@ def enrich_transaction(
         description_clean = str(result.get("description_clean") or "").strip()[:500]
         category          = str(result.get("category") or "").strip()
 
+        category = _CATEGORY_REMAP.get(category, category)
         if category not in VALID_CATEGORIES:
             category = "Unclassified"
         if not merchant_name:

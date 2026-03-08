@@ -140,7 +140,30 @@ const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).fo
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
 const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','#fca5a5','#bef264'];
-const CATEGORY_COLORS={'Groceries':'#16a34a','Supermarket':'#16a34a','Dining':'#ea580c','Restaurants':'#ea580c','Food & Drink':'#ea580c','Transportation':'#2563eb','Auto':'#2563eb','Gas':'#7c3aed','Fuel':'#7c3aed','Utilities':'#0891b2','Electric':'#0891b2','Water':'#0891b2','Internet':'#0891b2','Shopping':'#db2777','Clothing':'#db2777','Entertainment':'#9333ea','Streaming':'#9333ea','Travel':'#0284c7','Hotel':'#0284c7','Flights':'#0284c7','Health':'#dc2626','Medical':'#dc2626','Pharmacy':'#dc2626','Insurance':'#4f46e5','Subscriptions':'#0d9488','Personal Care':'#c026d3','Education':'#ca8a04','Tuition':'#ca8a04','Rent':'#b45309','Mortgage':'#b45309','Coffee':'#92400e','Pets':'#65a30d','Gifts':'#e11d48','Charity':'#e11d48','Taxes':'#475569','Fees':'#475569','Income':'#15803d','Paycheck':'#15803d','Other':'#6b7280'};
+// Canonical category colors — primary keys match database.py seed_categories exactly.
+// Legacy aliases kept for backward-compat (old transactions may carry these names).
+const CATEGORY_COLORS={
+  // ── Canonical (database.py seed) ──────────────────────────────────────────
+  'Groceries':'#16a34a','Dining':'#ea580c','Transportation':'#2563eb',
+  'Housing':'#b45309','Utilities':'#0891b2','Healthcare':'#dc2626',
+  'Insurance':'#4f46e5','Vehicle':'#7c3aed','Fitness':'#0d9488',
+  'Self Care':'#c026d3','Clothing':'#db2777','Electronics':'#475569',
+  'Streaming':'#9333ea','Travel':'#0284c7','Home':'#92400e',
+  'Kids':'#65a30d','Entertainment':'#9333ea','Gifts':'#e11d48',
+  'For Others':'#e11d48','Education':'#ca8a04','Fees & Interest':'#475569',
+  'Other':'#6b7280','Business':'#0891b2','Investment Gain (Loss)':'#15803d',
+  'Work':'#15803d','Transfer':'#94a3b8','Unclassified':'#9ca3af',
+  // ── Legacy aliases ────────────────────────────────────────────────────────
+  'Supermarket':'#16a34a','Restaurants':'#ea580c','Food & Drink':'#ea580c',
+  'Auto':'#2563eb','Gas':'#7c3aed','Fuel':'#7c3aed',
+  'Electric':'#0891b2','Water':'#0891b2','Internet':'#0891b2',
+  'Health':'#dc2626','Medical':'#dc2626','Pharmacy':'#dc2626',
+  'Personal Care':'#c026d3','Subscriptions':'#9333ea',
+  'Hotel':'#0284c7','Flights':'#0284c7','Shopping':'#db2777',
+  'Tuition':'#ca8a04','Rent':'#b45309','Mortgage':'#b45309',
+  'Coffee':'#92400e','Pets':'#65a30d','Charity':'#e11d48',
+  'Taxes':'#475569','Fees':'#475569','Income':'#15803d','Paycheck':'#15803d',
+};
 const _FALLBACK_COLORS=['#2563eb','#16a34a','#ea580c','#7c3aed','#0891b2','#db2777','#9333ea','#ca8a04','#0d9488','#c026d3','#dc2626','#b45309'];
 const _hashStr=s=>Math.abs(s.split('').reduce((a,c)=>(a*31+c.charCodeAt(0))|0,0));
 const getCatColor=cat=>CATEGORY_COLORS[cat]||_FALLBACK_COLORS[_hashStr(cat||'')%_FALLBACK_COLORS.length];
