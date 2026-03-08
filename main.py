@@ -117,6 +117,31 @@ PLAID_TYPE_FALLBACK = {
     'loan':        'loan',
 }
 
+# Plaid personal_finance_category.primary → (app_category, action)
+# Used as a deterministic fallback when rules don't produce a match.
+# Only applied when Plaid confidence_level is HIGH or VERY_HIGH.
+_PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
+    'INCOME':                    ('Work',            'Income'),
+    'TRANSFER_IN':               ('Transfer',        'Transfer'),
+    'TRANSFER_OUT':              ('Transfer',        'Transfer'),
+    'CREDIT_CARD_PAYMENT':       ('Transfer',        'Transfer'),
+    'LOAN_PAYMENTS':             ('Fees & Interest', 'Expense'),
+    'BANK_FEES':                 ('Fees & Interest', 'Expense'),
+    'FOOD_AND_DRINK':            ('Dining',          'Expense'),
+    'GROCERIES':                 ('Groceries',       'Expense'),
+    'TRANSPORTATION':            ('Transportation',  'Expense'),
+    'TRAVEL':                    ('Travel',          'Expense'),
+    'ENTERTAINMENT':             ('Entertainment',   'Expense'),
+    'PERSONAL_CARE':             ('Self Care',       'Expense'),
+    'MEDICAL':                   ('Healthcare',      'Expense'),
+    'RENT_AND_UTILITIES':        ('Utilities',       'Expense'),
+    'HOME_IMPROVEMENT':          ('Home',            'Expense'),
+    'GENERAL_MERCHANDISE':       ('Other',           'Expense'),
+    'GENERAL_SERVICES':          ('Other',           'Expense'),
+    'GOVERNMENT_AND_NON_PROFIT': ('Other',           'Expense'),
+    'EDUCATION':                 ('Education',       'Expense'),
+}
+
 
 def classify_account(account_type: str) -> dict:
     """
@@ -989,6 +1014,21 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
             txn_date = txn_data['date']
 
+            # ── Plaid PFC fallback: when rules leave category as Unclassified ────
+            # personal_finance_category is Plaid's deterministic hierarchical taxonomy.
+            # Only trust it when Plaid reports HIGH or VERY_HIGH confidence.
+            pfc_applied = False
+            if category == 'Unclassified':
+                _pfc_primary = txn_data.get('pfc_primary')
+                _pfc_conf    = txn_data.get('pfc_confidence', '')
+                if _pfc_primary and _pfc_conf in ('VERY_HIGH', 'HIGH'):
+                    _pfc_result = _PLAID_PFC_MAP.get(_pfc_primary)
+                    if _pfc_result:
+                        category   = _pfc_result[0]
+                        action     = _pfc_result[1]
+                        confidence = 0.72   # trustworthy but below a matched rule (0.85)
+                        pfc_applied = True
+
             # ── Auto-LLM when no rule produced a useful result ───────────────────
             llm_source = None
             llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
@@ -1003,6 +1043,8 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
             if llm_source:
                 final_source = llm_source
+            elif pfc_applied:
+                final_source = 'plaid_pfc'
             elif display_desc or (category and category != 'Unclassified'):
                 final_source = 'rule'
             else:

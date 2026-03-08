@@ -276,6 +276,7 @@ class PlaidClient:
             date_str = str(date_raw).split(' ')[0].split('T')[0]
             txn_date = datetime.strptime(date_str, '%Y-%m-%d')
 
+        pfc = transaction.get('personal_finance_category') or {}
         return {
             'plaid_transaction_id': transaction['transaction_id'],
             'plaid_account_id': transaction['account_id'],
@@ -286,6 +287,10 @@ class PlaidClient:
             'category': self._plaid_get(transaction, 'category', []),
             'pending': self._plaid_get(transaction, 'pending', False),
             'payment_channel': self._plaid_get(transaction, 'payment_channel'),
+            # Plaid personal_finance_category (stable hierarchical taxonomy, more accurate than legacy category)
+            'pfc_primary': pfc.get('primary'),       # e.g. 'FOOD_AND_DRINK'
+            'pfc_detailed': pfc.get('detailed'),      # e.g. 'FOOD_AND_DRINK_COFFEE'
+            'pfc_confidence': pfc.get('confidence_level'),  # 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW'
         }
 
 
