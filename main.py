@@ -528,6 +528,7 @@ class TransactionUpdate(BaseModel):
     is_gcb: Optional[bool] = None
     is_excluded: Optional[bool] = None
     points_category: Optional[str] = None
+    description_clean: Optional[str] = None
 
 
 class BatchTransactionUpdate(BaseModel):
@@ -2377,6 +2378,10 @@ async def update_transaction(
     if update.is_excluded is not None:
         t.is_excluded = update.is_excluded
         t.updated_at  = datetime.utcnow()
+
+    if update.description_clean is not None:
+        t.description_clean = update.description_clean
+        t.updated_at = datetime.utcnow()
 
     db.commit()
     return {"message": "Transaction updated"}

@@ -168,6 +168,7 @@ td{padding:11px 14px;font-size:13.5px}
 const{useState,useEffect,useCallback}=React;
 const API='/api';
 const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(n??0));
+const fmtRound=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
 const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','#fca5a5','#bef264'];
@@ -1160,6 +1161,84 @@ function BatchEditModal({count,categories,onSave,onClose}){
   );
 }
 
+/* ── Mobile edit modal: bottom-sheet for editing a transaction on mobile ─── */
+function MobileTxnModal({txn,categories,onSave,onClose,toast}){
+  const[category,setCategory]=useState(txn.category_final||'');
+  const[action,setAction]=useState(txn.action||'Expense');
+  const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||'');
+  const[saving,setSaving]=useState(false);
+  const[ruleCreating,setRuleCreating]=useState(false);
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const handleSave=async()=>{
+    setSaving(true);
+    try{
+      const updates={action,needs_review:false,category};
+      if(descClean!==(txn.description_clean||txn.description_display||''))updates.description_clean=descClean;
+      await onSave(txn.id,updates);
+      onClose();
+    }catch(e){toast&&toast('Save failed','error');}
+    finally{setSaving(false);}
+  };
+  const createRule=async()=>{
+    setRuleCreating(true);
+    try{
+      await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});
+      toast&&toast('Rule created');
+      await onSave(txn.id,{});
+    }catch(e){toast&&toast('Failed to create rule','error');}
+    finally{setRuleCreating(false);onClose();}
+  };
+  const inpStyle={width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:14,color:'var(--text)',background:'var(--card-bg)',boxSizing:'border-box',appearance:'none'};
+  const lblStyle={fontSize:11.5,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:6};
+  return ReactDOM.createPortal(
+    <div onClick={e=>e.target===e.currentTarget&&onClose()}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:2000,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={{background:'var(--card-bg)',borderRadius:'16px 16px 0 0',width:'100%',maxWidth:640,padding:'12px 16px 36px',maxHeight:'92vh',overflowY:'auto',boxShadow:'0 -4px 24px rgba(0,0,0,0.18)'}}>
+        <div style={{width:40,height:4,borderRadius:2,background:'var(--border)',margin:'0 auto 16px'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:600,fontSize:15,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{txn.description_display||txn.description_raw}</div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
+              {fmtDate(txn.date)} · <span style={{color:txn.action==='Expense'?'var(--red)':txn.action==='Income'?'var(--green)':'var(--text-muted)',fontWeight:600}}>{txn.amount<0?'–':'+'}{fmt(txn.amount)}</span>
+              {txn.account_name&&<span> · {txn.account_name}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:22,color:'var(--text-muted)',cursor:'pointer',padding:'0 0 0 12px',lineHeight:1}}>✕</button>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>Display Name</label>
+          <input value={descClean} onChange={e=>setDescClean(e.target.value)} placeholder="Edit display name…" style={inpStyle}/>
+          {txn.description_raw&&txn.description_raw!==descClean&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>Raw: {txn.description_raw}</div>}
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>Type</label>
+          <select value={action} onChange={e=>handleTypeChange(e.target.value)} style={inpStyle}>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+        </div>
+        {showCategoryForType(action)&&<div style={{marginBottom:14}}>
+          <label style={lblStyle}>Category</label>
+          <select value={category} onChange={e=>setCategory(e.target.value)} style={inpStyle}>
+            <option value="">Unclassified</option>
+            {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>}
+        <div style={{display:'flex',gap:10,marginTop:20}}>
+          <button onClick={createRule} disabled={ruleCreating}
+            style={{flex:1,padding:'11px 0',border:'1px solid var(--border)',borderRadius:10,fontSize:13,fontWeight:500,color:'var(--text-secondary)',background:'var(--card-bg)',cursor:'pointer'}}>
+            {ruleCreating?'…':'📐 Rule'}
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            style={{flex:2,padding:'11px 0',border:'none',borderRadius:10,fontSize:14,fontWeight:600,color:'#fff',background:'var(--primary)',cursor:'pointer'}}>
+            {saving?'…':'Save'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 /* ── Mobile transaction list: replaces full table on narrow screens ─────── */
 function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
   const isMobile=useIsMobile();
@@ -1183,51 +1262,42 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
       <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
     </table></div>
   );
-  // Mobile: card list with quick category selector
-  const mobileCats=sortedCats(categories);
+  // Mobile: card list — tap any card to open edit modal
+  const[editTxn,setEditTxn]=useState(null);
   return(
     <div>
+      {editTxn&&<MobileTxnModal txn={editTxn} categories={categories} onSave={onSave} onClose={()=>setEditTxn(null)} toast={toast}/>}
       {visible.map(t=>{
         const isExpense=t.action==='Expense';
         const isIncome=t.action==='Income';
         const needsRev=t.needs_review&&!t.is_locked;
+        const catLabel=t.action==='Transfer'?'Transfer':(t.category_final||'Unclassified');
         return(
-          <div key={t.id}
+          <div key={t.id} onClick={()=>setEditTxn(t)}
             style={{padding:'11px 14px',borderBottom:'1px solid var(--border)',
               background:needsRev?'#fffbeb':t.is_locked?'#eff6ff':'var(--card-bg)',
-              display:'flex',flexDirection:'column',gap:6}}>
+              display:'flex',flexDirection:'column',gap:5,cursor:'pointer',WebkitTapHighlightColor:'transparent'}}>
             {/* Top row: description + amount */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
               <div style={{fontWeight:500,fontSize:13.5,color:'var(--text)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {t.description_clean||t.description_raw}
+                {t.description_clean||t.description_display||t.description_raw}
               </div>
               <span style={{fontFamily:'Inter',fontWeight:600,fontSize:13.5,flexShrink:0,
                 color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
                 {t.amount<0?'–':'+'}{fmt(t.amount)}
               </span>
             </div>
-            {/* Bottom row: date, account, quick-reclassify */}
-            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            {/* Bottom row: date · account · category badge */}
+            <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
               <span style={{fontSize:11,color:'var(--text-muted)'}}>{fmtDate(t.date)}</span>
-              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',maxWidth:100,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+              <span style={{fontSize:10,padding:'1px 7px',borderRadius:8,
+                background:t.action==='Transfer'?'#f3f4f6':(t.category_final?'#eff6ff':'#f3f4f6'),
+                color:t.action==='Transfer'?'#6b7280':(t.category_final?'#1d4ed8':'#6b7280'),fontWeight:500}}>
+                {catLabel}
+              </span>
               {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:8,background:'#fef3c7',color:'#92400e',fontWeight:600}}>Review</span>}
-              {/* Quick category selector */}
-              {t.action!=='Transfer'&&(
-                <select
-                  value={t.category_final||''}
-                  onChange={async e=>{
-                    const cat=e.target.value;
-                    try{await onSave(t.id,{category_manual:cat,needs_review:false});t.category_final=cat;t.needs_review=false;}
-                    catch(err){toast('Save failed: '+(err.message||err),'error');}
-                  }}
-                  style={{fontSize:11,border:'1px solid var(--border)',borderRadius:6,padding:'2px 6px',
-                    background:'var(--card-bg)',color:'var(--text)',cursor:'pointer',
-                    maxWidth:130,flex:'1 1 auto'}}>
-                  <option value="">Unclassified</option>
-                  {mobileCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              )}
-              {t.action==='Transfer'&&<span style={{fontSize:11,padding:'1px 7px',borderRadius:8,background:'#f3f4f6',color:'#6b7280',fontWeight:500}}>Transfer</span>}
+              {t.is_locked&&<span style={{fontSize:11}}>🔒</span>}
             </div>
           </div>
         );
@@ -3780,6 +3850,7 @@ function BudgetsPage({categories,toast}){
   const now=new Date();
   const curYear=now.getFullYear();
   const curMonth=now.getMonth()+1; // 1-based
+  const isMob=useIsMobile();
 
   /* ── State ─────────────────────────────────────────────────────────────── */
   const[view,_setView]=useState(()=>parseHash().params.get('view')||'annual');
@@ -4022,16 +4093,31 @@ function BudgetsPage({categories,toast}){
     const varColor=variance>0?'var(--green)':(variance<0?'var(--red)':'var(--text-muted)');
     const editVal=edits[cat]?.[String(month)]||'';
     const suggestion=suggestions[cat];
+    const actualColor=over?'var(--red)':isIncome?'var(--green)':'var(--text-primary)';
 
-    if(!isEditing&&budget===0&&actual===0) return null; // hide rows with neither budget nor actuals
+    if(!isEditing&&budget===0&&actual===0) return null;
+
+    /* Mobile: Category | Budget | Actual | Remaining (no progress bar) */
+    if(isMob&&!isEditing) return(
+      <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
+        <td style={{fontWeight:500,fontSize:12.5,paddingLeft:10,paddingRight:4,paddingTop:6,paddingBottom:6}}>{cat}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 5px',color:'var(--text-secondary)',minWidth:58}}>{budget>0?fmtRound(budget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 5px',minWidth:58}}>
+          {actual!==0?<span style={{color:actualColor,fontWeight:500}}>{fmtRound(actual)}</span>:'—'}
+        </td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px',minWidth:58,color:budget>0?(variance>0?'var(--green)':variance<0?'var(--red)':'#d1d5db'):'#d1d5db'}}>
+          {budget>0?((variance>0?'+':'')+fmtRound(variance)):'—'}
+        </td>
+      </tr>
+    );
 
     return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
         <td style={{fontWeight:500,fontSize:13,minWidth:120,paddingLeft:12}}>{cat}</td>
-        {/* Actual — always visible; progress bar shows budget utilisation */}
+        {/* Actual — with progress bar on desktop */}
         <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 4px'}}>
-          {actual!==0&&<span style={{color:over?'var(--red)':isIncome?'var(--green)':'var(--text-primary)',fontWeight:500}}>{fmt(actual)}</span>}
-          {actual!==0&&budget>0&&(
+          {actual!==0&&<span style={{color:actualColor,fontWeight:500}}>{fmtRound(actual)}</span>}
+          {actual!==0&&budget>0&&!isMob&&(
             <div className="mobile-budget-bar" style={{width:60,display:'inline-block',verticalAlign:'middle',marginLeft:6}}>
               <div style={{height:'100%',width:`${pct*100}%`,background:barColor,borderRadius:3,transition:'width 0.3s'}}/>
             </div>
@@ -4051,9 +4137,9 @@ function BudgetsPage({categories,toast}){
             <span style={{color:budget>0?'var(--text-secondary)':'#d1d5db'}}>{budget>0?fmt(budget):'—'}</span>
           )}
         </td>
-        {/* Variance — hide on very narrow screens */}
+        {/* Variance — desktop only */}
         {!isEditing&&<td className="hide-mobile" style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:variance!==0?varColor:'#d1d5db'}}>
-          {variance!==0?(variance>0?'+':'')+fmt(variance):'—'}
+          {variance!==0?(variance>0?'+':'')+fmtRound(variance):'—'}
         </td>}
         {isEditing&&<td/>}
       </tr>
@@ -4069,31 +4155,48 @@ function BudgetsPage({categories,toast}){
 
   const renderSectionTotal=(label,totalBudget,totalActual)=>{
     const diff=totalBudget-totalActual;
+    if(isMob) return(
+      <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
+        <td style={{paddingLeft:10,fontSize:12.5}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 5px',color:'var(--text-muted)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+      </tr>
+    );
     return(
       <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:700}}>
         <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
-        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 4px',color:'var(--text-primary)'}}>{fmt(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
         <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,padding:'6px 8px',color:'var(--text-muted)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
-        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmt(diff):'—'}</td>
+        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'Inter',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
       </tr>
     );
   };
 
   /* ── NET row ───────────────────────────────────────────────────────────── */
-  const renderNetRow=(budgetNet,actualNet)=>(
+  const renderNetRow=(budgetNet,actualNet)=>{
+    if(isMob) return(
+      <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
+        <td style={{fontWeight:800,fontSize:13.5,paddingLeft:10,paddingTop:8,paddingBottom:8}}>NET</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,fontWeight:600,color:'var(--text-muted)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,fontWeight:700,padding:'6px 8px',color:(budgetNet-actualNet)>=0?'var(--green)':'var(--red)'}}>{((budgetNet-actualNet)>0?'+':'')+fmtRound(budgetNet-actualNet)}</td>
+      </tr>
+    );
+    return(
     <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
       <td style={{fontWeight:800,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8}}>NET</td>
-      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmt(actualNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:700,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
       <td style={{textAlign:'right',fontFamily:'Inter',fontSize:12,fontWeight:600,color:'var(--text-muted)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
       <td className="hide-mobile"/>
     </tr>
   );
+  };
 
   /* ═══════════════════════════════════════════════════════════════════════
      VIEW A — MONTH VIEW
   ═══════════════════════════════════════════════════════════════════════ */
   const renderMonthView=()=>{
-    const isMob=typeof window!=='undefined'&&window.innerWidth<768;
     const prevMonth=()=>{if(month>1)setMonth(month-1);else{setYear(year-1);setMonth(12);}};
     const nextMonth=()=>{if(month<12)setMonth(month+1);else{setYear(year+1);setMonth(1);}};
     return(
@@ -4132,10 +4235,15 @@ function BudgetsPage({categories,toast}){
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
-              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:120}}>Category</th>
-              <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)'}}>Actual</th>
-              <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>{MO[month-1]} Budget</th>
-              <th className="hide-mobile" style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>Variance</th>
+              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:600,fontSize:12,color:'var(--text-muted)'}}>Category</th>
+              {isMob
+                ?<><th style={{textAlign:'right',padding:'10px 5px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Budget</th>
+                    <th style={{textAlign:'right',padding:'10px 5px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Left</th></>
+                :<><th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)'}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>{MO[month-1]} Budget</th>
+                    <th className="hide-mobile" style={{textAlign:'right',padding:'10px 8px',fontWeight:600,fontSize:12,color:'var(--text-muted)',minWidth:80}}>Variance</th></>
+              }
             </tr>
           </thead>
           <tbody>
