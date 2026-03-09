@@ -1388,6 +1388,7 @@ async def plaid_item_status(db: Session = Depends(get_db)):
     consent expiration time, and update_type (background vs user_present).
     Use this to identify stale or broken Plaid connections (e.g. ITEM_LOGIN_REQUIRED).
     """
+    plaid = setup_plaid_from_env()
     if plaid is None:
         return {"error": "Plaid not configured"}
     items = db.query(PlaidItem).filter_by(is_active=True).all()
