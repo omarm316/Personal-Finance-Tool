@@ -1184,7 +1184,7 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
     </table></div>
   );
   // Mobile: card list with quick category selector
-  const sortedCats=categories.filter(c=>c.is_active).sort((a,b)=>a.name.localeCompare(b.name));
+  const mobileCats=sortedCats(categories);
   return(
     <div>
       {visible.map(t=>{
@@ -1224,7 +1224,7 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
                     background:'var(--card-bg)',color:'var(--text)',cursor:'pointer',
                     maxWidth:130,flex:'1 1 auto'}}>
                   <option value="">Unclassified</option>
-                  {sortedCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                  {mobileCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
               )}
               {t.action==='Transfer'&&<span style={{fontSize:11,padding:'1px 7px',borderRadius:8,background:'#f3f4f6',color:'#6b7280',fontWeight:500}}>Transfer</span>}
