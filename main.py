@@ -1346,89 +1346,85 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
 
 @app.post("/api/plaid/reset-stuck-cursors")
 async def reset_stuck_cursors(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Alias for sync-transactions — kept for backward compatibility."""
+    return await sync_all_transactions(background_tasks, db)
+
+
+@app.post("/api/plaid/sync-transactions")
+async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
-    Reset cursors for all items that have a stored (non-auth) error and haven't
-    synced recently.  This un-sticks items that got into a bad cursor state due
-    to TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION or similar errors, without
-    requiring a full nuclear reset.  Auth-error items (ITEM_LOGIN_REQUIRED etc.)
-    are left untouched since they need user re-linking.
+    Unified smart sync — one endpoint that does everything:
+
+    • Healthy items  → incremental sync from stored cursor (fast, only new txns)
+    • Stuck items    → cursor reset first, then full re-download
+      A "stuck" item is one that has a non-auth error stored OR has never synced.
+      Cursor reset is safe — it just re-fetches from scratch, no data is lost.
+    • Auth-error items (ITEM_LOGIN_REQUIRED etc.) → skipped; user must reconnect
+      via Plaid Link before sync can proceed.
+
+    Returns per-item status so the UI can report which accounts need attention.
     """
     AUTH_ERROR_CODES = {
         'ITEM_LOGIN_REQUIRED', 'INVALID_CREDENTIALS', 'INVALID_ACCESS_TOKEN',
         'USER_PERMISSION_REVOKED', 'ITEM_NOT_FOUND', 'ACCESS_NOT_GRANTED',
     }
-    items = db.query(PlaidItem).filter_by(is_active=True).all()
-    reset = []
-    skipped_auth = []
-    for item in items:
-        if item.last_error_code and item.last_error_code in AUTH_ERROR_CODES:
-            skipped_auth.append(item.institution_name)
-            continue
-        # Reset cursor on all non-auth items — safe since force-resync is always
-        # recoverable (it just re-downloads the full transaction history)
-        item.cursor             = None
-        item.last_error_code    = None
-        item.last_error_message = None
-        item.last_error_at      = None
-        reset.append(item.institution_name)
-        background_tasks.add_task(_sync_item_background, item.item_id, False)
-    db.commit()
-    print(f"[reset-stuck] reset {len(reset)} item(s): {reset}")
-    return {
-        "reset": len(reset),
-        "reset_institutions": reset,
-        "skipped_auth": skipped_auth,
-        "message": f"Cursor reset and sync started for {len(reset)} bank(s)." +
-                   (f" {len(skipped_auth)} skipped (reconnect required)." if skipped_auth else ""),
-    }
 
-
-@app.post("/api/plaid/sync-transactions")
-async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     if not items:
-        return {"message": "No connected accounts.", "items_queued": 0, "status": "idle"}
-
-    # Auth errors require the user to reconnect via Plaid Link — they cannot be
-    # resolved by retrying the sync.  All other error codes (transient Plaid
-    # errors, our own sync bugs, etc.) should be retried so that recovering from
-    # a brief outage doesn't leave an item permanently stuck.
-    AUTH_ERROR_CODES = {
-        'ITEM_LOGIN_REQUIRED',
-        'INVALID_CREDENTIALS',
-        'INVALID_ACCESS_TOKEN',
-        'USER_PERMISSION_REVOKED',
-        'ITEM_NOT_FOUND',
-        'ACCESS_NOT_GRANTED',
-    }
+        return {"message": "No connected accounts.", "items_queued": 0,
+                "items_cursor_reset": 0, "items_errored": 0,
+                "errored": [], "items": [], "status": "idle"}
 
     item_statuses = []
-    queued = 0
-    errored = []
+    queued         = 0
+    cursor_resets  = 0
+    errored        = []
+
     for item in items:
         if item.last_error_code and item.last_error_code in AUTH_ERROR_CODES:
-            # Only skip when the connection itself is broken — user must reconnect
+            # Connection is broken at the Plaid level — only re-linking fixes this
             errored.append({"institution_name": item.institution_name,
                             "error_code": item.last_error_code})
             item_statuses.append({"institution_name": item.institution_name,
-                                  "status": "skipped", "error_code": item.last_error_code})
+                                  "status": "skipped",
+                                  "error_code": item.last_error_code})
         else:
+            stuck = bool(item.last_error_code) or (item.last_synced_at is None)
+            if stuck:
+                # Clear bad cursor/error so the sync starts clean
+                item.cursor             = None
+                item.last_error_code    = None
+                item.last_error_message = None
+                item.last_error_at      = None
+                cursor_resets += 1
+                item_statuses.append({"institution_name": item.institution_name,
+                                      "status": "queued", "cursor_reset": True})
+                print(f"[sync] {item.institution_name}: cursor reset (was stuck) — re-downloading")
+            else:
+                item_statuses.append({"institution_name": item.institution_name,
+                                      "status": "queued", "cursor_reset": False})
             background_tasks.add_task(_sync_item_background, item.item_id, False)
             queued += 1
-            item_statuses.append({"institution_name": item.institution_name, "status": "queued"})
+
+    db.commit()
+
     parts = []
     if queued:
         parts.append(f"Sync started for {queued} bank{'' if queued == 1 else 's'}")
+    if cursor_resets:
+        parts.append(f"{cursor_resets} re-downloading from scratch")
     if errored:
         names = ", ".join(e["institution_name"] for e in errored)
-        parts.append(f"{len(errored)} skipped ({names} — reconnect required)")
+        parts.append(f"{len(errored)} need reconnecting ({names})")
+
     return {
-        "message": " — ".join(parts) or "Nothing to sync",
-        "items": item_statuses,
-        "items_queued": queued,
-        "items_errored": len(errored),
-        "errored": errored,
-        "status": "started" if queued else "idle",
+        "message":            " — ".join(parts) or "Nothing to sync",
+        "items":              item_statuses,
+        "items_queued":       queued,
+        "items_cursor_reset": cursor_resets,
+        "items_errored":      len(errored),
+        "errored":            errored,
+        "status":             "started" if queued else "idle",
     }
 
 

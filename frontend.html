@@ -2885,22 +2885,11 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
   const[balanceSyncResult,setBalanceSyncResult]=useState(null);
   const[healthChecking,setHealthChecking]=useState(false);
   const[healthResults,setHealthResults]=useState(null);
-  const[stuckResetting,setStuckResetting]=useState(false);
   const checkPlaidHealth=async()=>{
     setHealthChecking(true);
     try{const r=await apiFetch('/plaid/item-status');setHealthResults(r);}
     catch(e){toast('Health check failed: '+(e.message||e),'error');}
     finally{setHealthChecking(false);}
-  };
-  const resetStuckCursors=async()=>{
-    setStuckResetting(true);
-    try{
-      const r=await apiFetch('/plaid/reset-stuck-cursors',{method:'POST'});
-      toast(`↺ Cursor reset for ${r.reset} bank${r.reset!==1?'s':''} — syncing now`+(r.skipped_auth.length?` (${r.skipped_auth.length} need reconnect)`:''));
-      setHealthResults(null);
-      setTimeout(()=>refreshItems&&refreshItems(),20000);
-    }catch(e){toast('Reset failed: '+(e.message||e),'error');}
-    finally{setStuckResetting(false);}
   };
   const syncBalances=async(force=false)=>{
     setBalanceSyncing(true);
@@ -3406,12 +3395,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
             <div style={{marginBottom:16,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 14px',background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
                 <div style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Plaid Connection Health</div>
-                <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                  <button onClick={resetStuckCursors} disabled={stuckResetting} className="btn btn-sm btn-secondary" style={{fontSize:11,padding:'2px 10px'}} title="Reset sync cursors for all banks and re-download transactions. Safe — use when accounts show stale Last sync dates.">
-                    {stuckResetting?'Resetting…':'↺ Reset Stuck'}
-                  </button>
-                  <button onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
-                </div>
+                <button onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
               </div>
               {healthResults.map((r,i)=>{
                 const healthy=r.ok;
@@ -6233,20 +6217,44 @@ function App(){
     try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
   },[]);
 
+  // Auto-sync on app open — throttled to once per 20 minutes so refreshing
+  // the page doesn't hammer Plaid.  Runs silently in the background.
   useEffect(()=>{
     loadMeta();
     if(!document.getElementById('plaid-script')){const s=document.createElement('script');s.id='plaid-script';s.src='https://cdn.plaid.com/link/v2/stable/link-initialize.js';document.head.appendChild(s);}
+    const AUTO_SYNC_INTERVAL=20*60*1000;
+    const last=parseInt(localStorage.getItem('lastAutoSync')||'0');
+    if(Date.now()-last>AUTO_SYNC_INTERVAL){
+      localStorage.setItem('lastAutoSync',String(Date.now()));
+      apiFetch('/plaid/sync-transactions',{method:'POST'})
+        .then(r=>{
+          if(r.items_errored>0){
+            const names=r.errored.map(e=>e.institution_name).join(', ');
+            toast(`⚠️ ${r.items_errored} bank${r.items_errored!==1?' accounts need':'account needs'} reconnecting: ${names}`,'error');
+          }
+          if(r.items_cursor_reset>0){
+            toast(`↺ ${r.items_cursor_reset} stuck account${r.items_cursor_reset!==1?'s':''} reset — re-downloading transactions`);
+          }
+          setTimeout(loadMeta,15000);
+        })
+        .catch(()=>{});
+    }
   },[]);
 
   const sync=async()=>{
     try{
       const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});
       if(r.items_errored>0&&r.items_queued===0){
-        toast(`Sync skipped — ${r.items_errored} bank${r.items_errored!==1?'s need':'needs'} reconnecting (Settings → Connected Banks)`,'error');
+        const names=r.errored.map(e=>e.institution_name).join(', ');
+        toast(`Sync skipped — reconnect required: ${names} (Settings → Connected Banks)`,'error');
       }else if(r.items_errored>0){
-        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — ${r.items_errored} skipped (reconnect required in Settings)`);
+        const names=r.errored.map(e=>e.institution_name).join(', ');
+        const resetNote=r.items_cursor_reset>0?` (${r.items_cursor_reset} re-downloading from scratch)`:'';
+        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''}${resetNote} — reconnect required: ${names}`,'error');
+      }else if(r.items_cursor_reset>0){
+        toast(`↺ ${r.items_cursor_reset} stuck account${r.items_cursor_reset!==1?'s':''} reset + syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — transactions will appear shortly`);
       }else{
-        toast(`Sync started for ${r.items_queued} bank${r.items_queued!==1?'s':''} — transactions will appear shortly`);
+        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — new transactions will appear shortly`);
       }
       loadMeta();
       setTimeout(loadMeta,15000);
