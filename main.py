@@ -1017,14 +1017,20 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             txn_amount  = -txn_data['amount']
             txn_date    = txn_data['date']
             base_hash   = _content_base_hash(account.id, txn_date, txn_amount, txn_data['description_raw'])
-            hash_match  = (
+            # Avoid SQLAlchemy's notin_() with a large set — it builds a recursive
+            # Python expression tree that exceeds Python's recursion limit (~1000)
+            # when content_matched_ids grows large (e.g. Chase full-history re-download).
+            # Instead: fetch all rows sharing this base hash (typically 0-3 rows)
+            # and exclude already-matched IDs in Python.
+            hash_candidates = (
                 db.query(Transaction)
-                .filter(
-                    Transaction.content_hash.like(f'{base_hash}-%'),
-                    Transaction.id.notin_(content_matched_ids) if content_matched_ids else True,
-                )
+                .filter(Transaction.content_hash.like(f'{base_hash}-%'))
                 .order_by(Transaction.content_hash)  # lowest suffix first → stable ordering
-                .first()
+                .all()
+            )
+            hash_match = next(
+                (r for r in hash_candidates if r.id not in content_matched_ids),
+                None,
             )
             if hash_match:
                 # Adopt the new Plaid ID — all user classifications are preserved
