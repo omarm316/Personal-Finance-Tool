@@ -697,7 +697,7 @@ async def create_update_link_token(item_id: str, request: Request, db: Session =
             scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
             host = request.headers.get("host", request.url.netloc)
             base_url = f"{scheme}://{host}/plaid/oauth-return"
-        access_token = decrypt_token(item.access_token_enc)
+        access_token = item.access_token
         link_token = plaid_client.create_link_token(
             "default_user", redirect_uri=base_url, access_token=access_token
         )
@@ -1394,7 +1394,7 @@ async def plaid_item_status(db: Session = Depends(get_db)):
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     results = []
     for item in items:
-        access_token = decrypt_token(item.access_token_enc)
+        access_token = item.access_token
         status = plaid.get_item_status(access_token)
         results.append({
             "institution_name": item.institution_name,
