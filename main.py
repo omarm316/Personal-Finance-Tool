@@ -988,6 +988,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             if existing:
                 if not existing.is_locked:
                     existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+                # If Plaid previously removed this txn and we soft-deleted it,
+                # re-enable it now that Plaid is re-sending it as "added".
+                if existing.is_excluded:
+                    existing.is_excluded  = False
+                    existing.needs_review = False
                 # Backfill content_hash if this row predates the feature
                 if not existing.content_hash:
                     existing.content_hash = _assign_content_hash(
