@@ -3403,6 +3403,8 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
                 const needsRelink=errCode==='ITEM_LOGIN_REQUIRED'||errCode==='ITEM_NOT_FOUND'||errCode==='INVALID_ACCESS_TOKEN';
                 const expiring=errCode==='PENDING_EXPIRATION';
                 const hasInternalErr=!!r.internal_error_code;
+                const isSyncErr=r.internal_error_code?.startsWith('SYNC_ERROR:');
+                const internalErrLabel=isSyncErr?r.internal_error_code.replace('SYNC_ERROR:',''):r.internal_error_code;
                 const bgColor=healthy?(hasInternalErr?'#fffbeb':'#f0fdf4'):needsRelink||expiring?'#fff7ed':'#fef2f2';
                 const dot=healthy?(hasInternalErr?'🟡':'🟢'):needsRelink||expiring?'🟡':'🔴';
                 const fmtTs=ts=>ts?ts.replace('T',' ').slice(0,16)+' UTC':'—';
@@ -3412,7 +3414,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
                       <span>{dot}</span>
                       <span style={{fontWeight:600,fontSize:13}}>{r.institution_name}</span>
                       {errCode&&<span style={{fontSize:11,fontWeight:700,padding:'1px 8px',borderRadius:20,background:needsRelink||expiring?'#fef3c7':'#fee2e2',color:needsRelink||expiring?'#92400e':'#b91c1c'}}>{errCode}</span>}
-                      {hasInternalErr&&<span style={{fontSize:11,fontWeight:700,padding:'1px 8px',borderRadius:20,background:'#fef3c7',color:'#92400e'}}>sync error: {r.internal_error_code}</span>}
+                      {hasInternalErr&&<span style={{fontSize:11,fontWeight:700,padding:'1px 8px',borderRadius:20,background:'#fff7ed',color:'#92400e'}} title={r.internal_error_message||''}>⚠️ {internalErrLabel}</span>}
                     </div>
                     <div style={{display:'flex',gap:24,fontSize:11,color:'var(--text-muted)',flexWrap:'wrap',marginLeft:24}}>
                       <span>Last sync: <strong style={{color:'var(--text-primary)'}}>{fmtTs(r.last_synced_at)}</strong></span>

@@ -54,8 +54,21 @@ class PlaidClient:
                 'secret': secret,
             }
         )
-        
+
         api_client = ApiClient(configuration)
+
+        # Set an explicit read timeout so the sync never hangs indefinitely.
+        # Chase and other high-volume institutions can have large paginated
+        # responses — 180 s gives enough headroom without blocking a worker forever.
+        try:
+            import urllib3
+            api_client.rest_client.pool_manager = urllib3.PoolManager(
+                timeout=urllib3.Timeout(connect=10.0, read=180.0),
+                maxsize=4,
+            )
+        except Exception:
+            pass  # If for any reason the pool manager swap fails, proceed without it
+
         self.client = plaid_api.PlaidApi(api_client)
     
     def create_link_token(self, user_id: str, redirect_uri: str = None,

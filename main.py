@@ -1339,7 +1339,20 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             pass
     except Exception as e:
         import traceback; traceback.print_exc()
-        print(f"[sync] background sync failed for {item_id}: {e}")
+        err_type = type(e).__name__
+        print(f"[sync] {getattr(item,'institution_name',item_id)} background sync failed ({err_type}): {e}")
+        # Store generic errors on the item so they appear in the health check.
+        # Use a SYNC_ERROR prefix so the UI can distinguish these from Plaid
+        # auth errors — SYNC_ERROR items are safe to retry; auth errors need relink.
+        try:
+            if item:
+                item.last_error_code    = f'SYNC_ERROR:{err_type}'
+                item.last_error_message = str(e)[:500]
+                if not item.last_error_at:
+                    item.last_error_at = datetime.utcnow()
+                db.commit()
+        except Exception:
+            pass
     finally:
         db.close()
 
