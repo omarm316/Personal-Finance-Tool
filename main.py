@@ -1304,6 +1304,29 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             err_code = 'PLAID_ERROR'
             err_msg  = str(e)
         print(f"[sync] {item_id} Plaid error {err_code}: {err_msg}")
+
+        # Cursor-reset errors: Plaid requires us to start from scratch.
+        # Reset cursor and retry once immediately — no user action needed.
+        CURSOR_RESET_CODES = {
+            'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION',
+            'INVALID_CURSOR',
+        }
+        if err_code in CURSOR_RESET_CODES and item and not clear_cursor:
+            print(f"[sync] {item.institution_name}: {err_code} — resetting cursor and retrying once")
+            try:
+                item.cursor = None
+                item.last_error_code    = None
+                item.last_error_message = None
+                item.last_error_at      = None
+                db.commit()
+                # Immediate retry with clean cursor (clear_cursor=True skips here)
+                added = await _sync_item(item, plaid, db)
+                print(f"[sync] {item.institution_name}: cursor-reset retry succeeded — {added} transaction(s) added")
+                return
+            except Exception as retry_err:
+                print(f"[sync] {item.institution_name}: cursor-reset retry also failed: {retry_err}")
+                # Fall through to store the error below
+
         # Persist error on item so the UI can show a reconnect warning
         try:
             if item:
@@ -1319,6 +1342,45 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
         print(f"[sync] background sync failed for {item_id}: {e}")
     finally:
         db.close()
+
+
+@app.post("/api/plaid/reset-stuck-cursors")
+async def reset_stuck_cursors(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Reset cursors for all items that have a stored (non-auth) error and haven't
+    synced recently.  This un-sticks items that got into a bad cursor state due
+    to TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION or similar errors, without
+    requiring a full nuclear reset.  Auth-error items (ITEM_LOGIN_REQUIRED etc.)
+    are left untouched since they need user re-linking.
+    """
+    AUTH_ERROR_CODES = {
+        'ITEM_LOGIN_REQUIRED', 'INVALID_CREDENTIALS', 'INVALID_ACCESS_TOKEN',
+        'USER_PERMISSION_REVOKED', 'ITEM_NOT_FOUND', 'ACCESS_NOT_GRANTED',
+    }
+    items = db.query(PlaidItem).filter_by(is_active=True).all()
+    reset = []
+    skipped_auth = []
+    for item in items:
+        if item.last_error_code and item.last_error_code in AUTH_ERROR_CODES:
+            skipped_auth.append(item.institution_name)
+            continue
+        # Reset cursor on all non-auth items — safe since force-resync is always
+        # recoverable (it just re-downloads the full transaction history)
+        item.cursor             = None
+        item.last_error_code    = None
+        item.last_error_message = None
+        item.last_error_at      = None
+        reset.append(item.institution_name)
+        background_tasks.add_task(_sync_item_background, item.item_id, False)
+    db.commit()
+    print(f"[reset-stuck] reset {len(reset)} item(s): {reset}")
+    return {
+        "reset": len(reset),
+        "reset_institutions": reset,
+        "skipped_auth": skipped_auth,
+        "message": f"Cursor reset and sync started for {len(reset)} bank(s)." +
+                   (f" {len(skipped_auth)} skipped (reconnect required)." if skipped_auth else ""),
+    }
 
 
 @app.post("/api/plaid/sync-transactions")

@@ -2885,11 +2885,22 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
   const[balanceSyncResult,setBalanceSyncResult]=useState(null);
   const[healthChecking,setHealthChecking]=useState(false);
   const[healthResults,setHealthResults]=useState(null);
+  const[stuckResetting,setStuckResetting]=useState(false);
   const checkPlaidHealth=async()=>{
     setHealthChecking(true);
     try{const r=await apiFetch('/plaid/item-status');setHealthResults(r);}
     catch(e){toast('Health check failed: '+(e.message||e),'error');}
     finally{setHealthChecking(false);}
+  };
+  const resetStuckCursors=async()=>{
+    setStuckResetting(true);
+    try{
+      const r=await apiFetch('/plaid/reset-stuck-cursors',{method:'POST'});
+      toast(`↺ Cursor reset for ${r.reset} bank${r.reset!==1?'s':''} — syncing now`+(r.skipped_auth.length?` (${r.skipped_auth.length} need reconnect)`:''));
+      setHealthResults(null);
+      setTimeout(()=>refreshItems&&refreshItems(),20000);
+    }catch(e){toast('Reset failed: '+(e.message||e),'error');}
+    finally{setStuckResetting(false);}
   };
   const syncBalances=async(force=false)=>{
     setBalanceSyncing(true);
@@ -3395,7 +3406,12 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
             <div style={{marginBottom:16,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 14px',background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
                 <div style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Plaid Connection Health</div>
-                <button onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <button onClick={resetStuckCursors} disabled={stuckResetting} className="btn btn-sm btn-secondary" style={{fontSize:11,padding:'2px 10px'}} title="Reset sync cursors for all banks and re-download transactions. Safe — use when accounts show stale Last sync dates.">
+                    {stuckResetting?'Resetting…':'↺ Reset Stuck'}
+                  </button>
+                  <button onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
+                </div>
               </div>
               {healthResults.map((r,i)=>{
                 const healthy=r.ok;
