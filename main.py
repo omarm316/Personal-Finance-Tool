@@ -1326,12 +1326,26 @@ async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session =
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     if not items:
         return {"message": "No connected accounts.", "items_queued": 0, "status": "idle"}
+
+    # Auth errors require the user to reconnect via Plaid Link — they cannot be
+    # resolved by retrying the sync.  All other error codes (transient Plaid
+    # errors, our own sync bugs, etc.) should be retried so that recovering from
+    # a brief outage doesn't leave an item permanently stuck.
+    AUTH_ERROR_CODES = {
+        'ITEM_LOGIN_REQUIRED',
+        'INVALID_CREDENTIALS',
+        'INVALID_ACCESS_TOKEN',
+        'USER_PERMISSION_REVOKED',
+        'ITEM_NOT_FOUND',
+        'ACCESS_NOT_GRANTED',
+    }
+
     item_statuses = []
     queued = 0
     errored = []
     for item in items:
-        if item.last_error_code:
-            # Skip items with known errors — syncing them would just fail again
+        if item.last_error_code and item.last_error_code in AUTH_ERROR_CODES:
+            # Only skip when the connection itself is broken — user must reconnect
             errored.append({"institution_name": item.institution_name,
                             "error_code": item.last_error_code})
             item_statuses.append({"institution_name": item.institution_name,
@@ -1414,6 +1428,11 @@ async def plaid_item_status(db: Session = Depends(get_db)):
             "institution_name": item.institution_name,
             "item_id": item.item_id,
             "last_synced_at": item.last_synced_at.isoformat() if item.last_synced_at else None,
+            # Internal sync error state — set when our own sync code fails (not a Plaid
+            # connection error). Separate from the Plaid-side error returned above.
+            "internal_error_code":    item.last_error_code,
+            "internal_error_message": item.last_error_message,
+            "internal_error_at":      item.last_error_at.isoformat() if item.last_error_at else None,
             **status,
         })
     # Sort: broken items first, then by institution name
