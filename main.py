@@ -1155,23 +1155,30 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     # correction) in the 'modified' list.  We update unlocked transactions only —
     # locked ones represent a manual override that should be preserved.
     modified_count = 0
+    modified_errors = 0
     for txn_data in result.get('modified', []):
-        existing = db.query(Transaction).filter_by(
-            plaid_transaction_id=txn_data['plaid_transaction_id']
-        ).first()
-        if not existing or existing.is_locked:
-            continue
-        new_amount = -txn_data['amount']
-        new_date   = txn_data['date']
-        existing.date          = new_date
-        existing.year          = new_date.year
-        existing.month         = new_date.month
-        existing.day           = new_date.day
-        existing.amount        = new_amount
-        existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
-        modified_count += 1
+        try:
+            existing = db.query(Transaction).filter_by(
+                plaid_transaction_id=txn_data['plaid_transaction_id']
+            ).first()
+            if not existing or existing.is_locked:
+                continue
+            new_amount = -txn_data['amount']
+            new_date   = txn_data['date']
+            existing.date          = new_date
+            existing.year          = new_date.year
+            existing.month         = new_date.month
+            existing.day           = new_date.day
+            existing.amount        = new_amount
+            existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+            modified_count += 1
+        except Exception as mod_err:
+            modified_errors += 1
+            print(f"[sync] {plaid_item.institution_name}: failed to apply modified txn {txn_data.get('plaid_transaction_id','?')}: {mod_err}")
     if modified_count:
         print(f"[sync] {plaid_item.institution_name}: {modified_count} transaction(s) updated (Plaid modified)")
+    if modified_errors:
+        print(f"[sync] {plaid_item.institution_name}: {modified_errors} modified transaction(s) failed")
 
     # ── Handle removed transactions ───────────────────────────────────────────
     # Plaid removes a transaction when: a date/ID changes on settlement, a
@@ -1182,25 +1189,32 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     # Instead we SOFT-DELETE (is_excluded=True + flag in description_clean) so
     # the user can see and recover them.  Locked transactions are never touched.
     removed_count  = 0
+    removed_errors = 0
     locked_skipped = 0
     for plaid_id in result.get('removed', []):
-        existing = db.query(Transaction).filter_by(plaid_transaction_id=plaid_id).first()
-        if not existing:
-            continue
-        if existing.is_locked:
-            locked_skipped += 1
-            print(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
-            continue
-        # Soft-delete: exclude from all views but keep the row in the DB
-        existing.is_excluded = True
-        existing.needs_review = False
-        note = " [removed by Plaid — may reappear with a new ID]"
-        if existing.description_clean and note not in existing.description_clean:
-            existing.description_clean = existing.description_clean + note
-        removed_count += 1
-        print(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
+        try:
+            existing = db.query(Transaction).filter_by(plaid_transaction_id=plaid_id).first()
+            if not existing:
+                continue
+            if existing.is_locked:
+                locked_skipped += 1
+                print(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
+                continue
+            # Soft-delete: exclude from all views but keep the row in the DB
+            existing.is_excluded = True
+            existing.needs_review = False
+            note = " [removed by Plaid — may reappear with a new ID]"
+            if existing.description_clean and note not in existing.description_clean:
+                existing.description_clean = existing.description_clean + note
+            removed_count += 1
+            print(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
+        except Exception as rem_err:
+            removed_errors += 1
+            print(f"[sync] {plaid_item.institution_name}: failed to process removed txn {plaid_id}: {rem_err}")
     if removed_count:
         print(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) soft-deleted (Plaid removed)")
+    if removed_errors:
+        print(f"[sync] {plaid_item.institution_name}: {removed_errors} removed transaction(s) failed")
     if locked_skipped:
         print(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
 

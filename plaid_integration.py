@@ -295,10 +295,29 @@ class PlaidClient:
             has_more = response['has_more']
             cursor = response['next_cursor']
         
+        # Extract removed transaction IDs safely — RemovedTransaction objects may use
+        # attribute access, dict access, or neither depending on SDK version.
+        removed_ids = []
+        for t in removed_transactions:
+            tid = None
+            try:
+                tid = t['transaction_id']
+            except (KeyError, TypeError):
+                pass
+            if tid is None:
+                try:
+                    tid = getattr(t, 'transaction_id', None)
+                except Exception:
+                    pass
+            if tid:
+                removed_ids.append(tid)
+            else:
+                print(f"[plaid] could not extract transaction_id from removed item: {type(t)}")
+
         return {
             'added': [f for f in (self._safe_format(t) for t in added_transactions) if f is not None],
             'modified': [f for f in (self._safe_format(t) for t in modified_transactions) if f is not None],
-            'removed': [t['transaction_id'] for t in removed_transactions],
+            'removed': removed_ids,
             'next_cursor': cursor,
             'has_more': False
         }
