@@ -999,6 +999,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                         db, existing.account_id, existing.date,
                         existing.amount, existing.description_raw
                     )
+                # CRITICAL: always close the savepoint before continue.
+                # Without this, every iteration leaks a nested SQLAlchemy
+                # subtransaction. After thousands of iterations (Chase full
+                # re-download) db.commit() recurses 1000+ frames → RecursionError.
+                sp.commit()
                 continue
 
             # Skip pending transactions (holds/authorizations not yet posted) — they distort balances
@@ -1013,6 +1018,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             if not account:
                 print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
                 skipped += 1
+                sp.rollback()  # close savepoint before continue (nothing to keep)
                 continue
 
             # ── Content-hash fallback (re-link survivor) ──────────────────────
