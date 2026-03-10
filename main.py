@@ -1221,7 +1221,14 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     # Store cursor — use None instead of empty string for clean state
     plaid_item.cursor         = result['next_cursor'] or None
     plaid_item.last_synced_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except Exception as commit_err:
+        # Commit failed — this is the exception that will propagate to
+        # _sync_item_background's except-handler and be stored on the item.
+        print(f"[sync] {plaid_item.institution_name}: final commit failed: {commit_err}")
+        db.rollback()
+        raise
     return total_added
 
 
@@ -1327,8 +1334,11 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                 print(f"[sync] {item.institution_name}: cursor-reset retry also failed: {retry_err}")
                 # Fall through to store the error below
 
-        # Persist error on item so the UI can show a reconnect warning
+        # Persist error on item so the UI can show a reconnect warning.
+        # Rollback first — if we got here via a DB error, the session may be in
+        # ROLLBACK_REQUIRED state and commit would silently fail without it.
         try:
+            db.rollback()
             if item:
                 item.last_error_code    = err_code
                 item.last_error_message = err_msg
@@ -1340,19 +1350,20 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
     except Exception as e:
         import traceback; traceback.print_exc()
         err_type = type(e).__name__
-        print(f"[sync] {getattr(item,'institution_name',item_id)} background sync failed ({err_type}): {e}")
+        institution = getattr(item, 'institution_name', None) or item_id
+        print(f"[sync] {institution} background sync failed ({err_type}): {e}")
         # Store generic errors on the item so they appear in the health check.
-        # Use a SYNC_ERROR prefix so the UI can distinguish these from Plaid
-        # auth errors — SYNC_ERROR items are safe to retry; auth errors need relink.
+        # Rollback first — a failed DB operation (e.g. constraint violation) leaves
+        # the session in ROLLBACK_REQUIRED state; commit without rollback is a no-op.
         try:
+            db.rollback()
             if item:
                 item.last_error_code    = f'SYNC_ERROR:{err_type}'
                 item.last_error_message = str(e)[:500]
-                if not item.last_error_at:
-                    item.last_error_at = datetime.utcnow()
+                item.last_error_at      = item.last_error_at or datetime.utcnow()
                 db.commit()
-        except Exception:
-            pass
+        except Exception as store_err:
+            print(f"[sync] {institution}: could not store error on item: {store_err}")
     finally:
         db.close()
 
