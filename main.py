@@ -639,14 +639,14 @@ async def startup_event():
             print(f"Rules loaded: {rule_count} active rules")
 
         # One-time fix: correct balance observations for credit/loan accounts
-        # where plaid_balance was stored with wrong sign (positive instead of negative)
-        _credit_accts = session.query(Account).filter(
-            Account.account_type.in_(['credit card', 'credit', 'loan'])
-        ).all()
+        # where plaid_balance was stored with wrong sign (positive instead of negative).
+        # Use _sign_plaid_balance to determine which accounts are liability-type.
+        _all_accts = session.query(Account).all()
+        _liability_ids = [a.id for a in _all_accts if _sign_plaid_balance(1.0, a.account_type or '') == -1.0]
         _fixed = 0
-        for _ca in _credit_accts:
+        if _liability_ids:
             _bad_obs = session.query(BalanceObservation).filter(
-                BalanceObservation.account_id == _ca.id,
+                BalanceObservation.account_id.in_(_liability_ids),
                 BalanceObservation.plaid_balance > 0,
             ).all()
             for _ob in _bad_obs:
