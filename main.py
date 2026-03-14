@@ -268,6 +268,26 @@ def _sign_plaid_balance(raw: Optional[float], account_type_str: str) -> Optional
     return -raw if t.startswith('credit') or t in ('loan',) else raw
 
 
+def _plaid_anchor_date(account_type_str: str) -> datetime:
+    """
+    Return the effective anchor date for a Plaid balance snapshot.
+
+    Plaid's `current` balance lags behind real-time:
+      - Checking/Savings: typically 1-2 business days lag
+      - Credit cards/Loans: typically near real-time (same-day)
+
+    Instead of using datetime.utcnow() (which creates a gap where recent
+    transactions fall BEFORE the anchor and never get counted), we step
+    back to account for the lag, anchoring at end-of-day.
+    """
+    from datetime import timedelta, time as _time
+    t = (account_type_str or '').lower().strip()
+    is_liability = t.startswith('credit') or t in ('loan',)
+    lag_days = 0 if is_liability else 2
+    effective = datetime.utcnow() - timedelta(days=lag_days)
+    return datetime.combine(effective.date(), _time(23, 59, 59))
+
+
 def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
     """
     Full rebuild of monthly opening/closing snapshots for one account.
@@ -893,7 +913,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     mask=a.get('mask'),
                     is_active=True,
                     starting_balance=plaid_balance or 0,
-                    start_date=datetime.utcnow(),
+                    start_date=_plaid_anchor_date(raw_type),
                 )
                 db.add(new_acct)
                 db.flush()
@@ -1855,7 +1875,7 @@ async def backfill_account_balances(db: Session = Depends(get_db)):
                 continue
 
             acct.starting_balance = plaid_balance
-            acct.start_date       = datetime.utcnow()
+            acct.start_date       = _plaid_anchor_date(raw_type)
             updated += 1
 
     db.commit()
@@ -4382,7 +4402,7 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
                 # In normal (non-force) mode we preserve the existing anchor so
                 # that a stale Plaid balance cannot corrupt the running history.
                 account.starting_balance = round(signed_balance, 4)
-                account.start_date = datetime.utcnow()
+                account.start_date = _plaid_anchor_date(account.account_type)
                 anchor_updated = True
             db.flush()
             months_built = rebuild_monthly_snapshots(db, account.id)
