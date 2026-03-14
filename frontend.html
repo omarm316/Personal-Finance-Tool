@@ -1340,11 +1340,12 @@ function TransactionsPage({categories,toast}){
       if(startDate)q+=`&start_date=${startDate}`;
       if(endDate)q+=`&end_date=${endDate}`;
       if(accountFilter)q+=`&account_id=${accountFilter}`;
+      if(catFilter)q+=`&category=${encodeURIComponent(catFilter)}`;
       const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
       setTxns(t);setAccounts(a);
     }catch(e){toast('Failed to load','error');}
     finally{if(!silent)setLoading(false);}
-  },[needsReview,startDate,endDate,accountFilter]);
+  },[needsReview,startDate,endDate,accountFilter,catFilter]);
 
   useEffect(()=>{load();},[load]);
 
@@ -5316,7 +5317,7 @@ function LoansPage({toast}){
         {loading?<div className="loading"><div className="spinner"/></div>
           :loans.length===0&&!editing?<div className="empty"><div className="empty-icon">⌂</div><span>No loans yet</span></div>
           :<div className="table-wrap"><table>
-            <thead><tr><th>Lender</th><th>Type</th><th>Balance</th><th>Rate</th><th>P&amp;I / Tax / Ins</th><th>Remaining</th><th>Due</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Lender</th><th>Type</th><th>Balance</th><th>Rate</th><th>Principal / Interest / Tax / Ins</th><th>Remaining</th><th>Due</th><th>Actions</th></tr></thead>
             <tbody>{loans.map(l=>(
               <tr key={l.id}>
                 <td style={{fontWeight:500}}>{l.lender}</td>
@@ -5325,7 +5326,7 @@ function LoansPage({toast}){
                 <td style={{fontFamily:'Inter',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
                 <td style={{fontSize:12}}>
                   {l.next_split?<span style={{fontFamily:'Inter'}}>
-                    {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)}{l.next_split.property_tax>0?` / ${fmt(l.next_split.property_tax)}`:''}
+                    {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)}{l.next_split.property_tax>0?` / ${fmt(l.next_split.property_tax)}`:''}{l.next_split.insurance>0?` / ${fmt(l.next_split.insurance)}`:''}
                   </span>:<span style={{color:'var(--text-muted)'}}>—</span>}
                 </td>
                 <td style={{fontSize:12,color:'var(--text-muted)'}}>{l.remaining_term_months!=null?`${l.remaining_term_months} mo`:'—'}</td>

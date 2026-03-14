@@ -2424,9 +2424,10 @@ async def get_transactions(
     if end_date:
         query = query.filter(Transaction.date <= datetime.fromisoformat(end_date))
     if category:
+        # Replicate category_final logic: prefer category_manual, fall back to category_auto
         query = query.filter(
             (Transaction.category_manual == category) |
-            (Transaction.category_auto   == category)
+            ((Transaction.category_manual == None) & (Transaction.category_auto == category))
         )
     if account_id is not None:
         query = query.filter(Transaction.account_id == account_id)
@@ -5228,14 +5229,22 @@ async def update_loan(loan_id: int, updates: dict, db: Session = Depends(get_db)
                'property_tax_monthly', 'insurance_monthly',
                'payment_account_id', 'payment_due_day',
                'start_date', 'maturity_date', 'account_id', 'notes', 'is_active']
+    _int_fields = ('payment_account_id', 'payment_due_day', 'remaining_term_months',
+                   'term_months', 'account_id')
     for k, v in updates.items():
         if k in allowed:
             if k in _date_fields and v:
                 setattr(loan, k, datetime.strptime(v, "%Y-%m-%d"))
+            elif k in _int_fields:
+                setattr(loan, k, int(v) if v not in (None, '', 'null') else None)
             else:
                 setattr(loan, k, v)
     loan.updated_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to save loan: {e}")
     return {'message': 'Loan updated'}
 
 
