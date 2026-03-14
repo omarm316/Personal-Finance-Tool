@@ -913,7 +913,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                     mask=a.get('mask'),
                     is_active=True,
                     starting_balance=plaid_balance or 0,
-                    start_date=_plaid_anchor_date(raw_type),
+                    start_date=None,  # Legacy model: offset + all txns
                 )
                 db.add(new_acct)
                 db.flush()
@@ -1874,8 +1874,12 @@ async def backfill_account_balances(db: Session = Depends(get_db)):
             if plaid_balance is None:
                 continue
 
-            acct.starting_balance = plaid_balance
-            acct.start_date       = _plaid_anchor_date(raw_type)
+            # Calibration: offset = plaid_balance − SUM(all txns)
+            from sqlalchemy import func as _sbf
+            _txn_sum = db.query(_sbf.sum(Transaction.amount)).filter(
+                Transaction.account_id == acct.id).scalar() or 0.0
+            acct.starting_balance = round(plaid_balance - _txn_sum, 4)
+            acct.start_date       = None  # Legacy model
             updated += 1
 
     db.commit()
@@ -4398,11 +4402,16 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
             signed_balance = _sign_plaid_balance(raw_balance, account.account_type)
             anchor_updated = False
             if force or account.start_date is None:
-                # Force resync OR first-time setup: anchor from Plaid.
+                # Force resync OR first-time setup: calibrate offset from Plaid.
+                # offset = plaid_balance − SUM(all txns), so computed = plaid.
                 # In normal (non-force) mode we preserve the existing anchor so
                 # that a stale Plaid balance cannot corrupt the running history.
-                account.starting_balance = round(signed_balance, 4)
-                account.start_date = _plaid_anchor_date(account.account_type)
+                from sqlalchemy import func as _sbf2
+                _txn_sum = (db.query(_sbf2.sum(Transaction.amount))
+                            .filter(Transaction.account_id == account.id)
+                            .scalar() or 0.0)
+                account.starting_balance = round(signed_balance - _txn_sum, 4)
+                account.start_date = None  # Legacy model
                 anchor_updated = True
             db.flush()
             months_built = rebuild_monthly_snapshots(db, account.id)
@@ -4538,53 +4547,38 @@ async def reanchor_from_observation(account_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="No balance observations — sync first")
     old_balance = get_account_balance(db, account_id)
 
-    # Plaid's `current` balance lags 1-2 business days for checking/savings
-    # (credit cards are typically near real-time). The observed_at timestamp
-    # is when OUR sync ran, NOT when the balance was effective. We must set
-    # start_date to the date the Plaid balance actually corresponds to.
+    # ── Calibration approach ─────────────────────────────────────────────
+    # Instead of guessing which date the Plaid balance corresponds to
+    # (unreliable due to variable lag), we calibrate the offset:
     #
-    # Strategy: find the most recent transaction date on or before observed_at,
-    # then step back one day. Plaid's balance reflects the state AFTER the last
-    # fully-posted day's transactions.
+    #   starting_balance = plaid_balance − SUM(all transactions)
+    #   start_date = None  (legacy model — no date cutoff)
+    #
+    # This guarantees: computed = starting_balance + SUM(all txns) = plaid_balance
+    # As new transactions sync, they naturally increase the balance.
+    # On the next re-anchor/sync, we can recalibrate if needed.
     from sqlalchemy import func as _func
-    from datetime import timedelta, time as _time
 
-    last_txn_date = (
-        db.query(_func.max(_func.date(Transaction.date)))
-        .filter(
-            Transaction.account_id == account_id,
-            Transaction.date <= obs.observed_at,
-        )
-        .scalar()
+    total_txn_sum = (
+        db.query(_func.sum(Transaction.amount))
+        .filter(Transaction.account_id == account_id)
+        .scalar() or 0.0
     )
 
-    if last_txn_date:
-        # The Plaid balance typically doesn't include the very latest transactions.
-        # For checking/savings, step back 1 day from the last transaction date.
-        # For credit cards/loans, Plaid is more current — use last txn date.
-        acct_type = (account.account_type or '').lower()
-        is_liability = acct_type.startswith('credit') or acct_type in ('loan',)
-        lag_days = 0 if is_liability else 1
-        effective_date = last_txn_date - timedelta(days=lag_days)
-        anchor_dt = datetime.combine(effective_date, _time(23, 59, 59))
-    else:
-        anchor_dt = obs.observed_at
-
-    account.starting_balance = round(obs.plaid_balance, 4)
-    account.start_date = anchor_dt
+    account.starting_balance = round(obs.plaid_balance - total_txn_sum, 4)
+    account.start_date = None  # Legacy model — include ALL transactions
     db.flush()
     months_built = rebuild_monthly_snapshots(db, account_id)
     db.commit()
     new_balance = get_account_balance(db, account_id)
-    anchor_label = anchor_dt.strftime('%b %d, %Y')
     return {
         'account_name': account.account_name,
         'old_balance': old_balance,
         'new_balance': new_balance,
         'plaid_balance': obs.plaid_balance,
-        'anchor_date': anchor_dt.isoformat(),
+        'calibrated_offset': account.starting_balance,
         'months_rebuilt': months_built,
-        'message': f"Re-anchored to Plaid balance at EOD {anchor_label}",
+        'message': f"Calibrated to Plaid balance ${obs.plaid_balance:,.2f} (offset: ${account.starting_balance:,.4f})",
     }
 
 
