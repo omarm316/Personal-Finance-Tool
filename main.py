@@ -4517,20 +4517,54 @@ async def reanchor_from_observation(account_id: int, db: Session = Depends(get_d
     if not obs:
         raise HTTPException(status_code=404, detail="No balance observations — sync first")
     old_balance = get_account_balance(db, account_id)
+
+    # Plaid's `current` balance lags 1-2 business days for checking/savings
+    # (credit cards are typically near real-time). The observed_at timestamp
+    # is when OUR sync ran, NOT when the balance was effective. We must set
+    # start_date to the date the Plaid balance actually corresponds to.
+    #
+    # Strategy: find the most recent transaction date on or before observed_at,
+    # then step back one day. Plaid's balance reflects the state AFTER the last
+    # fully-posted day's transactions.
+    from sqlalchemy import func as _func
+    from datetime import timedelta, time as _time
+
+    last_txn_date = (
+        db.query(func.max(func.date(Transaction.date)))
+        .filter(
+            Transaction.account_id == account_id,
+            Transaction.date <= obs.observed_at,
+        )
+        .scalar()
+    )
+
+    if last_txn_date:
+        # The Plaid balance typically doesn't include the very latest transactions.
+        # For checking/savings, step back 1 day from the last transaction date.
+        # For credit cards/loans, Plaid is more current — use last txn date.
+        acct_type = (account.account_type or '').lower()
+        is_liability = acct_type.startswith('credit') or acct_type in ('loan',)
+        lag_days = 0 if is_liability else 1
+        effective_date = last_txn_date - timedelta(days=lag_days)
+        anchor_dt = datetime.combine(effective_date, _time(23, 59, 59))
+    else:
+        anchor_dt = obs.observed_at
+
     account.starting_balance = round(obs.plaid_balance, 4)
-    account.start_date = obs.observed_at
+    account.start_date = anchor_dt
     db.flush()
     months_built = rebuild_monthly_snapshots(db, account_id)
     db.commit()
     new_balance = get_account_balance(db, account_id)
+    anchor_label = anchor_dt.strftime('%b %d, %Y')
     return {
         'account_name': account.account_name,
         'old_balance': old_balance,
         'new_balance': new_balance,
         'plaid_balance': obs.plaid_balance,
-        'anchor_date': obs.observed_at.isoformat(),
+        'anchor_date': anchor_dt.isoformat(),
         'months_rebuilt': months_built,
-        'message': f"Re-anchored from Plaid observation ({obs.observed_at.strftime('%b %d %H:%M UTC')})",
+        'message': f"Re-anchored to Plaid balance at EOD {anchor_label}",
     }
 
 
