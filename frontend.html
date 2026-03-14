@@ -5438,7 +5438,7 @@ function LoansPage({toast}){
                 <td style={{fontFamily:'Inter',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
                 <td style={{fontSize:12}}>
                   {l.next_split?<span style={{fontFamily:'Inter'}}>
-                    {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)}{l.next_split.property_tax>0?` / ${fmt(l.next_split.property_tax)}`:''}{l.next_split.insurance>0?` / ${fmt(l.next_split.insurance)}`:''}
+                    {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)} / {fmt(l.next_split.property_tax||0)} / {fmt(l.next_split.insurance||0)}
                   </span>:<span style={{color:'var(--text-muted)'}}>—</span>}
                 </td>
                 <td style={{fontSize:12,color:'var(--text-muted)'}}>{l.remaining_term_months!=null?`${l.remaining_term_months} mo`:'—'}</td>
