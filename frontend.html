@@ -6018,8 +6018,89 @@ function CashFlowPage({toast}){
   );
 }
 
+/* ── Reconciliation Panel ──────────────────────────────────────────────── */
+function ReconciliationPanel({toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const load=async()=>{
+    setLoading(true);
+    try{const r=await apiFetch('/reconciliation');setData(r);}
+    catch(e){toast('Failed to load reconciliation data','error');}
+    finally{setLoading(false);}
+  };
+  useEffect(()=>{load();},[]);
+  if(loading)return<div style={{padding:40,textAlign:'center'}}><div className="spinner"/></div>;
+  if(!data||!data.accounts?.length)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No balance observations yet. Click <strong>Sync</strong> in the sidebar to record the first observations.</div>;
+  const fmtDt=(iso)=>{if(!iso)return'—';const d=new Date(iso);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});};
+  const driftColor=(d)=>{if(d==null)return'var(--text-muted)';const a=Math.abs(d);return a<0.02?'var(--green)':a<5?'#b45309':'var(--red)';};
+  const driftBadge=(d)=>{if(d==null)return'—';const a=Math.abs(d);return a<0.02?'✓ Matched':d>0?`+${fmt(d)} over`:`${fmt(a)} under`;};
+  return(
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div>
+          <h2 style={{fontSize:16,fontWeight:600,margin:0}}>Balance Reconciliation</h2>
+          <p style={{fontSize:12,color:'var(--text-muted)',margin:'4px 0 0'}}>Plaid-reported vs. transaction-derived balances. Observations are recorded every sync.</p>
+        </div>
+        <button className="btn btn-sm btn-secondary" onClick={load}>↻ Refresh</button>
+      </div>
+      <div className="table-wrap">
+        <table style={{fontSize:13}}>
+          <thead><tr>
+            <th>Account</th>
+            <th style={{textAlign:'right'}}>Plaid Balance</th>
+            <th style={{textAlign:'right'}}>Computed Balance</th>
+            <th style={{textAlign:'right'}}>Drift</th>
+            <th>Last Observed</th>
+            <th>Last Reconciled</th>
+            <th style={{textAlign:'center'}}>Observations</th>
+          </tr></thead>
+          <tbody>{data.accounts.map(a=>(
+            <tr key={a.account_id}>
+              <td style={{fontWeight:500}}>
+                {a.account_name}
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}</div>
+              </td>
+              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?fmt(a.latest.plaid_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?fmt(a.latest.computed_balance):'—'}</td>
+              <td style={{textAlign:'right',fontWeight:600,color:driftColor(a.latest?.delta)}}>
+                {a.latest?driftBadge(a.latest.delta):'—'}
+              </td>
+              <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.latest?fmtDt(a.latest.observed_at):'Never'}</td>
+              <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_reconciled?fmtDt(a.last_reconciled):'Never'}</td>
+              <td style={{textAlign:'center',color:'var(--text-muted)'}}>{a.observation_count}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {/* Drift history sparklines for accounts with drift */}
+      {data.accounts.filter(a=>a.drift_history?.length>1).map(a=>(
+        <div key={a.account_id} style={{marginTop:16,padding:12,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>{a.account_name} — Drift History</div>
+          <div style={{display:'flex',alignItems:'flex-end',gap:2,height:40}}>
+            {(()=>{
+              const pts=a.drift_history;
+              const maxD=Math.max(...pts.map(p=>Math.abs(p.delta||0)),0.01);
+              return pts.map((p,i)=>{
+                const h=Math.max(2,Math.abs(p.delta||0)/maxD*36);
+                const clr=(p.delta||0)===0?'var(--green)':(p.delta||0)>0?'#f59e0b':'#3b82f6';
+                return<div key={i} title={`${fmtDt(p.date)}: ${p.delta>0?'+':''}${p.delta?.toFixed(2)}`}
+                  style={{width:Math.max(4,Math.floor(300/pts.length)),height:h,background:clr,borderRadius:2,opacity:0.8}}/>;
+              });
+            })()}
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text-muted)',marginTop:4}}>
+            <span>{a.drift_history[0]?.date?.slice(0,10)}</span>
+            <span>{a.drift_history[a.drift_history.length-1]?.date?.slice(0,10)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ── Daily Balances Page ─────────────────────────────────────────────────── */
 function DailyBalancesPage({toast}){
+  const[tab,setTab]=useState('balances'); // 'balances' | 'reconciliation'
   const[data,setData]=useState(null);
   const[loading,setLoading]=useState(true);
   const[rangeMode,setRangeMode]=useState('month');
@@ -6081,6 +6162,13 @@ function DailyBalancesPage({toast}){
 
   return(
     <div>
+      {/* Tab bar */}
+      <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4,marginBottom:16,width:'fit-content'}}>
+        <button className={`btn btn-sm ${tab==='balances'?'btn-primary':'btn-ghost'}`} onClick={()=>setTab('balances')} style={{borderRadius:7}}>Daily Balances</button>
+        <button className={`btn btn-sm ${tab==='reconciliation'?'btn-primary':'btn-ghost'}`} onClick={()=>setTab('reconciliation')} style={{borderRadius:7}}>Reconciliation</button>
+      </div>
+
+      {tab==='reconciliation'?<ReconciliationPanel toast={toast}/>:<>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:8}}>
         <div><h2 style={{fontSize:18,fontWeight:600}}>Daily Balances</h2>
           <p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{numDays} days · end-of-day · italic = projected · <span style={{color:'#ca8a04'}}>◈</span> = click for detail</p>
@@ -6273,6 +6361,7 @@ function DailyBalancesPage({toast}){
         </div>
 
       </div>
+      </>}
     </div>
   );
 }
