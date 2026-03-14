@@ -336,6 +336,27 @@ class AccountMonthlySnapshot(Base):
     )
 
 
+class BalanceObservation(Base):
+    """
+    Plaid-reported balance snapshots captured every transaction sync.
+    Used as self-correcting anchors for daily balance calculations.
+    Each row records: what Plaid says, what we computed, and the drift.
+    """
+    __tablename__ = 'balance_observations'
+
+    id               = Column(Integer, primary_key=True)
+    account_id       = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    observed_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+    plaid_balance    = Column(Float, nullable=False)       # Signed (credit/loan negated)
+    computed_balance = Column(Float, nullable=True)        # Transaction-derived balance at observation time
+    delta            = Column(Float, nullable=True)        # plaid_balance - computed_balance
+    source           = Column(String(20), default='sync')  # 'sync', 'balance_sync', 'manual'
+
+    __table_args__ = (
+        Index('ix_balance_obs_account_observed', 'account_id', 'observed_at'),
+    )
+
+
 class BudgetTarget(Base):
     """
     Monthly budget targets per category (Section 4).
