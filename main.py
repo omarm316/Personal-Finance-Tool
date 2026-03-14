@@ -586,6 +586,15 @@ class AccountCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class ManualSplitItem(BaseModel):
+    """A single split row for a manual transaction."""
+    amount: float
+    description: Optional[str] = None
+    category: Optional[str] = None
+    action: Optional[str] = None
+    is_gcb: bool = False
+
+
 class ManualTransactionCreate(BaseModel):
     """Request body for manual value-change transactions (Section 2c)."""
     account_id: int
@@ -594,6 +603,8 @@ class ManualTransactionCreate(BaseModel):
     amount: float  # Caller is responsible for sign (positive or negative)
     description: str
     action: str = "Other"  # Purchase, Sale, Unrealized Gain/Loss, Transfer, Depreciation, Other
+    category: Optional[str] = None  # Category for unsplit transactions
+    splits: Optional[List[ManualSplitItem]] = None  # Optional split rows
 
 
 class BudgetTargetCreate(BaseModel):
@@ -4476,10 +4487,12 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
             description_raw=data.description,
             description_clean=data.description,
             action=data.action,
-            category_auto=data.action,  # Set category_auto = action for manual txns
+            category_auto=data.category or '',
+            category_manual=data.category or '',
             category_confidence=1.0,
             needs_review=False,
             is_locked=True,
+            import_source='manual',
             year=txn_date.year,
             month=txn_date.month,
             day=txn_date.day,
@@ -4487,6 +4500,21 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
         db.add(txn)
         db.flush()
         created_ids.append(txn.id)
+
+        # Create splits if provided
+        if data.splits and len(data.splits) > 1:
+            txn.is_split = True
+            for split_item in data.splits:
+                db.add(TransactionSplit(
+                    parent_transaction_id=txn.id,
+                    amount=split_item.amount,
+                    description=split_item.description or '',
+                    category=split_item.category or '',
+                    action=split_item.action or data.action,
+                    is_gcb=split_item.is_gcb,
+                ))
+            db.flush()
+
     db.commit()
     return {"ids": created_ids, "count": len(created_ids),
             "message": f"{len(created_ids)} manual transaction(s) created"}
