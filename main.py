@@ -199,17 +199,18 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     """
     Compute account balance at a given date (or now if not specified).
 
-    Priority 1 — Balance Observation (self-correcting anchor):
-      Uses the most recent Plaid-reported balance observation as anchor.
-      Recorded every sync cycle, so drift never compounds beyond ~24 hours.
-      balance = obs.plaid_balance + SUM(transactions after obs.observed_at)
-
-    Priority 2 — Monthly Snapshot model:
-      Uses the most recent completed-month snapshot (transaction-derived).
+    Priority 1 — Monthly Snapshot model (transaction-derived):
+      Uses the most recent completed-month snapshot as the anchor.
+      Immune to Plaid balance lag — purely based on actual transactions.
       balance = snapshot.closing_balance + SUM(transactions after snapshot month)
 
     Fallback — Anchor model / Legacy model:
       Uses account.starting_balance / start_date as anchor.
+
+    NOTE: Balance Observations are used for RECONCILIATION MONITORING only
+    (see /api/reconciliation), not for balance calculation. Plaid's reported
+    balance can lag 1-2 business days, which makes it unreliable as a
+    real-time anchor for high-volume accounts.
     """
     from sqlalchemy import func as _func
     import calendar as _cal
@@ -220,35 +221,7 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
 
     now = as_of_date if as_of_date else datetime.utcnow()
 
-    # ── Priority 1: most recent balance observation ───────────────────────────
-    # Plaid-reported balance captured at sync time. Self-correcting: every sync
-    # records a fresh anchor, so missing transactions only cause drift until the
-    # next sync, not forever.
-    obs = (
-        db.query(BalanceObservation)
-        .filter(BalanceObservation.account_id == account_id)
-        .order_by(BalanceObservation.observed_at.desc())
-        .first()
-    )
-    if obs:
-        if now >= obs.observed_at:
-            # Forward from observation: add transactions after observation
-            delta = db.query(_func.sum(Transaction.amount)).filter(
-                Transaction.account_id == account_id,
-                Transaction.date > obs.observed_at,
-                *([Transaction.date <= as_of_date] if as_of_date else []),
-            ).scalar() or 0.0
-            return round(obs.plaid_balance + delta, 2)
-        else:
-            # Backward from observation: subtract transactions between as_of and observation
-            backward_sum = db.query(_func.sum(Transaction.amount)).filter(
-                Transaction.account_id == account_id,
-                Transaction.date > as_of_date,
-                Transaction.date <= obs.observed_at,
-            ).scalar() or 0.0
-            return round(obs.plaid_balance - backward_sum, 2)
-
-    # ── Priority 2: most recent completed-month snapshot ──────────────────────
+    # ── Priority 1: most recent completed-month snapshot ──────────────────────
     ref_ym = now.year * 100 + now.month
     snap = (
         db.query(AccountMonthlySnapshot)
@@ -336,22 +309,7 @@ def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
         by_month[(t.date.year, t.date.month)] += t.amount
     db.query(AccountMonthlySnapshot).filter_by(account_id=account_id).delete(synchronize_session=False)
 
-    # Determine the anchor: prefer observation, then start_date, then legacy
-    obs = (
-        db.query(BalanceObservation)
-        .filter(BalanceObservation.account_id == account_id)
-        .order_by(BalanceObservation.observed_at.desc())
-        .first()
-    )
-    if obs:
-        # Observation anchor: derive "balance before any transaction" by subtracting
-        # all transactions up to observation time from the observed balance.
-        pre_obs_sum = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-            Transaction.date <= obs.observed_at,
-        ).scalar() or 0.0
-        running = round(obs.plaid_balance - pre_obs_sum, 4)
-    elif account.start_date:
+    if account.start_date:
         # Anchor model: starting_balance = Plaid balance AT start_date.
         pre_anchor_sum = db.query(_func.sum(Transaction.amount)).filter(
             Transaction.account_id == account_id,
@@ -4539,6 +4497,44 @@ async def get_reconciliation_data(db: Session = Depends(get_db)):
     return {'accounts': result}
 
 
+@app.post("/api/reconciliation/{account_id}/reanchor")
+async def reanchor_from_observation(account_id: int, db: Session = Depends(get_db)):
+    """
+    Re-anchor an account's balance from the most recent Plaid observation.
+    This corrects accumulated drift by resetting the anchor to Plaid's
+    reported balance, then rebuilding all monthly snapshots.
+
+    Use when the reconciliation panel shows significant drift for an account.
+    """
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    obs = (
+        db.query(BalanceObservation)
+        .filter_by(account_id=account_id)
+        .order_by(BalanceObservation.observed_at.desc())
+        .first()
+    )
+    if not obs:
+        raise HTTPException(status_code=404, detail="No balance observations — sync first")
+    old_balance = get_account_balance(db, account_id)
+    account.starting_balance = round(obs.plaid_balance, 4)
+    account.start_date = obs.observed_at
+    db.flush()
+    months_built = rebuild_monthly_snapshots(db, account_id)
+    db.commit()
+    new_balance = get_account_balance(db, account_id)
+    return {
+        'account_name': account.account_name,
+        'old_balance': old_balance,
+        'new_balance': new_balance,
+        'plaid_balance': obs.plaid_balance,
+        'anchor_date': obs.observed_at.isoformat(),
+        'months_rebuilt': months_built,
+        'message': f"Re-anchored from Plaid observation ({obs.observed_at.strftime('%b %d %H:%M UTC')})",
+    }
+
+
 @app.get("/api/balances/monthly")
 async def get_monthly_balances(months: int = 24, db: Session = Depends(get_db)):
     """
@@ -6089,19 +6085,8 @@ async def get_daily_balances(
     acct_balances = {}  # {account_id: [float per day]}
 
     for acct in accounts:
-        # ── Determine best anchor: observation > legacy ───────────────────
-        obs = (
-            db.query(BalanceObservation)
-            .filter(BalanceObservation.account_id == acct.id)
-            .order_by(BalanceObservation.observed_at.desc())
-            .first()
-        )
-        if obs:
-            anchor_balance = obs.plaid_balance
-            anchor_date = obs.observed_at.date()
-        else:
-            anchor_balance = acct.starting_balance or 0.0
-            anchor_date = acct.start_date.date() if acct.start_date else date(2000, 1, 1)
+        anchor_balance = acct.starting_balance or 0.0
+        anchor_date = acct.start_date.date() if acct.start_date else date(2000, 1, 1)
         range_start_dt = datetime.combine(start_dt, datetime.min.time())
         range_end_dt = datetime.combine(end_dt, datetime.max.time())
         # Use end-of-day for anchor so transactions ON anchor_date are considered

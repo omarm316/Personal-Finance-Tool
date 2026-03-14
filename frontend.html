@@ -6053,6 +6053,7 @@ function ReconciliationPanel({toast}){
             <th>Last Observed</th>
             <th>Last Reconciled</th>
             <th style={{textAlign:'center'}}>Observations</th>
+            <th></th>
           </tr></thead>
           <tbody>{data.accounts.map(a=>(
             <tr key={a.account_id}>
@@ -6068,6 +6069,14 @@ function ReconciliationPanel({toast}){
               <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.latest?fmtDt(a.latest.observed_at):'Never'}</td>
               <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_reconciled?fmtDt(a.last_reconciled):'Never'}</td>
               <td style={{textAlign:'center',color:'var(--text-muted)'}}>{a.observation_count}</td>
+              <td>{a.latest&&Math.abs(a.latest.delta)>=0.02&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px',color:'var(--blue)'}}
+                onClick={async()=>{
+                  try{
+                    const r=await apiFetch(`/reconciliation/${a.account_id}/reanchor`,{method:'POST'});
+                    toast(`${a.account_name}: re-anchored from Plaid (${r.old_balance?.toFixed(2)} → ${r.new_balance?.toFixed(2)})`);
+                    load();
+                  }catch(e){toast('Re-anchor failed: '+e.message,'error');}
+                }}>Re-anchor</button>}</td>
             </tr>
           ))}</tbody>
         </table>
