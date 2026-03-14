@@ -443,6 +443,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   const[editing,setEditing]=useState(false);
   const[category,setCategory]=useState(txn.category_final);
   const[action,setAction]=useState(txn.action);
+  const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||txn.description_raw||'');
   const[saving,setSaving]=useState(false);
   const[expanded,setExpanded]=useState(false);
   /* Transaction info modal */
@@ -463,7 +464,9 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   const[cm,setCm]=useState(null);
   const isLlmSource=txn.enrichment_source==='llm'||txn.enrichment_source==='override';
   const save=async()=>{
-    setSaving(true);await onSave(txn.id,{category,action,needs_review:false});setLocked(true);setSaving(false);setEditing(false);
+    const updates={category,action,needs_review:false};
+    if(descClean!==(txn.description_clean||txn.description_display||txn.description_raw||''))updates.description_clean=descClean;
+    setSaving(true);await onSave(txn.id,updates);setLocked(true);setSaving(false);setEditing(false);
     /* Only offer rule creation when enrichment came from LLM (not already a rule) */
     if(isLlmSource&&category&&category!=='Unclassified')setShowRulePrompt(true);
   };
@@ -490,7 +493,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
     }catch(e){toast&&toast('Failed to create rule: '+e.message,'error');}
     finally{setRuleSaving(false);setShowQuickRule(false);}
   };
-  const cancel=()=>{setCategory(txn.category_final);setAction(txn.action);setEditing(false);};
+  const cancel=()=>{setCategory(txn.category_final);setAction(txn.action);setDescClean(txn.description_clean||txn.description_display||txn.description_raw||'');setEditing(false);};
   const toggleLock=async()=>{const nl=!locked;await onSave(txn.id,{is_locked:nl});setLocked(nl);};
   const toggleExclude=async()=>{const ne=!excluded;await onSave(txn.id,{is_excluded:ne});setExcluded(ne);};
   const amtClass=txn.action==='Transfer'?'amount-neutral':txn.amount<0?'amount-neg':'amount-pos';
@@ -509,7 +512,12 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
         </div>
       </td>
       <td>
-        <div style={{fontWeight:500,fontSize:13.5}}>{txn.description_display||txn.description_raw}</div>
+        {editing
+          ?<input value={descClean} onChange={e=>setDescClean(e.target.value)} className="form-input"
+            style={{fontSize:13,padding:'4px 8px',width:'100%',boxSizing:'border-box'}}
+            placeholder="Display name"/>
+          :<div style={{fontWeight:500,fontSize:13.5}}>{txn.description_display||txn.description_raw}</div>
+        }
         <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2,flexWrap:'wrap'}}>
           {locked&&<span title="Manually edited — protected from sync">🔒</span>}
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
