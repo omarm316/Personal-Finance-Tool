@@ -4530,7 +4530,7 @@ async def reanchor_from_observation(account_id: int, db: Session = Depends(get_d
     from datetime import timedelta, time as _time
 
     last_txn_date = (
-        db.query(func.max(func.date(Transaction.date)))
+        db.query(_func.max(_func.date(Transaction.date)))
         .filter(
             Transaction.account_id == account_id,
             Transaction.date <= obs.observed_at,
