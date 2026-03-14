@@ -199,81 +199,60 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
     """
     Compute account balance at a given date (or now if not specified).
 
-    Priority 1 — Monthly Snapshot model (transaction-derived):
-      Uses the most recent completed-month snapshot as the anchor.
-      Immune to Plaid balance lag — purely based on actual transactions.
-      balance = snapshot.closing_balance + SUM(transactions after snapshot month)
+    Uses the same anchor model as get_daily_balances() to ensure consistency:
+      anchor_balance + SUM(transactions from anchor_date through as_of_date)
 
-    Fallback — Anchor model / Legacy model:
-      Uses account.starting_balance / start_date as anchor.
+    Anchor model (start_date is set):
+      starting_balance = Plaid balance AT start_date (end of that day).
+      Transactions AFTER start_date are accumulated forward.
 
-    NOTE: Balance Observations are used for RECONCILIATION MONITORING only
-    (see /api/reconciliation), not for balance calculation. Plaid's reported
-    balance can lag 1-2 business days, which makes it unreliable as a
-    real-time anchor for high-volume accounts.
+    Legacy model (start_date is None):
+      starting_balance is a pre-all-transactions offset.
+      ALL transactions are accumulated forward.
+
+    NOTE: Monthly snapshots are used for charting and historical analysis only.
+    Balance Observations are used for RECONCILIATION MONITORING only.
     """
     from sqlalchemy import func as _func
-    import calendar as _cal
 
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         return 0.0
 
-    now = as_of_date if as_of_date else datetime.utcnow()
-
-    # ── Priority 1: most recent completed-month snapshot ──────────────────────
-    ref_ym = now.year * 100 + now.month
-    snap = (
-        db.query(AccountMonthlySnapshot)
-        .filter(
-            AccountMonthlySnapshot.account_id == account_id,
-            (AccountMonthlySnapshot.year * 100 + AccountMonthlySnapshot.month) < ref_ym,
-        )
-        .order_by(
-            (AccountMonthlySnapshot.year * 100 + AccountMonthlySnapshot.month).desc()
-        )
-        .first()
-    )
-    if snap:
-        last_day = _cal.monthrange(snap.year, snap.month)[1]
-        snap_end_dt = datetime(snap.year, snap.month, last_day, 23, 59, 59)
-        delta_q = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-            Transaction.date > snap_end_dt,
-        )
-        if as_of_date:
-            delta_q = delta_q.filter(Transaction.date <= as_of_date)
-        delta = delta_q.scalar() or 0.0
-        return round(snap.closing_balance + delta, 2)
-
-    # ── Fallback: original anchor / legacy model ──────────────────────────────
     anchor = account.starting_balance or 0.0
     anchor_dt = account.start_date
 
     if anchor_dt is None:
         # Legacy: starting_balance = pre-all-transactions offset
-        query = db.query(Transaction).filter(Transaction.account_id == account_id)
-        if as_of_date:
-            query = query.filter(Transaction.date <= as_of_date)
-        return round(anchor + sum(t.amount for t in query.all()), 2)
-
-    # Anchor model
-    as_of_cmp = as_of_date if as_of_date else datetime.utcnow()
-    if as_of_cmp >= anchor_dt:
-        query = db.query(Transaction).filter(
+        q = db.query(_func.sum(Transaction.amount)).filter(
             Transaction.account_id == account_id,
-            Transaction.date > anchor_dt,
         )
         if as_of_date:
-            query = query.filter(Transaction.date <= as_of_date)
-        return round(anchor + sum(t.amount for t in query.all()), 2)
+            q = q.filter(Transaction.date <= as_of_date)
+        return round(anchor + (q.scalar() or 0.0), 2)
+
+    # Anchor model: starting_balance = Plaid balance at end of start_date
+    anchor_eod = datetime.combine(anchor_dt.date() if hasattr(anchor_dt, 'date') else anchor_dt,
+                                   datetime.max.time())
+    as_of_cmp = as_of_date if as_of_date else datetime.utcnow()
+
+    if as_of_cmp >= anchor_eod:
+        # Normal: accumulate transactions after anchor through as_of
+        q = db.query(_func.sum(Transaction.amount)).filter(
+            Transaction.account_id == account_id,
+            Transaction.date > anchor_eod,
+        )
+        if as_of_date:
+            q = q.filter(Transaction.date <= as_of_date)
+        return round(anchor + (q.scalar() or 0.0), 2)
     else:
-        txn_sum = sum(t.amount for t in db.query(Transaction).filter(
+        # as_of is before anchor: walk backward
+        q = db.query(_func.sum(Transaction.amount)).filter(
             Transaction.account_id == account_id,
             Transaction.date > as_of_date,
-            Transaction.date <= anchor_dt,
-        ).all())
-        return round(anchor - txn_sum, 2)
+            Transaction.date <= anchor_eod,
+        )
+        return round(anchor - (q.scalar() or 0.0), 2)
 
 
 # ---------------------------------------------------------------------------
