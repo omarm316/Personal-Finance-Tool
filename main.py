@@ -5269,12 +5269,16 @@ async def update_loan(loan_id: int, updates: dict, db: Session = Depends(get_db)
                'start_date', 'maturity_date', 'account_id', 'notes', 'is_active']
     _int_fields = ('payment_account_id', 'payment_due_day', 'remaining_term_months',
                    'term_months', 'account_id')
+    _float_fields = ('original_principal', 'current_balance', 'interest_rate',
+                      'monthly_payment', 'property_tax_monthly', 'insurance_monthly')
     for k, v in updates.items():
         if k in allowed:
-            if k in _date_fields and v:
-                setattr(loan, k, datetime.strptime(v, "%Y-%m-%d"))
+            if k in _date_fields:
+                setattr(loan, k, datetime.strptime(v, "%Y-%m-%d") if v else None)
             elif k in _int_fields:
                 setattr(loan, k, int(v) if v not in (None, '', 'null') else None)
+            elif k in _float_fields:
+                setattr(loan, k, float(v) if v not in (None, '', 'null') else None)
             else:
                 setattr(loan, k, v)
     loan.updated_at = datetime.utcnow()
