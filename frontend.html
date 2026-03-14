@@ -6061,8 +6061,8 @@ function ReconciliationPanel({toast}){
                 {a.account_name}
                 <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}</div>
               </td>
-              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?fmt(a.latest.plaid_balance):'—'}</td>
-              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?fmt(a.latest.computed_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?(a.latest.plaid_balance<0?'−':'')+fmt(a.latest.plaid_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Inter'}}>{a.latest?(a.latest.computed_balance<0?'−':'')+fmt(a.latest.computed_balance):'—'}</td>
               <td style={{textAlign:'right',fontWeight:600,color:driftColor(a.latest?.delta)}}>
                 {a.latest?driftBadge(a.latest.delta):'—'}
               </td>

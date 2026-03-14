@@ -285,7 +285,8 @@ def _sign_plaid_balance(raw: Optional[float], account_type_str: str) -> Optional
     if raw is None:
         return None
     t = (account_type_str or '').lower().strip()
-    return -raw if t in ('credit', 'loan') else raw
+    # Match both Plaid type ("credit") and stored subtype ("credit card")
+    return -raw if t.startswith('credit') or t in ('loan',) else raw
 
 
 def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
@@ -636,6 +637,25 @@ async def startup_event():
                 print("No Excel file found — run /api/init/import-rules manually")
         else:
             print(f"Rules loaded: {rule_count} active rules")
+
+        # One-time fix: correct balance observations for credit/loan accounts
+        # where plaid_balance was stored with wrong sign (positive instead of negative)
+        _credit_accts = session.query(Account).filter(
+            Account.account_type.in_(['credit card', 'credit', 'loan'])
+        ).all()
+        _fixed = 0
+        for _ca in _credit_accts:
+            _bad_obs = session.query(BalanceObservation).filter(
+                BalanceObservation.account_id == _ca.id,
+                BalanceObservation.plaid_balance > 0,
+            ).all()
+            for _ob in _bad_obs:
+                _ob.plaid_balance = -abs(_ob.plaid_balance)
+                _ob.delta = round(_ob.plaid_balance - (_ob.computed_balance or 0), 2)
+                _fixed += 1
+        if _fixed:
+            session.commit()
+            print(f"Fixed {_fixed} balance observations with wrong sign for credit/loan accounts")
 
         print("Database initialized")
         client_id = os.getenv("PLAID_CLIENT_ID")
