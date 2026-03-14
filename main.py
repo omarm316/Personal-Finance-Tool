@@ -589,7 +589,8 @@ class AccountCreate(BaseModel):
 class ManualTransactionCreate(BaseModel):
     """Request body for manual value-change transactions (Section 2c)."""
     account_id: int
-    date: str  # YYYY-MM-DD
+    date: Optional[str] = None  # YYYY-MM-DD (single date — legacy)
+    dates: Optional[List[str]] = None  # YYYY-MM-DD list (multi-date)
     amount: float  # Caller is responsible for sign (positive or negative)
     description: str
     action: str = "Other"  # Purchase, Sale, Unrealized Gain/Loss, Transfer, Depreciation, Other
@@ -4459,27 +4460,36 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    txn_date = datetime.strptime(data.date, "%Y-%m-%d")
+    # Support both single date (legacy) and multi-date
+    date_strings = data.dates if data.dates else ([data.date] if data.date else [])
+    if not date_strings:
+        raise HTTPException(status_code=400, detail="At least one date is required")
 
-    txn = Transaction(
-        plaid_transaction_id=None,
-        account_id=account.id,
-        date=txn_date,
-        amount=data.amount,  # Caller controls the sign
-        description_raw=data.description,
-        description_clean=data.description,
-        action=data.action,
-        category_auto=data.action,  # Set category_auto = action for manual txns
-        category_confidence=1.0,
-        needs_review=False,
-        is_locked=True,
-        year=txn_date.year,
-        month=txn_date.month,
-        day=txn_date.day,
-    )
-    db.add(txn)
+    created_ids = []
+    for ds in date_strings:
+        txn_date = datetime.strptime(ds, "%Y-%m-%d")
+        txn = Transaction(
+            plaid_transaction_id=None,
+            account_id=account.id,
+            date=txn_date,
+            amount=data.amount,  # Caller controls the sign
+            description_raw=data.description,
+            description_clean=data.description,
+            action=data.action,
+            category_auto=data.action,  # Set category_auto = action for manual txns
+            category_confidence=1.0,
+            needs_review=False,
+            is_locked=True,
+            year=txn_date.year,
+            month=txn_date.month,
+            day=txn_date.day,
+        )
+        db.add(txn)
+        db.flush()
+        created_ids.append(txn.id)
     db.commit()
-    return {"id": txn.id, "message": "Manual transaction created"}
+    return {"ids": created_ids, "count": len(created_ids),
+            "message": f"{len(created_ids)} manual transaction(s) created"}
 
 
 

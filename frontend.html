@@ -788,17 +788,23 @@ function ManualTransactionModal({accounts,onClose,onSaved,toast}){
   const[accountId,setAccountId]=useState(accounts[0]?.id||'');
   const[saving,setSaving]=useState(false);
   const[error,setError]=useState('');
+  const[dates,setDates]=useState([date]);
   /* Use the same canonical list as the filter dropdown and everywhere else */
   const actions=TXN_TYPES;
+  const addDate=()=>setDates(d=>[...d,'']);
+  const removeDate=i=>setDates(d=>d.filter((_,idx)=>idx!==i));
+  const updateDate=(i,v)=>setDates(d=>{const n=[...d];n[i]=v;return n;});
   const handleSave=async()=>{
+    const validDates=dates.filter(d=>d);
     if(!desc||!amount||!accountId){setError('Fill all required fields');return;}
+    if(!validDates.length){setError('At least one date is required');return;}
     setSaving(true);setError('');
     try{
       /* Amount sign is caller-controlled: negative = outflow, positive = inflow */
       await apiFetch('/transactions/manual',{method:'POST',body:JSON.stringify({
-        date,description:desc,amount:parseFloat(amount),action,account_id:parseInt(accountId)
+        dates:validDates,description:desc,amount:parseFloat(amount),action,account_id:parseInt(accountId)
       })});
-      toast('Manual transaction added');onSaved();onClose();
+      toast(`${validDates.length} manual transaction${validDates.length>1?'s':''} added`);onSaved();onClose();
     }catch(e){setError('Failed to save transaction');}
     finally{setSaving(false);}
   };
@@ -812,7 +818,16 @@ function ManualTransactionModal({accounts,onClose,onSaved,toast}){
             {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
           </select>
         </div>
-        <div className="review-field"><label>Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+        <div className="review-field">
+          <label>Date(s) <span style={{fontWeight:400,color:'var(--text-muted)',fontSize:12}}>— add multiple for recurring</span></label>
+          {dates.map((d,i)=>(
+            <div key={i} style={{display:'flex',gap:6,alignItems:'center',marginBottom:i<dates.length-1?6:0}}>
+              <input type="date" value={d} onChange={e=>updateDate(i,e.target.value)} style={{flex:1}}/>
+              {dates.length>1&&<button className="btn btn-sm btn-ghost" style={{color:'var(--red)',padding:'2px 6px',fontSize:14}} onClick={()=>removeDate(i)}>×</button>}
+            </div>
+          ))}
+          <button className="btn btn-sm btn-ghost" style={{marginTop:6,fontSize:12,color:'var(--blue)'}} onClick={addDate}>+ Add date</button>
+        </div>
         <div className="review-field"><label>Description *</label><input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="e.g. Home value update, Loan payment"/></div>
         <div className="review-field"><label>Amount * (negative = outflow)</label><input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="-500.00 or 1000.00"/></div>
         <div className="review-field"><label>Action</label>
@@ -822,7 +837,7 @@ function ManualTransactionModal({accounts,onClose,onSaved,toast}){
         </div>
         <div className="review-actions">
           <button className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving}>{saving?'…':'✓ Save'}</button>
+          <button className="btn btn-sm btn-success" onClick={handleSave} disabled={saving}>{saving?'…':`✓ Save${dates.length>1?` (${dates.filter(d=>d).length})`:''}`}</button>
         </div>
       </div>
     </div>
