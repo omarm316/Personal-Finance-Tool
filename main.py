@@ -3607,26 +3607,33 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
         'description': t.description_clean or t.description_raw,
         'amount': t.amount,
-        'category': t.category_final, 'action': t.action,
+        'category': t.category_manual or t.category_auto, 'action': t.action,
     } for t in txns]
 
-    # Spending by category
+    # Spending by category — use COALESCE(category_manual, category_auto) in SQL
+    # (category_final is a Python property, not a real column)
+    from sqlalchemy import case as _case
+    cat_col = _case(
+        (Transaction.category_manual != None, Transaction.category_manual),
+        else_=Transaction.category_auto,
+    )
     cat_spend = (
         db.query(
-            Transaction.category_final,
+            cat_col.label('cat'),
             _func.sum(Transaction.amount),
             _func.count(Transaction.id),
         )
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
-            Transaction.amount < 0,
+            Transaction.amount > 0,
+            Transaction.action == 'Expense',
         )
-        .group_by(Transaction.category_final)
+        .group_by(cat_col)
         .all()
     )
     for cat_name, total, count in cat_spend:
-        amt = abs(total or 0)
+        amt = round(total or 0, 2)
         rate = base_rate
         for es in earning_structure:
             if es['category'].lower() == (cat_name or '').lower():
@@ -3652,7 +3659,8 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
-            Transaction.amount < 0,
+            Transaction.amount > 0,
+            Transaction.action == 'Expense',
         )
         .group_by('yr', 'mo').order_by('yr', 'mo').all()
     )
