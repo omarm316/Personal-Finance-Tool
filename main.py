@@ -268,6 +268,11 @@ _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     ("domino",           "Dining"),
     ("five guys",        "Dining"),
     ("sweetgreen",       "Dining"),
+    ("chill bros",       "Dining"),    # ice cream
+    ("kilwin",           "Dining"),    # Kilwin's ice cream & candy
+    ("stix restaurant",  "Dining"),
+    # ── Spa & Salon ───────────────────────────────────────────────────────
+    ("hudson cuts",      "Spa & Salon"),   # barbershop
     # ── Food delivery variants ────────────────────────────────────────────
     ("doordasan",        "Food Delivery"),  # Plaid normalization of DoorDash
     # ── Ground transportation ─────────────────────────────────────────────
@@ -277,7 +282,8 @@ _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     ("ezpass",           "Ground Transportation"),
     ("paybyphone",       "Ground Transportation"),   # parking app
     ("parkmobile",       "Ground Transportation"),   # parking app
-    ("mta ",             "Ground Transportation"),   # NYC subway/bus (trailing space avoids false matches)
+    ("mta",              "Ground Transportation"),   # NYC/NJ Transit Authority
+    ("pay parking by phone", "Ground Transportation"),  # alternate Plaid normalization of PayByPhone
     ("las olas",         "Ground Transportation"),   # Las Olas parking, Fort Lauderdale
     # ── Car rental ────────────────────────────────────────────────────────
     ("sixt",             "Car Rental"),
