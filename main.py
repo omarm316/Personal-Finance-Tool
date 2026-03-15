@@ -642,8 +642,20 @@ async def startup_event():
             print(f"Rules loaded: {rule_count} active rules")
 
         # Seed points ecosystems and card products
-        seed_points_ecosystems(session)
-        seed_card_products(session)
+        try:
+            seed_points_ecosystems(session)
+            print("Ecosystems seeded OK")
+        except Exception as eco_err:
+            session.rollback()
+            print(f"WARNING: seed_points_ecosystems failed: {eco_err}")
+        try:
+            seed_card_products(session)
+            print("Card products seeded OK")
+        except Exception as prod_err:
+            session.rollback()
+            print(f"WARNING: seed_card_products failed: {prod_err}")
+            import traceback
+            traceback.print_exc()
 
         # Product catalog is seeded by seed_card_products() above — no Excel import needed
 
