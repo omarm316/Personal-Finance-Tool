@@ -724,6 +724,39 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               <span style={{fontWeight:600}}>Manual override: </span><span>{txn.category_manual}</span>
             </div>
           )}
+          {/* Points earn */}
+          {txn.points_earn&&(
+            <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:'12px 14px'}}>
+              <div style={{fontSize:11,fontWeight:600,color:'#15803d',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Points Earn</div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                  {/* Category breadcrumb: show L2 → L1 if applicable, else just L1 */}
+                  {txn.points_earn.points_category?(
+                    <span style={{display:'flex',alignItems:'center',gap:4}}>
+                      {txn.points_earn.points_category_l1&&(
+                        <>
+                          <span style={{fontSize:12,color:'#15803d',background:'#dcfce7',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category_l1}</span>
+                          <span style={{fontSize:11,color:'#86efac'}}>›</span>
+                        </>
+                      )}
+                      <span style={{fontSize:12,fontWeight:600,color:'#15803d',background:'#dcfce7',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category}</span>
+                    </span>
+                  ):(
+                    <span style={{fontSize:12,color:'#86efac',fontStyle:'italic'}}>Base rate</span>
+                  )}
+                  <span style={{fontSize:13,fontWeight:700,color:'#15803d'}}>{txn.points_earn.earn_rate}x</span>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:18,fontWeight:700,color:'#15803d'}}>
+                    {txn.points_earn.points_estimated.toLocaleString(undefined,{maximumFractionDigits:0})} pts
+                  </div>
+                  <div style={{fontSize:11,color:'#22c55e'}}>
+                    ≈ ${(txn.points_earn.points_estimated*txn.points_earn.cpp/100).toFixed(2)} value · {txn.points_earn.currency}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Flags */}
           {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -3872,11 +3905,20 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         {(d.recent_transactions||[]).length===0
           ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions</div>
           :<div>{d.recent_transactions.map(t=>(
-            <div key={t.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
-              <span style={{fontSize:12,color:'var(--text-muted)',fontFamily:'Inter',width:80,flexShrink:0}}>{t.date}</span>
-              <span style={{flex:1,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</span>
-              {t.category&&<span style={{fontSize:10,padding:'2px 8px',background:'#f3f4f6',borderRadius:10,color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{t.category}</span>}
-              <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+            <div key={t.id} style={{padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <span style={{fontSize:12,color:'var(--text-muted)',fontFamily:'Inter',width:80,flexShrink:0}}>{t.date}</span>
+                <span style={{flex:1,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</span>
+                {t.category&&<span style={{fontSize:10,padding:'2px 8px',background:'#f3f4f6',borderRadius:10,color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{t.category}</span>}
+                <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
+              </div>
+              {t.points_category&&t.earn_rate&&(
+                <div style={{display:'flex',alignItems:'center',gap:6,marginTop:3,paddingLeft:90}}>
+                  <span style={{fontSize:10,color:'#16a34a',background:'#dcfce7',borderRadius:4,padding:'1px 6px'}}>{t.points_category}</span>
+                  <span style={{fontSize:10,color:'#16a34a',fontWeight:600}}>{t.earn_rate}x</span>
+                  <span style={{fontSize:10,color:'#86efac'}}>· ~{Math.round(Math.abs(t.amount||0)*t.earn_rate)} pts</span>
+                </div>
+              )}
             </div>
           ))}</div>
         }

@@ -689,6 +689,8 @@ class TransactionResponse(BaseModel):
     is_split: bool = False
     is_excluded: bool = False
     points_category: Optional[str] = None
+    # Points earn summary — None when card/product is unknown or txn isn't an expense
+    points_earn: Optional[dict] = None
     account_name: str
     account_id: int = 0
     account_type: Optional[str] = None
@@ -2678,7 +2680,65 @@ def _best_description(raw: str, stored_clean, enrichment_source=None, categorize
     return raw
 
 
-def _serialize_txn(t, splits_map=None, categorizer=None):
+def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
+    """
+    Pre-build the data structures needed to compute earn rates for a batch of
+    transactions without N+1 queries.
+
+    Returns:
+      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name)}
+                       where bonus_by_name = {category_name: additional_multiplier}
+      cat_parent_map : {category_name: parent_key}  — for the L2→L1 waterfall
+    """
+    cat_parent_map = {c.name: c.parent_key for c in db.query(PointsCategory).all()}
+
+    if not account_ids:
+        return {}, cat_parent_map
+
+    cards = db.query(Card).filter(Card.account_id.in_(account_ids)).all()
+    acct_to_card = {c.account_id: c for c in cards}
+
+    product_ids = [c.product_id for c in cards if c.product_id]
+    if not product_ids:
+        return {}, cat_parent_map
+
+    products   = {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(product_ids)).all()}
+    eco_ids    = [p.ecosystem_id for p in products.values() if p.ecosystem_id]
+    ecosystems = {e.id: e for e in db.query(PointsEcosystem).filter(PointsEcosystem.id.in_(eco_ids)).all()}
+
+    all_rewards = db.query(CardProductReward)\
+        .filter(CardProductReward.product_id.in_(product_ids)).all()
+    rewards_by_product: dict[int, list] = {}
+    for r in all_rewards:
+        rewards_by_product.setdefault(r.product_id, []).append(r)
+
+    points_lookup: dict[int, tuple] = {}
+    for acct_id, card in acct_to_card.items():
+        if not card.product_id:
+            continue
+        product = products.get(card.product_id)
+        if not product:
+            continue
+        eco     = ecosystems.get(product.ecosystem_id) if product.ecosystem_id else None
+        rewards = rewards_by_product.get(card.product_id, [])
+        base    = next((r.multiplier for r in rewards if r.is_base_rate), 1.0)
+        bonus_by_name = {
+            r.points_category.name: r.multiplier
+            for r in rewards
+            if not r.is_base_rate and r.points_category
+        }
+        points_lookup[acct_id] = (
+            base,
+            bonus_by_name,
+            eco.currency_name if eco else 'Points',
+            eco.name if eco else None,
+            eco.your_cpp if eco else 1.0,
+        )
+
+    return points_lookup, cat_parent_map
+
+
+def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat_parent_map=None):
     """Serialize a Transaction with inline splits and computed display fields."""
     splits = splits_map.get(t.id, []) if splits_map else []
     is_split = bool(t.is_split or False)
@@ -2698,6 +2758,24 @@ def _serialize_txn(t, splits_map=None, categorizer=None):
         enrichment_source=t.enrichment_source,
         categorizer=categorizer
     )
+
+    # Points earn — only computed for expenses where we know the card's product
+    points_earn = None
+    if (points_lookup is not None and cat_parent_map is not None
+            and t.action == 'Expense' and t.account_id in points_lookup):
+        base, bonus_by_name, currency, eco_name, your_cpp = points_lookup[t.account_id]
+        rate   = calc_earn_rate(bonus_by_name, base, t.points_category, cat_parent_map)
+        parent = cat_parent_map.get(t.points_category) if t.points_category else None
+        pts    = round(abs(t.amount) * rate, 1)
+        points_earn = {
+            'points_category':    t.points_category,       # e.g. "Drugstore" or "United"
+            'points_category_l1': parent,                  # e.g. None or "Airlines"
+            'earn_rate':          rate,                    # total multiplier, e.g. 3.0
+            'points_estimated':   pts,                     # e.g. 29.1
+            'currency':           currency,                # e.g. "Ultimate Rewards"
+            'eco_name':           eco_name,
+            'cpp':                your_cpp,                # for value estimate in UI
+        }
 
     return {
         "id": t.id, "date": t.date,
@@ -2722,6 +2800,7 @@ def _serialize_txn(t, splits_map=None, categorizer=None):
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,
+        "points_earn":     points_earn,
         "enrichment_source": t.enrichment_source,
         "import_source": t.import_source or ('plaid' if t.plaid_transaction_id else None),
         "import_hash": t.import_hash,
@@ -2771,7 +2850,9 @@ async def get_transactions(
             splits_map.setdefault(s.parent_transaction_id, []).append(s)
 
     categorizer = CategorizationEngine(db)
-    return [_serialize_txn(t, splits_map, categorizer) for t in txns]
+    account_ids = list({t.account_id for t in txns})
+    points_lookup, cat_parent_map = _build_points_lookup(db, account_ids)
+    return [_serialize_txn(t, splits_map, categorizer, points_lookup, cat_parent_map) for t in txns]
 
 
 # ---------------------------------------------------------------------------
@@ -2785,7 +2866,8 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Transaction not found")
     splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all() if t.is_split else []
     categorizer = CategorizationEngine(db)
-    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer)
+    points_lookup, cat_parent_map = _build_points_lookup(db, [t.account_id])
+    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer, points_lookup, cat_parent_map)
 
 
 # ---------------------------------------------------------------------------
