@@ -380,13 +380,22 @@ class BudgetTarget(Base):
 
 
 class PointsCategory(Base):
-    """Universal points/miles earning categories based on card issuer classification"""
+    """Universal points/miles earning categories based on card issuer classification.
+
+    Two-level hierarchy for points calculation:
+      L1 (broad)  — Airlines, Hotels, Dining, etc.  parent_key = None
+      L2 (brand)  — United, Hilton, Best Buy, etc.  parent_key = L1 name
+
+    Earn-rate waterfall: try L2 rate first, fall back to L1, fall back to base.
+    """
     __tablename__ = 'points_categories'
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False)
     display_order = Column(Integer, default=100)
     is_active = Column(Boolean, default=True)
+    # L1/L2 hierarchy — stores the parent category's name (e.g. "Airlines" for "United")
+    parent_key = Column(String(100), nullable=True, index=True)
 
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="points_category")
 
@@ -787,6 +796,9 @@ def run_migrations(engine):
             ('eco_type',           'VARCHAR(20)'),
             ('conservative_basis', 'VARCHAR(200)'),
         ],
+        'points_categories': [
+            ('parent_key', 'VARCHAR(100)'),
+        ],
     }
 
     if _is_sqlite(engine):
@@ -1066,38 +1078,63 @@ if __name__ == "__main__":
     print("Database initialized successfully!")
 
 def seed_points_categories(session):
-    """Seed points earning categories — matches columns in points Excel"""
+    """Seed points earning categories with a two-level hierarchy.
+
+    Format: (name, display_order, parent_key)
+
+    L1 categories have parent_key=None.
+    L2 (brand-specific) categories carry their L1 parent name so the points
+    calculation engine can fall back: L2 rate → L1 rate → base rate.
+    """
     cats = [
-        ("Dining", 1),
-        ("Food Delivery", 2),
-        ("Groceries", 3),
-        ("Airlines", 4),
-        ("Ground Transportation", 5),
-        ("Hotels", 6),
-        ("Gas Stations", 7),
-        ("Car Rental", 8),
-        ("Wholesale Clubs", 9),
-        ("Walmart", 10),
-        ("Target", 11),
-        ("Amazon", 12),
-        ("Drugstore", 13),
-        ("Rideshare: Lyft", 14),
-        ("Rideshare: Uber", 15),
-        ("Online Shopping", 16),
-        ("Hilton", 17),
-        ("Marriott", 18),
-        ("Hyatt", 19),
-        ("Best Buy", 20),
-        ("Marshalls", 21),
-        ("West Elm", 22),
-        ("C&B", 23),
-        ("Spa & Salon", 24),
-        ("Chase Travel", 25),
-        ("Streaming", 26),
+        # ── L1: broad spend categories ────────────────────────────────────
+        ("Dining",                 1,  None),
+        ("Food Delivery",          2,  None),
+        ("Groceries",              3,  None),
+        ("Airlines",               4,  None),
+        ("Ground Transportation",  5,  None),
+        ("Hotels",                 6,  None),
+        ("Gas Stations",           7,  None),
+        ("Car Rental",             8,  None),
+        ("Wholesale Clubs",        9,  None),
+        ("Online Shopping",        16, None),
+        ("Drugstore",              13, None),
+        ("Streaming",              26, None),
+        ("Chase Travel",           25, None),   # booking-channel L1 (Chase portal)
+        ("Spa & Salon",            24, None),
+        # ── L2: hotel brands → Hotels ─────────────────────────────────────
+        ("Hilton",                 17, "Hotels"),
+        ("Marriott",               18, "Hotels"),
+        ("Hyatt",                  19, "Hotels"),
+        ("IHG",                    33, "Hotels"),
+        # ── L2: airline brands → Airlines ─────────────────────────────────
+        ("United",                 27, "Airlines"),
+        ("Delta",                  28, "Airlines"),
+        ("American Airlines",      29, "Airlines"),
+        ("Southwest",              30, "Airlines"),
+        ("JetBlue",                31, "Airlines"),
+        ("Alaska Airlines",        32, "Airlines"),
+        # ── L2: rideshare brands → Ground Transportation ──────────────────
+        ("Rideshare: Lyft",        14, "Ground Transportation"),
+        ("Rideshare: Uber",        15, "Ground Transportation"),
+        # ── L2: grocery/retail brands ─────────────────────────────────────
+        ("Walmart",                10, "Groceries"),   # Visa/MC classify as grocery
+        ("Target",                 11, "Groceries"),   # Same MCC as grocery at most issuers
+        ("Amazon",                 12, "Online Shopping"),
+        # ── L2: co-branded retail (no meaningful L1 parent) ───────────────
+        ("Best Buy",               20, None),
+        ("Marshalls",              21, None),
+        ("West Elm",               22, None),
+        ("C&B",                    23, None),
     ]
-    for name, order in cats:
-        if not session.query(PointsCategory).filter_by(name=name).first():
-            session.add(PointsCategory(name=name, display_order=order))
+    for name, order, parent in cats:
+        existing = session.query(PointsCategory).filter_by(name=name).first()
+        if not existing:
+            session.add(PointsCategory(name=name, display_order=order, parent_key=parent))
+        else:
+            # Always refresh parent_key so hierarchy corrections take effect on deploy
+            existing.parent_key = parent
+            existing.display_order = order
     session.commit()
 
 
