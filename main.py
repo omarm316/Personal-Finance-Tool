@@ -430,11 +430,13 @@ def _recalc_challenge(db, challenge):
         if extra_card.account_id and extra_card.account_id not in account_ids:
             account_ids.append(extra_card.account_id)
 
+    # Expenses are stored as negative amounts (Plaid sign is flipped on import).
+    # Sum the absolute value by negating the sum of negative amounts.
     q = db.query(_func.sum(Transaction.amount)).filter(
         Transaction.date >= effective_start,
         Transaction.date <= challenge.end_date,
         Transaction.action == 'Expense',
-        Transaction.amount > 0,
+        Transaction.amount < 0,   # expenses stored as negative
     )
     if account_ids:
         q = q.filter(Transaction.account_id.in_(account_ids))
@@ -447,7 +449,8 @@ def _recalc_challenge(db, challenge):
         valid_cats = list(set(cat_names + children))
         q = q.filter(Transaction.points_category.in_(valid_cats))
 
-    current_spend = float(q.scalar() or 0)
+    raw = q.scalar() or 0
+    current_spend = float(abs(raw))   # negate to get positive spend total
     challenge.current_spend = current_spend
     challenge.bonus_unlocked = (
         challenge.spend_threshold is None or current_spend >= challenge.spend_threshold
@@ -4300,7 +4303,13 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
     recent_txns = []
 
     now = datetime.utcnow()
-    lookback = datetime(now.year, now.month, 1) - timedelta(days=months * 30)
+    # Exact first-of-month lookback (e.g. months=3, today=Mar → Dec 1)
+    lb_year = now.year
+    lb_month = now.month - months
+    while lb_month <= 0:
+        lb_month += 12
+        lb_year -= 1
+    lookback = datetime(lb_year, lb_month, 1)
 
     # Recent transactions (last 30) — include points_category for display
     txns = db.query(Transaction).filter_by(account_id=account.id)\
@@ -4315,8 +4324,9 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
     } for t in txns]
 
-    # Spending grouped by points_category — uses the waterfall for accurate earn rates.
-    # Transactions with NULL points_category are grouped under None (base rate applies).
+    # Spending grouped by points_category — uses the earn-rate waterfall.
+    # Expenses are stored as NEGATIVE amounts (Plaid sign is flipped on import),
+    # so we filter amount < 0 and take abs() for the displayed spend totals.
     pts_cat_spend = (
         db.query(
             Transaction.points_category,
@@ -4326,14 +4336,14 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
-            Transaction.amount > 0,
+            Transaction.amount < 0,      # expenses are stored negative
             Transaction.action == 'Expense',
         )
         .group_by(Transaction.points_category)
         .all()
     )
     for pts_cat_name, total, count in pts_cat_spend:
-        amt = round(total or 0, 2)
+        amt = round(abs(total or 0), 2)  # abs: negative stored → positive display
         rate = calc_earn_rate(bonus_by_name, base_rate, pts_cat_name, cat_parent_map)
         pts = round(amt * rate, 0)
         label = pts_cat_name or 'Other'
@@ -4348,7 +4358,7 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         points_earned['by_category'].append({'category': label, 'points': pts})
     spending_by_category.sort(key=lambda x: x['amount'], reverse=True)
 
-    # Monthly spending
+    # Monthly spending trend (expenses are stored negative → abs for display)
     month_spend = (
         db.query(
             _func.extract('year', Transaction.date).label('yr'),
@@ -4358,7 +4368,7 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
-            Transaction.amount > 0,
+            Transaction.amount < 0,      # expenses are stored negative
             Transaction.action == 'Expense',
         )
         .group_by('yr', 'mo').order_by('yr', 'mo').all()

@@ -3840,7 +3840,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     const v=challengeVals;
     const showSpendCap=['rate_cap','category_rate_cap'].includes(v.challenge_type);
     const showThreshold=['threshold_bonus','sub','annual_threshold'].includes(v.challenge_type);
-    const showCategory=['category_rate_cap'].includes(v.challenge_type);
+    const showCategory=true; // categories are optional for all challenge types
     return(
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
         <div className="card" style={{width:540,maxHeight:'90vh',overflowY:'auto',padding:0}}>
@@ -3921,7 +3921,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
             </div>}
             {showCategory&&<div>
-              <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:6}}>Categories (select all that apply)</label>
+              <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:6}}>Limit to Categories <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional — leave blank to count all spend)</span></label>
               <div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:160,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:4}}>
                 {pointsCategories.map(pc=>(
                   <label key={pc.id} style={{fontSize:12,display:'flex',alignItems:'center',gap:6,cursor:'pointer',paddingLeft:pc.parent_key?14:0}}>
