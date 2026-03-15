@@ -235,6 +235,19 @@ _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     ("cvs",              "Drugstore"),
     ("walgreen",         "Drugstore"),
     ("rite aid",         "Drugstore"),
+    # ── Grocery chains not covered above ─────────────────────────────────
+    ("kings",            "Groceries"),   # Kings Food Markets / Kings Supermarkets
+    ("kroger",           "Groceries"),
+    ("safeway",          "Groceries"),
+    ("publix",           "Groceries"),
+    ("stop & shop",      "Groceries"),
+    ("stop and shop",    "Groceries"),
+    ("shoprite",         "Groceries"),
+    ("h-e-b",            "Groceries"),
+    ("wegmans",          "Groceries"),
+    ("aldi",             "Groceries"),
+    ("sprouts",          "Groceries"),
+    ("fresh market",     "Groceries"),
 ]
 
 # Plaid pfc_detailed → points category (L1 fallback when no merchant match)
@@ -2329,6 +2342,28 @@ async def backfill_points_categories(db: Session = Depends(get_db)):
             skipped += 1
     db.commit()
     return {"updated": updated, "skipped": skipped}
+
+
+@app.get("/api/transactions/unclassified-merchants")
+async def unclassified_merchants(limit: int = 50, db: Session = Depends(get_db)):
+    """
+    Returns the top merchants (by transaction count) that have a merchant_name
+    but no points_category assigned. Useful for discovering which patterns to
+    add to _MERCHANT_POINTS_PATTERNS next.
+    """
+    from sqlalchemy import func as _func
+    rows = (
+        db.query(Transaction.merchant_name, _func.count(Transaction.id).label("n"))
+        .filter(
+            Transaction.points_category == None,   # noqa: E711
+            Transaction.merchant_name != None,     # noqa: E711
+        )
+        .group_by(Transaction.merchant_name)
+        .order_by(_func.count(Transaction.id).desc())
+        .limit(limit)
+        .all()
+    )
+    return {"unclassified": [{"merchant": r[0], "count": r[1]} for r in rows]}
 
 
 @app.post("/api/transactions/backfill-content-hashes")
