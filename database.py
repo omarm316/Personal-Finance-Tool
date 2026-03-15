@@ -1170,14 +1170,27 @@ def seed_card_products(session):
             "Streaming": 2, "Airlines": 1, "Ground Transportation": 1, "Hotels": 1,
             "Car Rental": 1, "Rideshare: Lyft": 4}),
 
-        ("chase_sapphire_reserve", "Chase Sapphire Reserve", "Chase UR", "not_held", 550, [
+        ("chase_sapphire_reserve", "Chase Sapphire Reserve", "Chase UR", "not_held", 795, [
             ("$300 Travel Credit", 300, "annual", None),
-            ("$10/mo DoorDash Credit", 120, "annual", "Food Delivery"),
-            ("Priority Pass Lounge", 0, "annual", None),
-        ], {"_base": 1, "Dining": 2, "Food Delivery": 2, "Airlines": 2, "Ground Transportation": 2, "Hotels": 2, "Car Rental": 2}),
+            ("$500 The Edit Hotel Credit (2x $250)", 500, "calendar_year", "Chase Travel"),
+            ("$250 Chase Travel Hotel Credit", 250, "calendar_year", "Chase Travel"),
+            ("$300 Exclusive Tables Dining Credit (2x $150 semi-annual)", 300, "calendar_year", "Dining"),
+            ("$300 StubHub/Viagogo Credit (2x $150 semi-annual)", 300, "calendar_year", None),
+            ("$25/mo DoorDash Credit", 300, "annual", "Food Delivery"),
+            ("DashPass Membership", 0, "annual", "Food Delivery"),
+            ("$10/mo Lyft Credit", 120, "annual", "Rideshare: Lyft"),
+            ("$10/mo Peloton Credit", 120, "annual", None),
+            ("Apple TV+ & Apple Music (through June 2027)", 288, "annual", None),
+            ("Global Entry/TSA PreCheck/NEXUS Credit", 120, "every_4.5_years", None),
+            ("Priority Pass Lounge Access", 0, "annual", None),
+            ("IHG Platinum Elite Status (through 2027)", 0, "annual", None),
+        ], {"_base": 1, "Chase Travel": 7, "Dining": 2, "Airlines": 3, "Hotels": 3,
+            "Rideshare: Lyft": 4}),
 
-        ("chase_freedom", "Chase Freedom", "Chase UR", "active", 0, [],
-         {"_base": 1, "Dining": 2, "Food Delivery": 2, "Drugstore": 2}),
+        ("chase_freedom", "Chase Freedom", "Chase UR", "active", 0, [
+            ("5x Rotating Categories (activate quarterly, cap $1,500/qtr)", 0, "quarterly", None),
+        ],
+         {"_base": 1}),
 
         ("chase_freedom_unlimited", "Chase Freedom Unlimited", "Chase UR", "active", 0, [],
          {"_base": 1.5, "Dining": 1.5, "Drugstore": 1.5, "Chase Travel": 3.5, "Rideshare: Lyft": 3.5}),
@@ -1206,11 +1219,12 @@ def seed_card_products(session):
             ("Centurion Lounge Access", 0, "annual", None),
         ], {"_base": 1, "Airlines": 4}),
 
-        ("amex_gold", "Amex Gold", "Amex MR", "not_held", 250, [
-            ("$120 Uber Cash", 120, "annual", "Rideshare: Uber"),
-            ("$120 Dining Credit", 120, "annual", "Dining"),
-            ("$100 Dunkin'/Shake Shack", 100, "annual", "Dining"),
-        ], {"_base": 1, "Dining": 3, "Food Delivery": 3, "Groceries": 3}),
+        ("amex_gold", "Amex Gold", "Amex MR", "not_held", 325, [
+            ("$120 Uber Cash", 10, "monthly", "Rideshare: Uber"),
+            ("$120 Dining Credit", 10, "monthly", "Dining"),
+            ("$100 Resy Credit", 50, "semi-annual", "Dining"),
+            ("$84 Dunkin' Credit", 7, "monthly", "Dining"),
+        ], {"_base": 1, "Dining": 3, "Food Delivery": 3, "Groceries": 3, "Airlines": 2}),
 
         ("amex_green", "Amex Green", "Amex MR", "not_held", 150, [
             ("$189 CLEAR Plus Credit", 189, "annual", None),
