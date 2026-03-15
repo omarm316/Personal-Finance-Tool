@@ -540,26 +540,38 @@ class BenefitUsage(Base):
 
 
 class SpendChallenge(Base):
-    """Time-boxed earning challenge attached to a specific card instance."""
+    """Time-boxed earning challenge attached to a specific card instance.
+
+    challenge_type values:
+      'rate_cap'          — earn bonus_amount pts/$ on all spend, up to spend_cap
+      'threshold_bonus'   — earn bonus_amount pts/$ on all spend IF >= spend_threshold
+      'category_rate_cap' — like rate_cap but only qualifying CSC spend counts
+      'sub'               — flat bonus_amount pts IF spend >= spend_threshold (Sign-Up Bonus)
+      'annual_threshold'  — flat benefit (e.g. free night cert) IF spend >= threshold; resets Jan 1
+
+    bonus_type values: 'per_dollar' | 'flat' | 'benefit'
+      'benefit' = non-points reward (free night cert, status, etc.) — bonus_amount = # of rewards
+    """
     __tablename__ = 'spend_challenges'
 
     id              = Column(Integer, primary_key=True)
     card_id         = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False, index=True)
     name            = Column(String(200), nullable=False)
     challenge_type  = Column(String(30), nullable=False)
-    # 'rate_cap' | 'threshold_bonus' | 'category_rate_cap' | 'sub'
 
     start_date      = Column(Date, nullable=False)
     end_date        = Column(Date, nullable=False)
+    # Effective spend tracking starts at max(start_date, activation_date).
+    # Use when the card was opened after the challenge period started (e.g. SUB clock).
+    activation_date = Column(Date, nullable=True)
 
     # What you earn
-    bonus_type      = Column(String(20), nullable=False)   # 'per_dollar' | 'flat'
-    bonus_amount    = Column(Float, nullable=False)        # pts/$ or flat pts
+    bonus_type      = Column(String(20), nullable=False)   # 'per_dollar' | 'flat' | 'benefit'
+    bonus_amount    = Column(Float, nullable=False)        # pts/$ | flat pts | # of rewards
 
     # Conditions
-    spend_cap       = Column(Float, nullable=True)         # max eligible spend (rate_cap, category_rate_cap)
-    spend_threshold = Column(Float, nullable=True)         # min spend to unlock (threshold_bonus, sub)
-    points_category = Column(String(100), ForeignKey('points_categories.name'), nullable=True)
+    spend_cap       = Column(Float, nullable=True)   # max eligible spend (rate_cap, category_rate_cap)
+    spend_threshold = Column(Float, nullable=True)   # min spend to unlock (threshold_bonus, sub, annual_threshold)
 
     # Cached progress — recalculated from transactions on demand
     current_spend   = Column(Float, default=0)
@@ -569,7 +581,29 @@ class SpendChallenge(Base):
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
 
-    card = relationship('Card', back_populates='spend_challenges')
+    card             = relationship('Card', back_populates='spend_challenges')
+    # Additional cards this challenge also applies to (e.g. 2 Freedom cards same quarter)
+    additional_cards = relationship('Card', secondary='challenge_card_links',
+                                    primaryjoin='SpendChallenge.id==ChallengeCardLink.challenge_id',
+                                    secondaryjoin='ChallengeCardLink.card_id==Card.id')
+    # Categories for category-specific challenges (supports multi-select)
+    categories       = relationship('PointsCategory', secondary='challenge_category_links',
+                                    primaryjoin='SpendChallenge.id==ChallengeCategoryLink.challenge_id',
+                                    secondaryjoin='ChallengeCategoryLink.category_name==PointsCategory.name')
+
+
+class ChallengeCardLink(Base):
+    """Junction table: SpendChallenge ↔ additional Card (many-to-many)."""
+    __tablename__ = 'challenge_card_links'
+    challenge_id = Column(Integer, ForeignKey('spend_challenges.id', ondelete='CASCADE'), primary_key=True)
+    card_id      = Column(Integer, ForeignKey('cards.id',            ondelete='CASCADE'), primary_key=True)
+
+
+class ChallengeCategoryLink(Base):
+    """Junction table: SpendChallenge ↔ PointsCategory (multi-category challenges)."""
+    __tablename__ = 'challenge_category_links'
+    challenge_id  = Column(Integer, ForeignKey('spend_challenges.id',         ondelete='CASCADE'), primary_key=True)
+    category_name = Column(String(100), ForeignKey('points_categories.name',  ondelete='CASCADE'), primary_key=True)
 
 
 # Legacy alias — kept for backward compatibility during migration
@@ -726,6 +760,50 @@ _CAT_REMAP = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Challenge template catalog — used by GET /api/challenges/suggestions
+# ---------------------------------------------------------------------------
+# Each entry: (product_key, name, challenge_type, bonus_type, bonus_amount,
+#              spend_cap, spend_threshold, recurrence, notes)
+# recurrence: 'annual' | 'quarterly' | 'once'
+# Spend amounts in dollars; bonus_amount in pts/$ or flat pts or # of benefits.
+CHALLENGE_TEMPLATES = [
+    # ── Hilton Aspire ─────────────────────────────────────────────────────
+    ("hilton_aspire", "Free Night Certificate (annual $30K spend)",
+     "annual_threshold", "benefit", 1, None, 30000, "annual",
+     "Earn one Free Night Reward Certificate. Resets every Jan 1."),
+    ("hilton_aspire", "Diamond Status Requalification ($30K)",
+     "annual_threshold", "benefit", 1, None, 30000, "annual",
+     "Maintain Hilton Diamond status for the following year."),
+
+    # ── Hilton Surpass ────────────────────────────────────────────────────
+    ("hilton_surpass", "Free Night Certificate (annual $15K spend)",
+     "annual_threshold", "benefit", 1, None, 15000, "annual",
+     "Earn one Free Night Reward Certificate."),
+
+    # ── Chase Freedom / Freedom Flex rotating 5x ─────────────────────────
+    ("chase_freedom", "Q1 Rotating 5x (up to $1,500)",
+     "category_rate_cap", "per_dollar", 4, 1500, None, "quarterly",
+     "Activate by 3/14. Categories announced each quarter."),
+    ("chase_freedom_flex", "Q1 Rotating 5x (up to $1,500)",
+     "category_rate_cap", "per_dollar", 4, 1500, None, "quarterly",
+     "Activate by 3/14. Same categories as Freedom."),
+
+    # ── Marriott Bonvoy Brilliant ─────────────────────────────────────────
+    ("marriott_bonvoy_brilliant", "Free Night Certificate (annual $60K spend)",
+     "annual_threshold", "benefit", 1, None, 60000, "annual",
+     "Earn one Free Night Award (up to 85K points). Resets Jan 1."),
+
+    # ── World of Hyatt ────────────────────────────────────────────────────
+    ("world_of_hyatt", "Free Night Certificate (annual $15K spend)",
+     "annual_threshold", "benefit", 1, None, 15000, "annual",
+     "Earn one Category 1-4 Free Night Certificate."),
+    ("world_of_hyatt", "Second Free Night Certificate ($30K total)",
+     "annual_threshold", "benefit", 1, None, 30000, "annual",
+     "Earn second Cat 1-4 certificate when annual spend hits $30K."),
+]
+
+
 def _is_sqlite(engine):
     return str(engine.url).startswith('sqlite')
 
@@ -803,6 +881,9 @@ def run_migrations(engine):
         ],
         'points_categories': [
             ('parent_key', 'VARCHAR(100)'),
+        ],
+        'spend_challenges': [
+            ('activation_date', 'DATE'),
         ],
     }
 

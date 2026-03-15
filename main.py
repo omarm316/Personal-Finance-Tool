@@ -26,7 +26,8 @@ from database import (
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
-    CardBenefit, BenefitUsage, SpendChallenge,
+    CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
+    CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
@@ -403,31 +404,47 @@ def _recalc_challenge(db, challenge):
     Recompute current_spend and bonus_unlocked for a SpendChallenge from
     actual transactions. Mutates the challenge object; caller must commit.
 
-    Qualifying transactions: Expense, on the card's linked account,
-    date within [start_date, end_date], amount > 0.
-    For category challenges, points_category must match the challenge's
-    category OR be an L2 child of it.
-    """
-    from sqlalchemy import func as _func, or_ as _or
+    Effective start = max(start_date, activation_date) — handles the case where
+    a card was opened after the challenge period started (e.g. SUB clock begins
+    at card activation, not at start of the year).
 
-    # Find account via card
-    card = db.query(Card).filter_by(id=challenge.card_id).first()
-    account_id = card.account_id if card else None
+    Unions the primary card's account with all additional_cards accounts so that
+    e.g. two Freedom cards on the same household contribute jointly to one quarterly cap.
+
+    For category challenges, uses the challenge.categories junction rows and
+    expands each selected L1 category to include its L2 children.
+    """
+    from sqlalchemy import func as _func
+
+    # Effective start date
+    effective_start = challenge.start_date
+    if challenge.activation_date and challenge.activation_date > challenge.start_date:
+        effective_start = challenge.activation_date
+
+    # Collect account IDs: primary card + all additional cards
+    account_ids = []
+    primary_card = db.query(Card).filter_by(id=challenge.card_id).first()
+    if primary_card and primary_card.account_id:
+        account_ids.append(primary_card.account_id)
+    for extra_card in challenge.additional_cards:
+        if extra_card.account_id and extra_card.account_id not in account_ids:
+            account_ids.append(extra_card.account_id)
 
     q = db.query(_func.sum(Transaction.amount)).filter(
-        Transaction.date >= challenge.start_date,
+        Transaction.date >= effective_start,
         Transaction.date <= challenge.end_date,
         Transaction.action == 'Expense',
         Transaction.amount > 0,
     )
-    if account_id:
-        q = q.filter(Transaction.account_id == account_id)
+    if account_ids:
+        q = q.filter(Transaction.account_id.in_(account_ids))
 
-    if challenge.points_category:
-        # Include L2 children (e.g. "Walmart", "Target" count toward "Groceries" challenge)
+    # Category filter — use junction table; expand each selected category to include L2 children
+    cat_names = [cat.name for cat in challenge.categories]
+    if cat_names:
         children = [c.name for c in db.query(PointsCategory)
-                    .filter_by(parent_key=challenge.points_category).all()]
-        valid_cats = [challenge.points_category] + children
+                    .filter(PointsCategory.parent_key.in_(cat_names)).all()]
+        valid_cats = list(set(cat_names + children))
         q = q.filter(Transaction.points_category.in_(valid_cats))
 
     current_spend = float(q.scalar() or 0)
@@ -478,6 +495,10 @@ def _serialize_challenge(c, eco=None):
     else:
         status = 'active'
 
+    # Multi-card and multi-category info from junction tables
+    additional_card_ids = [card.id for card in c.additional_cards]
+    category_names = [cat.name for cat in c.categories]
+
     return {
         'id': c.id,
         'card_id': c.card_id,
@@ -485,11 +506,13 @@ def _serialize_challenge(c, eco=None):
         'challenge_type': c.challenge_type,
         'start_date': c.start_date.isoformat(),
         'end_date': c.end_date.isoformat(),
+        'activation_date': c.activation_date.isoformat() if c.activation_date else None,
         'bonus_type': c.bonus_type,
         'bonus_amount': c.bonus_amount,
         'spend_cap': c.spend_cap,
         'spend_threshold': c.spend_threshold,
-        'points_category': c.points_category,
+        'category_names': category_names,
+        'additional_card_ids': additional_card_ids,
         'current_spend': round(c.current_spend, 2),
         'bonus_unlocked': c.bonus_unlocked,
         'bonus_pts_earned': bonus_pts,
@@ -3904,10 +3927,17 @@ async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = De
 # ---------------------------------------------------------------------------
 
 @app.get("/api/challenges")
-async def get_challenges(active_only: bool = False, db: Session = Depends(get_db)):
+async def get_challenges(
+    active_only: bool = False,
+    card_id: int = None,
+    db: Session = Depends(get_db),
+):
+    """List challenges. Optionally filter by card_id (used by the card detail page)."""
     q = db.query(SpendChallenge)
     if active_only:
         q = q.filter_by(is_active=True)
+    if card_id is not None:
+        q = q.filter_by(card_id=card_id)
     challenges = q.order_by(SpendChallenge.end_date.desc()).all()
     # Build eco lookup via card → product → ecosystem
     results = []
@@ -3922,6 +3952,52 @@ async def get_challenges(active_only: bool = False, db: Session = Depends(get_db
     return results
 
 
+def _sync_challenge_links(db, challenge, additional_card_ids, category_names):
+    """Helper: replace junction-table rows for a challenge after create/update."""
+    # Additional cards
+    db.query(ChallengeCardLink).filter_by(challenge_id=challenge.id).delete()
+    for cid in (additional_card_ids or []):
+        db.add(ChallengeCardLink(challenge_id=challenge.id, card_id=int(cid)))
+    # Categories
+    db.query(ChallengeCategoryLink).filter_by(challenge_id=challenge.id).delete()
+    for name in (category_names or []):
+        db.add(ChallengeCategoryLink(challenge_id=challenge.id, category_name=name))
+
+
+@app.get("/api/challenges/suggestions")
+async def get_challenge_suggestions(db: Session = Depends(get_db)):
+    """Return CHALLENGE_TEMPLATES for cards the user currently holds that don't
+    already have a matching active challenge this year."""
+    from datetime import date as _date
+    year = _date.today().year
+    # Map product_key → card id for cards the user holds
+    cards = db.query(Card).join(CardProduct, Card.product_id == CardProduct.id).all()
+    product_key_to_card = {}
+    for card in cards:
+        prod = db.query(CardProduct).filter_by(id=card.product_id).first()
+        if prod:
+            product_key_to_card.setdefault(prod.product_key, []).append(card)
+
+    # Existing active challenges this year (avoid duplicate suggestions)
+    existing_names = {
+        c.name for c in db.query(SpendChallenge)
+        .filter(SpendChallenge.is_active == True)
+        .filter(SpendChallenge.end_date >= _date(year, 1, 1))
+        .all()
+    }
+
+    suggestions = []
+    for tmpl in CHALLENGE_TEMPLATES:
+        key = tmpl.get('product_key')
+        if key not in product_key_to_card:
+            continue
+        if tmpl['name'] in existing_names:
+            continue
+        for card in product_key_to_card[key]:
+            suggestions.append({**tmpl, 'card_id': card.id})
+    return suggestions
+
+
 @app.post("/api/challenges")
 async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)):
     from datetime import date as _date
@@ -3931,18 +4007,21 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
         challenge_type  = data['challenge_type'],
         start_date      = _date.fromisoformat(data['start_date']),
         end_date        = _date.fromisoformat(data['end_date']),
+        activation_date = _date.fromisoformat(data['activation_date']) if data.get('activation_date') else None,
         bonus_type      = data['bonus_type'],
         bonus_amount    = float(data['bonus_amount']),
         spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
         spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
-        points_category = data.get('points_category') or None,
         is_active       = data.get('is_active', True),
         notes           = data.get('notes'),
     )
     db.add(c)
+    db.flush()  # get c.id so junction rows can reference it
+    _sync_challenge_links(db, c, data.get('additional_card_ids'), data.get('category_names'))
     db.flush()
     _recalc_challenge(db, c)
     db.commit()
+    db.refresh(c)
     return _serialize_challenge(c)
 
 
@@ -3961,17 +4040,28 @@ async def update_challenge(challenge_id: int, data: dict = Body(...), db: Sessio
     c = db.query(SpendChallenge).filter_by(id=challenge_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    for field in ('name', 'challenge_type', 'bonus_type', 'notes', 'points_category', 'is_active'):
+    for field in ('name', 'challenge_type', 'bonus_type', 'notes', 'is_active'):
         if field in data:
-            setattr(c, field, data[field] or None if field == 'points_category' else data[field])
+            setattr(c, field, data[field])
     for field in ('bonus_amount', 'spend_cap', 'spend_threshold'):
         if field in data:
             setattr(c, field, float(data[field]) if data[field] is not None else None)
     for field in ('start_date', 'end_date'):
         if field in data:
             setattr(c, field, _date.fromisoformat(data[field]))
+    if 'activation_date' in data:
+        c.activation_date = _date.fromisoformat(data['activation_date']) if data['activation_date'] else None
+    # Update junction tables if provided
+    if 'additional_card_ids' in data or 'category_names' in data:
+        _sync_challenge_links(
+            db, c,
+            data.get('additional_card_ids'),
+            data.get('category_names'),
+        )
+        db.flush()
     _recalc_challenge(db, c)
     db.commit()
+    db.refresh(c)
     return _serialize_challenge(c)
 
 
@@ -3992,6 +4082,7 @@ async def recalc_challenge(challenge_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Challenge not found")
     _recalc_challenge(db, c)
     db.commit()
+    db.refresh(c)
     return _serialize_challenge(c)
 
 
