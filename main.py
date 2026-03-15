@@ -398,6 +398,112 @@ def calc_earn_rate(
     return base_rate
 
 
+def _recalc_challenge(db, challenge):
+    """
+    Recompute current_spend and bonus_unlocked for a SpendChallenge from
+    actual transactions. Mutates the challenge object; caller must commit.
+
+    Qualifying transactions: Expense, on the card's linked account,
+    date within [start_date, end_date], amount > 0.
+    For category challenges, points_category must match the challenge's
+    category OR be an L2 child of it.
+    """
+    from sqlalchemy import func as _func, or_ as _or
+
+    # Find account via card
+    card = db.query(Card).filter_by(id=challenge.card_id).first()
+    account_id = card.account_id if card else None
+
+    q = db.query(_func.sum(Transaction.amount)).filter(
+        Transaction.date >= challenge.start_date,
+        Transaction.date <= challenge.end_date,
+        Transaction.action == 'Expense',
+        Transaction.amount > 0,
+    )
+    if account_id:
+        q = q.filter(Transaction.account_id == account_id)
+
+    if challenge.points_category:
+        # Include L2 children (e.g. "Walmart", "Target" count toward "Groceries" challenge)
+        children = [c.name for c in db.query(PointsCategory)
+                    .filter_by(parent_key=challenge.points_category).all()]
+        valid_cats = [challenge.points_category] + children
+        q = q.filter(Transaction.points_category.in_(valid_cats))
+
+    current_spend = float(q.scalar() or 0)
+    challenge.current_spend = current_spend
+    challenge.bonus_unlocked = (
+        challenge.spend_threshold is None or current_spend >= challenge.spend_threshold
+    )
+    return challenge
+
+
+def _challenge_bonus_pts(challenge) -> float:
+    """Bonus points earned so far based on cached current_spend."""
+    if challenge.bonus_type == 'flat':
+        return float(challenge.bonus_amount) if challenge.bonus_unlocked else 0.0
+    # per_dollar
+    if not challenge.bonus_unlocked:
+        return 0.0
+    eligible = challenge.current_spend
+    if challenge.spend_cap:
+        eligible = min(eligible, challenge.spend_cap)
+    return round(eligible * challenge.bonus_amount, 1)
+
+
+def _serialize_challenge(c, eco=None):
+    """Serialize a SpendChallenge to a dict for API responses."""
+    bonus_pts = _challenge_bonus_pts(c)
+    # Progress toward cap or threshold
+    if c.spend_cap:
+        progress_target = c.spend_cap
+        progress_pct = min(100, round(c.current_spend / c.spend_cap * 100, 1)) if c.spend_cap else 0
+    elif c.spend_threshold:
+        progress_target = c.spend_threshold
+        progress_pct = min(100, round(c.current_spend / c.spend_threshold * 100, 1)) if c.spend_threshold else 0
+    else:
+        progress_target = None
+        progress_pct = None
+    remaining = None
+    if progress_target and c.current_spend < progress_target:
+        remaining = round(progress_target - c.current_spend, 2)
+
+    today = datetime.utcnow().date()
+    if today < c.start_date:
+        status = 'upcoming'
+    elif today > c.end_date:
+        status = 'expired'
+    elif c.bonus_unlocked and not c.spend_cap:
+        status = 'unlocked'
+    else:
+        status = 'active'
+
+    return {
+        'id': c.id,
+        'card_id': c.card_id,
+        'name': c.name,
+        'challenge_type': c.challenge_type,
+        'start_date': c.start_date.isoformat(),
+        'end_date': c.end_date.isoformat(),
+        'bonus_type': c.bonus_type,
+        'bonus_amount': c.bonus_amount,
+        'spend_cap': c.spend_cap,
+        'spend_threshold': c.spend_threshold,
+        'points_category': c.points_category,
+        'current_spend': round(c.current_spend, 2),
+        'bonus_unlocked': c.bonus_unlocked,
+        'bonus_pts_earned': bonus_pts,
+        'progress_pct': progress_pct,
+        'progress_target': progress_target,
+        'remaining_spend': remaining,
+        'status': status,
+        'is_active': c.is_active,
+        'notes': c.notes,
+        'currency': eco.currency_name if eco else 'Points',
+        'your_cpp': eco.your_cpp if eco else 1.0,
+    }
+
+
 def classify_account(account_type: str) -> dict:
     """
     Compute classification flags for an account based on its type.
@@ -3645,17 +3751,7 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
             'trigger_category': b.trigger_category,
             'notes': b.notes,
         } for b in (product.benefits if product else [])],
-        'spend_challenges': [{
-            'id': sc.id,
-            'name': sc.challenge_name,
-            'required_spend': sc.required_spend,
-            'reward_value': sc.reward_value,
-            'reward_type': sc.reward_type,
-            'start_date': sc.start_date.strftime('%Y-%m-%d') if sc.start_date else None,
-            'end_date': sc.end_date.strftime('%Y-%m-%d') if sc.end_date else None,
-            'current_spend': sc.current_spend,
-            'is_met': sc.is_met,
-        } for sc in (product.spend_challenges if product else [])],
+        'spend_challenges': [],
         'linked_account': {
             'id': account.id, 'name': account.account_name,
             'balance': balance,
@@ -3801,6 +3897,102 @@ async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = De
         eco.currency_name = data['currency_name']
     db.commit()
     return {'status': 'ok', 'name': eco.name}
+
+
+# ---------------------------------------------------------------------------
+# Spend Challenges
+# ---------------------------------------------------------------------------
+
+@app.get("/api/challenges")
+async def get_challenges(active_only: bool = False, db: Session = Depends(get_db)):
+    q = db.query(SpendChallenge)
+    if active_only:
+        q = q.filter_by(is_active=True)
+    challenges = q.order_by(SpendChallenge.end_date.desc()).all()
+    # Build eco lookup via card → product → ecosystem
+    results = []
+    for c in challenges:
+        eco = None
+        card = db.query(Card).filter_by(id=c.card_id).first()
+        if card and card.product_id:
+            prod = db.query(CardProduct).filter_by(id=card.product_id).first()
+            if prod and prod.ecosystem_id:
+                eco = db.query(PointsEcosystem).filter_by(id=prod.ecosystem_id).first()
+        results.append(_serialize_challenge(c, eco))
+    return results
+
+
+@app.post("/api/challenges")
+async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    c = SpendChallenge(
+        card_id         = data['card_id'],
+        name            = data['name'],
+        challenge_type  = data['challenge_type'],
+        start_date      = _date.fromisoformat(data['start_date']),
+        end_date        = _date.fromisoformat(data['end_date']),
+        bonus_type      = data['bonus_type'],
+        bonus_amount    = float(data['bonus_amount']),
+        spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
+        spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
+        points_category = data.get('points_category') or None,
+        is_active       = data.get('is_active', True),
+        notes           = data.get('notes'),
+    )
+    db.add(c)
+    db.flush()
+    _recalc_challenge(db, c)
+    db.commit()
+    return _serialize_challenge(c)
+
+
+@app.post("/api/challenges/recalc-all")
+async def recalc_all_challenges(db: Session = Depends(get_db)):
+    challenges = db.query(SpendChallenge).filter_by(is_active=True).all()
+    for c in challenges:
+        _recalc_challenge(db, c)
+    db.commit()
+    return {"recalculated": len(challenges)}
+
+
+@app.patch("/api/challenges/{challenge_id}")
+async def update_challenge(challenge_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    c = db.query(SpendChallenge).filter_by(id=challenge_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    for field in ('name', 'challenge_type', 'bonus_type', 'notes', 'points_category', 'is_active'):
+        if field in data:
+            setattr(c, field, data[field] or None if field == 'points_category' else data[field])
+    for field in ('bonus_amount', 'spend_cap', 'spend_threshold'):
+        if field in data:
+            setattr(c, field, float(data[field]) if data[field] is not None else None)
+    for field in ('start_date', 'end_date'):
+        if field in data:
+            setattr(c, field, _date.fromisoformat(data[field]))
+    _recalc_challenge(db, c)
+    db.commit()
+    return _serialize_challenge(c)
+
+
+@app.delete("/api/challenges/{challenge_id}")
+async def delete_challenge(challenge_id: int, db: Session = Depends(get_db)):
+    c = db.query(SpendChallenge).filter_by(id=challenge_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    db.delete(c)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/challenges/{challenge_id}/recalc")
+async def recalc_challenge(challenge_id: int, db: Session = Depends(get_db)):
+    c = db.query(SpendChallenge).filter_by(id=challenge_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    _recalc_challenge(db, c)
+    db.commit()
+    return _serialize_challenge(c)
 
 
 # ---------------------------------------------------------------------------
@@ -4092,17 +4284,8 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
             'notes': b.notes,
         } for b in product.benefits]
 
-    # Spend challenges
+    # Spend challenges (now card-level; fetched via separate /api/challenges endpoint)
     spend_challenges = []
-    if product:
-        spend_challenges = [{
-            'id': sc.id, 'name': sc.challenge_name,
-            'required_spend': sc.required_spend, 'reward_value': sc.reward_value,
-            'reward_type': sc.reward_type,
-            'start_date': sc.start_date.strftime('%Y-%m-%d') if sc.start_date else None,
-            'end_date': sc.end_date.strftime('%Y-%m-%d') if sc.end_date else None,
-            'current_spend': sc.current_spend, 'is_met': sc.is_met,
-        } for sc in product.spend_challenges]
 
     # Utilization
     utilization = None

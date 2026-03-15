@@ -3936,7 +3936,7 @@ function CardsPage({toast}){
   const[selectedAccount,setSelectedAccount]=useState(null);
   const[suggestions,setSuggestions]=useState([]);
   const[linking,setLinking]=useState({});
-  const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
+  const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards' | 'challenges'
   const[swipeData,setSwipeData]=useState(null);
   const[swipeLoading,setSwipeLoading]=useState(false);
   // Legacy card management state
@@ -3944,6 +3944,13 @@ function CardsPage({toast}){
   const[editing,setEditing]=useState(null);
   const[editVals,setEditVals]=useState({});
   const[showInactive,setShowInactive]=useState(false);
+  // Challenges state
+  const[challenges,setChallenges]=useState([]);
+  const[challengesLoading,setChallengesLoading]=useState(false);
+  const[pointsCategories,setPointsCategories]=useState([]);
+  const[showChallengeModal,setShowChallengeModal]=useState(false);
+  const[editingChallenge,setEditingChallenge]=useState(null);
+  const[challengeVals,setChallengeVals]=useState({});
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -3960,6 +3967,66 @@ function CardsPage({toast}){
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
   },[]);
+
+  const loadChallenges=useCallback(async()=>{
+    setChallengesLoading(true);
+    try{
+      const[ch,cats]=await Promise.all([
+        apiFetch('/challenges'),apiFetch('/points-categories'),
+      ]);
+      setChallenges(ch);
+      setPointsCategories(cats);
+    }catch(e){toast('Failed to load challenges','error');}
+    finally{setChallengesLoading(false);}
+  },[]);
+
+  const defaultChallengeVals=()=>({
+    card_id:'',name:'',challenge_type:'sub',start_date:'',end_date:'',
+    bonus_type:'flat',bonus_amount:'',spend_cap:'',spend_threshold:'',
+    points_category:'',is_active:true,notes:'',
+  });
+
+  const openNewChallenge=()=>{setChallengeVals(defaultChallengeVals());setEditingChallenge(null);setShowChallengeModal(true);};
+  const openEditChallenge=(ch)=>{
+    setChallengeVals({
+      card_id:ch.card_id,name:ch.name,challenge_type:ch.challenge_type,
+      start_date:ch.start_date,end_date:ch.end_date,
+      bonus_type:ch.bonus_type,bonus_amount:ch.bonus_amount,
+      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',
+      points_category:ch.points_category||'',is_active:ch.is_active,notes:ch.notes||'',
+    });
+    setEditingChallenge(ch.id);
+    setShowChallengeModal(true);
+  };
+
+  const saveChallenge=async()=>{
+    const v=challengeVals;
+    if(!v.card_id||!v.name||!v.challenge_type||!v.start_date||!v.end_date||!v.bonus_amount){
+      toast('Please fill in all required fields','error');return;
+    }
+    try{
+      let saved;
+      if(editingChallenge){
+        saved=await apiFetch(`/challenges/${editingChallenge}`,{method:'PATCH',body:JSON.stringify(v)});
+        await apiFetch(`/challenges/${editingChallenge}/recalc`,{method:'POST'});
+      }else{
+        saved=await apiFetch('/challenges',{method:'POST',body:JSON.stringify(v)});
+        if(saved.id)await apiFetch(`/challenges/${saved.id}/recalc`,{method:'POST'});
+      }
+      setShowChallengeModal(false);
+      await loadChallenges();
+      toast(editingChallenge?'Challenge updated':'Challenge created');
+    }catch(e){toast('Failed to save challenge','error');}
+  };
+
+  const deleteChallenge=async(id)=>{
+    if(!confirm('Delete this challenge?'))return;
+    try{
+      await apiFetch(`/challenges/${id}`,{method:'DELETE'});
+      await loadChallenges();
+      toast('Challenge deleted');
+    }catch(e){toast('Failed to delete','error');}
+  };
 
   const loadSwipe=async()=>{
     setSwipeLoading(true);
@@ -3995,6 +4062,7 @@ function CardsPage({toast}){
   };
 
   useEffect(()=>{load().then(()=>loadSuggestions());},[load]);
+  useEffect(()=>{if(tab==='challenges')loadChallenges();},[tab]);
 
   // Legacy card management
   const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
@@ -4029,7 +4097,7 @@ function CardsPage({toast}){
     <div>
       {/* Tab switcher */}
       <div style={{display:'flex',gap:4,marginBottom:20,background:'var(--border)',borderRadius:8,padding:3,width:'fit-content'}}>
-        {[{id:'accounts',label:'My Accounts'},{id:'swipe',label:'Where Should I Swipe?'},{id:'cards',label:'Card Management'}].map(t=>(
+        {[{id:'accounts',label:'My Accounts'},{id:'swipe',label:'Where Should I Swipe?'},{id:'cards',label:'Card Management'},{id:'challenges',label:'Challenges'}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
             style={{padding:'6px 18px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:tab===t.id?600:400,
               background:tab===t.id?'var(--bg)':'transparent',color:tab===t.id?'var(--text-primary)':'var(--text-muted)',
@@ -4075,6 +4143,205 @@ function CardsPage({toast}){
                 </div>
               </div>
             ))
+          }
+        </div>
+      ):tab==='challenges'?(
+        /* SPEND CHALLENGES */
+        <div>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:700,margin:'0 0 4px'}}>Spend Challenges</h2>
+              <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Track spending bonuses, SUBs, and category promotions.</p>
+            </div>
+            <button className="btn btn-primary" onClick={openNewChallenge}>+ New Challenge</button>
+          </div>
+
+          {/* Challenge modal */}
+          {showChallengeModal&&(()=>{
+            const v=challengeVals;
+            const set=(k,val)=>setChallengeVals(prev=>({...prev,[k]:val}));
+            const showSpendCap=['rate_cap','category_rate_cap'].includes(v.challenge_type);
+            const showThreshold=['threshold_bonus','sub'].includes(v.challenge_type);
+            const showCategory=v.challenge_type==='category_rate_cap';
+            const cardName=cards.find(c=>c.id===parseInt(v.card_id))?.card_name||'';
+            return(
+              <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <div className="card" style={{width:500,maxHeight:'90vh',overflowY:'auto',padding:0}}>
+                  <div style={{padding:'20px 24px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div style={{fontSize:16,fontWeight:700}}>{editingChallenge?'Edit Challenge':'New Challenge'}</div>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>setShowChallengeModal(false)}>X</button>
+                  </div>
+                  <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:14}}>
+                    {/* Card */}
+                    <div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Card *</label>
+                      <select value={v.card_id} onChange={e=>set('card_id',e.target.value?parseInt(e.target.value):'')}
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                        <option value="">Select card...</option>
+                        {cards.filter(c=>c.is_active).map(c=><option key={c.id} value={c.id}>{c.card_name||c.card_id}</option>)}
+                      </select>
+                    </div>
+                    {/* Name */}
+                    <div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Challenge Name *</label>
+                      <input value={v.name} onChange={e=>set('name',e.target.value)}
+                        placeholder="e.g. Signup Bonus, Q1 5x Groceries..."
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                    </div>
+                    {/* Type */}
+                    <div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Challenge Type *</label>
+                      <select value={v.challenge_type} onChange={e=>{
+                        const t=e.target.value;
+                        set('challenge_type',t);
+                        set('bonus_type',t==='sub'?'flat':'per_dollar');
+                      }} style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                        <option value="sub">SUB (Sign-Up Bonus)</option>
+                        <option value="rate_cap">Rate Cap (e.g. 5x up to $1,500)</option>
+                        <option value="threshold_bonus">Threshold Bonus (spend $X, earn Y%)</option>
+                        <option value="category_rate_cap">Category Rate Cap (rotating category)</option>
+                      </select>
+                    </div>
+                    {/* Dates */}
+                    <div style={{display:'flex',gap:12}}>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Start Date *</label>
+                        <input type="date" value={v.start_date} onChange={e=>set('start_date',e.target.value)}
+                          style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>End Date *</label>
+                        <input type="date" value={v.end_date} onChange={e=>set('end_date',e.target.value)}
+                          style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                      </div>
+                    </div>
+                    {/* Bonus type + amount */}
+                    <div style={{display:'flex',gap:12}}>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Bonus Type</label>
+                        <select value={v.bonus_type} onChange={e=>set('bonus_type',e.target.value)}
+                          style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                          <option value="flat">Flat (total points)</option>
+                          <option value="per_dollar">Per Dollar (pts/$)</option>
+                        </select>
+                      </div>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>{v.bonus_type==='flat'?'Bonus Points *':'Pts per Dollar *'}</label>
+                        <input type="number" step="any" value={v.bonus_amount} onChange={e=>set('bonus_amount',e.target.value)}
+                          placeholder={v.bonus_type==='flat'?'e.g. 60000':'e.g. 5'}
+                          style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                      </div>
+                    </div>
+                    {/* Spend cap */}
+                    {showSpendCap&&<div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Spend Cap ($)</label>
+                      <input type="number" step="any" value={v.spend_cap} onChange={e=>set('spend_cap',e.target.value)}
+                        placeholder="e.g. 1500"
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                    </div>}
+                    {/* Spend threshold */}
+                    {showThreshold&&<div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Spend Threshold ($)</label>
+                      <input type="number" step="any" value={v.spend_threshold} onChange={e=>set('spend_threshold',e.target.value)}
+                        placeholder="e.g. 4000"
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                    </div>}
+                    {/* Points category */}
+                    {showCategory&&<div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Points Category</label>
+                      <select value={v.points_category} onChange={e=>set('points_category',e.target.value)}
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                        <option value="">All spend</option>
+                        {pointsCategories.map(pc=><option key={pc.id} value={pc.name}>{pc.parent_key?`\u00a0\u00a0${pc.name}`:pc.name}</option>)}
+                      </select>
+                    </div>}
+                    {/* Notes */}
+                    <div>
+                      <label style={{fontSize:12,fontWeight:600,display:'block',marginBottom:4}}>Notes</label>
+                      <input value={v.notes} onChange={e=>set('notes',e.target.value)}
+                        style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+                    </div>
+                    {/* Active */}
+                    <label style={{fontSize:13,display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
+                      <input type="checkbox" checked={v.is_active} onChange={e=>set('is_active',e.target.checked)}/> Active
+                    </label>
+                  </div>
+                  <div style={{padding:'12px 24px 20px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+                    <button className="btn btn-ghost" onClick={()=>setShowChallengeModal(false)}>Cancel</button>
+                    <button className="btn btn-primary" onClick={saveChallenge}>{editingChallenge?'Save Changes':'Create Challenge'}</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Challenge list */}
+          {challengesLoading?<div style={{padding:40,textAlign:'center'}}><div className="spinner"/></div>
+            :challenges.length===0?<div className="card" style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No challenges yet. Create one to track your SUBs and spending bonuses.</div>
+            :challenges.map(ch=>{
+              const statusColor={upcoming:'#6b7280',active:'var(--blue)',unlocked:'#059669',expired:'#9ca3af'}[ch.status]||'var(--text-muted)';
+              const barColor={upcoming:'#d1d5db',active:'var(--blue)',unlocked:'#059669',expired:'#d1d5db'}[ch.status]||'var(--border)';
+              const cardObj=cards.find(c=>c.id===ch.card_id);
+              const estVal=ch.bonus_pts_earned&&ch.your_cpp?((ch.bonus_pts_earned*ch.your_cpp)/100).toFixed(2):null;
+              return(
+                <div key={ch.id} className="card" style={{marginBottom:12,padding:'16px 20px',opacity:ch.is_active?1:0.6}}>
+                  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <span style={{fontSize:14,fontWeight:700}}>{cardObj?.card_name||`Card #${ch.card_id}`}</span>
+                        <span style={{fontSize:12,color:'var(--text-muted)'}}>·</span>
+                        <span style={{fontSize:13,fontWeight:600}}>{ch.name}</span>
+                        <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:barColor+'22',color:statusColor,fontWeight:600,textTransform:'uppercase'}}>{ch.status}</span>
+                        <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--border)',color:'var(--text-muted)'}}>{ch.challenge_type.replace('_',' ')}</span>
+                      </div>
+                      <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{ch.start_date} — {ch.end_date}</div>
+                    </div>
+                    <div style={{display:'flex',gap:6,flexShrink:0,marginLeft:12}}>
+                      <button className="btn btn-sm btn-secondary" onClick={()=>openEditChallenge(ch)}>Edit</button>
+                      <button className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteChallenge(ch.id)}>Delete</button>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  {ch.progress_target!=null&&<div style={{marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
+                      <span style={{color:'var(--text-muted)'}}>Spend progress</span>
+                      <span style={{fontWeight:600,fontFamily:'Inter'}}>${ch.current_spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
+                    </div>
+                    <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{height:'100%',width:`${ch.progress_pct||0}%`,background:barColor,borderRadius:3,transition:'width 0.3s'}}/>
+                    </div>
+                    {ch.remaining_spend!=null&&ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                      ${ch.remaining_spend.toLocaleString()} more to {ch.spend_cap?'hit cap':'unlock'}
+                    </div>}
+                  </div>}
+                  {/* Earnings row */}
+                  <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>
+                    <div>
+                      <span style={{fontSize:11,color:'var(--text-muted)'}}>Bonus: </span>
+                      <span style={{fontSize:13,fontWeight:700,color:ch.bonus_pts_earned>0?'#059669':'var(--text-muted)'}}>
+                        {ch.bonus_pts_earned>0?`${ch.bonus_pts_earned.toLocaleString()} ${ch.currency||'pts'}`:ch.status==='unlocked'?'Unlocked!':'Not yet earned'}
+                      </span>
+                    </div>
+                    {estVal&&parseFloat(estVal)>0&&<div>
+                      <span style={{fontSize:11,color:'var(--text-muted)'}}>Est. value: </span>
+                      <span style={{fontSize:13,fontWeight:600,color:'#059669'}}>${estVal}</span>
+                    </div>}
+                    <div>
+                      <span style={{fontSize:11,color:'var(--text-muted)'}}>Bonus rate: </span>
+                      <span style={{fontSize:12,fontFamily:'Inter'}}>
+                        {ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`:`${ch.bonus_amount}x per $`}
+                        {ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}
+                      </span>
+                    </div>
+                    {ch.points_category&&<div>
+                      <span style={{fontSize:11,color:'var(--text-muted)'}}>Category: </span>
+                      <span style={{fontSize:12}}>{ch.points_category}</span>
+                    </div>}
+                  </div>
+                </div>
+              );
+            })
           }
         </div>
       ):tab==='cards'?(
@@ -6810,6 +7077,7 @@ function App(){
             toast(`↺ ${r.items_cursor_reset} stuck account${r.items_cursor_reset!==1?'s':''} reset — re-downloading transactions`);
           }
           setTimeout(loadMeta,15000);
+          apiFetch('/challenges/recalc-all',{method:'POST'}).catch(()=>{});
         })
         .catch(()=>{});
     }
@@ -6832,6 +7100,7 @@ function App(){
       }
       loadMeta();
       setTimeout(loadMeta,15000);
+      apiFetch('/challenges/recalc-all',{method:'POST'}).catch(()=>{});
     }catch(e){toast('Sync failed: '+(e.message||e),'error');}
   };
 

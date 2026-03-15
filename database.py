@@ -432,6 +432,7 @@ class Card(Base):
     product = relationship("CardProduct", back_populates="cards")
     ecosystem_rel = relationship("PointsEcosystem", back_populates="cards")
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="card")
+    spend_challenges = relationship('SpendChallenge', back_populates='card', cascade='all, delete-orphan')
 
 
 class PointsEcosystem(Base):
@@ -473,7 +474,6 @@ class CardProduct(Base):
     ecosystem_rel = relationship("PointsEcosystem", back_populates="products")
     rewards = relationship("CardProductReward", back_populates="product", cascade="all, delete-orphan")
     benefits = relationship("CardBenefit", back_populates="product", cascade="all, delete-orphan")
-    spend_challenges = relationship("SpendChallenge", back_populates="product", cascade="all, delete-orphan")
     cards = relationship("Card", back_populates="product")
 
 
@@ -540,31 +540,36 @@ class BenefitUsage(Base):
 
 
 class SpendChallenge(Base):
-    """
-    Signup bonuses and spending challenges.
-    e.g., "Spend $4,000 in 3 months → 60,000 points"
-    """
+    """Time-boxed earning challenge attached to a specific card instance."""
     __tablename__ = 'spend_challenges'
 
-    id = Column(Integer, primary_key=True)
-    product_id = Column(Integer, ForeignKey('card_products.id', ondelete='CASCADE'), nullable=False)
-    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=True)  # Specific card instance
-    challenge_name = Column(String(200), default='Signup Bonus')
-    required_spend = Column(Float, nullable=False)             # Spending threshold
-    reward_value = Column(Float, nullable=False)               # Points/miles/cash earned
-    reward_type = Column(String(50), default='points')         # "points", "cash", "statement_credit"
-    start_date = Column(DateTime, nullable=True)
-    end_date = Column(DateTime, nullable=True)
-    current_spend = Column(Float, default=0)                   # Tracked spend so far
-    is_met = Column(Boolean, default=False)
-    notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id              = Column(Integer, primary_key=True)
+    card_id         = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False, index=True)
+    name            = Column(String(200), nullable=False)
+    challenge_type  = Column(String(30), nullable=False)
+    # 'rate_cap' | 'threshold_bonus' | 'category_rate_cap' | 'sub'
 
-    product = relationship("CardProduct", back_populates="spend_challenges")
+    start_date      = Column(Date, nullable=False)
+    end_date        = Column(Date, nullable=False)
 
-    __table_args__ = (
-        Index('ix_spend_challenge_card', 'card_id'),
-    )
+    # What you earn
+    bonus_type      = Column(String(20), nullable=False)   # 'per_dollar' | 'flat'
+    bonus_amount    = Column(Float, nullable=False)        # pts/$ or flat pts
+
+    # Conditions
+    spend_cap       = Column(Float, nullable=True)         # max eligible spend (rate_cap, category_rate_cap)
+    spend_threshold = Column(Float, nullable=True)         # min spend to unlock (threshold_bonus, sub)
+    points_category = Column(String(100), ForeignKey('points_categories.name'), nullable=True)
+
+    # Cached progress — recalculated from transactions on demand
+    current_spend   = Column(Float, default=0)
+    bonus_unlocked  = Column(Boolean, default=False)
+
+    is_active       = Column(Boolean, default=True)
+    notes           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    card = relationship('Card', back_populates='spend_challenges')
 
 
 # Legacy alias — kept for backward compatibility during migration
