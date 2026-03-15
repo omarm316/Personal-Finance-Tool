@@ -147,6 +147,149 @@ _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Points category inference
+# ---------------------------------------------------------------------------
+
+# Merchant name patterns → L2 (or L1) points category.
+# Checked in order — put more-specific patterns first so "Uber Eats" wins
+# over the plain "Uber" rideshare match.
+# Each entry: (substring_to_match_lowercased, points_category_name)
+_MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
+    # ── Food delivery (before rideshare so "uber eats" hits here first) ──
+    ("uber eats",        "Food Delivery"),
+    ("doordash",         "Food Delivery"),
+    ("door dash",        "Food Delivery"),
+    ("grubhub",          "Food Delivery"),
+    ("postmates",        "Food Delivery"),
+    ("seamless",         "Food Delivery"),
+    ("instacart",        "Groceries"),       # grocery delivery → Groceries
+    # ── Rideshare ─────────────────────────────────────────────────────────
+    ("lyft",             "Rideshare: Lyft"),
+    ("uber",             "Rideshare: Uber"),
+    # ── Airlines ──────────────────────────────────────────────────────────
+    ("united air",       "United"),
+    ("united airline",   "United"),
+    ("united.com",       "United"),
+    ("ual ",             "United"),          # United Airlines IATA code in merchant names
+    ("delta air",        "Delta"),
+    ("delta.com",        "Delta"),
+    ("american airline", "American Airlines"),
+    ("aa.com",           "American Airlines"),
+    ("southwest air",    "Southwest"),
+    ("southwest.com",    "Southwest"),
+    ("jetblue",          "JetBlue"),
+    ("alaska air",       "Alaska Airlines"),
+    ("alaskaair",        "Alaska Airlines"),
+    # ── Hotels ────────────────────────────────────────────────────────────
+    ("hilton",           "Hilton"),          # matches Hampton Inn, DoubleTree, etc.
+    ("marriott",         "Marriott"),
+    ("sheraton",         "Marriott"),
+    ("westin",           "Marriott"),
+    ("w hotel",          "Marriott"),
+    ("ritz-carlton",     "Marriott"),
+    ("ritz carlton",     "Marriott"),
+    ("courtyard",        "Marriott"),
+    ("hyatt",            "Hyatt"),           # matches Park Hyatt, Grand Hyatt, Andaz, etc.
+    ("intercontinental", "IHG"),
+    ("holiday inn",      "IHG"),
+    ("crowne plaza",     "IHG"),
+    ("kimpton",          "IHG"),
+    ("ihg",              "IHG"),
+    # ── Retail / grocery ─────────────────────────────────────────────────
+    ("walmart",          "Walmart"),
+    ("wal-mart",         "Walmart"),
+    ("target",           "Target"),
+    ("amazon",           "Amazon"),          # also catches Amazon Fresh
+    ("whole foods",      "Groceries"),
+    ("trader joe",       "Groceries"),
+    ("costco",           "Wholesale Clubs"),
+    ("sam's club",       "Wholesale Clubs"),
+    ("sams club",        "Wholesale Clubs"),
+    ("best buy",         "Best Buy"),
+    # ── Gas stations ─────────────────────────────────────────────────────
+    ("shell",            "Gas Stations"),
+    ("exxon",            "Gas Stations"),
+    ("mobil",            "Gas Stations"),
+    ("bp ",              "Gas Stations"),
+    ("chevron",          "Gas Stations"),
+    ("sunoco",           "Gas Stations"),
+    ("circle k",         "Gas Stations"),
+    ("speedway",         "Gas Stations"),
+    # ── Streaming ─────────────────────────────────────────────────────────
+    ("netflix",          "Streaming"),
+    ("spotify",          "Streaming"),
+    ("hulu",             "Streaming"),
+    ("disney+",          "Streaming"),
+    ("disneyplus",       "Streaming"),
+    ("peacock",          "Streaming"),
+    ("hbomax",           "Streaming"),
+    ("hbo max",          "Streaming"),
+    ("paramount+",       "Streaming"),
+    ("paramountplus",    "Streaming"),
+    ("apple tv",         "Streaming"),
+    ("apple music",      "Streaming"),
+    ("siriusxm",         "Streaming"),
+    ("youtube premium",  "Streaming"),
+    # ── Drugstore ─────────────────────────────────────────────────────────
+    ("cvs",              "Drugstore"),
+    ("walgreen",         "Drugstore"),
+    ("rite aid",         "Drugstore"),
+]
+
+# Plaid pfc_detailed → points category (L1 fallback when no merchant match)
+_PFC_POINTS_MAP: dict[str, str] = {
+    "TRAVEL_AIRLINES":                           "Airlines",
+    "TRAVEL_LODGING":                            "Hotels",
+    "TRAVEL_CAR_RENTALS":                        "Car Rental",
+    "TRANSPORTATION_TAXIS":                      "Ground Transportation",
+    "TRANSPORTATION_PUBLIC_TRANSIT":             "Ground Transportation",
+    "TRANSPORTATION_GAS_STATIONS":               "Gas Stations",
+    "FOOD_AND_DRINK_RESTAURANTS":                "Dining",
+    "FOOD_AND_DRINK_FAST_FOOD":                  "Dining",
+    "FOOD_AND_DRINK_BAR":                        "Dining",
+    "FOOD_AND_DRINK_COFFEE":                     "Dining",
+    "FOOD_AND_DRINK_FOOD_DELIVERY_SERVICES":     "Food Delivery",
+    "SHOPS_GROCERIES":                           "Groceries",
+    "SHOPS_PHARMACIES":                          "Drugstore",
+    "ENTERTAINMENT_STREAMING_SERVICES":          "Streaming",
+    "ENTERTAINMENT_MUSIC_AND_AUDIO":             "Streaming",
+}
+
+
+def infer_points_category(
+    merchant_name: str | None,
+    pfc_detailed: str | None = None,
+    pfc_primary: str | None = None,
+) -> str | None:
+    """
+    Infer the points_category name for a transaction using a two-step approach:
+
+    1. Merchant name substring match → L2 (brand-specific) or L1 result.
+       This is preferred because it's the most precise signal.
+    2. Plaid pfc_detailed → L1 fallback when no merchant pattern fires.
+
+    Returns None if we can't confidently classify — callers should leave
+    points_category as NULL rather than guess.
+    """
+    if merchant_name:
+        needle = merchant_name.lower()
+        for pattern, cat in _MERCHANT_POINTS_PATTERNS:
+            if pattern in needle:
+                return cat
+
+    if pfc_detailed:
+        cat = _PFC_POINTS_MAP.get(pfc_detailed)
+        if cat:
+            return cat
+
+    # pfc_primary gives a coarser signal — only use it for unambiguous mappings
+    if pfc_primary == "GROCERIES":
+        return "Groceries"
+
+    return None
+
+
 def classify_account(account_type: str) -> dict:
     """
     Compute classification flags for an account based on its type.
@@ -1130,6 +1273,15 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                         gcb_auto = True
                     if 'points:' in rule.notes:
                         points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
+
+            # Auto-infer points category from merchant name + Plaid PFC when
+            # no categorization rule provided one explicitly.
+            if not points_cat:
+                points_cat = infer_points_category(
+                    txn_data.get('merchant_name'),
+                    txn_data.get('pfc_detailed'),
+                    txn_data.get('pfc_primary'),
+                )
 
             txn_date = txn_data['date']
 
@@ -3283,6 +3435,10 @@ async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(ge
         .order_by(PointsCategory.display_order).all()
     ecosystems = {e.id: e for e in db.query(PointsEcosystem).all()}
 
+    # Build hierarchy lookup: category_id → parent_category_id (for earn-rate waterfall)
+    cat_name_to_id = {c.name: c.id for c in categories}
+    cat_parent_id  = {c.id: cat_name_to_id.get(c.parent_key) for c in categories}
+
     # Build earning data per card (from product-level rewards)
     products_cache = {}  # product_id → (base, cat_bonuses)
     card_data = []
@@ -3316,8 +3472,12 @@ async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(ge
             'eco': eco,
         })
 
-    def _card_value(cd, cat_id):
-        total_rate = cd['base'] + cd['cat_bonuses'].get(cat_id, 0)
+    def _card_value(cd, cat_id, parent_cat_id=None):
+        # Earn-rate waterfall: L2 (brand-specific) → L1 (broad) → base
+        l2_bonus = cd['cat_bonuses'].get(cat_id)
+        l1_bonus = cd['cat_bonuses'].get(parent_cat_id) if parent_cat_id else None
+        bonus = l2_bonus if l2_bonus is not None else (l1_bonus or 0)
+        total_rate = cd['base'] + bonus
         eco = cd['eco']
         cons_cpp = eco.conservative_cpp if eco else 1.0
         your_cpp = eco.your_cpp if eco else 1.0
@@ -3344,23 +3504,27 @@ async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(ge
         if not cat_match:
             raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
 
-        rankings = [_card_value(cd, cat_match.id) for cd in card_data]
+        parent_id = cat_parent_id.get(cat_match.id)
+        rankings = [_card_value(cd, cat_match.id, parent_id) for cd in card_data]
         rankings.sort(key=lambda x: x['your_value'], reverse=True)
         return {
             'category': cat_match.name,
+            'parent_category': cat_match.parent_key,
             'rankings': rankings[:10],  # Top 10
         }
 
     # Return best card per category
     results = []
     for cat in categories:
-        rankings = [_card_value(cd, cat.id) for cd in card_data]
+        parent_id = cat_parent_id.get(cat.id)
+        rankings = [_card_value(cd, cat.id, parent_id) for cd in card_data]
         rankings.sort(key=lambda x: x['your_value'], reverse=True)
         best = rankings[0] if rankings else None
         runner_up = rankings[1] if len(rankings) > 1 else None
         results.append({
             'category': cat.name,
             'category_id': cat.id,
+            'parent_category': cat.parent_key,
             'best': best,
             'runner_up': runner_up,
         })
@@ -4207,6 +4371,11 @@ async def import_transactions(
                     llm_calls        += 1
             except Exception:
                 pass
+
+        # Auto-infer points category from merchant name when no rule provided one.
+        # CSV imports have no Plaid PFC, so merchant_name is the only signal here.
+        if not points_cat:
+            points_cat = infer_points_category(merchant_name)
 
         # Determine enrichment source
         if llm_source:
