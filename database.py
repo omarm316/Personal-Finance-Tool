@@ -783,6 +783,10 @@ def run_migrations(engine):
             ('action', 'VARCHAR(50)'),
         ],
         'merchant_overrides': [],   # No extra columns needed beyond what the model defines
+        'points_ecosystems': [
+            ('eco_type',           'VARCHAR(20)'),
+            ('conservative_basis', 'VARCHAR(200)'),
+        ],
     }
 
     if _is_sqlite(engine):
