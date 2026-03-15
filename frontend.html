@@ -3819,6 +3819,43 @@ function CardDetailPage({cardId,onBack,toast}){
         </div>
       </div>}
 
+      {/* ── Benefits & Challenges ─────────────────────────── */}
+      {(d.benefits?.length>0||d.spend_challenges?.length>0)&&<div style={{display:'grid',gridTemplateColumns:d.benefits?.length>0&&d.spend_challenges?.length>0?'1fr 1fr':'1fr',gap:20,marginBottom:24}}>
+        {d.benefits?.length>0&&<div className="card" style={{padding:20}}>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Card Benefits</div>
+          {d.benefits.map(b=>(
+            <div key={b.id} style={{padding:'10px 0',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:500}}>{b.name}</div>
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>{b.reset_frequency}{b.trigger_category?` · ${b.trigger_category}`:''}</div>
+              </div>
+              <div style={{fontSize:16,fontWeight:700,fontFamily:'Inter',color:'var(--green)'}}>${b.amount}</div>
+            </div>
+          ))}
+          <div style={{marginTop:10,padding:'8px 12px',background:'#f0fdf4',borderRadius:8,fontSize:12,color:'#15803d',fontWeight:600}}>
+            Total annual credits: ${d.benefits.reduce((s,b)=>s+(b.reset_frequency==='monthly'?b.amount*12:b.reset_frequency==='semi-annual'?b.amount*2:b.amount),0).toLocaleString()}
+          </div>
+        </div>}
+        {d.spend_challenges?.length>0&&<div className="card" style={{padding:20}}>
+          <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Spend Challenges</div>
+          {d.spend_challenges.map(sc=>(
+            <div key={sc.id} style={{padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                <span style={{fontSize:13,fontWeight:500}}>{sc.name}</span>
+                <span style={{fontSize:12,fontWeight:600,color:sc.is_met?'var(--green)':'var(--amber)'}}>{sc.is_met?'✓ Met':'In Progress'}</span>
+              </div>
+              <div style={{height:8,background:'var(--border)',borderRadius:4,overflow:'hidden',marginBottom:4}}>
+                <div style={{height:'100%',width:`${Math.min((sc.current_spend/sc.required_spend)*100,100)}%`,background:sc.is_met?'var(--green)':'var(--amber)',borderRadius:4}}/>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text-muted)'}}>
+                <span>${sc.current_spend?.toLocaleString()} / ${sc.required_spend?.toLocaleString()}</span>
+                <span>Reward: {sc.reward_value?.toLocaleString()} {sc.reward_type}</span>
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>}
+
       {/* ── Recent Transactions ────────────────────────────── */}
       <div className="card" style={{padding:20}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Recent Transactions</div>

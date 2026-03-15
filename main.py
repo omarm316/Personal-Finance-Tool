@@ -25,7 +25,8 @@ from database import (
     init_db, Account, Transaction, Category,
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
-    PointsEcosystem, CardEarningRate,
+    PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
+    CardBenefit, BenefitUsage, SpendChallenge,
     seed_points_categories, seed_points_ecosystems, seed_card_earning_rates,
     import_cards_from_excel, import_points_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
@@ -3064,10 +3065,12 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
     if account:
         balance = get_account_balance(db, account.id)
 
-    # ── Ecosystem & earning rates ─────────────────────────────────────────
+    # ── Product, ecosystem & earning rates ────────────────────────────────
+    product = db.query(CardProduct).filter_by(id=card.product_id).first() if card.product_id else None
     ecosystem = None
-    if card.ecosystem_id:
-        eco = db.query(PointsEcosystem).filter_by(id=card.ecosystem_id).first()
+    eco_id = product.ecosystem_id if product else card.ecosystem_id
+    if eco_id:
+        eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
         if eco:
             ecosystem = {
                 'id': eco.id, 'name': eco.name, 'currency_name': eco.currency_name,
@@ -3075,7 +3078,11 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
                 'is_cash_back': eco.is_cash_back,
             }
 
-    rates = db.query(CardEarningRate).filter_by(card_id=card.id).all()
+    # Get rewards from product level (preferred) or legacy card-level
+    rates = []
+    if product:
+        rates = db.query(CardProductReward).filter_by(product_id=product.id).all()
+
     base_rate = 1.0
     category_bonuses = []
     all_categories = db.query(PointsCategory).filter_by(is_active=True)\
@@ -3083,13 +3090,13 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
 
     for r in rates:
         if r.is_base_rate:
-            base_rate = r.earn_rate
+            base_rate = r.multiplier
         else:
             category_bonuses.append({
                 'category_id': r.points_category_id,
                 'category_name': r.points_category.name if r.points_category else None,
-                'additional': r.earn_rate,
-                'total': base_rate + r.earn_rate,
+                'additional': r.multiplier,
+                'total': base_rate + r.multiplier,
             })
 
     # Build full earning structure (all categories with their rates)
@@ -3221,9 +3228,34 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
             'card_age_years': card_age_years,
             'notes': card.notes,
         },
+        'product': {
+            'id': product.id,
+            'product_key': product.product_key,
+            'card_name': product.card_name,
+            'status': product.status,
+        } if product else None,
         'ecosystem': ecosystem,
         'earning_structure': earning_structure,
         'base_rate': base_rate,
+        'benefits': [{
+            'id': b.id,
+            'name': b.benefit_name,
+            'amount': b.amount,
+            'reset_frequency': b.reset_frequency,
+            'trigger_category': b.trigger_category,
+            'notes': b.notes,
+        } for b in (product.benefits if product else [])],
+        'spend_challenges': [{
+            'id': sc.id,
+            'name': sc.challenge_name,
+            'required_spend': sc.required_spend,
+            'reward_value': sc.reward_value,
+            'reward_type': sc.reward_type,
+            'start_date': sc.start_date.strftime('%Y-%m-%d') if sc.start_date else None,
+            'end_date': sc.end_date.strftime('%Y-%m-%d') if sc.end_date else None,
+            'current_spend': sc.current_spend,
+            'is_met': sc.is_met,
+        } for sc in (product.spend_challenges if product else [])],
         'linked_account': {
             'id': account.id, 'name': account.account_name,
             'balance': balance,
@@ -3248,18 +3280,32 @@ async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(ge
         .order_by(PointsCategory.display_order).all()
     ecosystems = {e.id: e for e in db.query(PointsEcosystem).all()}
 
-    # Build earning data per card
+    # Build earning data per card (from product-level rewards)
+    products_cache = {}  # product_id → (base, cat_bonuses)
     card_data = []
     for card in active_cards:
-        rates = db.query(CardEarningRate).filter_by(card_id=card.id).all()
         base = 1.0
         cat_bonuses = {}
-        for r in rates:
-            if r.is_base_rate:
-                base = r.earn_rate
-            elif r.points_category_id:
-                cat_bonuses[r.points_category_id] = r.earn_rate
-        eco = ecosystems.get(card.ecosystem_id) if card.ecosystem_id else None
+        product_id = card.product_id
+        if product_id:
+            if product_id not in products_cache:
+                rates = db.query(CardProductReward).filter_by(product_id=product_id).all()
+                _b = 1.0
+                _cb = {}
+                for r in rates:
+                    if r.is_base_rate:
+                        _b = r.multiplier
+                    elif r.points_category_id:
+                        _cb[r.points_category_id] = r.multiplier
+                products_cache[product_id] = (_b, _cb)
+            base, cat_bonuses = products_cache[product_id]
+        eco_id = None
+        if product_id:
+            prod = db.query(CardProduct).filter_by(id=product_id).first()
+            eco_id = prod.ecosystem_id if prod else card.ecosystem_id
+        else:
+            eco_id = card.ecosystem_id
+        eco = ecosystems.get(eco_id) if eco_id else None
         card_data.append({
             'card': card,
             'base': base,

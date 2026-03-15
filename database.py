@@ -409,7 +409,8 @@ class Card(Base):
     plaid_account_id = Column(String(100), nullable=True)  # Legacy string link — prefer account_id
     account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True, index=True)  # Proper FK to Account
     payment_account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Checking account that pays this card
-    ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)  # Points ecosystem
+    product_id = Column(Integer, ForeignKey('card_products.id'), nullable=True, index=True)  # Links to card product
+    ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)  # Legacy — prefer product.ecosystem
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -417,9 +418,9 @@ class Card(Base):
 
     account = relationship("Account", back_populates="card", foreign_keys=[account_id])
     payment_account = relationship("Account", foreign_keys=[payment_account_id])
+    product = relationship("CardProduct", back_populates="cards")
     ecosystem_rel = relationship("PointsEcosystem", back_populates="cards")
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="card")
-    earning_rates = relationship("CardEarningRate", back_populates="card", cascade="all, delete-orphan")
 
 
 class PointsEcosystem(Base):
@@ -429,29 +430,134 @@ class PointsEcosystem(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(50), unique=True, nullable=False)    # "Chase UR", "Amex MR", "Hilton", etc.
     currency_name = Column(String(100))                        # "Ultimate Rewards", "Membership Rewards"
+    eco_type = Column(String(20))                              # "Flexible", "Hotel", "Airline", "Cash"
     conservative_cpp = Column(Float, default=1.0)              # Conservative cents per point
     your_cpp = Column(Float, default=1.0)                      # User's personal valuation
     is_cash_back = Column(Boolean, default=False)              # True = flat cash back (always 1 cpp)
+    conservative_basis = Column(String(200), nullable=True)    # Explanation of conservative value
 
+    products = relationship("CardProduct", back_populates="ecosystem_rel")
+    # Legacy: cards may still reference ecosystem_id directly
     cards = relationship("Card", back_populates="ecosystem_rel")
 
 
-class CardEarningRate(Base):
-    """Per-card per-category earning rates (points multiplier)"""
-    __tablename__ = 'card_earning_rates'
+class CardProduct(Base):
+    """
+    One row per card PRODUCT (e.g., 'Chase Sapphire Preferred').
+    Multiple physical Cards may reference the same product
+    (Omer's CSP + Daniella's CSP = 2 cards, 1 product).
+    Earning rates and benefits live here, not on Card.
+    """
+    __tablename__ = 'card_products'
 
     id = Column(Integer, primary_key=True)
-    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False)
-    points_category_id = Column(Integer, ForeignKey('points_categories.id', ondelete='CASCADE'), nullable=True)
-    earn_rate = Column(Float, nullable=False)      # Points per dollar (e.g., 3.0 = 3x)
-    is_base_rate = Column(Boolean, default=False)  # True = applies to ALL spend; category is ignored
+    product_key = Column(String(50), unique=True, nullable=False, index=True)  # e.g., 'chase_sapphire_preferred'
+    card_name = Column(String(200))                                             # Display name
+    ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)
+    status = Column(String(20), default='active')                               # active, closed, planned
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    card = relationship("Card", back_populates="earning_rates")
+    ecosystem_rel = relationship("PointsEcosystem", back_populates="products")
+    rewards = relationship("CardProductReward", back_populates="product", cascade="all, delete-orphan")
+    benefits = relationship("CardBenefit", back_populates="product", cascade="all, delete-orphan")
+    spend_challenges = relationship("SpendChallenge", back_populates="product", cascade="all, delete-orphan")
+    cards = relationship("Card", back_populates="product")
+
+
+class CardProductReward(Base):
+    """
+    Category multipliers for a card product.
+    Base rate: points_category_id = NULL, is_base_rate = True.
+    Category bonus: ADDITIONAL points on top of base.
+    Total for category = base + category bonus.
+    """
+    __tablename__ = 'card_product_rewards'
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('card_products.id', ondelete='CASCADE'), nullable=False)
+    points_category_id = Column(Integer, ForeignKey('points_categories.id', ondelete='CASCADE'), nullable=True)
+    multiplier = Column(Float, nullable=False)     # Points per dollar (base or additional)
+    is_base_rate = Column(Boolean, default=False)  # True = applies to ALL spend
+
+    product = relationship("CardProduct", back_populates="rewards")
     points_category = relationship("PointsCategory")
 
     __table_args__ = (
-        Index('ix_card_earning_card_cat', 'card_id', 'points_category_id'),
+        Index('ix_product_reward_prod_cat', 'product_id', 'points_category_id'),
     )
+
+
+class CardBenefit(Base):
+    """
+    Recurring credits/perks for a card product.
+    e.g., Amex Platinum $200 airline credit, Hilton Aspire $250 resort credit.
+    """
+    __tablename__ = 'card_benefits'
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('card_products.id', ondelete='CASCADE'), nullable=False)
+    benefit_name = Column(String(200), nullable=False)        # "Airline Credit", "Resort Credit"
+    amount = Column(Float, nullable=False)                     # Dollar value per cycle
+    reset_frequency = Column(String(20), default='annual')     # "annual", "semi-annual", "monthly", "calendar_year"
+    trigger_category = Column(String(100), nullable=True)      # Spending category that triggers the credit (if any)
+    notes = Column(Text, nullable=True)
+
+    product = relationship("CardProduct", back_populates="benefits")
+    usage = relationship("BenefitUsage", back_populates="benefit", cascade="all, delete-orphan")
+
+
+class BenefitUsage(Base):
+    """Tracks per-cycle usage of a card benefit."""
+    __tablename__ = 'benefit_usage'
+
+    id = Column(Integer, primary_key=True)
+    benefit_id = Column(Integer, ForeignKey('card_benefits.id', ondelete='CASCADE'), nullable=False)
+    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=True)  # Which physical card used it
+    cycle = Column(String(20), nullable=False)                 # "2026", "2026-H1", "2026-03" depending on frequency
+    amount_used = Column(Float, default=0)                     # How much of the benefit has been used
+    confirmed = Column(Boolean, default=False)                 # User-confirmed usage
+    notes = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    benefit = relationship("CardBenefit", back_populates="usage")
+
+    __table_args__ = (
+        Index('ix_benefit_usage_benefit_cycle', 'benefit_id', 'cycle'),
+    )
+
+
+class SpendChallenge(Base):
+    """
+    Signup bonuses and spending challenges.
+    e.g., "Spend $4,000 in 3 months → 60,000 points"
+    """
+    __tablename__ = 'spend_challenges'
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('card_products.id', ondelete='CASCADE'), nullable=False)
+    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=True)  # Specific card instance
+    challenge_name = Column(String(200), default='Signup Bonus')
+    required_spend = Column(Float, nullable=False)             # Spending threshold
+    reward_value = Column(Float, nullable=False)               # Points/miles/cash earned
+    reward_type = Column(String(50), default='points')         # "points", "cash", "statement_credit"
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    current_spend = Column(Float, default=0)                   # Tracked spend so far
+    is_met = Column(Boolean, default=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    product = relationship("CardProduct", back_populates="spend_challenges")
+
+    __table_args__ = (
+        Index('ix_spend_challenge_card', 'card_id'),
+    )
+
+
+# Legacy alias — kept for backward compatibility during migration
+CardEarningRate = CardProductReward
 
 
 class MerchantPointsMapping(Base):
@@ -997,25 +1103,25 @@ def seed_card_earning_rates(session):
 
 def import_points_from_excel(filepath, session):
     """
-    Import points data from the points Excel file.
-    Two sheets:
-      - 'valuations': ecosystem name, type, conservative_cpp, your_valuation_cpp
-      - 'points': card earning rates (Base + category columns = additional above base)
+    Import points data from the points Excel file into the proper schema:
+      - 'valuations' sheet → PointsEcosystem table
+      - 'points' sheet    → CardProduct + CardProductReward tables
+                             + links Card.product_id
 
     Earning rate logic: each category column holds the ADDITIONAL points above Base.
     Total earn for a category = Base + category value.
     A value of 0 means no bonus (total = Base). None means category not applicable.
 
-    The card_db_id column may contain comma-separated IDs for duplicate cards
+    The card_db_id column contains comma-separated Card.id values
     (e.g., "3,19" = same product held by Omer and Daniella).
     """
     import openpyxl
 
     wb = openpyxl.load_workbook(filepath, data_only=True)
     imported_ecos = 0
-    imported_rates = 0
+    imported_products = 0
 
-    # ── Sheet 1: Valuations ───────────────────────────────────────────────
+    # ── Sheet 1: Valuations → PointsEcosystem ────────────────────────────
     if 'valuations' in wb.sheetnames:
         ws = wb['valuations']
         headers = [c.value for c in ws[1]]
@@ -1028,40 +1134,44 @@ def import_points_from_excel(filepath, session):
             eco_type = str(d.get('type', '')).strip()
             cons = d.get('conservative_cpp')
             yours = d.get('your_valuation_cpp')
+            cons_basis = d.get('conservative_basis')
             existing = session.query(PointsEcosystem).filter_by(name=name).first()
             if existing:
-                # Update valuations if they changed
                 if cons is not None:
                     existing.conservative_cpp = float(cons)
                 if yours is not None:
                     existing.your_cpp = float(yours)
                 existing.is_cash_back = eco_type in cash_types
+                existing.eco_type = eco_type
+                if cons_basis:
+                    existing.conservative_basis = str(cons_basis)
             else:
                 session.add(PointsEcosystem(
                     name=name,
                     currency_name=name,
+                    eco_type=eco_type,
                     conservative_cpp=float(cons) if cons else 1.0,
                     your_cpp=float(yours) if yours else float(cons) if cons else 1.0,
                     is_cash_back=eco_type in cash_types,
+                    conservative_basis=str(cons_basis) if cons_basis else None,
                 ))
                 imported_ecos += 1
         session.flush()
 
-    # ── Sheet 2: Points (earning rates) ───────────────────────────────────
+    # ── Sheet 2: Points → CardProduct + CardProductReward ─────────────────
     if 'points' in wb.sheetnames:
         ws = wb['points']
         headers = [c.value for c in ws[1]]
 
-        # Category columns start after the metadata columns
+        # Category columns = everything after the metadata columns
         meta_cols = {'product_key', 'card_db_id', 'ecosystem', 'status', 'card_name', 'notes', 'Base'}
         cat_columns = [h for h in headers if h and h not in meta_cols]
 
-        # Build category lookup
-        cat_map = {}  # header_name → PointsCategory.id
+        # Ensure PointsCategory rows exist for every category column
+        cat_map = {}
         for col_name in cat_columns:
             cat = session.query(PointsCategory).filter_by(name=col_name).first()
             if not cat:
-                # Auto-create missing category
                 max_order = session.query(PointsCategory).count() + 1
                 cat = PointsCategory(name=col_name, display_order=max_order)
                 session.add(cat)
@@ -1072,54 +1182,76 @@ def import_points_from_excel(filepath, session):
 
         for row in ws.iter_rows(min_row=2, values_only=True):
             d = dict(zip(headers, row))
-            db_ids_str = str(d.get('card_db_id', '')).strip()
-            eco_name = str(d.get('ecosystem', '')).strip()
-            base_rate = d.get('Base')
-
-            if not db_ids_str or db_ids_str.startswith('⚠'):
-                continue  # Skip TBD cards
-
-            # Parse comma-separated card IDs
-            try:
-                card_db_ids = [int(x.strip()) for x in db_ids_str.split(',') if x.strip().isdigit()]
-            except ValueError:
+            product_key = str(d.get('product_key', '')).strip()
+            if not product_key:
                 continue
+            card_name = str(d.get('card_name', '')).strip() or product_key
+            eco_name = str(d.get('ecosystem', '')).strip()
+            status = str(d.get('status', 'active')).strip()
+            notes = d.get('notes')
+            base_rate = d.get('Base')
+            db_ids_str = str(d.get('card_db_id', '')).strip()
 
-            for card_db_id in card_db_ids:
-                card = session.query(Card).filter_by(id=card_db_id).first()
-                if not card:
-                    continue
+            eco_id = eco_map.get(eco_name)
 
-                # Set ecosystem
-                eco_id = eco_map.get(eco_name)
-                if eco_id and card.ecosystem_id != eco_id:
-                    card.ecosystem_id = eco_id
+            # ── Upsert CardProduct ────────────────────────────────────────
+            product = session.query(CardProduct).filter_by(product_key=product_key).first()
+            if not product:
+                product = CardProduct(
+                    product_key=product_key,
+                    card_name=card_name,
+                    ecosystem_id=eco_id,
+                    status=status,
+                    notes=str(notes) if notes else None,
+                )
+                session.add(product)
+                session.flush()
+            else:
+                product.card_name = card_name
+                product.ecosystem_id = eco_id
+                product.status = status
+                if notes:
+                    product.notes = str(notes)
 
-                # Clear existing rates for reimport
-                session.query(CardEarningRate).filter_by(card_id=card.id).delete(
-                    synchronize_session=False)
+            # ── Replace rewards (delete + re-insert) ──────────────────────
+            session.query(CardProductReward).filter_by(product_id=product.id).delete(
+                synchronize_session=False)
 
+            if base_rate is not None:
                 # Base rate
-                if base_rate is not None:
-                    session.add(CardEarningRate(
-                        card_id=card.id, points_category_id=None,
-                        earn_rate=float(base_rate), is_base_rate=True,
-                    ))
+                session.add(CardProductReward(
+                    product_id=product.id, points_category_id=None,
+                    multiplier=float(base_rate), is_base_rate=True,
+                ))
+                # Category bonus rates (additional above base)
+                for col_name in cat_columns:
+                    val = d.get(col_name)
+                    if val is not None and isinstance(val, (int, float)) and val > 0:
+                        cat_id = cat_map.get(col_name)
+                        if cat_id:
+                            session.add(CardProductReward(
+                                product_id=product.id, points_category_id=cat_id,
+                                multiplier=float(val), is_base_rate=False,
+                            ))
 
-                    # Category bonus rates (additional above base)
-                    for col_name in cat_columns:
-                        val = d.get(col_name)
-                        if val is not None and isinstance(val, (int, float)) and val > 0:
-                            cat_id = cat_map.get(col_name)
-                            if cat_id:
-                                session.add(CardEarningRate(
-                                    card_id=card.id, points_category_id=cat_id,
-                                    earn_rate=float(val), is_base_rate=False,
-                                ))
-                    imported_rates += 1
+            # ── Link Card → CardProduct ───────────────────────────────────
+            if db_ids_str and not db_ids_str.startswith('⚠'):
+                try:
+                    card_db_ids = [int(x.strip()) for x in db_ids_str.split(',') if x.strip().isdigit()]
+                except ValueError:
+                    card_db_ids = []
+                for card_db_id in card_db_ids:
+                    card = session.query(Card).filter_by(id=card_db_id).first()
+                    if card:
+                        card.product_id = product.id
+                        # Also set ecosystem on card for backward compat
+                        if eco_id:
+                            card.ecosystem_id = eco_id
+
+            imported_products += 1
 
     session.commit()
-    return {'ecosystems_imported': imported_ecos, 'cards_with_rates': imported_rates}
+    return {'ecosystems_imported': imported_ecos, 'products_imported': imported_products}
 
 
 def import_cards_from_excel(filepath, session):
