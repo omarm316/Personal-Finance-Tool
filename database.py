@@ -89,6 +89,7 @@ class Account(Base):
     starting_balance = Column(Float, default=0)       # Balance when tracking began
     start_date = Column(DateTime, nullable=True)       # Date starting_balance applies to
     notes = Column(Text, nullable=True)                # Optional user notes
+    product_id = Column(Integer, ForeignKey('card_products.id'), nullable=True, index=True)  # Links account directly to card product
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -103,6 +104,7 @@ class Account(Base):
 
     transactions = relationship("Transaction", back_populates="account")
     card = relationship("Card", back_populates="account", uselist=False, foreign_keys="Card.account_id")
+    product = relationship("CardProduct")
 
 
 class Transaction(Base):
@@ -751,6 +753,7 @@ def run_migrations(engine):
             ('liability_last_payment',     'FLOAT'),
             ('liability_last_payment_date', 'DATE'),
             ('liability_purchase_apr',     'FLOAT'),
+            ('product_id',                 'INTEGER'),
         ],
         'plaid_items': [
             ('institution_id',    'VARCHAR(50)'),
@@ -761,6 +764,8 @@ def run_migrations(engine):
         'cards': [
             ('account_id', 'INTEGER'),
             ('payment_account_id', 'INTEGER'),
+            ('product_id', 'INTEGER'),
+            ('ecosystem_id', 'INTEGER'),
         ],
         'loans': [
             ('balance_date',          'DATE'),
@@ -1091,14 +1096,228 @@ def seed_points_categories(session):
 
 
 def seed_points_ecosystems(session):
-    """Seed ecosystems from hardcoded defaults. Overridden by import_points_from_excel."""
-    # Minimal fallback — the real data comes from the Excel valuations sheet
-    pass
+    """Seed all points/miles ecosystems with valuations."""
+    ecosystems = [
+        ("Chase UR", "Ultimate Rewards", "Flexible", 1.25, False, "Portal redemption floor"),
+        ("Amex MR", "Membership Rewards", "Flexible", 1.0, False, "Transfer partner average"),
+        ("Citi ThankYou", "ThankYou Points", "Flexible", 1.0, False, "Transfer partner average"),
+        ("Capital One Miles", "Capital One Miles", "Flexible", 1.0, False, "Transfer/portal"),
+        ("Hilton Honors", "Hilton Honors Points", "Hotel", 0.5, False, "Standard night avg"),
+        ("Marriott Bonvoy", "Marriott Bonvoy Points", "Hotel", 0.7, False, "Standard night avg"),
+        ("World of Hyatt", "World of Hyatt Points", "Hotel", 1.7, False, "Standard night avg"),
+        ("IHG Rewards", "IHG One Rewards Points", "Hotel", 0.5, False, "Standard night avg"),
+        ("Delta SkyMiles", "Delta SkyMiles", "Airline", 1.0, False, "Domestic economy avg"),
+        ("United MileagePlus", "United MileagePlus Miles", "Airline", 1.0, False, "Domestic economy avg"),
+        ("AA AAdvantage", "AAdvantage Miles", "Airline", 1.0, False, "Domestic economy avg"),
+        ("Southwest RR", "Rapid Rewards Points", "Airline", 1.0, False, "Wanna Get Away avg"),
+        ("JetBlue TrueBlue", "TrueBlue Points", "Airline", 1.0, False, "Domestic economy avg"),
+        ("Alaska Mileage Plan", "Alaska Miles", "Airline", 1.0, False, "Domestic economy avg"),
+        ("Cash Back", "Cash Back", "Cash", 1.0, True, "1:1 cash value"),
+        ("Discover Cashback", "Cashback Bonus", "Cash", 1.0, True, "1:1 cash value"),
+        ("Best Buy Rewards", "Best Buy Reward Certificates", "Cash", 1.0, True, "1:1 cash value"),
+        ("Fidelity Rewards", "Fidelity Rewards", "Cash", 1.0, True, "1:1 cash into brokerage"),
+        ("Amazon Rewards", "Amazon Points", "Cash", 1.0, True, "1:1 at Amazon"),
+        ("Walmart Rewards", "Walmart Rewards", "Cash", 1.0, True, "1:1 at Walmart"),
+        ("Target Circle", "Target Circle Earnings", "Cash", 1.0, True, "1:1 at Target"),
+        ("Costco Rewards", "Costco Cash Back", "Cash", 1.0, True, "Annual check"),
+        ("Apple Cash", "Apple Cash", "Cash", 1.0, True, "1:1 cash value"),
+    ]
+    for name, currency, eco_type, cons_cpp, is_cash, basis in ecosystems:
+        existing = session.query(PointsEcosystem).filter_by(name=name).first()
+        if not existing:
+            session.add(PointsEcosystem(
+                name=name, currency_name=currency, eco_type=eco_type,
+                conservative_cpp=cons_cpp, your_cpp=cons_cpp,
+                is_cash_back=is_cash, conservative_basis=basis,
+            ))
+    session.commit()
 
 
-def seed_card_earning_rates(session):
-    """No-op — real data comes from import_points_from_excel."""
-    pass
+def seed_card_products(session):
+    """
+    Seed the full card product catalog with earning rates and benefits.
+    Runs on every startup — skips products that already exist (by product_key).
+    Does NOT overwrite existing data (so user edits via UI are preserved).
+    """
+    # Build category lookup
+    cat_map = {c.name: c.id for c in session.query(PointsCategory).all()}
+    eco_map = {e.name: e.id for e in session.query(PointsEcosystem).all()}
+
+    # Product definitions: (product_key, card_name, ecosystem_name, status, annual_fee, benefits, earning_rates)
+    # earning_rates: dict of {category_name: additional_points_above_base} + {'_base': base_rate}
+    # benefits: list of (name, amount, frequency, trigger_category)
+    products = [
+        ("chase_sapphire_preferred", "Chase Sapphire Preferred", "Chase UR", "active", 95, [
+            ("DoorDash DashPass", 0, "annual", "Food Delivery"),
+            ("$50 Chase Travel Hotel Credit", 50, "annual", "Hotels"),
+        ], {"_base": 1, "Dining": 2, "Food Delivery": 2, "Airlines": 1, "Ground Transportation": 1, "Hotels": 1, "Car Rental": 1, "Rideshare: Lyft": 4}),
+
+        ("chase_sapphire_reserve", "Chase Sapphire Reserve", "Chase UR", "not_held", 550, [
+            ("$300 Travel Credit", 300, "annual", None),
+            ("$10/mo DoorDash Credit", 120, "annual", "Food Delivery"),
+            ("Priority Pass Lounge", 0, "annual", None),
+        ], {"_base": 1, "Dining": 2, "Food Delivery": 2, "Airlines": 2, "Ground Transportation": 2, "Hotels": 2, "Car Rental": 2}),
+
+        ("chase_freedom", "Chase Freedom", "Chase UR", "active", 0, [],
+         {"_base": 1, "Dining": 2, "Food Delivery": 2, "Drugstore": 2}),
+
+        ("chase_freedom_unlimited", "Chase Freedom Unlimited", "Chase UR", "active", 0, [],
+         {"_base": 1.5, "Drugstore": 1.5, "Rideshare: Lyft": 3.5}),
+
+        ("chase_freedom_flex", "Chase Freedom Flex", "Chase UR", "active", 0, [],
+         {"_base": 1, "Dining": 2, "Food Delivery": 2, "Drugstore": 2}),
+
+        ("chase_ink_preferred", "Chase Ink Business Preferred", "Chase UR", "not_held", 95, [],
+         {"_base": 1}),
+
+        ("chase_ink_unlimited", "Chase Ink Business Unlimited", "Chase UR", "not_held", 0, [],
+         {"_base": 1.5}),
+
+        ("chase_amazon_prime", "Amazon Prime Rewards Visa", "Cash Back", "active", 0, [],
+         {"_base": 1, "Amazon": 4, "Groceries": 1, "Dining": 1, "Gas Stations": 1}),
+
+        ("amex_platinum", "Amex Platinum", "Amex MR", "active", 695, [
+            ("$200 Airline Fee Credit", 200, "calendar_year", "Airlines"),
+            ("$200 Hotel Credit (FHR/THC)", 200, "calendar_year", "Hotels"),
+            ("$200 Uber Cash", 200, "annual", "Rideshare: Uber"),
+            ("$155 Walmart+ Credit", 155, "annual", "Walmart"),
+            ("$240 Digital Entertainment", 240, "annual", None),
+            ("$189 CLEAR Plus Credit", 189, "annual", None),
+            ("$100 Saks Credit", 100, "annual", None),
+            ("Global Entry/TSA PreCheck", 100, "every_4.5_years", None),
+            ("Centurion Lounge Access", 0, "annual", None),
+        ], {"_base": 1, "Airlines": 4}),
+
+        ("amex_gold", "Amex Gold", "Amex MR", "not_held", 250, [
+            ("$120 Uber Cash", 120, "annual", "Rideshare: Uber"),
+            ("$120 Dining Credit", 120, "annual", "Dining"),
+            ("$100 Dunkin'/Shake Shack", 100, "annual", "Dining"),
+        ], {"_base": 1, "Dining": 3, "Food Delivery": 3, "Groceries": 3}),
+
+        ("amex_green", "Amex Green", "Amex MR", "not_held", 150, [
+            ("$189 CLEAR Plus Credit", 189, "annual", None),
+            ("$100 LoungeBuddy Credit", 100, "annual", None),
+        ], {"_base": 1, "Dining": 2, "Airlines": 2, "Ground Transportation": 2}),
+
+        ("amex_blue_cash_preferred", "Blue Cash Preferred", "Cash Back", "not_held", 95, [],
+         {"_base": 1, "Groceries": 5, "Gas Stations": 2, "Online Shopping": 2}),
+
+        ("hilton_aspire", "Hilton Honors Aspire", "Hilton Honors", "active", 550, [
+            ("$250 Hilton Resort Credit", 250, "annual", "Hilton"),
+            ("$200 Airline Fee Credit", 200, "calendar_year", "Airlines"),
+            ("$50 Hilton Quarterly Credit", 200, "annual", "Hilton"),
+            ("Diamond Status", 0, "annual", None),
+            ("Free Weekend Night Cert", 0, "annual", "Hilton"),
+        ], {"_base": 3, "Dining": 4, "Food Delivery": 4, "Airlines": 4, "Car Rental": 4, "Hilton": 11}),
+
+        ("hilton_surpass", "Hilton Honors Surpass", "Hilton Honors", "not_held", 150, [
+            ("Gold Status", 0, "annual", None),
+            ("Free Weekend Night Cert (after $15k)", 0, "annual", "Hilton"),
+        ], {"_base": 3, "Dining": 3, "Groceries": 3, "Gas Stations": 3, "Hilton": 9}),
+
+        ("hilton_honors", "Hilton Honors Card", "Hilton Honors", "active", 0, [
+            ("Silver Status", 0, "annual", None),
+        ], {"_base": 3, "Dining": 2, "Groceries": 2, "Gas Stations": 2, "Hilton": 4}),
+
+        ("hyatt_personal", "World of Hyatt Card", "World of Hyatt", "active", 95, [
+            ("Discoverist Status", 0, "annual", None),
+            ("Free Night Cert (up to Cat 4)", 0, "annual", "Hyatt"),
+            ("Free Night Cert (after $15k)", 0, "annual", "Hyatt"),
+        ], {"_base": 1, "Dining": 1, "Spa & Salon": 1, "Hyatt": 3}),
+
+        ("marriott_bonvoy_brilliant", "Marriott Bonvoy Brilliant", "Marriott Bonvoy", "active", 650, [
+            ("$300 Marriott Credit", 300, "annual", "Marriott"),
+            ("Platinum Elite Status", 0, "annual", None),
+            ("Free Night Cert (up to 85k pts)", 0, "annual", "Marriott"),
+            ("$100 Dining Credit", 100, "annual", "Dining"),
+            ("Priority Pass Select", 0, "annual", None),
+        ], {"_base": 2, "Dining": 1, "Airlines": 1, "Marriott": 4}),
+
+        ("marriott_bonvoy_boundless", "Marriott Bonvoy Boundless", "Marriott Bonvoy", "not_held", 95, [
+            ("Free Night Cert (up to 35k pts)", 0, "annual", "Marriott"),
+        ], {"_base": 2, "Marriott": 4}),
+
+        ("citi_custom_cash", "Citi Custom Cash", "Citi ThankYou", "active", 0, [],
+         {"_base": 1, "Gas Stations": 4}),
+
+        ("citi_double_cash", "Citi Double Cash", "Citi ThankYou", "active", 0, [],
+         {"_base": 2}),
+
+        ("citi_premier", "Citi Premier", "Citi ThankYou", "not_held", 95, [],
+         {"_base": 1, "Dining": 2, "Groceries": 2, "Airlines": 2, "Gas Stations": 2, "Hotels": 2}),
+
+        ("best_buy_card", "Best Buy Credit Card", "Best Buy Rewards", "active", 0, [],
+         {"_base": 1, "Dining": 1, "Food Delivery": 1, "Groceries": 1, "Gas Stations": 2, "Best Buy": 4}),
+
+        ("fidelity_rewards", "Fidelity Rewards Visa", "Fidelity Rewards", "active", 0, [],
+         {"_base": 2}),
+
+        ("discover_it", "Discover it Cash Back", "Discover Cashback", "active", 0, [],
+         {"_base": 1}),
+
+        ("apple_card", "Apple Card", "Apple Cash", "not_held", 0, [],
+         {"_base": 1, "Apple": 2}),
+
+        ("costco_anywhere", "Costco Anywhere Visa", "Costco Rewards", "not_held", 0, [],
+         {"_base": 1, "Dining": 2, "Gas Stations": 3, "Wholesale Clubs": 1}),
+
+        ("capital_one_venture_x", "Capital One Venture X", "Capital One Miles", "not_held", 395, [
+            ("$300 Travel Credit", 300, "annual", None),
+            ("10,000 Anniversary Miles", 0, "annual", None),
+            ("Priority Pass + Plaza Premium", 0, "annual", None),
+        ], {"_base": 2, "Airlines": 3, "Hotels": 8}),
+
+        ("capital_one_venture", "Capital One Venture", "Capital One Miles", "not_held", 95, [],
+         {"_base": 2, "Hotels": 3}),
+
+        ("capital_one_savor_one", "Capital One SavorOne", "Cash Back", "not_held", 0, [],
+         {"_base": 1, "Dining": 2, "Groceries": 2, "Online Shopping": 2}),
+    ]
+
+    for product_key, card_name, eco_name, status, annual_fee, benefits, rates in products:
+        # Skip if already exists
+        if session.query(CardProduct).filter_by(product_key=product_key).first():
+            continue
+
+        eco_id = eco_map.get(eco_name)
+        product = CardProduct(
+            product_key=product_key,
+            card_name=card_name,
+            ecosystem_id=eco_id,
+            status=status,
+            notes=f"Annual fee: ${annual_fee}" if annual_fee else None,
+        )
+        session.add(product)
+        session.flush()
+
+        # Add earning rates
+        base_rate = rates.get('_base', 1)
+        session.add(CardProductReward(
+            product_id=product.id, points_category_id=None,
+            multiplier=base_rate, is_base_rate=True,
+        ))
+        for cat_name, additional in rates.items():
+            if cat_name == '_base':
+                continue
+            cat_id = cat_map.get(cat_name)
+            if cat_id and additional > 0:
+                session.add(CardProductReward(
+                    product_id=product.id, points_category_id=cat_id,
+                    multiplier=additional, is_base_rate=False,
+                ))
+
+        # Add benefits
+        for ben_name, amount, frequency, trigger in benefits:
+            session.add(CardBenefit(
+                product_id=product.id,
+                benefit_name=ben_name,
+                amount=amount,
+                reset_frequency=frequency,
+                trigger_category=trigger,
+            ))
+
+    session.commit()
+    print(f"Card products seeded: {session.query(CardProduct).count()} products in catalog")
 
 
 def import_points_from_excel(filepath, session):

@@ -3656,65 +3656,72 @@ function usePlaidLink(toast,onSuccess){
 }
 
 
-function CardDetailPage({cardId,onBack,toast}){
+function AccountCardDetailPage({accountId,onBack,toast}){
   const[d,setD]=useState(null);
   const[loading,setLoading]=useState(true);
   const load=async()=>{
     setLoading(true);
-    try{setD(await apiFetch(`/cards/${cardId}/detail`));}
+    try{setD(await apiFetch(`/accounts/${accountId}/card-detail`));}
     catch(e){toast('Failed to load card detail','error');}
     finally{setLoading(false);}
   };
-  useEffect(()=>{load();},[cardId]);
+  useEffect(()=>{load();},[accountId]);
   if(loading)return<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>;
-  if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Card not found</div>;
+  if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
 
+  const acct=d.account;
   const c=d.card;
+  const p=d.product;
   const eco=d.ecosystem;
-  const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
   const issuerGradient={
-    CHASE:'linear-gradient(135deg,#003087 0%,#0060c7 100%)',
-    AMEX:'linear-gradient(135deg,#006FCF 0%,#00A5E5 100%)',
-    CITI:'linear-gradient(135deg,#003B70 0%,#005DAA 100%)',
-    BOA:'linear-gradient(135deg,#C41230 0%,#E31837 100%)',
-    DISCOVER:'linear-gradient(135deg,#FF6600 0%,#FF8C00 100%)',
-    CAPITALONE:'linear-gradient(135deg,#004879 0%,#0072B5 100%)',
-    'CAPITAL ONE':'linear-gradient(135deg,#004879 0%,#0072B5 100%)',
-    FIDELITY:'linear-gradient(135deg,#4A8C2A 0%,#6DB33F 100%)',
-    SYNCHRONY:'linear-gradient(135deg,#0066CC 0%,#3399FF 100%)',
-    'US BANK':'linear-gradient(135deg,#C41230 0%,#E31837 100%)',
+    'chase':'linear-gradient(135deg,#003087 0%,#0060c7 100%)',
+    'amex':'linear-gradient(135deg,#006FCF 0%,#00A5E5 100%)',
+    'american express':'linear-gradient(135deg,#006FCF 0%,#00A5E5 100%)',
+    'citi':'linear-gradient(135deg,#003B70 0%,#005DAA 100%)',
+    'discover':'linear-gradient(135deg,#FF6600 0%,#FF8C00 100%)',
+    'capital one':'linear-gradient(135deg,#004879 0%,#0072B5 100%)',
+    'fidelity':'linear-gradient(135deg,#4A8C2A 0%,#6DB33F 100%)',
+    'hilton':'linear-gradient(135deg,#104C97 0%,#2E7BD5 100%)',
+    'hyatt':'linear-gradient(135deg,#8B6914 0%,#C49B1A 100%)',
+    'marriott':'linear-gradient(135deg,#8C1D40 0%,#BE2A5A 100%)',
+    'best buy':'linear-gradient(135deg,#003B64 0%,#0058A3 100%)',
+    'amazon':'linear-gradient(135deg,#232F3E 0%,#37475A 100%)',
   };
-  const grad=issuerGradient[c.issuer]||'linear-gradient(135deg,#374151 0%,#6B7280 100%)';
-  const bal=d.linked_account?.balance;
+  // Determine gradient from account name or card issuer
+  const nameLower=(acct.name||'').toLowerCase();
+  const grad=Object.entries(issuerGradient).find(([k])=>nameLower.includes(k))?.[1]
+    ||(c?issuerGradient[(c.issuer||'').toLowerCase()]:null)
+    ||'linear-gradient(135deg,#374151 0%,#6B7280 100%)';
+  const displayName=p?p.card_name:(c?c.card_name:acct.name);
+  const bal=acct.balance;
   const utilPct=d.utilization;
-  const topCats=d.spending_by_category.slice(0,6);
+  const topCats=(d.spending_by_category||[]).slice(0,6);
   const maxSpend=topCats.length?Math.max(...topCats.map(s=>s.amount)):1;
 
   return(
     <div style={{maxWidth:900,margin:'0 auto'}}>
-      {/* ── Hero Card ────────────────────────────────────── */}
+      {/* Hero */}
       <div style={{background:grad,borderRadius:16,padding:'28px 32px',color:'#fff',marginBottom:24,position:'relative',overflow:'hidden'}}>
         <div style={{position:'absolute',top:0,right:0,bottom:0,width:'40%',opacity:0.07,background:'radial-gradient(circle at 70% 30%, #fff 0%, transparent 70%)'}}/>
-        <button onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>← All Cards</button>
+        <button onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>← Back</button>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
           <div>
-            <div style={{fontSize:28,fontWeight:700,letterSpacing:'-0.5px',lineHeight:1.2}}>{c.card_name||c.brand}</div>
-            <div style={{fontSize:14,opacity:0.8,marginTop:4}}>{c.issuer} · {c.brand}</div>
+            <div style={{fontSize:28,fontWeight:700,letterSpacing:'-0.5px',lineHeight:1.2}}>{displayName}</div>
+            <div style={{fontSize:14,opacity:0.8,marginTop:4}}>{acct.name}{acct.mask?` · ···${acct.mask}`:''}</div>
             <div style={{display:'flex',gap:10,marginTop:14}}>
-              <span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:600,backdropFilter:'blur(4px)'}}>{c.network}</span>
               {eco&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:600,backdropFilter:'blur(4px)'}}>{eco.currency_name}</span>}
-              {c.card_age_years!=null&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:600,backdropFilter:'blur(4px)'}}>{c.card_age_years}y old</span>}
+              {c&&c.network&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:600,backdropFilter:'blur(4px)'}}>{c.network}</span>}
+              {p&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:600,backdropFilter:'blur(4px)'}}>{p.status}</span>}
             </div>
           </div>
           <div style={{textAlign:'right'}}>
             {bal!=null&&<>
               <div style={{fontSize:11,opacity:0.7,textTransform:'uppercase',fontWeight:600}}>Current Balance</div>
-              <div style={{fontSize:32,fontWeight:700,fontFamily:'Inter',letterSpacing:'-1px'}}>{bal<0?'−':''}${Math.abs(bal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+              <div style={{fontSize:32,fontWeight:700,fontFamily:'Inter',letterSpacing:'-1px'}}>{bal<0?'-':''}${Math.abs(bal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
             </>}
           </div>
         </div>
-        {/* Utilization bar */}
-        {utilPct!=null&&c.credit_limit&&<div style={{marginTop:18}}>
+        {utilPct!=null&&c&&c.credit_limit&&<div style={{marginTop:18}}>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:11,opacity:0.8,marginBottom:4}}>
             <span>Utilization</span>
             <span>{utilPct}% of ${c.credit_limit.toLocaleString()}</span>
@@ -3725,42 +3732,46 @@ function CardDetailPage({cardId,onBack,toast}){
         </div>}
       </div>
 
-      {/* ── Stats Row ────────────────────────────────────── */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+      {/* No product linked warning */}
+      {!p&&<div className="card" style={{marginBottom:24,padding:20,border:'2px solid #fbbf24',background:'#fffbeb'}}>
+        <div style={{fontSize:14,fontWeight:600,color:'#92400e',marginBottom:4}}>No Card Product Linked</div>
+        <div style={{fontSize:13,color:'#92400e'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Go back and use the product dropdown to link it.</div>
+      </div>}
+
+      {/* Stats Row */}
+      {(c||p)&&<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
         {[
-          {label:'Annual Fee',value:c.annual_fee?`$${c.annual_fee}`:'$0',color:c.annual_fee?'var(--red)':'var(--green)'},
-          {label:'Credit Limit',value:c.credit_limit?`$${c.credit_limit.toLocaleString()}`:'—'},
-          {label:'Stmt Close',value:c.statement_close_day?`Day ${c.statement_close_day}`:'—'},
-          {label:'Payment Due',value:c.payment_due_day?`Day ${c.payment_due_day}`:'—'},
+          {label:'Annual Fee',value:c&&c.annual_fee?`$${c.annual_fee}`:(p&&p.notes&&p.notes.includes('$')?p.notes.replace('Annual fee: ',''):'$0'),color:c&&c.annual_fee?'var(--red)':'var(--green)'},
+          {label:'Credit Limit',value:c&&c.credit_limit?`$${c.credit_limit.toLocaleString()}`:'--'},
+          {label:'Stmt Close',value:c&&c.statement_close_day?`Day ${c.statement_close_day}`:'--'},
+          {label:'Payment Due',value:c&&c.payment_due_day?`Day ${c.payment_due_day}`:'--'},
         ].map((s,i)=>(
           <div key={i} className="card" style={{padding:'14px 16px',textAlign:'center'}}>
             <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>{s.label}</div>
             <div style={{fontSize:20,fontWeight:700,fontFamily:'Inter',marginTop:4,color:s.color||'var(--text-primary)'}}>{s.value}</div>
           </div>
         ))}
-      </div>
+      </div>}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
-        {/* ── Earning Structure ────────────────────────────── */}
+      {p&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
+        {/* Earning Structure */}
         <div className="card" style={{padding:20}}>
           <div style={{fontSize:15,fontWeight:600,marginBottom:4}}>Earning Structure</div>
-          {eco&&<div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>{eco.currency_name} · {eco.is_cash_back?'Cash Back':`${eco.conservative_cpp}¢ (conservative) / ${eco.your_cpp}¢ (yours) per point`}</div>}
+          {eco&&<div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>{eco.currency_name} · {eco.is_cash_back?'Cash Back':`${eco.conservative_cpp}\u00A2 (conservative) / ${eco.your_cpp}\u00A2 (yours) per point`}</div>}
           <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',paddingBottom:6,borderBottom:'1px solid var(--border)',marginBottom:2}}>
             <span>Category</span>
             <span style={{textAlign:'center'}}>Rate</span>
-            <span style={{textAlign:'center',fontSize:10}}>¢/$<br/>(cons.)</span>
-            <span style={{textAlign:'center',fontSize:10}}>¢/$<br/>(yours)</span>
+            <span style={{textAlign:'center',fontSize:10}}>{'\u00A2'}/$<br/>(cons.)</span>
+            <span style={{textAlign:'center',fontSize:10}}>{'\u00A2'}/$<br/>(yours)</span>
           </div>
-          {/* Base rate */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'#f0f9ff'}}>
             <span style={{fontSize:12,fontWeight:600,paddingLeft:4}}>All Purchases (Base)</span>
             <span style={{textAlign:'center',fontSize:13,fontWeight:700,color:'var(--blue)',fontFamily:'Inter'}}>{d.base_rate}x</span>
             <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',color:'var(--text-muted)'}}>{eco?((d.base_rate*eco.conservative_cpp).toFixed(1)):d.base_rate.toFixed(1)}</span>
             <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',fontWeight:600}}>{eco?((d.base_rate*eco.your_cpp).toFixed(1)):d.base_rate.toFixed(1)}</span>
           </div>
-          {/* Category bonuses */}
           <div style={{maxHeight:320,overflowY:'auto'}}>
-            {d.earning_structure.filter(e=>e.bonus>0).map((e,i)=>(
+            {(d.earning_structure||[]).filter(e=>e.bonus>0).map((e,i)=>(
               <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
                 <span style={{fontSize:12,paddingLeft:4}}>{e.category}</span>
                 <span style={{textAlign:'center',fontSize:13,fontWeight:700,color:'#059669',fontFamily:'Inter'}}>{e.total}x</span>
@@ -3771,12 +3782,12 @@ function CardDetailPage({cardId,onBack,toast}){
           </div>
         </div>
 
-        {/* ── Spending Breakdown ──────────────────────────── */}
+        {/* Spending Breakdown */}
         <div className="card" style={{padding:20}}>
           <div style={{fontSize:15,fontWeight:600,marginBottom:4}}>Spending (Last 3 Months)</div>
-          <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>Charges by category · Points at your valuation</div>
+          <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>Charges by category with points earned</div>
           {topCats.length===0
-            ?<div style={{padding:30,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No spending data yet.<br/>Link this card to an account first.</div>
+            ?<div style={{padding:30,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No spending data yet.</div>
             :<div style={{display:'flex',flexDirection:'column',gap:8}}>
               {topCats.map((s,i)=>(
                 <div key={i}>
@@ -3788,25 +3799,24 @@ function CardDetailPage({cardId,onBack,toast}){
                     <div style={{flex:1,height:8,background:'var(--border)',borderRadius:4,overflow:'hidden'}}>
                       <div style={{height:'100%',width:`${(s.amount/maxSpend*100)}%`,background:'var(--blue)',borderRadius:4,transition:'width 0.4s ease'}}/>
                     </div>
-                    <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'Inter',minWidth:48,textAlign:'right'}}>{s.earn_rate}x → {Math.round(s.points_earned).toLocaleString()}pts</span>
+                    <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'Inter',minWidth:48,textAlign:'right'}}>{s.earn_rate}x {'\u2192'} {Math.round(s.points_earned).toLocaleString()}pts</span>
                   </div>
                 </div>
               ))}
             </div>
           }
-          {/* Points earned summary */}
-          {d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0'}}>
+          {d.points_earned&&d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0'}}>
             <div style={{fontSize:11,fontWeight:600,color:'#15803d',textTransform:'uppercase'}}>Points Earned (3 mo)</div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4}}>
               <div style={{fontSize:24,fontWeight:700,fontFamily:'Inter',color:'#15803d'}}>{Math.round(d.points_earned.total).toLocaleString()}</div>
-              {eco&&!eco.is_cash_back&&<div style={{fontSize:13,color:'#15803d'}}>≈ ${(d.points_earned.total*eco.your_cpp/100).toFixed(2)} value</div>}
+              {eco&&!eco.is_cash_back&&<div style={{fontSize:13,color:'#15803d'}}>{'\u2248'} ${(d.points_earned.total*eco.your_cpp/100).toFixed(2)} value</div>}
             </div>
           </div>}
         </div>
-      </div>
+      </div>}
 
-      {/* ── Monthly Trend ─────────────────────────────────── */}
-      {d.monthly_spend.length>1&&<div className="card" style={{padding:20,marginBottom:24}}>
+      {/* Monthly Trend */}
+      {(d.monthly_spend||[]).length>1&&<div className="card" style={{padding:20,marginBottom:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Monthly Spending</div>
         <div style={{display:'flex',alignItems:'flex-end',gap:6,height:120}}>
           {(()=>{const mx=Math.max(...d.monthly_spend.map(m=>m.amount),1);return d.monthly_spend.map((m,i)=>(
@@ -3819,9 +3829,9 @@ function CardDetailPage({cardId,onBack,toast}){
         </div>
       </div>}
 
-      {/* ── Benefits & Challenges ─────────────────────────── */}
-      {(d.benefits?.length>0||d.spend_challenges?.length>0)&&<div style={{display:'grid',gridTemplateColumns:d.benefits?.length>0&&d.spend_challenges?.length>0?'1fr 1fr':'1fr',gap:20,marginBottom:24}}>
-        {d.benefits?.length>0&&<div className="card" style={{padding:20}}>
+      {/* Benefits & Challenges */}
+      {((d.benefits||[]).length>0||(d.spend_challenges||[]).length>0)&&<div style={{display:'grid',gridTemplateColumns:(d.benefits||[]).length>0&&(d.spend_challenges||[]).length>0?'1fr 1fr':'1fr',gap:20,marginBottom:24}}>
+        {(d.benefits||[]).length>0&&<div className="card" style={{padding:20}}>
           <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Card Benefits</div>
           {d.benefits.map(b=>(
             <div key={b.id} style={{padding:'10px 0',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -3829,20 +3839,20 @@ function CardDetailPage({cardId,onBack,toast}){
                 <div style={{fontSize:13,fontWeight:500}}>{b.name}</div>
                 <div style={{fontSize:11,color:'var(--text-muted)'}}>{b.reset_frequency}{b.trigger_category?` · ${b.trigger_category}`:''}</div>
               </div>
-              <div style={{fontSize:16,fontWeight:700,fontFamily:'Inter',color:'var(--green)'}}>${b.amount}</div>
+              <div style={{fontSize:16,fontWeight:700,fontFamily:'Inter',color:b.amount>0?'var(--green)':'var(--text-muted)'}}>{b.amount>0?`$${b.amount}`:'Perk'}</div>
             </div>
           ))}
-          <div style={{marginTop:10,padding:'8px 12px',background:'#f0fdf4',borderRadius:8,fontSize:12,color:'#15803d',fontWeight:600}}>
-            Total annual credits: ${d.benefits.reduce((s,b)=>s+(b.reset_frequency==='monthly'?b.amount*12:b.reset_frequency==='semi-annual'?b.amount*2:b.amount),0).toLocaleString()}
-          </div>
+          {d.benefits.some(b=>b.amount>0)&&<div style={{marginTop:10,padding:'8px 12px',background:'#f0fdf4',borderRadius:8,fontSize:12,color:'#15803d',fontWeight:600}}>
+            Total annual credits: ${d.benefits.reduce((s,b)=>s+(b.amount>0?(b.reset_frequency==='monthly'?b.amount*12:b.reset_frequency==='semi-annual'?b.amount*2:b.amount):0),0).toLocaleString()}
+          </div>}
         </div>}
-        {d.spend_challenges?.length>0&&<div className="card" style={{padding:20}}>
+        {(d.spend_challenges||[]).length>0&&<div className="card" style={{padding:20}}>
           <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Spend Challenges</div>
           {d.spend_challenges.map(sc=>(
             <div key={sc.id} style={{padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
                 <span style={{fontSize:13,fontWeight:500}}>{sc.name}</span>
-                <span style={{fontSize:12,fontWeight:600,color:sc.is_met?'var(--green)':'var(--amber)'}}>{sc.is_met?'✓ Met':'In Progress'}</span>
+                <span style={{fontSize:12,fontWeight:600,color:sc.is_met?'var(--green)':'var(--amber)'}}>{sc.is_met?'Met':'In Progress'}</span>
               </div>
               <div style={{height:8,background:'var(--border)',borderRadius:4,overflow:'hidden',marginBottom:4}}>
                 <div style={{height:'100%',width:`${Math.min((sc.current_spend/sc.required_spend)*100,100)}%`,background:sc.is_met?'var(--green)':'var(--amber)',borderRadius:4}}/>
@@ -3856,17 +3866,17 @@ function CardDetailPage({cardId,onBack,toast}){
         </div>}
       </div>}
 
-      {/* ── Recent Transactions ────────────────────────────── */}
+      {/* Recent Transactions */}
       <div className="card" style={{padding:20}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Recent Transactions</div>
-        {d.recent_transactions.length===0
+        {(d.recent_transactions||[]).length===0
           ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions</div>
           :<div>{d.recent_transactions.map(t=>(
             <div key={t.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
               <span style={{fontSize:12,color:'var(--text-muted)',fontFamily:'Inter',width:80,flexShrink:0}}>{t.date}</span>
               <span style={{flex:1,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</span>
               {t.category&&<span style={{fontSize:10,padding:'2px 8px',background:'#f3f4f6',borderRadius:10,color:'var(--text-secondary)',whiteSpace:'nowrap'}}>{t.category}</span>}
-              <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'−':'+'}{fmt(t.amount)}</span>
+              <span style={{fontFamily:'Inter',fontSize:13,fontWeight:600,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(t.amount)}</span>
             </div>
           ))}</div>
         }
@@ -3877,27 +3887,35 @@ function CardDetailPage({cardId,onBack,toast}){
 
 
 function CardsPage({toast}){
-  const[cards,setCards]=useState([]);
   const[accounts,setAccounts]=useState([]);
-  const[plaidAccounts,setPlaidAccounts]=useState([]);
+  const[allAccounts,setAllAccounts]=useState([]);
+  const[products,setProducts]=useState([]);
   const[loading,setLoading]=useState(true);
+  const[selectedAccount,setSelectedAccount]=useState(null);
+  const[suggestions,setSuggestions]=useState([]);
+  const[linking,setLinking]=useState({});
+  const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
+  const[swipeData,setSwipeData]=useState(null);
+  const[swipeLoading,setSwipeLoading]=useState(false);
+  // Legacy card management state
+  const[cards,setCards]=useState([]);
   const[editing,setEditing]=useState(null);
   const[editVals,setEditVals]=useState({});
   const[showInactive,setShowInactive]=useState(false);
-  const[selectedCard,setSelectedCard]=useState(null); // card id for detail view
-  const[matchSuggestions,setMatchSuggestions]=useState(null);
-  const[matching,setMatching]=useState(false);
-  const[linking,setLinking]=useState({});
-  const[tab,setTab]=useState('cards'); // 'cards' | 'swipe'
-  const[swipeData,setSwipeData]=useState(null);
-  const[swipeLoading,setSwipeLoading]=useState(false);
 
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const[c,a,accts]=await Promise.all([apiFetch('/cards'),apiFetch('/plaid/items'),apiFetch('/accounts')]);
-      setCards(c);setPlaidAccounts(a);setAccounts(accts);
-    }catch(e){toast('Failed to load cards','error');}
+      const[accts,prods,cards_]=await Promise.all([
+        apiFetch('/accounts'),apiFetch('/card-products'),apiFetch('/cards'),
+      ]);
+      // Filter to credit card accounts
+      const creditAccts=accts.filter(a=>a.account_type&&a.account_type.toLowerCase().includes('credit'));
+      setAccounts(creditAccts);
+      setAllAccounts(accts);
+      setProducts(prods);
+      setCards(cards_);
+    }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
   },[]);
 
@@ -3908,32 +3926,35 @@ function CardsPage({toast}){
     finally{setSwipeLoading(false);}
   };
 
-  const runMatch=async()=>{
-    setMatching(true);setMatchSuggestions(null);
+  const loadSuggestions=async()=>{
     try{
-      const r=await apiFetch('/cards/match-accounts',{method:'POST'});
-      setMatchSuggestions(r.suggestions||[]);
-      if((r.suggestions||[]).length===0)toast('No confident matches found','error');
-      else toast(`Found ${r.suggestions.length} match${r.suggestions.length!==1?'es':''}`);
-    }catch(e){toast('Matching failed','error');}
-    finally{setMatching(false);}
+      const s=await apiFetch('/accounts/product-suggestions');
+      setSuggestions(s);
+    }catch(e){}
   };
 
-  const confirmLink=async(cardDbId,accountDbId)=>{
-    setLinking(l=>({...l,[cardDbId]:true}));
+  const linkProduct=async(accountId,productId)=>{
+    setLinking(l=>({...l,[accountId]:true}));
     try{
-      const r=await apiFetch(`/cards/${cardDbId}/link-account`,{method:'POST',body:JSON.stringify({account_id:accountDbId})});
-      toast(`Linked — ${r.transactions_updated} txns updated`);
-      setMatchSuggestions(s=>s.filter(x=>x.card_db_id!==cardDbId));
+      const r=await apiFetch(`/accounts/${accountId}/link-product`,{method:'POST',body:JSON.stringify({product_id:productId})});
+      toast(`Linked to ${r.product_name}`);
       await load();
+      setSuggestions(s=>s.filter(x=>x.account_id!==accountId));
     }catch(e){toast('Link failed','error');}
-    finally{setLinking(l=>({...l,[cardDbId]:false}));}
+    finally{setLinking(l=>({...l,[accountId]:false}));}
   };
 
-  const dismissSuggestion=(cardDbId)=>setMatchSuggestions(s=>s.filter(x=>x.card_db_id!==cardDbId));
+  const unlinkProduct=async(accountId)=>{
+    try{
+      await apiFetch(`/accounts/${accountId}/link-product`,{method:'POST',body:JSON.stringify({product_id:null})});
+      toast('Product unlinked');
+      await load();
+    }catch(e){toast('Unlink failed','error');}
+  };
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load().then(()=>loadSuggestions());},[load]);
 
+  // Legacy card management
   const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
@@ -3943,31 +3964,41 @@ function CardsPage({toast}){
     }catch(e){toast('Failed to save','error');}
   };
 
-  const visible=cards.filter(c=>showInactive||c.is_active);
   const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
-  const activeCount=cards.filter(c=>c.is_active).length;
-  const totalLimit=visible.reduce((s,c)=>s+(c.credit_limit||0),0);
-  const totalFees=visible.reduce((s,c)=>s+(c.annual_fee||0),0);
 
-  // ── If a card is selected, show the full detail page ──
-  if(selectedCard)return<CardDetailPage cardId={selectedCard} onBack={()=>setSelectedCard(null)} toast={toast}/>;
+  // If an account is selected, show the detail page
+  if(selectedAccount)return<AccountCardDetailPage accountId={selectedAccount} onBack={()=>setSelectedAccount(null)} toast={toast}/>;
+
+  // Find linked product info for each account
+  const getProductForAccount=(acctId)=>{
+    const acct=accounts.find(a=>a.id===acctId);
+    if(acct&&acct.product_id)return products.find(p=>p.id===acct.product_id);
+    // Fallback: check if a card links this account to a product
+    const card=cards.find(c=>c.account_id===acctId&&c.product_id);
+    if(card)return products.find(p=>p.id===card.product_id);
+    return null;
+  };
+
+  const linkedCount=accounts.filter(a=>getProductForAccount(a.id)).length;
+  const unlinkedCount=accounts.length-linkedCount;
+  const visible=cards.filter(c=>showInactive||c.is_active);
 
   return(
     <div>
       {/* Tab switcher */}
       <div style={{display:'flex',gap:4,marginBottom:20,background:'var(--border)',borderRadius:8,padding:3,width:'fit-content'}}>
-        {['cards','swipe'].map(t=>(
-          <button key={t} onClick={()=>{setTab(t);if(t==='swipe'&&!swipeData)loadSwipe();}}
-            style={{padding:'6px 18px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:tab===t?600:400,
-              background:tab===t?'var(--bg)':'transparent',color:tab===t?'var(--text-primary)':'var(--text-muted)',
-              boxShadow:tab===t?'0 1px 3px rgba(0,0,0,0.08)':'none'}}>
-            {t==='cards'?'My Cards':'Where Should I Swipe?'}
+        {[{id:'accounts',label:'My Accounts'},{id:'swipe',label:'Where Should I Swipe?'},{id:'cards',label:'Card Management'}].map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
+            style={{padding:'6px 18px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:tab===t.id?600:400,
+              background:tab===t.id?'var(--bg)':'transparent',color:tab===t.id?'var(--text-primary)':'var(--text-muted)',
+              boxShadow:tab===t.id?'0 1px 3px rgba(0,0,0,0.08)':'none'}}>
+            {t.label}
           </button>
         ))}
       </div>
 
       {tab==='swipe'?(
-        /* ── WHERE SHOULD I SWIPE ──────────────────────────── */
+        /* WHERE SHOULD I SWIPE */
         <div>
           <div style={{marginBottom:20}}>
             <h2 style={{fontSize:18,fontWeight:700,margin:'0 0 4px'}}>Where Should I Swipe?</h2>
@@ -3990,13 +4021,13 @@ function CardsPage({toast}){
                       <div style={{fontSize:10,color:'var(--text-muted)'}}>earn rate</div>
                     </div>
                     <div style={{textAlign:'center',minWidth:55}}>
-                      <div style={{fontSize:16,fontWeight:600,fontFamily:'Inter',color:'var(--blue)'}}>{cat.best.your_value}¢</div>
+                      <div style={{fontSize:16,fontWeight:600,fontFamily:'Inter',color:'var(--blue)'}}>{cat.best.your_value}{'\u00A2'}</div>
                       <div style={{fontSize:10,color:'var(--text-muted)'}}>per $1</div>
                     </div>
                     {cat.runner_up&&<div style={{fontSize:11,color:'var(--text-muted)',textAlign:'right',minWidth:100,paddingLeft:8,borderLeft:'1px solid var(--border)'}}>
                       <div>Runner-up:</div>
                       <div style={{fontWeight:500}}>{cat.runner_up.card_name}</div>
-                      <div>{cat.runner_up.earn_rate}x · {cat.runner_up.your_value}¢/$</div>
+                      <div>{cat.runner_up.earn_rate}x · {cat.runner_up.your_value}{'\u00A2'}/$</div>
                     </div>}
                   </div>}
                 </div>
@@ -4004,60 +4035,16 @@ function CardsPage({toast}){
             ))
           }
         </div>
-      ):(
-        /* ── CARDS LIST ────────────────────────────────────── */
+      ):tab==='cards'?(
+        /* LEGACY CARD MANAGEMENT */
         <div>
-          {/* KPI cards */}
-          <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
-            <div className="card metric-card"><div className="metric-label">Active Cards</div><div className="metric-value">{activeCount}</div></div>
-            <div className="card metric-card"><div className="metric-label">Total Credit Limit</div><div className="metric-value">{fmt(totalLimit)}</div></div>
-            <div className="card metric-card"><div className="metric-label">Annual Fees</div><div className="metric-value" style={{color:totalFees>0?'var(--red)':'var(--text-muted)'}}>{totalFees>0?fmt(totalFees):'$0'}</div></div>
-          </div>
-
-          {/* Account match suggestions */}
-          {matchSuggestions&&matchSuggestions.length>0&&(
-            <div className="card" style={{marginBottom:16,border:'2px solid #dbeafe'}}>
-              <div className="section-header" style={{paddingBottom:8}}>
-                <div className="section-title" style={{color:'#1d4ed8'}}>🔗 Suggested Account Links</div>
-                <button className="btn btn-sm btn-ghost" onClick={()=>setMatchSuggestions(null)}>Dismiss all</button>
-              </div>
-              <div style={{padding:'0 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
-                {matchSuggestions.map(s=>(
-                  <div key={s.card_db_id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:600}}>{s.card_display}</div>
-                      <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>→ {s.account_display}</div>
-                      <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontStyle:'italic'}}>{s.reason}</div>
-                    </div>
-                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':s.confidence==='medium'?'#fef9c3':'#f3f4f6',color:s.confidence==='high'?'#15803d':s.confidence==='medium'?'#854d0e':'var(--text-muted)',fontWeight:600}}>{s.confidence}</span>
-                    <button className="btn btn-sm btn-success" disabled={linking[s.card_db_id]} onClick={()=>confirmLink(s.card_db_id,s.account_db_id)}>{linking[s.card_db_id]?'…':'✓ Link'}</button>
-                    <button className="btn btn-sm btn-ghost" onClick={()=>dismissSuggestion(s.card_db_id)}>✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="card">
             <div className="section-header">
-              <div className="section-title">Cards ({visible.length}{!showInactive&&cards.filter(c=>!c.is_active).length>0?` + ${cards.filter(c=>!c.is_active).length} inactive`:''})</div>
+              <div className="section-title">Cards ({visible.length})</div>
               <div style={{display:'flex',gap:8,alignItems:'center'}}>
                 <label className="filter-label">
                   <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
                 </label>
-                <label className="btn btn-sm btn-secondary" style={{cursor:'pointer',margin:0}}>
-                  📊 Import Points
-                  <input type="file" accept=".xlsx,.xls" hidden onChange={async(e)=>{
-                    const f=e.target.files[0];if(!f)return;
-                    const fd=new FormData();fd.append('file',f);
-                    try{const r=await fetch(`${window._API_BASE||''}/api/points/upload-and-import`,{method:'POST',body:fd});
-                      const j=await r.json();if(!r.ok)throw new Error(j.detail||'Upload failed');
-                      toast(`Points imported: ${j.cards_with_rates} cards, ${j.ecosystems_imported} ecosystems`);
-                    }catch(err){toast('Import failed: '+err.message,'error');}
-                    e.target.value='';
-                  }}/>
-                </label>
-                <button className="btn btn-sm btn-primary" onClick={runMatch} disabled={matching}>{matching?'Matching…':'🔗 Match Accounts'}</button>
               </div>
             </div>
             {loading?<div className="loading"><div className="spinner"/></div>
@@ -4069,8 +4056,7 @@ function CardsPage({toast}){
                   <th>Linked Account</th><th>Actions</th>
                 </tr></thead>
                 <tbody>{visible.map(c=>(
-                  <tr key={c.id} style={{opacity:c.is_active?1:0.5,cursor:'pointer'}}
-                    onClick={()=>{if(editing!==c.id)setSelectedCard(c.id);}}>
+                  <tr key={c.id} style={{opacity:c.is_active?1:0.5}}>
                     <td>
                       <div style={{fontWeight:600,fontSize:13}}>{c.card_name||c.brand}</div>
                       <div style={{fontSize:11,color:'var(--text-muted)'}}>{c.card_id}</div>
@@ -4084,20 +4070,20 @@ function CardsPage({toast}){
                       <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.annual_fee} onChange={e=>setEditVals(v=>({...v,annual_fee:e.target.value}))} style={{width:70,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}>
                         <select value={editVals.account_id||''} onChange={e=>setEditVals(v=>({...v,account_id:e.target.value?parseInt(e.target.value):null}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:150}}>
-                          <option value="">— Not linked —</option>
-                          {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+                          <option value="">-- Not linked --</option>
+                          {allAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
                         </select>
                       </td>
                       <td onClick={e=>e.stopPropagation()}><div style={{display:'flex',gap:4}}>
                         <button className="btn btn-sm btn-success" onClick={()=>saveEdit(c.id)}>Save</button>
-                        <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>✕</button>
+                        <button className="btn btn-sm btn-ghost" onClick={cancelEdit}>X</button>
                       </div></td>
                     </>:<>
                       <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.issuer}</td>
                       <td><span style={{fontFamily:'Inter',fontSize:11,fontWeight:700,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
-                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Inter'}}>{c.statement_close_day||'—'}</td>
-                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Inter'}}>{c.payment_due_day||'—'}</td>
-                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Inter'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Inter'}}>{c.statement_close_day||'--'}</td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Inter'}}>{c.payment_due_day||'--'}</td>
+                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Inter'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>--</span>}</td>
                       <td style={{textAlign:'right',fontSize:13,fontFamily:'Inter',color:c.annual_fee?'var(--red)':'var(--text-muted)'}}>{c.annual_fee?`$${c.annual_fee}`:'$0'}</td>
                       <td style={{fontSize:12}}>
                         {c.account_id
@@ -4112,6 +4098,93 @@ function CardsPage({toast}){
                   </tr>
                 ))}</tbody>
               </table></div>
+            }
+          </div>
+        </div>
+      ):(
+        /* ACCOUNTS (main view) */
+        <div>
+          {/* KPI */}
+          <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+            <div className="card metric-card"><div className="metric-label">Credit Card Accounts</div><div className="metric-value">{accounts.length}</div></div>
+            <div className="card metric-card"><div className="metric-label">Products Linked</div><div className="metric-value" style={{color:linkedCount>0?'var(--green)':'var(--text-muted)'}}>{linkedCount}</div></div>
+            <div className="card metric-card"><div className="metric-label">Needs Linking</div><div className="metric-value" style={{color:unlinkedCount>0?'var(--amber)':'var(--green)'}}>{unlinkedCount}</div></div>
+          </div>
+
+          {/* Auto-suggestions */}
+          {suggestions.length>0&&<div className="card" style={{marginBottom:16,border:'2px solid #dbeafe'}}>
+            <div className="section-header" style={{paddingBottom:8}}>
+              <div className="section-title" style={{color:'#1d4ed8'}}>Auto-detected Product Matches</div>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
+            </div>
+            <div style={{padding:'0 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
+              {suggestions.map(s=>(
+                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:600}}>{s.account_name}{s.mask?` ···${s.mask}`:''}</div>
+                    <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{'\u2192'} {s.suggested_product_name}</div>
+                  </div>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':s.confidence==='medium'?'#fef9c3':'#f3f4f6',color:s.confidence==='high'?'#15803d':s.confidence==='medium'?'#854d0e':'var(--text-muted)',fontWeight:600}}>{s.confidence}</span>
+                  <button className="btn btn-sm btn-success" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>
+                    {linking[s.account_id]?'...':'Confirm'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>}
+
+          {/* Accounts list */}
+          <div className="card">
+            <div className="section-header">
+              <div className="section-title">Credit Card Accounts</div>
+            </div>
+            {loading?<div className="loading"><div className="spinner"/></div>
+              :<div style={{padding:'0 0 8px'}}>
+                {accounts.length===0
+                  ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No credit card accounts found. Connect a bank with credit cards via Settings.</div>
+                  :accounts.map(acct=>{
+                    const prod=getProductForAccount(acct.id);
+                    return(
+                      <div key={acct.id} style={{display:'flex',alignItems:'center',gap:12,padding:'14px 20px',borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
+                        onClick={()=>setSelectedAccount(acct.id)}
+                        onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        {/* Account info */}
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8}}>
+                            <div style={{fontSize:14,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acct.account_name}</div>
+                            {acct.mask&&<span style={{fontSize:11,color:'var(--text-muted)'}}>···{acct.mask}</span>}
+                          </div>
+                          {acct.official_name&&acct.official_name!==acct.account_name&&
+                            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acct.official_name}</div>}
+                        </div>
+                        {/* Product badge */}
+                        <div style={{minWidth:180,textAlign:'right'}} onClick={e=>e.stopPropagation()}>
+                          {prod
+                            ?<div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'flex-end'}}>
+                              <span style={{fontSize:12,fontWeight:600,color:'var(--green)'}}>{prod.card_name}</span>
+                              <button className="btn btn-sm btn-ghost" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>unlinkProduct(acct.id)}>X</button>
+                            </div>
+                            :<select style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--bg)',color:'var(--text-primary)',maxWidth:180}}
+                              value="" onChange={e=>{if(e.target.value)linkProduct(acct.id,parseInt(e.target.value));}}>
+                              <option value="">Select product...</option>
+                              {products.map(p=><option key={p.id} value={p.id}>{p.card_name}</option>)}
+                            </select>
+                          }
+                        </div>
+                        {/* Balance */}
+                        <div style={{minWidth:100,textAlign:'right',fontFamily:'Inter',fontSize:14,fontWeight:600}}>
+                          {acct.balance!=null
+                            ?<span style={{color:acct.balance<0?'var(--red)':'var(--green)'}}>{acct.balance<0?'-':''}${Math.abs(acct.balance).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                            :<span style={{color:'var(--text-muted)'}}>--</span>}
+                        </div>
+                        {/* Arrow */}
+                        <div style={{color:'var(--text-muted)',fontSize:16}}>{'\u203A'}</div>
+                      </div>
+                    );
+                  })
+                }
+              </div>
             }
           </div>
         </div>

@@ -27,7 +27,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge,
-    seed_points_categories, seed_points_ecosystems, seed_card_earning_rates,
+    seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
@@ -195,6 +195,7 @@ def serialize_account(a: Account, transaction_count: int = 0) -> dict:
         'liability_last_payment':     getattr(a, 'liability_last_payment', None),
         'liability_last_payment_date': a.liability_last_payment_date.strftime('%Y-%m-%d') if getattr(a, 'liability_last_payment_date', None) else None,
         'liability_purchase_apr':     getattr(a, 'liability_purchase_apr', None),
+        'product_id':                 getattr(a, 'product_id', None),
     }
 
 
@@ -640,21 +641,11 @@ async def startup_event():
         else:
             print(f"Rules loaded: {rule_count} active rules")
 
-        # Seed points ecosystems and earning rates
+        # Seed points ecosystems and card products
         seed_points_ecosystems(session)
-        seed_card_earning_rates(session)
+        seed_card_products(session)
 
-        # Auto-import points data from Excel if available
-        here = os.path.dirname(os.path.abspath(__file__))
-        for pts_fname in ["points_2026.03.13_updated.xlsx", "points.xlsx"]:
-            pts_path = os.path.join(here, pts_fname)
-            if os.path.exists(pts_path):
-                try:
-                    result = import_points_from_excel(pts_path, session)
-                    print(f"Points imported from {pts_fname}: {result}")
-                except Exception as pts_err:
-                    print(f"Points import failed: {pts_err}")
-                break
+        # Product catalog is seeded by seed_card_products() above — no Excel import needed
 
         # One-time fix: correct balance observations for credit/loan accounts
         # where plaid_balance was stored with wrong sign (positive instead of negative).
@@ -3391,6 +3382,335 @@ async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = De
     return {'status': 'ok', 'name': eco.name}
 
 
+# ---------------------------------------------------------------------------
+# Account → Product linking & card detail
+# ---------------------------------------------------------------------------
+
+@app.get("/api/card-products")
+async def list_card_products(db: Session = Depends(get_db)):
+    """List all card products in the catalog for the product-linking dropdown."""
+    products = db.query(CardProduct).order_by(CardProduct.card_name).all()
+    eco_map = {e.id: e.name for e in db.query(PointsEcosystem).all()}
+    return [{
+        'id': p.id,
+        'product_key': p.product_key,
+        'card_name': p.card_name,
+        'ecosystem': eco_map.get(p.ecosystem_id, ''),
+        'status': p.status,
+    } for p in products]
+
+
+@app.get("/api/accounts/product-suggestions")
+async def suggest_products_for_accounts(db: Session = Depends(get_db)):
+    """
+    Auto-suggest card products for credit card accounts based on name matching.
+    Returns suggestions for accounts that don't have a product linked yet.
+    """
+    accounts = db.query(Account).filter(
+        Account.is_active == True,
+        Account.product_id.is_(None),
+        Account.account_type.ilike('%credit%'),
+    ).all()
+
+    products = db.query(CardProduct).all()
+
+    suggestions = []
+    for acct in accounts:
+        name = (acct.account_name or '').lower()
+        official = (acct.official_name or '').lower()
+
+        best_match = None
+        best_score = 0
+
+        for prod in products:
+            score = 0
+            pname = prod.card_name.lower()
+            pkey = prod.product_key.lower()
+
+            # Exact product name match
+            if pname in name or pname in official:
+                score = 100
+            # Key word matching
+            else:
+                words = pname.split()
+                matched = sum(1 for w in words if len(w) > 2 and (w in name or w in official))
+                if matched > 0:
+                    score = (matched / len(words)) * 80
+
+                # Issuer matching boost
+                issuer_map = {
+                    'chase': ['chase'], 'amex': ['amex', 'american express'],
+                    'citi': ['citi', 'citibank'], 'discover': ['discover'],
+                    'hilton': ['hilton'], 'hyatt': ['hyatt'], 'marriott': ['marriott'],
+                    'capital_one': ['capital one'], 'fidelity': ['fidelity'],
+                    'best_buy': ['best buy'],
+                }
+                for key, patterns in issuer_map.items():
+                    if key in pkey:
+                        if any(p in name or p in official for p in patterns):
+                            score += 20
+
+            if score > best_score and score >= 30:
+                best_score = score
+                best_match = prod
+
+        if best_match:
+            suggestions.append({
+                'account_id': acct.id,
+                'account_name': acct.account_name,
+                'official_name': acct.official_name,
+                'mask': acct.mask,
+                'suggested_product_id': best_match.id,
+                'suggested_product_name': best_match.card_name,
+                'confidence': 'high' if best_score >= 70 else 'medium' if best_score >= 50 else 'low',
+                'score': best_score,
+            })
+
+    suggestions.sort(key=lambda x: x['score'], reverse=True)
+    return suggestions
+
+
+@app.post("/api/accounts/{account_id}/link-product")
+async def link_account_to_product(account_id: int, body: dict, db: Session = Depends(get_db)):
+    """
+    Link a bank account to a card product.
+    This is the primary way users associate their Plaid accounts with
+    specific card products (e.g., "Amex 1009 is an Amex Platinum").
+    """
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    product_id = body.get('product_id')
+    if product_id is None:
+        # Unlink
+        account.product_id = None
+        db.commit()
+        return {"status": "unlinked", "account_id": account_id}
+
+    product = db.query(CardProduct).filter_by(id=product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    account.product_id = product_id
+
+    # Also link any Card row that references this account
+    card = db.query(Card).filter_by(account_id=account_id).first()
+    if card:
+        card.product_id = product_id
+        if product.ecosystem_id:
+            card.ecosystem_id = product.ecosystem_id
+
+    db.commit()
+    return {
+        "status": "linked",
+        "account_id": account_id,
+        "product_id": product_id,
+        "product_name": product.card_name,
+    }
+
+
+@app.get("/api/accounts/{account_id}/card-detail")
+async def account_card_detail(account_id: int, months: int = 3, db: Session = Depends(get_db)):
+    """
+    Card detail page driven by account (not card).
+    This is the main entry point for viewing card product info for an account.
+    If the account has a linked product, shows full earning structure + spending analysis.
+    """
+    from sqlalchemy import func as _func
+    from datetime import timedelta
+
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Find product — either from account.product_id or through Card
+    product = None
+    card = None
+    if account.product_id:
+        product = db.query(CardProduct).filter_by(id=account.product_id).first()
+
+    # Also find Card row for this account
+    card = db.query(Card).filter_by(account_id=account_id).first()
+    if not product and card and card.product_id:
+        product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+    # Ecosystem
+    ecosystem = None
+    if product and product.ecosystem_id:
+        eco = db.query(PointsEcosystem).filter_by(id=product.ecosystem_id).first()
+        if eco:
+            ecosystem = {
+                'id': eco.id, 'name': eco.name, 'currency_name': eco.currency_name,
+                'eco_type': eco.eco_type, 'conservative_cpp': eco.conservative_cpp,
+                'your_cpp': eco.your_cpp, 'is_cash_back': eco.is_cash_back,
+            }
+
+    # Earning structure
+    all_categories = db.query(PointsCategory).filter_by(is_active=True)\
+        .order_by(PointsCategory.display_order).all()
+    base_rate = 1.0
+    category_bonuses = []
+    earning_structure = []
+
+    if product:
+        rates = db.query(CardProductReward).filter_by(product_id=product.id).all()
+        for r in rates:
+            if r.is_base_rate:
+                base_rate = r.multiplier
+            elif r.points_category_id:
+                category_bonuses.append({
+                    'category_id': r.points_category_id,
+                    'additional': r.multiplier,
+                    'total': base_rate + r.multiplier,
+                })
+
+        bonus_map = {b['category_id']: b for b in category_bonuses}
+        for cat in all_categories:
+            bonus = bonus_map.get(cat.id)
+            earning_structure.append({
+                'category': cat.name,
+                'category_id': cat.id,
+                'base': base_rate,
+                'bonus': bonus['additional'] if bonus else 0,
+                'total': bonus['total'] if bonus else base_rate,
+            })
+
+    # Account balance
+    balance = get_account_balance(db, account.id)
+
+    # Spending analysis
+    spending_by_category = []
+    points_earned = {'total': 0, 'by_category': []}
+    monthly_spend = []
+    recent_txns = []
+
+    now = datetime.utcnow()
+    lookback = datetime(now.year, now.month, 1) - timedelta(days=months * 30)
+
+    # Recent transactions (last 30)
+    txns = db.query(Transaction).filter_by(account_id=account.id)\
+        .order_by(Transaction.date.desc()).limit(30).all()
+    recent_txns = [{
+        'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
+        'description': t.description_clean or t.description_raw,
+        'amount': t.amount,
+        'category': t.category_final, 'action': t.action,
+    } for t in txns]
+
+    # Spending by category
+    cat_spend = (
+        db.query(
+            Transaction.category_final,
+            _func.sum(Transaction.amount),
+            _func.count(Transaction.id),
+        )
+        .filter(
+            Transaction.account_id == account.id,
+            Transaction.date >= lookback,
+            Transaction.amount < 0,
+        )
+        .group_by(Transaction.category_final)
+        .all()
+    )
+    for cat_name, total, count in cat_spend:
+        amt = abs(total or 0)
+        rate = base_rate
+        for es in earning_structure:
+            if es['category'].lower() == (cat_name or '').lower():
+                rate = es['total']
+                break
+        pts = round(amt * rate, 0)
+        spending_by_category.append({
+            'category': cat_name or 'Uncategorized',
+            'amount': round(amt, 2), 'count': count,
+            'earn_rate': rate, 'points_earned': pts,
+        })
+        points_earned['total'] += pts
+        points_earned['by_category'].append({'category': cat_name or 'Uncategorized', 'points': pts})
+    spending_by_category.sort(key=lambda x: x['amount'], reverse=True)
+
+    # Monthly spending
+    month_spend = (
+        db.query(
+            _func.extract('year', Transaction.date).label('yr'),
+            _func.extract('month', Transaction.date).label('mo'),
+            _func.sum(Transaction.amount),
+        )
+        .filter(
+            Transaction.account_id == account.id,
+            Transaction.date >= lookback,
+            Transaction.amount < 0,
+        )
+        .group_by('yr', 'mo').order_by('yr', 'mo').all()
+    )
+    for yr, mo, total in month_spend:
+        monthly_spend.append({'month': f"{int(yr)}-{int(mo):02d}", 'amount': round(abs(total or 0), 2)})
+
+    # Benefits
+    benefits = []
+    if product:
+        benefits = [{
+            'id': b.id, 'name': b.benefit_name, 'amount': b.amount,
+            'reset_frequency': b.reset_frequency, 'trigger_category': b.trigger_category,
+            'notes': b.notes,
+        } for b in product.benefits]
+
+    # Spend challenges
+    spend_challenges = []
+    if product:
+        spend_challenges = [{
+            'id': sc.id, 'name': sc.challenge_name,
+            'required_spend': sc.required_spend, 'reward_value': sc.reward_value,
+            'reward_type': sc.reward_type,
+            'start_date': sc.start_date.strftime('%Y-%m-%d') if sc.start_date else None,
+            'end_date': sc.end_date.strftime('%Y-%m-%d') if sc.end_date else None,
+            'current_spend': sc.current_spend, 'is_met': sc.is_met,
+        } for sc in product.spend_challenges]
+
+    # Utilization
+    utilization = None
+    if card and card.credit_limit and balance:
+        utilization = round(abs(balance) / card.credit_limit * 100, 1)
+    elif account.account_type and 'credit' in account.account_type.lower():
+        # Try to get credit limit from liability data
+        if account.liability_last_statement_bal:
+            pass  # No credit limit available without card row
+
+    return {
+        'account': {
+            'id': account.id, 'name': account.account_name,
+            'type': account.account_type, 'mask': account.mask,
+            'balance': balance,
+        },
+        'card': {
+            'id': card.id, 'card_name': card.card_name,
+            'issuer': card.issuer, 'brand': card.brand, 'network': card.network,
+            'credit_limit': card.credit_limit,
+            'statement_close_day': card.statement_close_day,
+            'payment_due_day': card.payment_due_day,
+            'annual_fee': card.annual_fee, 'is_active': card.is_active,
+            'issue_date': card.issue_date.strftime('%Y-%m-%d') if card.issue_date else None,
+            'card_age_years': round((datetime.utcnow() - card.issue_date).days / 365.25, 1) if card and card.issue_date else None,
+            'notes': card.notes,
+        } if card else None,
+        'product': {
+            'id': product.id, 'product_key': product.product_key,
+            'card_name': product.card_name, 'status': product.status,
+        } if product else None,
+        'ecosystem': ecosystem,
+        'earning_structure': earning_structure,
+        'base_rate': base_rate,
+        'benefits': benefits,
+        'spend_challenges': spend_challenges,
+        'utilization': utilization,
+        'spending_by_category': spending_by_category,
+        'points_earned': points_earned,
+        'monthly_spend': monthly_spend,
+        'recent_transactions': recent_txns,
+    }
+
+
 @app.get("/api/cards/validate-plaid")
 async def validate_cards_plaid(db: Session = Depends(get_db)):
     """Check which cards have plaid_account_id that matches an actual Account.plaid_account_id."""
@@ -4244,7 +4564,12 @@ async def list_accounts(db: Session = Depends(get_db)):
         db.query(Transaction.account_id, _func.count(Transaction.id))
         .group_by(Transaction.account_id).all()
     )
-    return [serialize_account(a, counts.get(a.id, 0)) for a in accounts]
+    result = []
+    for a in accounts:
+        d = serialize_account(a, counts.get(a.id, 0))
+        d['balance'] = get_account_balance(db, a.id)
+        result.append(d)
+    return result
 
 
 @app.post("/api/accounts")
