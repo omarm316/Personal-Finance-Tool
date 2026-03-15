@@ -290,6 +290,35 @@ def infer_points_category(
     return None
 
 
+def calc_earn_rate(
+    bonus_by_name: dict[str, float],
+    base_rate: float,
+    points_category_name: str | None,
+    cat_parent_map: dict[str, str | None],
+) -> float:
+    """
+    Waterfall earn-rate lookup: L2 (brand) → L1 (broad) → base.
+
+    bonus_by_name    : {category_name: additional_multiplier} — pre-built from
+                       the card product's CardProductReward rows (non-base only).
+    base_rate        : the card's base earn rate (e.g. 1.5 for CFU).
+    points_category_name : the transaction's assigned points category, or None.
+    cat_parent_map   : {category_name: parent_key} — from PointsCategory table.
+
+    Returns the total earn rate (base + bonus).
+    """
+    if not points_category_name:
+        return base_rate
+    # L2: card has an explicit rate for this brand/category
+    if points_category_name in bonus_by_name:
+        return base_rate + bonus_by_name[points_category_name]
+    # L1: fall back to parent category (e.g. "United" → "Airlines")
+    parent = cat_parent_map.get(points_category_name)
+    if parent and parent in bonus_by_name:
+        return base_rate + bonus_by_name[parent]
+    return base_rate
+
+
 def classify_account(account_type: str) -> dict:
     """
     Compute classification flags for an account based on its type.
@@ -2269,6 +2298,39 @@ async def backfill_persistent_ids(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/transactions/backfill-points-categories")
+async def backfill_points_categories(db: Session = Depends(get_db)):
+    """
+    One-time (and idempotent) backfill: infer points_category for every
+    transaction that has merchant_name set but points_category NULL.
+
+    Uses the same infer_points_category() logic as live sync, so results
+    are consistent with newly ingested transactions.  Safe to run multiple
+    times — only NULL rows with a known merchant are touched.
+
+    Returns {updated, skipped} counts.
+    """
+    txns = (
+        db.query(Transaction)
+        .filter(
+            Transaction.points_category == None,   # noqa: E711
+            Transaction.merchant_name != None,     # noqa: E711
+        )
+        .all()
+    )
+    updated = 0
+    skipped = 0
+    for t in txns:
+        cat = infer_points_category(t.merchant_name)
+        if cat:
+            t.points_category = cat
+            updated += 1
+        else:
+            skipped += 1
+    db.commit()
+    return {"updated": updated, "skipped": skipped}
+
+
 @app.post("/api/transactions/backfill-content-hashes")
 async def backfill_content_hashes(db: Session = Depends(get_db)):
     """
@@ -3755,6 +3817,16 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
     # Account balance
     balance = get_account_balance(db, account.id)
 
+    # Pre-build structures needed for earn-rate calc
+    # bonus_by_name: {category_name: additional_multiplier} for this card product
+    # cat_parent_map: {category_name: parent_key} for the L2→L1 waterfall
+    bonus_by_name: dict[str, float] = {}
+    cat_parent_map: dict[str, str | None] = {c.name: c.parent_key for c in all_categories}
+    if product:
+        for r in db.query(CardProductReward).filter_by(product_id=product.id).all():
+            if not r.is_base_rate and r.points_category:
+                bonus_by_name[r.points_category.name] = r.multiplier
+
     # Spending analysis
     spending_by_category = []
     points_earned = {'total': 0, 'by_category': []}
@@ -3764,26 +3836,24 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
     now = datetime.utcnow()
     lookback = datetime(now.year, now.month, 1) - timedelta(days=months * 30)
 
-    # Recent transactions (last 30)
+    # Recent transactions (last 30) — include points_category for display
     txns = db.query(Transaction).filter_by(account_id=account.id)\
         .order_by(Transaction.date.desc()).limit(30).all()
     recent_txns = [{
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
         'description': t.description_clean or t.description_raw,
         'amount': t.amount,
-        'category': t.category_manual or t.category_auto, 'action': t.action,
+        'category': t.category_manual or t.category_auto,
+        'points_category': t.points_category,
+        'action': t.action,
+        'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
     } for t in txns]
 
-    # Spending by category — use COALESCE(category_manual, category_auto) in SQL
-    # (category_final is a Python property, not a real column)
-    from sqlalchemy import case as _case
-    cat_col = _case(
-        (Transaction.category_manual != None, Transaction.category_manual),
-        else_=Transaction.category_auto,
-    )
-    cat_spend = (
+    # Spending grouped by points_category — uses the waterfall for accurate earn rates.
+    # Transactions with NULL points_category are grouped under None (base rate applies).
+    pts_cat_spend = (
         db.query(
-            cat_col.label('cat'),
+            Transaction.points_category,
             _func.sum(Transaction.amount),
             _func.count(Transaction.id),
         )
@@ -3793,24 +3863,23 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
             Transaction.amount > 0,
             Transaction.action == 'Expense',
         )
-        .group_by(cat_col)
+        .group_by(Transaction.points_category)
         .all()
     )
-    for cat_name, total, count in cat_spend:
+    for pts_cat_name, total, count in pts_cat_spend:
         amt = round(total or 0, 2)
-        rate = base_rate
-        for es in earning_structure:
-            if es['category'].lower() == (cat_name or '').lower():
-                rate = es['total']
-                break
+        rate = calc_earn_rate(bonus_by_name, base_rate, pts_cat_name, cat_parent_map)
         pts = round(amt * rate, 0)
+        label = pts_cat_name or 'Other'
         spending_by_category.append({
-            'category': cat_name or 'Uncategorized',
-            'amount': round(amt, 2), 'count': count,
-            'earn_rate': rate, 'points_earned': pts,
+            'category': label,
+            'amount': amt,
+            'count': count,
+            'earn_rate': rate,
+            'points_earned': pts,
         })
         points_earned['total'] += pts
-        points_earned['by_category'].append({'category': cat_name or 'Uncategorized', 'points': pts})
+        points_earned['by_category'].append({'category': label, 'points': pts})
     spending_by_category.sort(key=lambda x: x['amount'], reverse=True)
 
     # Monthly spending
