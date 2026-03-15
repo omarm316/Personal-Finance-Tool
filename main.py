@@ -248,6 +248,66 @@ _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     ("aldi",             "Groceries"),
     ("sprouts",          "Groceries"),
     ("fresh market",     "Groceries"),
+    # ── Dining: coffee, fast food, restaurants ────────────────────────────
+    ("starbucks",        "Dining"),
+    ("shake shack",      "Dining"),
+    ("pruplaza",         "Dining"),    # Pru Plaza Cafe (72 txns)
+    ("pru plaza",        "Dining"),
+    ("blue angel",       "Dining"),    # Blue Angel Cafe & Bakery (multiple Plaid variants)
+    ("shokudo",          "Dining"),
+    ("juicylicious",     "Dining"),
+    ("emanu el",         "Dining"),    # Emanu El Deli, Tenafly NJ
+    ("hellas retail",    "Dining"),    # Hellas Retail Bakery
+    ("chipotle",         "Dining"),
+    ("panera",           "Dining"),
+    ("chick-fil-a",      "Dining"),
+    ("mcdonald",         "Dining"),
+    ("dunkin",           "Dining"),
+    ("subway",           "Dining"),
+    ("taco bell",        "Dining"),
+    ("domino",           "Dining"),
+    ("five guys",        "Dining"),
+    ("sweetgreen",       "Dining"),
+    # ── Food delivery variants ────────────────────────────────────────────
+    ("doordasan",        "Food Delivery"),  # Plaid normalization of DoorDash
+    # ── Ground transportation ─────────────────────────────────────────────
+    ("nj transit",       "Ground Transportation"),
+    ("njtransit",        "Ground Transportation"),
+    ("e-zpass",          "Ground Transportation"),
+    ("ezpass",           "Ground Transportation"),
+    ("paybyphone",       "Ground Transportation"),   # parking app
+    ("parkmobile",       "Ground Transportation"),   # parking app
+    ("mta ",             "Ground Transportation"),   # NYC subway/bus (trailing space avoids false matches)
+    ("las olas",         "Ground Transportation"),   # Las Olas parking, Fort Lauderdale
+    # ── Car rental ────────────────────────────────────────────────────────
+    ("sixt",             "Car Rental"),
+    ("enterprise",       "Car Rental"),
+    ("national car",     "Car Rental"),
+    ("avis",             "Car Rental"),
+    ("budget car",       "Car Rental"),
+    ("alamo",            "Car Rental"),
+    ("dollar rent",      "Car Rental"),
+    ("thrifty",          "Car Rental"),
+    # ── Hotel brands: Hilton family ───────────────────────────────────────
+    ("conrad",           "Hilton"),    # Conrad Hotels & Resorts — Hilton luxury brand
+    # ── Hotel brands: Marriott family ─────────────────────────────────────
+    ("the edition",      "Marriott"),  # The EDITION — Marriott luxury brand
+    ("tampa edit",       "Marriott"),  # truncated Plaid variant of Tampa EDITION
+    ("edition hotel",    "Marriott"),
+    ("st. regis",        "Marriott"),
+    ("st regis",         "Marriott"),
+    ("w hotel",          "Marriott"),
+    # ── Streaming ─────────────────────────────────────────────────────────
+    ("espn",             "Streaming"),   # covers ESPN+
+    ("new york times",   "Streaming"),   # digital subscription
+    ("nytimes",          "Streaming"),
+    ("wsj",              "Streaming"),   # Wall Street Journal
+    ("washington post",  "Streaming"),
+    # ── Online shopping ───────────────────────────────────────────────────
+    ("newegg",           "Online Shopping"),
+    ("ebay",             "Online Shopping"),
+    ("etsy",             "Online Shopping"),
+    ("rakuten",          "Online Shopping"),
 ]
 
 # Plaid pfc_detailed → points category (L1 fallback when no merchant match)
