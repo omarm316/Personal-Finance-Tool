@@ -4008,6 +4008,18 @@ function CardsPage({toast}){
                 <label className="filter-label">
                   <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
                 </label>
+                <label className="btn btn-sm btn-secondary" style={{cursor:'pointer',margin:0}}>
+                  📊 Import Points
+                  <input type="file" accept=".xlsx,.xls" hidden onChange={async(e)=>{
+                    const f=e.target.files[0];if(!f)return;
+                    const fd=new FormData();fd.append('file',f);
+                    try{const r=await fetch(`${window._API_BASE||''}/api/points/upload-and-import`,{method:'POST',body:fd});
+                      const j=await r.json();if(!r.ok)throw new Error(j.detail||'Upload failed');
+                      toast(`Points imported: ${j.cards_with_rates} cards, ${j.ecosystems_imported} ecosystems`);
+                    }catch(err){toast('Import failed: '+err.message,'error');}
+                    e.target.value='';
+                  }}/>
+                </label>
                 <button className="btn btn-sm btn-primary" onClick={runMatch} disabled={matching}>{matching?'Matching…':'🔗 Match Accounts'}</button>
               </div>
             </div>
