@@ -27,7 +27,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardEarningRate,
     seed_points_categories, seed_points_ecosystems, seed_card_earning_rates,
-    import_cards_from_excel,
+    import_cards_from_excel, import_points_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
     SalaryPayment, SalaryAllocation, BalanceObservation,
@@ -642,6 +642,18 @@ async def startup_event():
         # Seed points ecosystems and earning rates
         seed_points_ecosystems(session)
         seed_card_earning_rates(session)
+
+        # Auto-import points data from Excel if available
+        here = os.path.dirname(os.path.abspath(__file__))
+        for pts_fname in ["points_2026.03.13_updated.xlsx", "points.xlsx"]:
+            pts_path = os.path.join(here, pts_fname)
+            if os.path.exists(pts_path):
+                try:
+                    result = import_points_from_excel(pts_path, session)
+                    print(f"Points imported from {pts_fname}: {result}")
+                except Exception as pts_err:
+                    print(f"Points import failed: {pts_err}")
+                break
 
         # One-time fix: correct balance observations for credit/loan accounts
         # where plaid_balance was stored with wrong sign (positive instead of negative).
@@ -3391,6 +3403,23 @@ async def upload_and_import_cards(file: UploadFile = File(...), db: Session = De
 
     n = import_cards_from_excel(dest, db)
     return {"imported": n, "total": db.query(Card).count(), "message": f"Uploaded and imported {n} cards"}
+
+
+@app.post("/api/points/upload-and-import")
+async def upload_and_import_points(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a points Excel file and import ecosystems + earning rates."""
+    import shutil
+
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    dest = os.path.join(here, "points.xlsx")
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    result = import_points_from_excel(dest, db)
+    return {**result, "message": f"Imported {result['ecosystems_imported']} ecosystems, {result['cards_with_rates']} card earning rates"}
 
 
 # ---------------------------------------------------------------------------
