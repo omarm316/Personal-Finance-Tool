@@ -1092,6 +1092,7 @@ def seed_points_categories(session):
         ("West Elm", 22),
         ("C&B", 23),
         ("Spa & Salon", 24),
+        ("Chase Travel", 25),
     ]
     for name, order in cats:
         if not session.query(PointsCategory).filter_by(name=name).first():
@@ -1166,7 +1167,7 @@ def seed_card_products(session):
          {"_base": 1, "Dining": 2, "Food Delivery": 2, "Drugstore": 2}),
 
         ("chase_freedom_unlimited", "Chase Freedom Unlimited", "Chase UR", "active", 0, [],
-         {"_base": 1.5, "Drugstore": 1.5, "Rideshare: Lyft": 3.5}),
+         {"_base": 1.5, "Dining": 1.5, "Drugstore": 1.5, "Chase Travel": 3.5, "Rideshare: Lyft": 3.5}),
 
         ("chase_freedom_flex", "Chase Freedom Flex", "Chase UR", "active", 0, [],
          {"_base": 1, "Dining": 2, "Food Delivery": 2, "Drugstore": 2}),
@@ -1279,22 +1280,21 @@ def seed_card_products(session):
     ]
 
     for product_key, card_name, eco_name, status, annual_fee, benefits, rates in products:
-        # Skip if already exists
-        if session.query(CardProduct).filter_by(product_key=product_key).first():
-            continue
-
         eco_id = eco_map.get(eco_name)
-        product = CardProduct(
-            product_key=product_key,
-            card_name=card_name,
-            ecosystem_id=eco_id,
-            status=status,
-            notes=f"Annual fee: ${annual_fee}" if annual_fee else None,
-        )
-        session.add(product)
+
+        # Upsert product row — create if missing, update name/ecosystem if it drifted
+        product = session.query(CardProduct).filter_by(product_key=product_key).first()
+        if not product:
+            product = CardProduct(product_key=product_key, status=status)
+            session.add(product)
+        product.card_name = card_name
+        product.ecosystem_id = eco_id
+        if annual_fee and not product.notes:
+            product.notes = f"Annual fee: ${annual_fee}"
         session.flush()
 
-        # Add earning rates
+        # Always refresh earning rates from seed (wipes stale data, applies fixes)
+        session.query(CardProductReward).filter_by(product_id=product.id).delete()
         base_rate = rates.get('_base', 1)
         session.add(CardProductReward(
             product_id=product.id, points_category_id=None,
@@ -1310,15 +1310,18 @@ def seed_card_products(session):
                     multiplier=additional, is_base_rate=False,
                 ))
 
-        # Add benefits
-        for ben_name, amount, frequency, trigger in benefits:
-            session.add(CardBenefit(
-                product_id=product.id,
-                benefit_name=ben_name,
-                amount=amount,
-                reset_frequency=frequency,
-                trigger_category=trigger,
-            ))
+        # Refresh benefits only if the seed defines any (preserves manually-added ones
+        # when benefits list is empty — use explicit None sentinel if you want to clear)
+        if benefits:
+            session.query(CardBenefit).filter_by(product_id=product.id).delete()
+            for ben_name, amount, frequency, trigger in benefits:
+                session.add(CardBenefit(
+                    product_id=product.id,
+                    benefit_name=ben_name,
+                    amount=amount,
+                    reset_frequency=frequency,
+                    trigger_category=trigger,
+                ))
 
     session.commit()
     print(f"Card products seeded: {session.query(CardProduct).count()} products in catalog")
