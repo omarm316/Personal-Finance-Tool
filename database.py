@@ -1093,6 +1093,7 @@ def seed_points_categories(session):
         ("C&B", 23),
         ("Spa & Salon", 24),
         ("Chase Travel", 25),
+        ("Streaming", 26),
     ]
     for name, order in cats:
         if not session.query(PointsCategory).filter_by(name=name).first():
@@ -1103,7 +1104,7 @@ def seed_points_categories(session):
 def seed_points_ecosystems(session):
     """Seed all points/miles ecosystems with valuations."""
     ecosystems = [
-        ("Chase UR", "Ultimate Rewards", "Flexible", 1.25, False, "Portal redemption floor"),
+        ("Chase UR", "Ultimate Rewards", "Flexible", 1.0, False, "Points Boost variable rate (1.25cpp portal guarantee removed Oct 2025)"),
         ("Amex MR", "Membership Rewards", "Flexible", 1.0, False, "Transfer partner average"),
         ("Citi ThankYou", "ThankYou Points", "Flexible", 1.0, False, "Transfer partner average"),
         ("Capital One Miles", "Capital One Miles", "Flexible", 1.0, False, "Transfer/portal"),
@@ -1135,6 +1136,15 @@ def seed_points_ecosystems(session):
                 conservative_cpp=cons_cpp, your_cpp=cons_cpp,
                 is_cash_back=is_cash, conservative_basis=basis,
             ))
+        else:
+            # Always refresh descriptive/factual fields.
+            # conservative_cpp is updated from seed (floor value from card issuer data).
+            # your_cpp is intentionally NOT touched — that's the user's personal valuation.
+            existing.currency_name = currency
+            existing.eco_type = eco_type
+            existing.is_cash_back = is_cash
+            existing.conservative_cpp = cons_cpp
+            existing.conservative_basis = basis
     session.commit()
 
 
@@ -1153,9 +1163,12 @@ def seed_card_products(session):
     # benefits: list of (name, amount, frequency, trigger_category)
     products = [
         ("chase_sapphire_preferred", "Chase Sapphire Preferred", "Chase UR", "active", 95, [
-            ("DoorDash DashPass", 0, "annual", "Food Delivery"),
-            ("$50 Chase Travel Hotel Credit", 50, "annual", "Hotels"),
-        ], {"_base": 1, "Dining": 2, "Food Delivery": 2, "Airlines": 1, "Ground Transportation": 1, "Hotels": 1, "Car Rental": 1, "Rideshare: Lyft": 4}),
+            ("$50 Chase Travel Hotel Credit", 50, "annual", "Chase Travel"),
+            ("DashPass Membership", 0, "annual", "Food Delivery"),
+            ("$10/mo DoorDash Credit", 120, "annual", "Food Delivery"),
+        ], {"_base": 1, "Chase Travel": 4, "Dining": 2, "Food Delivery": 2, "Groceries": 2,
+            "Streaming": 2, "Airlines": 1, "Ground Transportation": 1, "Hotels": 1,
+            "Car Rental": 1, "Rideshare: Lyft": 4}),
 
         ("chase_sapphire_reserve", "Chase Sapphire Reserve", "Chase UR", "not_held", 550, [
             ("$300 Travel Credit", 300, "annual", None),
