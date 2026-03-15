@@ -25,7 +25,9 @@ from database import (
     init_db, Account, Transaction, Category,
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
-    seed_points_categories, import_cards_from_excel,
+    PointsEcosystem, CardEarningRate,
+    seed_points_categories, seed_points_ecosystems, seed_card_earning_rates,
+    import_cards_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
     SalaryPayment, SalaryAllocation, BalanceObservation,
@@ -636,6 +638,10 @@ async def startup_event():
                 print("No Excel file found — run /api/init/import-rules manually")
         else:
             print(f"Rules loaded: {rule_count} active rules")
+
+        # Seed points ecosystems and earning rates
+        seed_points_ecosystems(session)
+        seed_card_earning_rates(session)
 
         # One-time fix: correct balance observations for credit/loan accounts
         # where plaid_balance was stored with wrong sign (positive instead of negative).
@@ -3024,36 +3030,155 @@ async def link_card_to_account(card_id: int, body: dict, db: Session = Depends(g
 
 
 @app.get("/api/cards/{card_id}/detail")
-async def get_card_detail(card_id: int, db: Session = Depends(get_db)):
+async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(get_db)):
     """
-    Get card detail including linked account balance and recent transactions.
-    Used by the Cards page detail panel (Section 6).
+    Enhanced card detail: account info, earning structure, spending analysis,
+    points earned, and recent transactions.
     """
+    from sqlalchemy import func as _func
+    from collections import defaultdict
+
     card = db.query(Card).filter_by(id=card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # Find linked account
+    # ── Linked account & balance ──────────────────────────────────────────
     account = None
     balance = None
-    recent_txns = []
-    if card.plaid_account_id:
+    if card.account_id:
+        account = db.query(Account).filter_by(id=card.account_id).first()
+    elif card.plaid_account_id:
         account = db.query(Account).filter_by(plaid_account_id=card.plaid_account_id).first()
-        if account:
-            balance = get_account_balance(db, account.id)
-            txns = db.query(Transaction).filter_by(account_id=account.id)\
-                .order_by(Transaction.date.desc()).limit(20).all()
-            recent_txns = [{
-                'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
-                'description': t.description_clean or t.description_raw, 'description_raw': t.description_raw, 'amount': t.amount,
-                'category': t.category_final, 'action': t.action,
-            } for t in txns]
+    if account:
+        balance = get_account_balance(db, account.id)
 
-    # Statement estimate: sum of transactions since last statement close
+    # ── Ecosystem & earning rates ─────────────────────────────────────────
+    ecosystem = None
+    if card.ecosystem_id:
+        eco = db.query(PointsEcosystem).filter_by(id=card.ecosystem_id).first()
+        if eco:
+            ecosystem = {
+                'id': eco.id, 'name': eco.name, 'currency_name': eco.currency_name,
+                'conservative_cpp': eco.conservative_cpp, 'your_cpp': eco.your_cpp,
+                'is_cash_back': eco.is_cash_back,
+            }
+
+    rates = db.query(CardEarningRate).filter_by(card_id=card.id).all()
+    base_rate = 1.0
+    category_bonuses = []
+    all_categories = db.query(PointsCategory).filter_by(is_active=True)\
+        .order_by(PointsCategory.display_order).all()
+
+    for r in rates:
+        if r.is_base_rate:
+            base_rate = r.earn_rate
+        else:
+            category_bonuses.append({
+                'category_id': r.points_category_id,
+                'category_name': r.points_category.name if r.points_category else None,
+                'additional': r.earn_rate,
+                'total': base_rate + r.earn_rate,
+            })
+
+    # Build full earning structure (all categories with their rates)
+    bonus_map = {b['category_id']: b for b in category_bonuses}
+    earning_structure = []
+    for cat in all_categories:
+        bonus = bonus_map.get(cat.id)
+        earning_structure.append({
+            'category': cat.name,
+            'category_id': cat.id,
+            'base': base_rate,
+            'bonus': bonus['additional'] if bonus else 0,
+            'total': bonus['total'] if bonus else base_rate,
+        })
+
+    # ── Spending analysis (last N months) ─────────────────────────────────
+    spending_by_category = []
+    points_earned = {'total': 0, 'by_category': []}
+    monthly_spend = []
+    recent_txns = []
+
+    if account:
+        now = datetime.utcnow()
+        lookback = datetime(now.year, now.month, 1) - timedelta(days=months * 30)
+
+        # Recent transactions (last 30)
+        txns = db.query(Transaction).filter_by(account_id=account.id)\
+            .order_by(Transaction.date.desc()).limit(30).all()
+        recent_txns = [{
+            'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
+            'description': t.description_clean or t.description_raw,
+            'amount': t.amount,
+            'category': t.category_final, 'action': t.action,
+        } for t in txns]
+
+        # Spending by category (charges only — negative amounts for credit cards)
+        cat_spend = (
+            db.query(
+                Transaction.category_final,
+                _func.sum(Transaction.amount),
+                _func.count(Transaction.id),
+            )
+            .filter(
+                Transaction.account_id == account.id,
+                Transaction.date >= lookback,
+                Transaction.amount < 0,  # Only charges
+            )
+            .group_by(Transaction.category_final)
+            .all()
+        )
+        total_spend = 0
+        for cat_name, total, count in cat_spend:
+            amt = abs(total or 0)
+            total_spend += amt
+            # Find earning rate for this category
+            rate = base_rate
+            for es in earning_structure:
+                if es['category'].lower() == (cat_name or '').lower():
+                    rate = es['total']
+                    break
+            pts = round(amt * rate, 0)
+            spending_by_category.append({
+                'category': cat_name or 'Uncategorized',
+                'amount': round(amt, 2),
+                'count': count,
+                'earn_rate': rate,
+                'points_earned': pts,
+            })
+            points_earned['total'] += pts
+            points_earned['by_category'].append({
+                'category': cat_name or 'Uncategorized',
+                'points': pts,
+            })
+        spending_by_category.sort(key=lambda x: x['amount'], reverse=True)
+
+        # Monthly spending trend
+        month_spend = (
+            db.query(
+                _func.extract('year', Transaction.date).label('yr'),
+                _func.extract('month', Transaction.date).label('mo'),
+                _func.sum(Transaction.amount),
+            )
+            .filter(
+                Transaction.account_id == account.id,
+                Transaction.date >= lookback,
+                Transaction.amount < 0,
+            )
+            .group_by('yr', 'mo')
+            .order_by('yr', 'mo')
+            .all()
+        )
+        for yr, mo, total in month_spend:
+            monthly_spend.append({
+                'month': f"{int(yr)}-{int(mo):02d}",
+                'amount': round(abs(total or 0), 2),
+            })
+
+    # ── Statement estimate ────────────────────────────────────────────────
     statement_balance = None
     if card.statement_close_day and account:
         today = datetime.utcnow()
-        # Find last statement close date
         close_day = min(card.statement_close_day, 28)
         if today.day > close_day:
             stmt_start = datetime(today.year, today.month, close_day)
@@ -3061,29 +3186,151 @@ async def get_card_detail(card_id: int, db: Session = Depends(get_db)):
             m = today.month - 1 if today.month > 1 else 12
             y = today.year if today.month > 1 else today.year - 1
             stmt_start = datetime(y, m, close_day)
-        stmt_txns = db.query(Transaction).filter(
+        stmt_sum = db.query(_func.sum(Transaction.amount)).filter(
             Transaction.account_id == account.id,
             Transaction.date >= stmt_start,
-        ).all()
-        statement_balance = round(sum(t.amount for t in stmt_txns), 2)
+        ).scalar() or 0.0
+        statement_balance = round(stmt_sum, 2)
+
+    # ── Card age ──────────────────────────────────────────────────────────
+    card_age_years = None
+    if card.issue_date:
+        card_age_years = round((datetime.utcnow() - card.issue_date).days / 365.25, 1)
 
     return {
         'card': {
             'id': card.id, 'card_id': card.card_id, 'card_name': card.card_name,
-            'issuer': card.issuer, 'network': card.network,
+            'issuer': card.issuer, 'brand': card.brand, 'network': card.network,
             'credit_limit': card.credit_limit,
             'statement_close_day': card.statement_close_day,
             'payment_due_day': card.payment_due_day,
             'annual_fee': card.annual_fee, 'is_active': card.is_active,
+            'issue_date': card.issue_date.strftime('%Y-%m-%d') if card.issue_date else None,
+            'card_age_years': card_age_years,
+            'notes': card.notes,
         },
+        'ecosystem': ecosystem,
+        'earning_structure': earning_structure,
+        'base_rate': base_rate,
         'linked_account': {
             'id': account.id, 'name': account.account_name,
             'balance': balance,
         } if account else None,
         'statement_balance': statement_balance,
         'utilization': round(abs(balance) / card.credit_limit * 100, 1) if balance and card.credit_limit else None,
+        'spending_by_category': spending_by_category,
+        'points_earned': points_earned,
+        'monthly_spend': monthly_spend,
         'recent_transactions': recent_txns,
     }
+
+
+@app.get("/api/cards/swipe-advisor")
+async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    "Where Should I Swipe?" — ranks active cards by value for a given spending category.
+    Returns best card for each category, or ranks all cards for a specific category.
+    """
+    active_cards = db.query(Card).filter_by(is_active=True).all()
+    categories = db.query(PointsCategory).filter_by(is_active=True)\
+        .order_by(PointsCategory.display_order).all()
+    ecosystems = {e.id: e for e in db.query(PointsEcosystem).all()}
+
+    # Build earning data per card
+    card_data = []
+    for card in active_cards:
+        rates = db.query(CardEarningRate).filter_by(card_id=card.id).all()
+        base = 1.0
+        cat_bonuses = {}
+        for r in rates:
+            if r.is_base_rate:
+                base = r.earn_rate
+            elif r.points_category_id:
+                cat_bonuses[r.points_category_id] = r.earn_rate
+        eco = ecosystems.get(card.ecosystem_id) if card.ecosystem_id else None
+        card_data.append({
+            'card': card,
+            'base': base,
+            'cat_bonuses': cat_bonuses,
+            'eco': eco,
+        })
+
+    def _card_value(cd, cat_id):
+        total_rate = cd['base'] + cd['cat_bonuses'].get(cat_id, 0)
+        eco = cd['eco']
+        cons_cpp = eco.conservative_cpp if eco else 1.0
+        your_cpp = eco.your_cpp if eco else 1.0
+        return {
+            'card_id': cd['card'].id,
+            'card_name': f"{cd['card'].card_name or cd['card'].brand} {cd['card'].last_four or ''}".strip(),
+            'card_display_id': cd['card'].card_id,
+            'issuer': cd['card'].issuer,
+            'network': cd['card'].network,
+            'earn_rate': total_rate,
+            'ecosystem': eco.name if eco else 'Unknown',
+            'currency': eco.currency_name if eco else 'Points',
+            'conservative_value': round(total_rate * cons_cpp, 2),  # cents per dollar
+            'your_value': round(total_rate * your_cpp, 2),
+        }
+
+    if category:
+        # Find the matching category
+        cat_match = None
+        for c in categories:
+            if c.name.lower() == category.lower():
+                cat_match = c
+                break
+        if not cat_match:
+            raise HTTPException(status_code=404, detail=f"Category '{category}' not found")
+
+        rankings = [_card_value(cd, cat_match.id) for cd in card_data]
+        rankings.sort(key=lambda x: x['your_value'], reverse=True)
+        return {
+            'category': cat_match.name,
+            'rankings': rankings[:10],  # Top 10
+        }
+
+    # Return best card per category
+    results = []
+    for cat in categories:
+        rankings = [_card_value(cd, cat.id) for cd in card_data]
+        rankings.sort(key=lambda x: x['your_value'], reverse=True)
+        best = rankings[0] if rankings else None
+        runner_up = rankings[1] if len(rankings) > 1 else None
+        results.append({
+            'category': cat.name,
+            'category_id': cat.id,
+            'best': best,
+            'runner_up': runner_up,
+        })
+    return {'categories': results}
+
+
+@app.get("/api/ecosystems")
+async def get_ecosystems(db: Session = Depends(get_db)):
+    """Get all points ecosystems with valuations."""
+    ecos = db.query(PointsEcosystem).order_by(PointsEcosystem.name).all()
+    return [{
+        'id': e.id, 'name': e.name, 'currency_name': e.currency_name,
+        'conservative_cpp': e.conservative_cpp, 'your_cpp': e.your_cpp,
+        'is_cash_back': e.is_cash_back,
+    } for e in ecos]
+
+
+@app.patch("/api/ecosystems/{eco_id}")
+async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    """Update ecosystem valuation (cpp values)."""
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+    if 'conservative_cpp' in data:
+        eco.conservative_cpp = float(data['conservative_cpp'])
+    if 'your_cpp' in data:
+        eco.your_cpp = float(data['your_cpp'])
+    if 'currency_name' in data:
+        eco.currency_name = data['currency_name']
+    db.commit()
+    return {'status': 'ok', 'name': eco.name}
 
 
 @app.get("/api/cards/validate-plaid")

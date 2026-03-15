@@ -409,6 +409,7 @@ class Card(Base):
     plaid_account_id = Column(String(100), nullable=True)  # Legacy string link — prefer account_id
     account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True, index=True)  # Proper FK to Account
     payment_account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Checking account that pays this card
+    ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)  # Points ecosystem
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -416,7 +417,41 @@ class Card(Base):
 
     account = relationship("Account", back_populates="card", foreign_keys=[account_id])
     payment_account = relationship("Account", foreign_keys=[payment_account_id])
+    ecosystem_rel = relationship("PointsEcosystem", back_populates="cards")
     merchant_mappings = relationship("MerchantPointsMapping", back_populates="card")
+    earning_rates = relationship("CardEarningRate", back_populates="card", cascade="all, delete-orphan")
+
+
+class PointsEcosystem(Base):
+    """Points/miles currency ecosystem with valuations"""
+    __tablename__ = 'points_ecosystems'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False)    # "Chase UR", "Amex MR", "Hilton", etc.
+    currency_name = Column(String(100))                        # "Ultimate Rewards", "Membership Rewards"
+    conservative_cpp = Column(Float, default=1.0)              # Conservative cents per point
+    your_cpp = Column(Float, default=1.0)                      # User's personal valuation
+    is_cash_back = Column(Boolean, default=False)              # True = flat cash back (always 1 cpp)
+
+    cards = relationship("Card", back_populates="ecosystem_rel")
+
+
+class CardEarningRate(Base):
+    """Per-card per-category earning rates (points multiplier)"""
+    __tablename__ = 'card_earning_rates'
+
+    id = Column(Integer, primary_key=True)
+    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False)
+    points_category_id = Column(Integer, ForeignKey('points_categories.id', ondelete='CASCADE'), nullable=True)
+    earn_rate = Column(Float, nullable=False)      # Points per dollar (e.g., 3.0 = 3x)
+    is_base_rate = Column(Boolean, default=False)  # True = applies to ALL spend; category is ignored
+
+    card = relationship("Card", back_populates="earning_rates")
+    points_category = relationship("PointsCategory")
+
+    __table_args__ = (
+        Index('ix_card_earning_card_cat', 'card_id', 'points_category_id'),
+    )
 
 
 class MerchantPointsMapping(Base):
@@ -935,6 +970,138 @@ def seed_points_categories(session):
     for name, order in cats:
         if not session.query(PointsCategory).filter_by(name=name).first():
             session.add(PointsCategory(name=name, display_order=order))
+    session.commit()
+
+
+def seed_points_ecosystems(session):
+    """Seed points/miles ecosystems with valuation data"""
+    ecosystems = [
+        # (name, currency_name, conservative_cpp, your_cpp, is_cash_back)
+        ("Chase UR",       "Ultimate Rewards",     1.5,  2.0,  False),
+        ("Amex MR",        "Membership Rewards",   1.0,  2.0,  False),
+        ("Hilton Honors",  "Hilton Honors Points", 0.5,  0.6,  False),
+        ("Hyatt",          "World of Hyatt Points", 1.7,  2.2,  False),
+        ("Marriott Bonvoy","Marriott Bonvoy Points",0.7,  0.9,  False),
+        ("United MileagePlus","United Miles",       1.2,  1.5,  False),
+        ("Delta SkyMiles", "Delta SkyMiles",        1.1,  1.4,  False),
+        ("Cash Back",      "Cash Back",             1.0,  1.0,  True),
+        ("Citi TYP",       "ThankYou Points",       1.0,  1.5,  False),
+        ("Capital One",    "Capital One Miles",     1.0,  1.5,  False),
+        ("Discover CB",    "Cashback Bonus",        1.0,  1.0,  True),
+        ("Amex Hilton",    "Hilton Honors Points",  0.5,  0.6,  False),
+        ("Fidelity",       "Cash Back",             1.0,  1.0,  True),
+    ]
+    for name, currency, cons, yours, is_cb in ecosystems:
+        if not session.query(PointsEcosystem).filter_by(name=name).first():
+            session.add(PointsEcosystem(
+                name=name, currency_name=currency,
+                conservative_cpp=cons, your_cpp=yours, is_cash_back=is_cb
+            ))
+    session.commit()
+
+
+def seed_card_earning_rates(session):
+    """
+    Seed earning rates for all cards.
+    Base rate = points earned on ALL spend.
+    Category rates = ADDITIONAL points on top of base for specific categories.
+    Total for a category = base + category rate.
+
+    These are curated from public card terms as of early 2026.
+    """
+    # Build lookup: category_name → id
+    cats = {c.name: c.id for c in session.query(PointsCategory).all()}
+    ecosystems = {e.name: e.id for e in session.query(PointsEcosystem).all()}
+    cards = {c.card_id: c for c in session.query(Card).all()}
+
+    if not cats or not ecosystems or not cards:
+        return  # Seed data not ready yet
+
+    # Format: card_id → (ecosystem, base_rate, {category: additional_rate})
+    card_earn_data = {
+        # ── Chase Ultimate Rewards ────────────────────────────────────
+        "VISA 3698":  ("Chase UR", 1, {"Travel": 2, "Dining & Restaurants": 2}),           # Sapphire Preferred
+        "VISA 7154":  ("Chase UR", 1, {"Travel": 2, "Dining & Restaurants": 2}),           # Sapphire Preferred (2nd)
+        "MC 5780":    ("Chase UR", 1, {"Dining & Restaurants": 2, "Drug Store": 2, "Transit & Rideshare": 2}),  # Freedom Flex (rotating 5x handled separately)
+        "VISA 4747":  ("Chase UR", 1, {}),           # Freedom (rotating 5x)
+        "VISA 9156":  ("Chase UR", 1, {}),           # Freedom (2nd)
+        "VISA 4341":  ("Chase UR", 1.5, {}),         # Freedom Unlimited
+        "VISA 0856":  ("Chase UR", 1.5, {}),         # Freedom Unlimited (2nd)
+
+        # ── Chase Co-Brand ────────────────────────────────────────────
+        "VISA 1677":  ("Hyatt", 2, {"Travel": 2, "Dining & Restaurants": 2, "Transit & Rideshare": 2}),  # Hyatt
+        "VISA 8991":  ("United MileagePlus", 2, {"Travel": 1, "Dining & Restaurants": 1, "Streaming & Subscriptions": 1}),  # United Quest
+        "VISA 9968":  ("United MileagePlus", 2, {"Travel": 0, "Dining & Restaurants": 0}),  # United Explorer — 2x on travel/dining (2 base, 0 additional)
+        "VISA 6639":  ("Chase UR", 2, {"Dining & Restaurants": 1, "Drug Store": 1, "Gas & EV Charging": 1}),  # Amazon Prime — 5% Amazon
+        "VISA 3663":  ("Marriott Bonvoy", 2, {"Dining & Restaurants": 4, "Groceries": 4}),  # Bonvoy Boundless — 6x dining/grocery
+        "VISA 7371":  ("Marriott Bonvoy", 2, {"Dining & Restaurants": 4, "Groceries": 4}),  # Bonvoy Boundless (2nd)
+
+        # ── Amex Membership Rewards ───────────────────────────────────
+        "AMEX 1009":  ("Amex MR", 1, {"Travel": 4}),                                       # Amex Platinum — 5x flights
+        "AMEX 1008":  ("Amex MR", 1, {"Travel": 4}),                                       # Amex Platinum (2nd)
+        "AMEX BBP 1008": ("Amex MR", 2, {}),                                               # Blue Business Preferred — 2x everything
+        "DELTA GOLD 1006": ("Delta SkyMiles", 1, {"Dining & Restaurants": 1, "Groceries": 1}),  # Delta Gold — 2x dining/grocery
+
+        # ── Amex Co-Brand (Hilton) ────────────────────────────────────
+        "HILTON 1009":("Amex Hilton", 3, {"Travel": 11, "Dining & Restaurants": 3, "Groceries": 3, "Gas & EV Charging": 3}),  # Hilton Aspire — 14x travel
+        "HILTON 1005":("Amex Hilton", 3, {"Groceries": 2, "Gas & EV Charging": 2, "Dining & Restaurants": 2}),  # Hilton Honors — 5x grocery/gas/dining
+        "HILTON 1008":("Amex Hilton", 3, {"Groceries": 2, "Gas & EV Charging": 2, "Dining & Restaurants": 2}),  # Hilton Honors (2nd)
+
+        # ── Amex Co-Brand (Marriott) ──────────────────────────────────
+        "AMEXMB 1000":("Marriott Bonvoy", 3, {"Dining & Restaurants": 3, "Groceries": 3, "Travel": 3}),  # Bonvoy Brilliant — 6x dining/grocery/travel
+
+        # ── Amex Cash Back ────────────────────────────────────────────
+        "AMEX 1000":  ("Cash Back", 1.5, {}),                                              # Cash Magnet — 1.5% all
+        "AMEX 1001":  ("Cash Back", 1.5, {}),                                              # Cash Magnet (2nd)
+        "RAKUTEN 1008":("Amex MR", 1, {"Online Retail": 2}),                               # Rakuten — 3x through Rakuten
+
+        # ── Citi ──────────────────────────────────────────────────────
+        "MC 8475":    ("Cash Back", 2, {}),                                                 # Citi Double Cash — 2% all
+        "MC 3240":    ("Cash Back", 1, {}),                                                 # Citi Custom Cash — 5% top category (handled separately)
+
+        # ── Others ────────────────────────────────────────────────────
+        "VISA 8344":  ("Cash Back", 1, {"Groceries": 2, "Gas & EV Charging": 2}),          # BOA Cash Back — 3% grocery, 2% gas
+        "VISA 7384":  ("Cash Back", 1, {"Groceries": 2, "Gas & EV Charging": 2}),          # BOA Cash Back (2nd)
+        "VISA 5707":  ("Cash Back", 1, {"Dining & Restaurants": 3, "Travel": 3}),          # Atmos Ascent — emerging card
+        "VISA 2440":  ("Fidelity", 2, {}),                                                  # Fidelity Rewards — 2% all
+        "MC 9689":    ("Capital One", 1.25, {}),                                            # Venture One — 1.25x all
+        "DISCOVER 7930":("Discover CB", 1, {}),                                             # Discover it — 5% rotating
+        "DISCOVER 3368":("Discover CB", 1, {}),                                             # Discover it (2nd)
+        "VISA 4449":  ("Cash Back", 1, {}),                                                 # Best Buy — store card
+        "MC 6560":    ("Cash Back", 1, {}),                                                 # C&B — store card
+        "VISA 6184":  ("Cash Back", 1, {}),                                                 # West Elm — store card
+    }
+
+    for card_id_str, (eco_name, base, cat_rates) in card_earn_data.items():
+        card = cards.get(card_id_str)
+        if not card:
+            continue
+
+        # Set ecosystem on card
+        eco_id = ecosystems.get(eco_name)
+        if eco_id and card.ecosystem_id != eco_id:
+            card.ecosystem_id = eco_id
+
+        # Check if rates already seeded for this card
+        existing = session.query(CardEarningRate).filter_by(card_id=card.id).count()
+        if existing > 0:
+            continue
+
+        # Base rate
+        session.add(CardEarningRate(
+            card_id=card.id, points_category_id=None,
+            earn_rate=base, is_base_rate=True
+        ))
+
+        # Category bonus rates (additional on top of base)
+        for cat_name, additional in cat_rates.items():
+            cat_id = cats.get(cat_name)
+            if cat_id and additional > 0:
+                session.add(CardEarningRate(
+                    card_id=card.id, points_category_id=cat_id,
+                    earn_rate=additional, is_base_rate=False
+                ))
+
     session.commit()
 
 
