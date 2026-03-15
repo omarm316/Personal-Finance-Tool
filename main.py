@@ -4582,6 +4582,53 @@ async def reanchor_from_observation(account_id: int, db: Session = Depends(get_d
     }
 
 
+@app.post("/api/reconciliation/reanchor-all")
+async def reanchor_all_accounts(db: Session = Depends(get_db)):
+    """
+    Re-anchor every account that has a balance observation.
+    Uses the calibration approach (offset = plaid_balance - SUM(txns)).
+    """
+    from sqlalchemy import func as _func
+
+    accounts = db.query(Account).filter_by(is_active=True).all()
+    results = []
+    for account in accounts:
+        obs = (
+            db.query(BalanceObservation)
+            .filter_by(account_id=account.id)
+            .order_by(BalanceObservation.observed_at.desc())
+            .first()
+        )
+        if not obs:
+            continue
+        old_balance = get_account_balance(db, account.id)
+        total_txn_sum = (
+            db.query(_func.sum(Transaction.amount))
+            .filter(Transaction.account_id == account.id)
+            .scalar() or 0.0
+        )
+        account.starting_balance = round(obs.plaid_balance - total_txn_sum, 4)
+        account.start_date = None
+        db.flush()
+        rebuild_monthly_snapshots(db, account.id)
+        new_balance = get_account_balance(db, account.id)
+        drift = round(obs.plaid_balance - old_balance, 2)
+        results.append({
+            'account_name': account.account_name,
+            'old_balance': old_balance,
+            'new_balance': new_balance,
+            'plaid_balance': obs.plaid_balance,
+            'drift_corrected': drift,
+        })
+    db.commit()
+    corrected = sum(1 for r in results if r['drift_corrected'] != 0)
+    return {
+        'total_accounts': len(results),
+        'corrected': corrected,
+        'results': results,
+    }
+
+
 @app.get("/api/balances/monthly")
 async def get_monthly_balances(months: int = 24, db: Session = Depends(get_db)):
     """

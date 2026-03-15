@@ -6041,7 +6041,16 @@ function ReconciliationPanel({toast}){
           <h2 style={{fontSize:16,fontWeight:600,margin:0}}>Balance Reconciliation</h2>
           <p style={{fontSize:12,color:'var(--text-muted)',margin:'4px 0 0'}}>Plaid-reported vs. transaction-derived balances. Observations are recorded every sync.</p>
         </div>
-        <button className="btn btn-sm btn-secondary" onClick={load}>↻ Refresh</button>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-sm btn-secondary" onClick={async()=>{
+            try{
+              const r=await apiFetch('/reconciliation/reanchor-all',{method:'POST'});
+              toast(`Re-anchored ${r.corrected} of ${r.total_accounts} accounts`);
+              load();
+            }catch(e){toast('Re-anchor all failed: '+e.message,'error');}
+          }}>⚓ Re-anchor All</button>
+          <button className="btn btn-sm btn-secondary" onClick={load}>↻ Refresh</button>
+        </div>
       </div>
       <div className="table-wrap">
         <table style={{fontSize:13}}>
