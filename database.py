@@ -1067,14 +1067,23 @@ def _run_migrations_pg(engine, required_columns):
                 ), {'new': new, 'old': old})
             print('  Migration: remapped categorization_rules set_category')
         # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
-        # Drop stale NOT NULL constraint on spend_challenges.product_id.
-        # Old schema had this column as NOT NULL; current model doesn't include it.
-        # We must make it nullable so INSERTs from the current model succeed.
+        # Drop stale NOT NULL constraints on spend_challenges columns that exist
+        # only in older Railway DB schema versions but are absent from the current
+        # model.  Any such column with NOT NULL will block every INSERT.
         if insp.has_table('spend_challenges'):
             _sc_cols = {c['name']: c for c in insp.get_columns('spend_challenges')}
-            if 'product_id' in _sc_cols and not _sc_cols['product_id'].get('nullable', True):
-                conn.execute(text('ALTER TABLE spend_challenges ALTER COLUMN product_id DROP NOT NULL'))
-                print('  Migration: dropped NOT NULL on spend_challenges.product_id')
+            # Columns that may exist in old schema with NOT NULL but are no longer
+            # part of the model — make them nullable so INSERTs succeed.
+            _sc_stale_notnull = [
+                'product_id', 'required_spend', 'reward_type',
+                'reward_amount', 'category_id', 'multiplier',
+            ]
+            for _stale_col in _sc_stale_notnull:
+                if _stale_col in _sc_cols and not _sc_cols[_stale_col].get('nullable', True):
+                    conn.execute(text(
+                        f'ALTER TABLE spend_challenges ALTER COLUMN {_stale_col} DROP NOT NULL'
+                    ))
+                    print(f'  Migration: dropped NOT NULL on spend_challenges.{_stale_col}')
         if insp.has_table('transactions') and insp.has_table('accounts'):
             conn.execute(text("""
                 UPDATE transactions
