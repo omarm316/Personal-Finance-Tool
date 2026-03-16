@@ -13,6 +13,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, Response, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 import hashlib
 from sqlalchemy.orm import Session
@@ -784,6 +785,12 @@ BALANCE_TYPES = {
 engine, SessionLocal = init_db()
 
 app = FastAPI(title="Finance Automation API", version="1.0.0")
+
+# Serve static assets (card images, backgrounds, etc.) from /static
+_here = os.path.dirname(os.path.abspath(__file__))
+_static_dir = os.path.join(_here, "static")
+os.makedirs(_static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 app.add_middleware(
     CORSMiddleware,

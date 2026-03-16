@@ -3762,6 +3762,9 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const grad=Object.entries(issuerGradient).find(([k])=>nameLower.includes(k))?.[1]
     ||(c?issuerGradient[(c.issuer||'').toLowerCase()]:null)
     ||'linear-gradient(135deg,#374151 0%,#6B7280 100%)';
+  // Card image: /static/images/cards/{product_key}.png (or .jpg / .webp)
+  // Falls back silently to gradient if file not present
+  const cardImgSrc=p?.product_key?`/static/images/cards/${p.product_key}.png`:null;
   const displayName=p?p.card_name:(c?c.card_name:acct.name);
   const bal=acct.balance;
   const utilPct=d.utilization;
@@ -3997,6 +4000,9 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       {/* Hero */}
       <div style={{background:grad,borderRadius:16,padding:'28px 32px',color:'#fff',marginBottom:24,position:'relative',overflow:'hidden'}}>
         <div style={{position:'absolute',top:0,right:0,bottom:0,width:'40%',opacity:0.07,background:'radial-gradient(circle at 70% 30%, #fff 0%, transparent 70%)'}}/>
+        {/* Card artwork — floated in the bottom-right corner of the hero */}
+        {cardImgSrc&&<img src={cardImgSrc} alt="" onError={e=>{e.target.style.display='none';}}
+          style={{position:'absolute',bottom:16,right:24,height:90,borderRadius:6,boxShadow:'0 4px 20px rgba(0,0,0,0.35)',opacity:0.92,pointerEvents:'none'}}/>}
         <button onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>&#8592; Back</button>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
           <div>
