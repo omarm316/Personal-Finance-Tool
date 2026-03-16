@@ -4260,7 +4260,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 e.stopPropagation();
                 if(!window.confirm(`Delete challenge "${ch.name}"?`)) return;
                 try{
-                  await apiFetch(`/challenges/${ch.id}`,'DELETE');
+                  await apiFetch(`/challenges/${ch.id}`,{method:'DELETE'});
                   toast('Challenge deleted','success');
                   loadDetail();
                 }catch(err){toast('Delete failed: '+(err?.message||''),'error');}
