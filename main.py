@@ -4428,32 +4428,36 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     # Challenge bonus points — separate from base-rate points.
     # Shows bonus pts earned across all active challenges for this card
     # (for threshold challenges, only count if threshold met).
+    # Wrapped in try/except so a missing table (first deploy) never breaks card detail.
     challenge_points = []
     challenge_pts_total = 0.0
     if card:
-        active_challenges = db.query(SpendChallenge).filter_by(
-            card_id=card.id, is_active=True
-        ).all()
-        for ch in active_challenges:
-            bp = _challenge_bonus_pts(ch)
-            challenge_points.append({
-                'id': ch.id,
-                'name': ch.name,
-                'bonus_pts': round(bp, 0),
-                'bonus_amount': ch.bonus_amount,
-                'bonus_type': ch.bonus_type,
-                'status': ch.status if hasattr(ch, 'status') else (
-                    'active' if ch.is_active else 'inactive'
-                ),
-                'category_names': [lnk.category_name for lnk in ch.category_links],
-                'spend_cap': ch.spend_cap,
-                'current_spend': round(ch.current_spend or 0, 2),
-                'progress_pct': min(100, round(
-                    (ch.current_spend or 0) / ch.spend_cap * 100, 1
-                )) if ch.spend_cap else None,
-                'threshold_met': ch.bonus_unlocked,
-            })
-            challenge_pts_total += bp
+        try:
+            active_challenges = db.query(SpendChallenge).filter_by(
+                card_id=card.id, is_active=True
+            ).all()
+            for ch in active_challenges:
+                bp = _challenge_bonus_pts(ch)
+                challenge_points.append({
+                    'id': ch.id,
+                    'name': ch.name,
+                    'bonus_pts': round(bp, 0),
+                    'bonus_amount': ch.bonus_amount,
+                    'bonus_type': ch.bonus_type,
+                    'category_names': [lnk.category_name for lnk in ch.category_links],
+                    'spend_cap': ch.spend_cap,
+                    'current_spend': round(ch.current_spend or 0, 2),
+                    'progress_pct': min(100, round(
+                        (ch.current_spend or 0) / ch.spend_cap * 100, 1
+                    )) if ch.spend_cap else None,
+                    'threshold_met': ch.bonus_unlocked,
+                })
+                challenge_pts_total += bp
+        except Exception:
+            # challenge tables may not exist yet on first deploy — degrade gracefully
+            challenge_points = []
+            challenge_pts_total = 0.0
+            db.rollback()
 
     return {
         'account': {
