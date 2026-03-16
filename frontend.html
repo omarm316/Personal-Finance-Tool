@@ -45,7 +45,7 @@ body{overflow:hidden}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
 .topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
-.content{flex:1;overflow-y:auto;padding:24px 20px}
+.content{flex:1;overflow-y:auto;padding:24px 32px}
 .card{background:#ffffff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
@@ -3830,14 +3830,12 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     if(!cardId)return;
     setChallengesLoading(true);
     try{
-      const[ch,cardsAll,sugg]=await Promise.all([
+      const[ch,cardsAll]=await Promise.all([
         apiFetch(`/challenges?card_id=${cardId}`),
         apiFetch('/cards'),
-        apiFetch('/challenges/suggestions'),
       ]);
       setChallenges(ch);
       setAllCards(cardsAll.filter(c=>c.is_active&&c.id!==cardId));
-      setSuggestions(sugg.filter(s=>s.card_id===cardId));
     }catch(e){toast('Failed to load challenges','error');}
     finally{setChallengesLoading(false);}
   };
@@ -4119,7 +4117,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   );
 
   return(
-    <div style={{maxWidth:900,margin:'0 auto'}}>
+    <div style={{maxWidth:1400,margin:'0 auto'}}>
       {ChallengeModal}
       {DeleteConfirm}
       {/* Hero */}
