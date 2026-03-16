@@ -1074,16 +1074,23 @@ def _run_migrations_pg(engine, required_columns):
             _sc_cols = {c['name']: c for c in insp.get_columns('spend_challenges')}
             # Columns that may exist in old schema with NOT NULL but are no longer
             # part of the model — make them nullable so INSERTs succeed.
-            _sc_stale_notnull = [
-                'product_id', 'required_spend', 'reward_type',
-                'reward_amount', 'category_id', 'multiplier',
-            ]
-            for _stale_col in _sc_stale_notnull:
-                if _stale_col in _sc_cols and not _sc_cols[_stale_col].get('nullable', True):
+            # Known model columns — anything ELSE in the DB is a legacy relic.
+            # Drop NOT NULL on every such relic so INSERTs from the current model
+            # always succeed regardless of which old schema the DB was created from.
+            _sc_model_cols = {
+                'id', 'card_id', 'name', 'challenge_type',
+                'start_date', 'end_date', 'activation_date',
+                'bonus_type', 'bonus_amount',
+                'spend_cap', 'spend_threshold',
+                'current_spend', 'bonus_unlocked',
+                'is_active', 'notes', 'created_at',
+            }
+            for _col_name, _col_info in _sc_cols.items():
+                if _col_name not in _sc_model_cols and not _col_info.get('nullable', True):
                     conn.execute(text(
-                        f'ALTER TABLE spend_challenges ALTER COLUMN {_stale_col} DROP NOT NULL'
+                        f'ALTER TABLE spend_challenges ALTER COLUMN {_col_name} DROP NOT NULL'
                     ))
-                    print(f'  Migration: dropped NOT NULL on spend_challenges.{_stale_col}')
+                    print(f'  Migration: dropped NOT NULL on spend_challenges.{_col_name}')
         if insp.has_table('transactions') and insp.has_table('accounts'):
             conn.execute(text("""
                 UPDATE transactions
