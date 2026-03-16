@@ -4500,17 +4500,18 @@ async def account_transactions(
     account_id: int,
     year: int = None,
     month: int = None,
+    quarter: int = None,
     action: str = None,
     db: Session = Depends(get_db),
 ):
     """Filtered transaction list for an account.
 
-    - year + month → all transactions for that calendar month
-    - year only    → all transactions for that calendar year
-    - neither      → most recent 60 transactions
+    - year + month          → calendar month
+    - year + quarter (1-4)  → calendar quarter (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
+    - year only             → full calendar year
+    - neither               → most recent 200 transactions
     Optionally filter by action ('Expense', 'Income', etc.).
     """
-    from sqlalchemy import func as _func
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -4536,6 +4537,14 @@ async def account_transactions(
         import calendar as _cal
         first_day = _date(year, month, 1)
         last_day  = _date(year, month, _cal.monthrange(year, month)[1])
+        q = q.filter(Transaction.date >= first_day, Transaction.date <= last_day)
+    elif year and quarter:
+        from datetime import date as _date
+        import calendar as _cal
+        q_start_month = (quarter - 1) * 3 + 1
+        q_end_month   = q_start_month + 2
+        first_day = _date(year, q_start_month, 1)
+        last_day  = _date(year, q_end_month, _cal.monthrange(year, q_end_month)[1])
         q = q.filter(Transaction.date >= first_day, Transaction.date <= last_day)
     elif year:
         from datetime import date as _date

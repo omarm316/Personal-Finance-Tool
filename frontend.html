@@ -98,7 +98,7 @@ td{padding:11px 14px;font-size:13.5px}
 .amount-pos{color:var(--green);font-family:'Inter',sans-serif;font-size:13.5px;font-weight:500}
 .amount-neutral{color:var(--text-secondary);font-family:'Inter',sans-serif;font-size:13.5px}
 .toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{background:#0f1117;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-md);animation:slideUp 0.2s ease;max-width:320px}
+.toast{background:#0f1117;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-md);animation:slideUp 0.2s ease;max-width:480px;word-break:break-word}
 .toast.success{border-left:3px solid var(--green)}
 .toast.error{border-left:3px solid var(--red)}
 @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -210,7 +210,8 @@ function useToast(){
   const add=(msg,type='success')=>{
     const id=Date.now();
     setToasts(t=>[...t,{id,msg,type}]);
-    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);
+    // Error toasts stay 8 seconds so diagnostic text can be read
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),type==='error'?8000:3500);
   };
   return{toasts,toast:add};
 }
@@ -3704,18 +3705,22 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[confirmDeleteId,setConfirmDeleteId]=useState(null);
   const[suggestions,setSuggestions]=useState([]);
   const[spendRefreshing,setSpendRefreshing]=useState(false);
-  // Recent Transactions — independent month/year filter
+  // Recent Transactions — independent month/year/quarter filter
   const _now=new Date();
-  const[txnView,setTxnView]=useState('monthly');   // 'monthly' | 'ytd'
+  const[txnView,setTxnView]=useState('monthly');   // 'monthly' | 'qtd' | 'ytd'
   const[txnYear,setTxnYear]=useState(_now.getFullYear());
   const[txnMonth,setTxnMonth]=useState(_now.getMonth()+1);
+  const[txnQuarter,setTxnQuarter]=useState(Math.ceil((_now.getMonth()+1)/3));
   const[txns,setTxns]=useState([]);
   const[txnsLoading,setTxnsLoading]=useState(false);
-  const loadTxns=async(yr,mo,view)=>{
+  const loadTxns=async(yr,mo,view,qtr)=>{
     setTxnsLoading(true);
     try{
-      const y=yr||txnYear; const m=mo||txnMonth; const v=view||txnView;
-      const qs=v==='ytd'?`year=${y}&action=Expense`:`year=${y}&month=${m}&action=Expense`;
+      const y=yr??txnYear; const m=mo??txnMonth; const v=view||txnView; const q=qtr??txnQuarter;
+      let qs;
+      if(v==='ytd') qs=`year=${y}&action=Expense`;
+      else if(v==='qtd') qs=`year=${y}&quarter=${q}&action=Expense`;
+      else qs=`year=${y}&month=${m}&action=Expense`;
       setTxns(await apiFetch(`/accounts/${accountId}/transactions?${qs}`));
     }catch(e){}
     finally{setTxnsLoading(false);}
@@ -3726,8 +3731,17 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   };
   const nextTxnMonth=()=>{
     const _n=new Date();
-    if(txnYear===_n.getFullYear()&&txnMonth===_n.getMonth()+1)return; // don't go future
+    if(txnYear===_n.getFullYear()&&txnMonth===_n.getMonth()+1)return;
     if(txnMonth===12){setTxnYear(y=>y+1);setTxnMonth(1);}else{setTxnMonth(m=>m+1);}
+  };
+  const prevTxnQuarter=()=>{
+    if(txnQuarter===1){setTxnYear(y=>y-1);setTxnQuarter(4);}else{setTxnQuarter(q=>q-1);}
+  };
+  const nextTxnQuarter=()=>{
+    const _n=new Date();
+    const curQ=Math.ceil((_n.getMonth()+1)/3);
+    if(txnYear===_n.getFullYear()&&txnQuarter>=curQ)return;
+    if(txnQuarter===4){setTxnYear(y=>y+1);setTxnQuarter(1);}else{setTxnQuarter(q=>q+1);}
   };
   const load=async(p,silent)=>{
     if(silent){setSpendRefreshing(true);}else{setLoading(true);}
@@ -3762,8 +3776,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   useEffect(()=>{
     if(d?.card?.id)loadChallenges(d.card.id);
   },[d?.card?.id]);
-  // Transactions filter — reload when year/month/view changes (or on first mount)
-  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView);},[accountId,txnYear,txnMonth,txnView]);
+  // Transactions filter — reload when year/month/quarter/view changes
+  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter);},[accountId,txnYear,txnMonth,txnView,txnQuarter]);
 
   if(loading)return<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>;
   if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
@@ -3862,7 +3876,11 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       setShowChallengeModal(false);
       await loadChallenges(c.id);
       toast(editingChallenge?'Challenge updated':'Challenge created');
-    }catch(e){toast('Failed to save challenge','error');}
+    }catch(e){
+      // Show actual server error so we can diagnose — truncate if very long
+      const msg=e?.message||'Unknown error';
+      toast('Save failed: '+(msg.length>120?msg.slice(0,120)+'…':msg),'error');
+    }
   };
   const doDelete=async()=>{
     if(!confirmDeleteId)return;
@@ -4302,13 +4320,13 @@ function AccountCardDetailPage({accountId,onBack,toast}){
 
       {/* Recent Transactions */}
       <div className="card" style={{padding:20}}>
-        {/* Header row: title + Monthly/YTD toggle + month nav */}
+        {/* Header row: title + Monthly/QTD/YTD toggle + period nav */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
           <div style={{fontSize:15,fontWeight:600}}>Transactions</div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
-            {/* Monthly / YTD toggle */}
+            {/* Monthly / QTD / YTD toggle */}
             <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
-              {[['monthly','Monthly'],['ytd','YTD']].map(([v,label])=>(
+              {[['monthly','Monthly'],['qtd','QTD'],['ytd','YTD']].map(([v,label])=>(
                 <button key={v} onClick={()=>setTxnView(v)}
                   style={{padding:'3px 10px',borderRadius:4,border:'none',cursor:'pointer',fontSize:11,fontWeight:txnView===v?700:400,
                     background:txnView===v?'var(--bg)':'transparent',
@@ -4318,13 +4336,19 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 </button>
               ))}
             </div>
-            {/* Month/Year nav — only when Monthly view */}
+            {/* Month nav */}
             {txnView==='monthly'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
               <button onClick={prevTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
               <span style={{fontSize:12,fontWeight:600,minWidth:72,textAlign:'center'}}>{txnMonthNames[txnMonth-1]} {txnYear}</span>
               <button onClick={nextTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
             </div>}
-            {/* YTD year nav */}
+            {/* Quarter nav */}
+            {txnView==='qtd'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button onClick={prevTxnQuarter} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:600,minWidth:64,textAlign:'center'}}>Q{txnQuarter} {txnYear}</span>
+              <button onClick={nextTxnQuarter} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
+            {/* Year nav */}
             {txnView==='ytd'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
               <button onClick={()=>setTxnYear(y=>y-1)} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
               <span style={{fontSize:12,fontWeight:600,minWidth:40,textAlign:'center'}}>{txnYear}</span>
