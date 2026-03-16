@@ -4566,6 +4566,12 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
                 card_id=card.id, is_active=True
             ).all()
             for ch in active_challenges:
+                try:
+                    _recalc_challenge(db, ch)
+                except Exception:
+                    pass
+            db.commit()
+            for ch in active_challenges:
                 bp = _challenge_bonus_pts(ch)
                 challenge_points.append({
                     'id': ch.id,

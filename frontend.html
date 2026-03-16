@@ -12,7 +12,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:220px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
+  --sidebar-w:200px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
   --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
@@ -45,7 +45,7 @@ body{overflow:hidden}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
 .topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
-.content{flex:1;overflow-y:auto;padding:24px 28px}
+.content{flex:1;overflow-y:auto;padding:24px 20px}
 .card{background:#ffffff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
@@ -4256,18 +4256,38 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             {d.challenge_points.map(ch=>{
               const earned=Math.round(ch.bonus_pts);
               const locked=ch.bonus_type==='flat'&&!ch.threshold_met;
+              const handleDeleteChallenge=async(e)=>{
+                e.stopPropagation();
+                if(!window.confirm(`Delete challenge "${ch.name}"?`)) return;
+                try{
+                  await apiFetch(`/challenges/${ch.id}`,'DELETE');
+                  toast('Challenge deleted','success');
+                  loadDetail();
+                }catch(err){toast('Delete failed: '+(err?.message||''),'error');}
+              };
+              const chFullName=ch.name&&ch.name.length>40?ch.name:ch.name;
               return(
-                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid #e9d5ff'}}>
+                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid #e9d5ff',gap:6}}>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:500,marginBottom:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:1}}>
+                      <div style={{fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}} title={ch.name}>{ch.name}</div>
+                      <button onClick={()=>openEdit(ch)} title="Edit"
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid #e9d5ff',background:'none',color:'#7c3aed',fontSize:10,cursor:'pointer',lineHeight:1.4}}>✎</button>
+                      <button onClick={handleDeleteChallenge} title="Delete"
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid #fca5a5',background:'none',color:'#ef4444',fontSize:10,cursor:'pointer',lineHeight:1.4}}>×</button>
+                    </div>
                     {ch.category_names&&ch.category_names.length>0&&<div style={{fontSize:10,color:'#7c3aed',opacity:0.8}}>{ch.category_names.join(', ')}</div>}
                     {ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
                       ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString()} spent
                       {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
                     </div>}
+                    {ch.spend_threshold&&!ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
+                      ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_threshold.toLocaleString()} threshold
+                      {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
+                    </div>}
                     {locked&&<div style={{fontSize:10,color:'#9ca3af',marginTop:1}}>Threshold not yet met</div>}
                   </div>
-                  <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}>
+                  <div style={{textAlign:'right',flexShrink:0,marginLeft:4}}>
                     {earned>0
                       ?<div style={{fontFamily:'Inter',fontWeight:700,color:'#7c3aed',fontSize:14}}>+{earned.toLocaleString()}</div>
                       :<div style={{fontSize:11,color:'#9ca3af'}}>{locked?'Locked':'—'}</div>}
@@ -7526,7 +7546,7 @@ function App(){
   return(
     <div style={{display:'flex',height:'100vh'}}>
       <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync} collapsed={collapsed} setCollapsed={setCollapsed}/>
-      <div className="main" style={{marginLeft:collapsed?56:220}}>
+      <div className="main" style={{marginLeft:collapsed?56:200}}>
         <div className="topbar">
           <div className="topbar-title">{titles[page]}</div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
