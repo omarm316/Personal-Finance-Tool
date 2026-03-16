@@ -417,10 +417,19 @@ def _recalc_challenge(db, challenge):
     """
     from sqlalchemy import func as _func
 
+    # Normalise: old DB schema stored these as TIMESTAMP; current model uses DATE.
+    # Calling .date() on a datetime is safe; a plain date passes through unchanged.
+    def _d(v):
+        return v.date() if isinstance(v, datetime) else v
+
     # Effective start date
-    effective_start = challenge.start_date
-    if challenge.activation_date and challenge.activation_date > challenge.start_date:
-        effective_start = challenge.activation_date
+    effective_start = _d(challenge.start_date)
+    if challenge.activation_date:
+        act = _d(challenge.activation_date)
+        if act > effective_start:
+            effective_start = act
+
+    end_date = _d(challenge.end_date)
 
     # Collect account IDs: primary card + all additional cards
     account_ids = []
@@ -437,7 +446,7 @@ def _recalc_challenge(db, challenge):
     # Sum the absolute value by negating the sum of negative amounts.
     q = db.query(_func.sum(Transaction.amount)).filter(
         Transaction.date >= effective_start,
-        Transaction.date <= challenge.end_date,
+        Transaction.date <= end_date,
         Transaction.action == 'Expense',
         Transaction.amount < 0,   # expenses stored as negative
     )
@@ -491,10 +500,11 @@ def _serialize_challenge(c, eco=None):
     if progress_target and c.current_spend < progress_target:
         remaining = round(progress_target - c.current_spend, 2)
 
+    _cd = lambda v: v.date() if isinstance(v, datetime) else v
     today = datetime.utcnow().date()
-    if today < c.start_date:
+    if today < _cd(c.start_date):
         status = 'upcoming'
-    elif today > c.end_date:
+    elif today > _cd(c.end_date):
         status = 'expired'
     elif c.bonus_unlocked and not c.spend_cap:
         status = 'unlocked'
