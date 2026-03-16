@@ -3919,6 +3919,274 @@ async def get_card_detail(card_id: int, months: int = 3, db: Session = Depends(g
     }
 
 
+@app.get("/api/cards/portfolio")
+async def cards_portfolio(db: Session = Depends(get_db)):
+    """
+    Portfolio overview for the Cards Landing Page.
+
+    Returns:
+    - summary: portfolio-level aggregates (total fees, credits, utilization,
+               upcoming statement/payment dates, ecosystems present)
+    - cards: per-card enriched data including blended ¢/dollar value
+             (base earn rate × CPP + proportional challenge bonus value)
+
+    Blended ¢/dollar formula
+    ─────────────────────────
+    base_cpp = base_rate × your_cpp
+
+    For each *active* challenge:
+      per_dollar type  → incr += bonus_amount × your_cpp  (while cap not exhausted)
+      flat type        → if threshold not yet unlocked:
+                         incr += (bonus_amount × your_cpp) / remaining_spend_to_threshold
+
+    blended_cpp (returned in ¢) = (base_cpp + Σ incr) × 100
+    """
+    import calendar as _calendar
+    from datetime import date as _date
+
+    today = _date.today()
+    ecosystems = {e.id: e for e in db.query(PointsEcosystem).all()}
+
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .filter(Account.account_type.ilike('%credit%'))
+        .all()
+    )
+
+    # Prefetch all cards once (avoids N queries for card lookup)
+    card_by_account: dict[int, Card] = {}
+    for c in db.query(Card).all():
+        if c.account_id and c.account_id not in card_by_account:
+            card_by_account[c.account_id] = c
+
+    def _next_day_occurrence(d: int) -> _date:
+        """Next calendar date whose day-of-month == d (handles month-end roll-over)."""
+        if today.day <= d:
+            last = _calendar.monthrange(today.year, today.month)[1]
+            return today.replace(day=min(d, last))
+        nm = today.month + 1 if today.month < 12 else 1
+        ny = today.year if today.month < 12 else today.year + 1
+        last = _calendar.monthrange(ny, nm)[1]
+        return _date(ny, nm, min(d, last))
+
+    cards_out = []
+    total_annual_fees = 0.0
+    total_annual_credits = 0.0
+    total_annual_credits_remaining = 0.0
+    utilizations: list[float] = []
+    upcoming_statements: list[dict] = []
+    upcoming_payments: list[dict] = []
+    eco_summary: dict[str, dict] = {}
+
+    for account in credit_accounts:
+        balance = get_account_balance(db, account.id)
+        card = card_by_account.get(account.id)
+
+        # Product lookup (account.product_id takes priority, then Card.product_id)
+        product = None
+        if account.product_id:
+            product = db.query(CardProduct).filter_by(id=account.product_id).first()
+        if not product and card and card.product_id:
+            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+        # Ecosystem
+        eco = None
+        if product and product.ecosystem_id:
+            eco = ecosystems.get(product.ecosystem_id)
+        elif card and card.ecosystem_id:
+            eco = ecosystems.get(card.ecosystem_id)
+        your_cpp = float(eco.your_cpp) if eco else 0.01  # 1¢ fallback
+
+        # Base earn rate
+        base_rate = 1.0
+        if product:
+            for r in db.query(CardProductReward).filter_by(
+                product_id=product.id, is_base_rate=True
+            ).all():
+                base_rate = r.multiplier
+        base_cpp_frac = base_rate * your_cpp  # e.g. 3 × 0.006 = 0.018
+
+        # Annual fee
+        annual_fee = float(card.annual_fee or 0) if card else 0.0
+        total_annual_fees += annual_fee
+
+        # Benefits (annual credits)
+        benefit_total = 0.0
+        benefit_remaining = 0.0
+        benefits_list: list[dict] = []
+        if product and card:
+            try:
+                for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
+                    cycle = _current_cycle(b.reset_frequency or 'annual')
+                    usage = db.query(BenefitUsage).filter_by(
+                        benefit_id=b.id, card_id=card.id, cycle=cycle
+                    ).first()
+                    ser = _serialize_benefit(b, usage)
+                    benefits_list.append({
+                        'name': ser['benefit_name'],
+                        'amount': ser['amount'],
+                        'remaining': ser['remaining'],
+                        'pct_used': ser['pct_used'],
+                    })
+                    benefit_total += b.amount or 0.0
+                    benefit_remaining += ser['remaining']
+            except Exception:
+                db.rollback()
+        total_annual_credits += benefit_total
+        total_annual_credits_remaining += benefit_remaining
+
+        # Utilization
+        util = None
+        if card and card.credit_limit and balance:
+            util = round(abs(balance) / card.credit_limit * 100, 1)
+            utilizations.append(util)
+
+        # Upcoming statement close
+        days_to_statement = None
+        statement_date = None
+        if card and card.statement_close_day:
+            statement_date = _next_day_occurrence(card.statement_close_day)
+            days_to_statement = (statement_date - today).days
+            upcoming_statements.append({
+                'account_id': account.id, 'name': account.account_name,
+                'mask': account.mask, 'days': days_to_statement,
+                'date': statement_date.isoformat(),
+            })
+
+        # Upcoming payment due
+        days_to_payment = None
+        payment_date = None
+        if card and card.payment_due_day:
+            payment_date = _next_day_occurrence(card.payment_due_day)
+            days_to_payment = (payment_date - today).days
+            upcoming_payments.append({
+                'account_id': account.id, 'name': account.account_name,
+                'mask': account.mask, 'days': days_to_payment,
+                'date': payment_date.isoformat(),
+            })
+
+        # Active challenges → blended ¢/dollar computation
+        # Uses cached current_spend (avoids re-running full recalc for every card)
+        challenge_incr_frac = 0.0
+        active_challenges_out: list[dict] = []
+        if card:
+            try:
+                challenges = db.query(SpendChallenge).filter_by(
+                    card_id=card.id, is_active=True
+                ).all()
+                for ch in challenges:
+                    cs = _serialize_challenge(ch, eco)
+                    if cs['status'] not in ('active', 'unlocked'):
+                        continue
+                    incr = 0.0
+                    desc = ''
+                    current_spend = float(ch.current_spend or 0)
+                    bonus_amount = float(ch.bonus_amount or 0)
+
+                    if ch.bonus_type == 'per_dollar':
+                        if ch.spend_cap:
+                            remaining_cap = max(0.0, float(ch.spend_cap) - current_spend)
+                            if remaining_cap > 0:
+                                incr = bonus_amount * your_cpp
+                                desc = f"+{bonus_amount:g}x extra · ${remaining_cap:,.0f} cap left"
+                        else:
+                            # Ongoing multiplier with no cap
+                            incr = bonus_amount * your_cpp
+                            desc = f"+{bonus_amount:g}x extra (no cap)"
+                    elif ch.bonus_type == 'flat':
+                        # Threshold bonus not yet unlocked
+                        if ch.spend_threshold and not ch.bonus_unlocked:
+                            remaining_spend = max(0.0, float(ch.spend_threshold) - current_spend)
+                            if remaining_spend > 0:
+                                bonus_value = bonus_amount * your_cpp
+                                incr = bonus_value / remaining_spend
+                                desc = (
+                                    f"${bonus_value:,.0f} bonus / "
+                                    f"${remaining_spend:,.0f} remaining"
+                                )
+
+                    if incr > 0:
+                        challenge_incr_frac += incr
+                        active_challenges_out.append({
+                            'id': ch.id,
+                            'name': ch.name,
+                            'incremental_cpp': round(incr * 100, 3),
+                            'description': desc,
+                            'status': cs['status'],
+                        })
+            except Exception:
+                db.rollback()
+
+        blended_frac = base_cpp_frac + challenge_incr_frac
+
+        # Ecosystem tally
+        if eco:
+            ek = eco.name
+            if ek not in eco_summary:
+                eco_summary[ek] = {
+                    'ecosystem': eco.name,
+                    'currency_name': eco.currency_name,
+                    'your_cpp': eco.your_cpp,
+                    'card_count': 0,
+                }
+            eco_summary[ek]['card_count'] += 1
+
+        cards_out.append({
+            'account_id': account.id,
+            'account_name': account.account_name,
+            'mask': account.mask,
+            'balance': balance,
+            'product_name': product.card_name if product else None,
+            'has_product': product is not None,
+            'issuer': card.issuer if card else None,
+            'network': card.network if card else None,
+            'annual_fee': annual_fee,
+            'annual_credits_total': round(benefit_total, 2),
+            'annual_credits_remaining': round(benefit_remaining, 2),
+            'net_annual_cost': round(annual_fee - benefit_total, 2),
+            'benefits': benefits_list,
+            'utilization': util,
+            'credit_limit': card.credit_limit if card else None,
+            'statement_close_day': card.statement_close_day if card else None,
+            'payment_due_day': card.payment_due_day if card else None,
+            'days_to_statement': days_to_statement,
+            'statement_date': statement_date.isoformat() if statement_date else None,
+            'days_to_payment': days_to_payment,
+            'payment_date': payment_date.isoformat() if payment_date else None,
+            'ecosystem': eco.name if eco else None,
+            'ecosystem_currency': eco.currency_name if eco else None,
+            'base_rate': base_rate,
+            'your_cpp': your_cpp,
+            'base_cpp': round(base_cpp_frac * 100, 3),          # ¢ per dollar
+            'challenge_incremental_cpp': round(challenge_incr_frac * 100, 3),
+            'blended_cpp': round(blended_frac * 100, 3),         # ¢ per dollar
+            'active_challenges': active_challenges_out,
+        })
+
+    cards_out.sort(key=lambda x: x['blended_cpp'], reverse=True)
+    upcoming_statements.sort(key=lambda x: x['days'])
+    upcoming_payments.sort(key=lambda x: x['days'])
+    avg_util = round(sum(utilizations) / len(utilizations), 1) if utilizations else None
+    active_challenge_count = sum(len(c['active_challenges']) for c in cards_out)
+
+    return {
+        'summary': {
+            'card_count': len(cards_out),
+            'total_annual_fees': round(total_annual_fees, 2),
+            'total_annual_credits': round(total_annual_credits, 2),
+            'total_annual_credits_remaining': round(total_annual_credits_remaining, 2),
+            'net_annual_cost': round(total_annual_fees - total_annual_credits, 2),
+            'avg_utilization': avg_util,
+            'active_challenge_count': active_challenge_count,
+            'upcoming_statements': upcoming_statements[:6],
+            'upcoming_payments': upcoming_payments[:6],
+            'ecosystems': list(eco_summary.values()),
+        },
+        'cards': cards_out,
+    }
+
+
 @app.get("/api/cards/swipe-advisor")
 async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(get_db)):
     """

@@ -4916,6 +4916,9 @@ function CardsPage({toast}){
   const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
   const[swipeData,setSwipeData]=useState(null);
   const[swipeLoading,setSwipeLoading]=useState(false);
+  // Portfolio state
+  const[portfolioData,setPortfolioData]=useState(null);
+  const[portfolioLoading,setPortfolioLoading]=useState(true);
   // Legacy card management state
   const[cards,setCards]=useState([]);
   const[editing,setEditing]=useState(null);
@@ -4936,6 +4939,13 @@ function CardsPage({toast}){
       setCards(cards_);
     }catch(e){toast('Failed to load','error');}
     finally{setLoading(false);}
+  },[]);
+
+  const loadPortfolio=useCallback(async()=>{
+    setPortfolioLoading(true);
+    try{setPortfolioData(await apiFetch('/cards/portfolio'));}
+    catch(e){setPortfolioData(null);}
+    finally{setPortfolioLoading(false);}
   },[]);
 
 
@@ -4973,7 +4983,7 @@ function CardsPage({toast}){
     }catch(e){toast('Unlink failed','error');}
   };
 
-  useEffect(()=>{load().then(()=>loadSuggestions());},[load]);
+  useEffect(()=>{load().then(()=>Promise.all([loadSuggestions(),loadPortfolio()]));},[load]);
 
   // Legacy card management
   const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
@@ -5123,16 +5133,79 @@ function CardsPage({toast}){
           </div>
         </div>
       ):(
-        /* ACCOUNTS (main view) */
+        /* ACCOUNTS — Portfolio Landing */
         <div>
-          {/* KPI */}
-          <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
-            <div className="card metric-card"><div className="metric-label">Credit Card Accounts</div><div className="metric-value">{accounts.length}</div></div>
-            <div className="card metric-card"><div className="metric-label">Products Linked</div><div className="metric-value" style={{color:linkedCount>0?'var(--green)':'var(--text-muted)'}}>{linkedCount}</div></div>
-            <div className="card metric-card"><div className="metric-label">Needs Linking</div><div className="metric-value" style={{color:unlinkedCount>0?'var(--amber)':'var(--green)'}}>{unlinkedCount}</div></div>
-          </div>
+          {/* ── Portfolio Summary KPIs ── */}
+          {portfolioLoading
+            ?<div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+              {[0,1,2,3].map(i=><div key={i} className="card metric-card"><div className="metric-label">Loading…</div><div className="metric-value" style={{color:'var(--text-muted)'}}>—</div></div>)}
+            </div>
+            :portfolioData
+            ?<div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+              <div className="card metric-card">
+                <div className="metric-label">Net Annual Cost</div>
+                <div className="metric-value" style={{color:portfolioData.summary.net_annual_cost>0?'var(--red)':'var(--green)'}}>
+                  {portfolioData.summary.net_annual_cost>0?'':'-'}${Math.abs(portfolioData.summary.net_annual_cost).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                  ${portfolioData.summary.total_annual_fees.toLocaleString(undefined,{maximumFractionDigits:0})} fees − ${portfolioData.summary.total_annual_credits.toLocaleString(undefined,{maximumFractionDigits:0})} credits
+                </div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Credits Remaining</div>
+                <div className="metric-value" style={{color:'var(--green)'}}>
+                  ${portfolioData.summary.total_annual_credits_remaining.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>this cycle · across all cards</div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Avg Utilization</div>
+                <div className="metric-value" style={{color:portfolioData.summary.avg_utilization==null?'var(--text-muted)':portfolioData.summary.avg_utilization>30?'var(--amber)':'var(--green)'}}>
+                  {portfolioData.summary.avg_utilization!=null?`${portfolioData.summary.avg_utilization}%`:'—'}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{portfolioData.summary.card_count} active cards</div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Active Challenges</div>
+                <div className="metric-value" style={{color:portfolioData.summary.active_challenge_count>0?'var(--blue)':'var(--text-muted)'}}>
+                  {portfolioData.summary.active_challenge_count}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                  {portfolioData.summary.ecosystems.map(e=>e.ecosystem).join(' · ')||'—'}
+                </div>
+              </div>
+            </div>
+            :<div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+              <div className="card metric-card"><div className="metric-label">Credit Card Accounts</div><div className="metric-value">{accounts.length}</div></div>
+              <div className="card metric-card"><div className="metric-label">Products Linked</div><div className="metric-value" style={{color:linkedCount>0?'var(--green)':'var(--text-muted)'}}>{linkedCount}</div></div>
+              <div className="card metric-card"><div className="metric-label">Needs Linking</div><div className="metric-value" style={{color:unlinkedCount>0?'var(--amber)':'var(--green)'}}>{unlinkedCount}</div></div>
+            </div>
+          }
 
-          {/* Auto-suggestions */}
+          {/* ── Upcoming Dates Strip ── */}
+          {portfolioData&&(()=>{
+            const urgent=[
+              ...portfolioData.summary.upcoming_statements.filter(x=>x.days<=7).map(x=>({...x,type:'statement'})),
+              ...portfolioData.summary.upcoming_payments.filter(x=>x.days<=7).map(x=>({...x,type:'payment'})),
+            ].sort((a,b)=>a.days-b.days);
+            if(!urgent.length)return null;
+            return(
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+                {urgent.map((u,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'6px 12px',borderRadius:20,fontSize:12,fontWeight:500,
+                    background:u.type==='payment'?'#fef2f2':'#fffbeb',
+                    border:`1px solid ${u.type==='payment'?'#fca5a5':'#fcd34d'}`,
+                    color:u.type==='payment'?'#991b1b':'#92400e'}}>
+                    <span>{u.type==='payment'?'💳':'📅'}</span>
+                    <span>{u.name}{u.mask?` ···${u.mask}`:''}</span>
+                    <span style={{fontWeight:700}}>{u.type==='payment'?'payment':'statement'} in {u.days===0?'today':`${u.days}d`}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* ── Auto-suggestions ── */}
           {suggestions.length>0&&<div className="card" style={{marginBottom:16,border:'2px solid #dbeafe'}}>
             <div className="section-header" style={{paddingBottom:8}}>
               <div className="section-title" style={{color:'#1d4ed8'}}>Auto-detected Product Matches</div>
@@ -5154,60 +5227,142 @@ function CardsPage({toast}){
             </div>
           </div>}
 
-          {/* Accounts list */}
+          {/* ── Card Grid ── */}
           <div className="card">
             <div className="section-header">
               <div className="section-title">Credit Card Accounts</div>
+              {!portfolioData&&<div style={{fontSize:11,color:'var(--text-muted)'}}>Needs Linking: {unlinkedCount}</div>}
             </div>
-            {loading?<div className="loading"><div className="spinner"/></div>
+            {(loading||portfolioLoading)
+              ?<div className="loading"><div className="spinner"/></div>
+              :accounts.length===0
+              ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No credit card accounts found. Connect a bank with credit cards via Settings.</div>
+              :(portfolioData?portfolioData.cards:[]).length===0&&portfolioData
+              ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No portfolio data loaded.</div>
               :<div style={{padding:'0 0 8px'}}>
-                {accounts.length===0
-                  ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No credit card accounts found. Connect a bank with credit cards via Settings.</div>
-                  :accounts.map(acct=>{
-                    const prod=getProductForAccount(acct.id);
-                    return(
-                      <div key={acct.id} style={{display:'flex',alignItems:'center',gap:12,padding:'14px 20px',borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
-                        onClick={()=>setSelectedAccount(acct.id)}
-                        onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
-                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        {/* Account info */}
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:'flex',alignItems:'center',gap:8}}>
-                            <div style={{fontSize:14,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acct.account_name}</div>
-                            {acct.mask&&<span style={{fontSize:11,color:'var(--text-muted)'}}>···{acct.mask}</span>}
+                {/* Portfolio card rows — sorted by blended value when portfolio loaded */}
+                {(portfolioData
+                  ? portfolioData.cards
+                  : accounts.map(a=>({account_id:a.id,account_name:a.account_name,mask:a.mask,balance:a.balance,blended_cpp:null,base_cpp:null,base_rate:null,annual_fee:null,annual_credits_remaining:null,annual_credits_total:null,utilization:null,days_to_statement:null,days_to_payment:null,active_challenges:[],ecosystem:null,ecosystem_currency:null,network:null,has_product:getProductForAccount(a.id)!=null}))
+                ).map(c=>{
+                  const prod=portfolioData?null:getProductForAccount(c.account_id);
+                  const acct=accounts.find(a=>a.id===c.account_id);
+                  const netCost=c.annual_fee!=null&&c.annual_credits_total!=null?c.annual_fee-c.annual_credits_total:null;
+                  const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
+                  const daysColor=(d)=>d==null?'var(--text-muted)':d<=3?'var(--red)':d<=7?'var(--amber)':'var(--text-secondary)';
+                  return(
+                    <div key={c.account_id}
+                      style={{display:'flex',alignItems:'stretch',gap:0,borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
+                      onClick={()=>setSelectedAccount(c.account_id)}
+                      onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+
+                      {/* ── Left: identity ── */}
+                      <div style={{flex:'0 0 240px',padding:'14px 16px 14px 20px',minWidth:0,display:'flex',flexDirection:'column',justifyContent:'center',gap:3}}>
+                        <div style={{display:'flex',alignItems:'center',gap:7}}>
+                          {c.network&&<span style={{fontSize:10,fontWeight:800,letterSpacing:0.3,color:networkColor[c.network]||'var(--text-secondary)',background:'var(--border)',borderRadius:4,padding:'1px 5px'}}>{c.network}</span>}
+                          <span style={{fontSize:14,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.account_name}</span>
+                          {c.mask&&<span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>···{c.mask}</span>}
+                        </div>
+                        <div style={{fontSize:11,color:'var(--text-muted)'}}>
+                          {c.ecosystem||c.product_name||(prod?prod.card_name:'No product linked')}
+                        </div>
+                        {/* Utilization bar */}
+                        {c.utilization!=null&&<div style={{marginTop:4}}>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text-muted)',marginBottom:2}}>
+                            <span>Utilization</span>
+                            <span style={{color:c.utilization>30?'var(--amber)':c.utilization>60?'var(--red)':'var(--green)',fontWeight:600}}>{c.utilization}%</span>
                           </div>
-                          {acct.official_name&&acct.official_name!==acct.account_name&&
-                            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acct.official_name}</div>}
-                        </div>
-                        {/* Product badge */}
-                        <div style={{minWidth:180,textAlign:'right'}} onClick={e=>e.stopPropagation()}>
-                          {prod
-                            ?<div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'flex-end'}}>
-                              <span style={{fontSize:12,fontWeight:600,color:'var(--green)'}}>{prod.card_name}</span>
-                              <button className="btn btn-sm btn-ghost" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>unlinkProduct(acct.id)}>X</button>
-                            </div>
-                            :<select style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--bg)',color:'var(--text-primary)',maxWidth:180}}
-                              value="" onChange={e=>{if(e.target.value)linkProduct(acct.id,parseInt(e.target.value));}}>
-                              <option value="">Select product...</option>
-                              {products.map(p=><option key={p.id} value={p.id}>{p.card_name}</option>)}
-                            </select>
-                          }
-                        </div>
-                        {/* Balance */}
-                        <div style={{minWidth:100,textAlign:'right',fontFamily:'Inter',fontSize:14,fontWeight:600}}>
-                          {acct.balance!=null
-                            ?<span style={{color:acct.balance<0?'var(--red)':'var(--green)'}}>{acct.balance<0?'-':''}${Math.abs(acct.balance).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                            :<span style={{color:'var(--text-muted)'}}>--</span>}
-                        </div>
-                        {/* Arrow */}
-                        <div style={{color:'var(--text-muted)',fontSize:16}}>{'\u203A'}</div>
+                          <div style={{height:4,borderRadius:4,background:'var(--border)',overflow:'hidden'}}>
+                            <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,c.utilization)}%`,
+                              background:c.utilization>60?'var(--red)':c.utilization>30?'var(--amber)':'var(--green)'}}/>
+                          </div>
+                        </div>}
                       </div>
-                    );
-                  })
-                }
+
+                      {/* ── Centre: fees & credits ── */}
+                      <div style={{flex:'0 0 170px',padding:'14px 16px',borderLeft:'1px solid var(--border)',display:'flex',flexDirection:'column',justifyContent:'center',gap:4}}>
+                        {c.annual_fee!=null
+                          ?<>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
+                              <span style={{color:'var(--text-muted)'}}>Annual fee</span>
+                              <span style={{fontWeight:600,color:c.annual_fee>0?'var(--red)':'var(--text-muted)',fontFamily:'Inter'}}>{c.annual_fee>0?`$${c.annual_fee.toLocaleString(undefined,{maximumFractionDigits:0})}`:'$0'}</span>
+                            </div>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
+                              <span style={{color:'var(--text-muted)'}}>Credits left</span>
+                              <span style={{fontWeight:600,color:c.annual_credits_remaining>0?'var(--green)':'var(--text-muted)',fontFamily:'Inter'}}>{c.annual_credits_total>0?`$${c.annual_credits_remaining.toLocaleString(undefined,{maximumFractionDigits:0})} / $${c.annual_credits_total.toLocaleString(undefined,{maximumFractionDigits:0})}`:'—'}</span>
+                            </div>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:11}}>
+                              <span style={{color:'var(--text-muted)'}}>Net cost</span>
+                              <span style={{fontWeight:600,color:netCost!=null&&netCost<=0?'var(--green)':'var(--text-secondary)',fontFamily:'Inter'}}>{netCost!=null?(netCost<=0?`+$${Math.abs(netCost).toLocaleString(undefined,{maximumFractionDigits:0})}`:`$${netCost.toLocaleString(undefined,{maximumFractionDigits:0})}`): '—'}</span>
+                            </div>
+                          </>
+                          :<div style={{fontSize:12,color:'var(--text-muted)'}}>No product linked</div>
+                        }
+                      </div>
+
+                      {/* ── Right side: value + dates ── */}
+                      <div style={{flex:1,padding:'14px 16px',borderLeft:'1px solid var(--border)',display:'flex',alignItems:'center',gap:16}}>
+
+                        {/* Blended value */}
+                        {c.blended_cpp!=null
+                          ?<div style={{textAlign:'center',minWidth:80}}>
+                            <div style={{fontSize:22,fontWeight:800,fontFamily:'Inter',color:'#059669',lineHeight:1}}>{c.blended_cpp.toFixed(1)}¢</div>
+                            <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>per dollar</div>
+                            {c.challenge_incremental_cpp>0&&<div style={{fontSize:10,color:'var(--blue)',marginTop:2}}>+{c.challenge_incremental_cpp.toFixed(2)}¢ challenge</div>}
+                          </div>
+                          :<div style={{minWidth:80,textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>—</div>
+                        }
+
+                        {/* Challenges summary */}
+                        {c.active_challenges&&c.active_challenges.length>0&&<div style={{flex:1,minWidth:0}}>
+                          {c.active_challenges.slice(0,2).map(ch=>(
+                            <div key={ch.id} style={{fontSize:11,color:'var(--blue)',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                              <span style={{fontWeight:600}}>⚡ {ch.name}</span>
+                              {ch.description&&<span style={{color:'var(--text-muted)',marginLeft:4}}>{ch.description}</span>}
+                            </div>
+                          ))}
+                          {c.active_challenges.length>2&&<div style={{fontSize:10,color:'var(--text-muted)'}}>+{c.active_challenges.length-2} more</div>}
+                        </div>}
+
+                        {/* Dates */}
+                        <div style={{display:'flex',flexDirection:'column',gap:4,textAlign:'right',minWidth:90,marginLeft:'auto'}}>
+                          {c.days_to_statement!=null&&<div style={{fontSize:11}}>
+                            <span style={{color:'var(--text-muted)'}}>Statement </span>
+                            <span style={{fontWeight:600,color:daysColor(c.days_to_statement)}}>{c.days_to_statement===0?'today':`${c.days_to_statement}d`}</span>
+                          </div>}
+                          {c.days_to_payment!=null&&<div style={{fontSize:11}}>
+                            <span style={{color:'var(--text-muted)'}}>Payment </span>
+                            <span style={{fontWeight:600,color:daysColor(c.days_to_payment)}}>{c.days_to_payment===0?'today':`${c.days_to_payment}d`}</span>
+                          </div>}
+                        </div>
+                      </div>
+
+                      {/* Arrow */}
+                      <div style={{display:'flex',alignItems:'center',paddingRight:16,color:'var(--text-muted)',fontSize:16}}>{'\u203A'}</div>
+                    </div>
+                  );
+                })}
               </div>
             }
           </div>
+
+          {/* ── Product linking for unlinked accounts (only show when there are unlinked) ── */}
+          {!portfolioLoading&&unlinkedCount>0&&<div className="card" style={{marginTop:14}}>
+            <div className="section-header"><div className="section-title" style={{fontSize:13}}>Link Products to Unlinked Accounts</div></div>
+            <div style={{padding:'0 0 8px'}}>
+              {accounts.filter(a=>!getProductForAccount(a.id)).map(acct=>(
+                <div key={acct.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 20px',borderBottom:'1px solid var(--border)'}}>
+                  <div style={{flex:1,fontSize:13,fontWeight:500}}>{acct.account_name}{acct.mask?` ···${acct.mask}`:''}</div>
+                  <select style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--bg)',color:'var(--text-primary)',maxWidth:220}}
+                    value="" onChange={e=>{if(e.target.value)linkProduct(acct.id,parseInt(e.target.value));}}>
+                    <option value="">Select product…</option>
+                    {products.map(p=><option key={p.id} value={p.id}>{p.card_name}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>}
         </div>
       )}
     </div>
