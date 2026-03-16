@@ -4700,12 +4700,16 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     # Benefits
     benefits = []
     if product and card:
-        for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
-            cycle = _current_cycle(b.reset_frequency or 'annual')
-            usage = db.query(BenefitUsage).filter_by(
-                benefit_id=b.id, card_id=card.id, cycle=cycle
-            ).first()
-            benefits.append(_serialize_benefit(b, usage))
+        try:
+            for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
+                cycle = _current_cycle(b.reset_frequency or 'annual')
+                usage = db.query(BenefitUsage).filter_by(
+                    benefit_id=b.id, card_id=card.id, cycle=cycle
+                ).first()
+                benefits.append(_serialize_benefit(b, usage))
+        except Exception:
+            benefits = []
+            db.rollback()
 
     # Utilization
     utilization = None

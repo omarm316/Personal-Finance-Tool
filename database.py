@@ -897,6 +897,16 @@ def run_migrations(engine):
             ('notes',            'TEXT'),
             ('created_at',       'TIMESTAMP DEFAULT NOW()'),
         ],
+        'card_benefits': [
+            ('trigger_category', 'VARCHAR(100)'),
+            ('notes',            'TEXT'),
+        ],
+        'benefit_usage': [
+            ('card_id',    'INTEGER'),
+            ('confirmed',  'BOOLEAN DEFAULT FALSE'),
+            ('notes',      'TEXT'),
+            ('updated_at', 'TIMESTAMP DEFAULT NOW()'),
+        ],
     }
 
     if _is_sqlite(engine):
