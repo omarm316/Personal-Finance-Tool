@@ -4076,7 +4076,7 @@ async def get_challenges(
             try:
                 _recalc_challenge(db, c)
             except Exception:
-                pass  # leave cached values intact; serializer guards against None
+                db.rollback()  # clear bad session state so the final commit doesn't fail
             eco = None
             card = db.query(Card).filter_by(id=c.card_id).first()
             if card and card.product_id:
@@ -4238,6 +4238,163 @@ async def recalc_challenge(challenge_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(c)
     return _serialize_challenge(c)
+
+
+# ---------------------------------------------------------------------------
+# Benefits (CardBenefit + BenefitUsage)
+# ---------------------------------------------------------------------------
+
+def _current_cycle(frequency: str) -> str:
+    """Return the current period key for a benefit's reset_frequency.
+    annual / calendar_year → "2026"
+    semi-annual           → "2026-H1" or "2026-H2"
+    quarterly             → "2026-Q1" … "2026-Q4"
+    monthly               → "2026-03"
+    """
+    from datetime import date as _date
+    now = _date.today()
+    if frequency in ('annual', 'calendar_year'):
+        return str(now.year)
+    if frequency == 'semi-annual':
+        return f"{now.year}-{'H1' if now.month <= 6 else 'H2'}"
+    if frequency == 'quarterly':
+        return f"{now.year}-Q{(now.month - 1) // 3 + 1}"
+    if frequency == 'monthly':
+        return f"{now.year}-{now.month:02d}"
+    return str(now.year)
+
+
+def _serialize_benefit(b: CardBenefit, usage: BenefitUsage | None) -> dict:
+    amt_used = round(usage.amount_used if usage else 0.0, 2)
+    pct      = round(amt_used / b.amount * 100, 1) if b.amount else 0.0
+    return {
+        'id':               b.id,
+        'product_id':       b.product_id,
+        'benefit_name':     b.benefit_name,
+        'amount':           b.amount,
+        'reset_frequency':  b.reset_frequency or 'annual',
+        'trigger_category': b.trigger_category,
+        'notes':            b.notes,
+        'cycle':            _current_cycle(b.reset_frequency or 'annual'),
+        'amount_used':      amt_used,
+        'confirmed':        usage.confirmed if usage else False,
+        'usage_id':         usage.id if usage else None,
+        'pct_used':         pct,
+        'remaining':        round((b.amount or 0) - amt_used, 2),
+    }
+
+
+@app.get("/api/cards/{card_id}/benefits")
+async def get_card_benefits(card_id: int, db: Session = Depends(get_db)):
+    """All benefits for the product linked to this card, with current-cycle usage."""
+    card = db.query(Card).filter_by(id=card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    if not card.product_id:
+        return []
+    benefits = (db.query(CardBenefit)
+                  .filter_by(product_id=card.product_id)
+                  .order_by(CardBenefit.amount.desc(), CardBenefit.benefit_name)
+                  .all())
+    result = []
+    for b in benefits:
+        cycle = _current_cycle(b.reset_frequency or 'annual')
+        usage = db.query(BenefitUsage).filter_by(
+            benefit_id=b.id, card_id=card_id, cycle=cycle
+        ).first()
+        result.append(_serialize_benefit(b, usage))
+    return result
+
+
+@app.post("/api/card-products/{product_id}/benefits")
+async def create_benefit(product_id: int, body: dict, db: Session = Depends(get_db)):
+    prod = db.query(CardProduct).filter_by(id=product_id).first()
+    if not prod:
+        raise HTTPException(status_code=404, detail="Card product not found")
+    b = CardBenefit(
+        product_id=product_id,
+        benefit_name=(body.get('benefit_name') or '').strip(),
+        amount=float(body.get('amount') or 0),
+        reset_frequency=body.get('reset_frequency') or 'annual',
+        trigger_category=body.get('trigger_category') or None,
+        notes=body.get('notes') or None,
+    )
+    if not b.benefit_name:
+        raise HTTPException(status_code=400, detail="benefit_name is required")
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return _serialize_benefit(b, None)
+
+
+@app.patch("/api/benefits/{benefit_id}")
+async def update_benefit(benefit_id: int, body: dict, db: Session = Depends(get_db)):
+    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Benefit not found")
+    if 'benefit_name' in body:
+        b.benefit_name = (body['benefit_name'] or '').strip()
+    if 'amount' in body:
+        b.amount = float(body['amount'] or 0)
+    if 'reset_frequency' in body:
+        b.reset_frequency = body['reset_frequency'] or 'annual'
+    if 'trigger_category' in body:
+        b.trigger_category = body['trigger_category'] or None
+    if 'notes' in body:
+        b.notes = body['notes'] or None
+    db.commit()
+    cycle = _current_cycle(b.reset_frequency or 'annual')
+    usage = db.query(BenefitUsage).filter_by(benefit_id=b.id, cycle=cycle).first()
+    return _serialize_benefit(b, usage)
+
+
+@app.delete("/api/benefits/{benefit_id}")
+async def delete_benefit(benefit_id: int, db: Session = Depends(get_db)):
+    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Benefit not found")
+    db.delete(b)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.put("/api/benefits/{benefit_id}/usage")
+async def upsert_benefit_usage(benefit_id: int, body: dict, db: Session = Depends(get_db)):
+    """Create or update usage for a benefit in the current (or specified) cycle."""
+    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Benefit not found")
+    card_id    = body.get('card_id')
+    cycle      = body.get('cycle') or _current_cycle(b.reset_frequency or 'annual')
+    amt_used   = float(body.get('amount_used', 0))
+    confirmed  = bool(body.get('confirmed', True))
+    notes      = body.get('notes') or None
+    usage = db.query(BenefitUsage).filter_by(
+        benefit_id=benefit_id, card_id=card_id, cycle=cycle
+    ).first()
+    if usage:
+        usage.amount_used = amt_used
+        usage.confirmed   = confirmed
+        usage.notes       = notes
+    else:
+        usage = BenefitUsage(
+            benefit_id=benefit_id, card_id=card_id, cycle=cycle,
+            amount_used=amt_used, confirmed=confirmed, notes=notes,
+        )
+        db.add(usage)
+    db.commit()
+    db.refresh(usage)
+    return _serialize_benefit(b, usage)
+
+
+@app.delete("/api/benefit-usage/{usage_id}")
+async def delete_benefit_usage(usage_id: int, db: Session = Depends(get_db)):
+    u = db.query(BenefitUsage).filter_by(id=usage_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Usage record not found")
+    db.delete(u)
+    db.commit()
+    return {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
@@ -4542,12 +4699,13 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
 
     # Benefits
     benefits = []
-    if product:
-        benefits = [{
-            'id': b.id, 'name': b.benefit_name, 'amount': b.amount,
-            'reset_frequency': b.reset_frequency, 'trigger_category': b.trigger_category,
-            'notes': b.notes,
-        } for b in product.benefits]
+    if product and card:
+        for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
+            cycle = _current_cycle(b.reset_frequency or 'annual')
+            usage = db.query(BenefitUsage).filter_by(
+                benefit_id=b.id, card_id=card.id, cycle=cycle
+            ).first()
+            benefits.append(_serialize_benefit(b, usage))
 
     # Utilization
     utilization = None
