@@ -3752,7 +3752,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   },[]);
   const saveCscEdit=async(txnId,newVal)=>{
     try{
-      await apiFetch(`/transactions/${txnId}`,'PATCH',{points_category:newVal||null});
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_category:newVal||null})});
       // Find the transaction before updating state so we have merchant_name
       const txn=txns.find(t=>t.id===txnId);
       setTxns(prev=>prev.map(t=>t.id===txnId?{...t,points_category:newVal||null}:t));
@@ -3766,11 +3766,11 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const teachMerchant=async(merchantName,csc)=>{
     setTeachLoading(true);
     try{
-      const r=await apiFetch('/merchant-csc','POST',{
+      const r=await apiFetch('/merchant-csc',{method:'POST',body:JSON.stringify({
         merchant_pattern:merchantName,
         points_category:csc,
         apply_to_existing:true,
-      });
+      })});
       toast(`✓ Saved — ${r.transactions_updated} past transaction${r.transactions_updated!==1?'s':''} updated`,'success');
       setTeachPrompt(null);
       // Reload txns so backfilled rows reflect the change
@@ -3789,11 +3789,11 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const assignMerchantCsc=async(merchantName,csc)=>{
     setAssignLoading(true);
     try{
-      const r=await apiFetch('/merchant-csc','POST',{
+      const r=await apiFetch('/merchant-csc',{method:'POST',body:JSON.stringify({
         merchant_pattern:merchantName,
         points_category:csc,
         apply_to_existing:true,
-      });
+      })});
       toast(`✓ ${r.transactions_updated} transaction${r.transactions_updated!==1?'s':''} updated`,'success');
       setAssigningMerchant(null);
       setAssignCscVal('');
