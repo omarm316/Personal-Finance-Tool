@@ -4218,7 +4218,7 @@ async def link_account_to_product(account_id: int, body: dict, db: Session = Dep
 
 
 @app.get("/api/accounts/{account_id}/card-detail")
-async def account_card_detail(account_id: int, months: int = 3, db: Session = Depends(get_db)):
+async def account_card_detail(account_id: int, months: int = 3, period: str = None, db: Session = Depends(get_db)):
     """
     Card detail page driven by account (not card).
     This is the main entry point for viewing card product info for an account.
@@ -4303,13 +4303,26 @@ async def account_card_detail(account_id: int, months: int = 3, db: Session = De
     recent_txns = []
 
     now = datetime.utcnow()
-    # Exact first-of-month lookback (e.g. months=3, today=Mar → Dec 1)
-    lb_year = now.year
-    lb_month = now.month - months
-    while lb_month <= 0:
-        lb_month += 12
-        lb_year -= 1
-    lookback = datetime(lb_year, lb_month, 1)
+    today = now.date()
+    # Compute lookback based on period or months
+    if period == 'mtd':
+        # Month-to-date: first day of current month
+        lookback = datetime(today.year, today.month, 1)
+    elif period == 'qtd':
+        # Quarter-to-date: first day of current quarter (Jan/Apr/Jul/Oct)
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        lookback = datetime(today.year, q_start_month, 1)
+    elif period == 'ytd':
+        # Year-to-date: Jan 1 of current year
+        lookback = datetime(today.year, 1, 1)
+    else:
+        # Fallback: exact first-of-month N months ago
+        lb_year = today.year
+        lb_month = today.month - months
+        while lb_month <= 0:
+            lb_month += 12
+            lb_year -= 1
+        lookback = datetime(lb_year, lb_month, 1)
 
     # Recent transactions (last 30) — include points_category for display
     txns = db.query(Transaction).filter_by(account_id=account.id)\
