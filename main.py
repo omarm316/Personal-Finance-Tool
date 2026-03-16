@@ -3945,23 +3945,27 @@ async def get_challenges(
     db: Session = Depends(get_db),
 ):
     """List challenges. Optionally filter by card_id (used by the card detail page)."""
-    q = db.query(SpendChallenge)
-    if active_only:
-        q = q.filter_by(is_active=True)
-    if card_id is not None:
-        q = q.filter_by(card_id=card_id)
-    challenges = q.order_by(SpendChallenge.end_date.desc()).all()
-    # Build eco lookup via card → product → ecosystem
-    results = []
-    for c in challenges:
-        eco = None
-        card = db.query(Card).filter_by(id=c.card_id).first()
-        if card and card.product_id:
-            prod = db.query(CardProduct).filter_by(id=card.product_id).first()
-            if prod and prod.ecosystem_id:
-                eco = db.query(PointsEcosystem).filter_by(id=prod.ecosystem_id).first()
-        results.append(_serialize_challenge(c, eco))
-    return results
+    try:
+        q = db.query(SpendChallenge)
+        if active_only:
+            q = q.filter_by(is_active=True)
+        if card_id is not None:
+            q = q.filter_by(card_id=card_id)
+        challenges = q.order_by(SpendChallenge.end_date.desc()).all()
+        # Build eco lookup via card → product → ecosystem
+        results = []
+        for c in challenges:
+            eco = None
+            card = db.query(Card).filter_by(id=c.card_id).first()
+            if card and card.product_id:
+                prod = db.query(CardProduct).filter_by(id=card.product_id).first()
+                if prod and prod.ecosystem_id:
+                    eco = db.query(PointsEcosystem).filter_by(id=prod.ecosystem_id).first()
+            results.append(_serialize_challenge(c, eco))
+        return results
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"challenges error: {e}\n{traceback.format_exc()}")
 
 
 def _sync_challenge_links(db, challenge, additional_card_ids, category_names):
@@ -4017,28 +4021,33 @@ async def get_challenge_suggestions(db: Session = Depends(get_db)):
 @app.post("/api/challenges")
 async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)):
     from datetime import date as _date
-    c = SpendChallenge(
-        card_id         = data['card_id'],
-        name            = data['name'],
-        challenge_type  = data['challenge_type'],
-        start_date      = _date.fromisoformat(data['start_date']),
-        end_date        = _date.fromisoformat(data['end_date']),
-        activation_date = _date.fromisoformat(data['activation_date']) if data.get('activation_date') else None,
-        bonus_type      = data['bonus_type'],
-        bonus_amount    = float(data['bonus_amount']),
-        spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
-        spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
-        is_active       = data.get('is_active', True),
-        notes           = data.get('notes'),
-    )
-    db.add(c)
-    db.flush()  # get c.id so junction rows can reference it
-    _sync_challenge_links(db, c, data.get('additional_card_ids'), data.get('category_names'))
-    db.flush()
-    _recalc_challenge(db, c)
-    db.commit()
-    db.refresh(c)
-    return _serialize_challenge(c)
+    try:
+        c = SpendChallenge(
+            card_id         = data['card_id'],
+            name            = data['name'],
+            challenge_type  = data['challenge_type'],
+            start_date      = _date.fromisoformat(data['start_date']),
+            end_date        = _date.fromisoformat(data['end_date']),
+            activation_date = _date.fromisoformat(data['activation_date']) if data.get('activation_date') else None,
+            bonus_type      = data['bonus_type'],
+            bonus_amount    = float(data['bonus_amount']),
+            spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
+            spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
+            is_active       = data.get('is_active', True),
+            notes           = data.get('notes'),
+        )
+        db.add(c)
+        db.flush()  # get c.id so junction rows can reference it
+        _sync_challenge_links(db, c, data.get('additional_card_ids'), data.get('category_names'))
+        db.flush()
+        _recalc_challenge(db, c)
+        db.commit()
+        db.refresh(c)
+        return _serialize_challenge(c)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create challenge error: {e}\n{traceback.format_exc()}")
 
 
 @app.post("/api/challenges/recalc-all")
@@ -4411,17 +4420,40 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             'notes': b.notes,
         } for b in product.benefits]
 
-    # Spend challenges (now card-level; fetched via separate /api/challenges endpoint)
-    spend_challenges = []
-
     # Utilization
     utilization = None
     if card and card.credit_limit and balance:
         utilization = round(abs(balance) / card.credit_limit * 100, 1)
-    elif account.account_type and 'credit' in account.account_type.lower():
-        # Try to get credit limit from liability data
-        if account.liability_last_statement_bal:
-            pass  # No credit limit available without card row
+
+    # Challenge bonus points — separate from base-rate points.
+    # Shows bonus pts earned across all active challenges for this card
+    # (for threshold challenges, only count if threshold met).
+    challenge_points = []
+    challenge_pts_total = 0.0
+    if card:
+        active_challenges = db.query(SpendChallenge).filter_by(
+            card_id=card.id, is_active=True
+        ).all()
+        for ch in active_challenges:
+            bp = _challenge_bonus_pts(ch)
+            challenge_points.append({
+                'id': ch.id,
+                'name': ch.name,
+                'bonus_pts': round(bp, 0),
+                'bonus_amount': ch.bonus_amount,
+                'bonus_type': ch.bonus_type,
+                'status': ch.status if hasattr(ch, 'status') else (
+                    'active' if ch.is_active else 'inactive'
+                ),
+                'category_names': [lnk.category_name for lnk in ch.category_links],
+                'spend_cap': ch.spend_cap,
+                'current_spend': round(ch.current_spend or 0, 2),
+                'progress_pct': min(100, round(
+                    (ch.current_spend or 0) / ch.spend_cap * 100, 1
+                )) if ch.spend_cap else None,
+                'threshold_met': ch.bonus_unlocked,
+            })
+            challenge_pts_total += bp
 
     return {
         'account': {
@@ -4448,13 +4480,78 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         'earning_structure': earning_structure,
         'base_rate': base_rate,
         'benefits': benefits,
-        'spend_challenges': spend_challenges,
+        'spend_challenges': [],   # loaded separately via /api/challenges
         'utilization': utilization,
         'spending_by_category': spending_by_category,
         'points_earned': points_earned,
+        'challenge_points': challenge_points,
+        'challenge_pts_total': round(challenge_pts_total, 0),
         'monthly_spend': monthly_spend,
         'recent_transactions': recent_txns,
     }
+
+
+@app.get("/api/accounts/{account_id}/transactions")
+async def account_transactions(
+    account_id: int,
+    year: int = None,
+    month: int = None,
+    action: str = None,
+    db: Session = Depends(get_db),
+):
+    """Filtered transaction list for an account.
+
+    - year + month → all transactions for that calendar month
+    - year only    → all transactions for that calendar year
+    - neither      → most recent 60 transactions
+    Optionally filter by action ('Expense', 'Income', etc.).
+    """
+    from sqlalchemy import func as _func
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Earn-rate helpers
+    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
+    cat_parent_map = {c.name: c.parent_key for c in all_categories}
+    base_rate = 1.0
+    bonus_by_name: dict[str, float] = {}
+    card = db.query(Card).filter_by(account_id=account_id).first()
+    if card:
+        product = db.query(CardProduct).filter_by(id=card.product_id).first() if card.product_id else None
+        if product:
+            for r in db.query(CardProductReward).filter_by(product_id=product.id).all():
+                if r.is_base_rate:
+                    base_rate = r.multiplier
+                elif r.points_category:
+                    bonus_by_name[r.points_category.name] = r.multiplier
+
+    q = db.query(Transaction).filter_by(account_id=account_id)
+    if year and month:
+        from datetime import date as _date
+        import calendar as _cal
+        first_day = _date(year, month, 1)
+        last_day  = _date(year, month, _cal.monthrange(year, month)[1])
+        q = q.filter(Transaction.date >= first_day, Transaction.date <= last_day)
+    elif year:
+        from datetime import date as _date
+        q = q.filter(
+            Transaction.date >= _date(year, 1, 1),
+            Transaction.date <= _date(year, 12, 31),
+        )
+    if action:
+        q = q.filter(Transaction.action == action)
+
+    txns = q.order_by(Transaction.date.desc()).limit(200).all()
+    return [{
+        'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
+        'description': t.description_clean or t.description_raw,
+        'amount': t.amount,
+        'category': t.category_manual or t.category_auto,
+        'points_category': t.points_category,
+        'action': t.action,
+        'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
+    } for t in txns]
 
 
 @app.get("/api/cards/validate-plaid")

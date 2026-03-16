@@ -3704,6 +3704,31 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[confirmDeleteId,setConfirmDeleteId]=useState(null);
   const[suggestions,setSuggestions]=useState([]);
   const[spendRefreshing,setSpendRefreshing]=useState(false);
+  // Recent Transactions — independent month/year filter
+  const _now=new Date();
+  const[txnView,setTxnView]=useState('monthly');   // 'monthly' | 'ytd'
+  const[txnYear,setTxnYear]=useState(_now.getFullYear());
+  const[txnMonth,setTxnMonth]=useState(_now.getMonth()+1);
+  const[txns,setTxns]=useState([]);
+  const[txnsLoading,setTxnsLoading]=useState(false);
+  const loadTxns=async(yr,mo,view)=>{
+    setTxnsLoading(true);
+    try{
+      const y=yr||txnYear; const m=mo||txnMonth; const v=view||txnView;
+      const qs=v==='ytd'?`year=${y}&action=Expense`:`year=${y}&month=${m}&action=Expense`;
+      setTxns(await apiFetch(`/accounts/${accountId}/transactions?${qs}`));
+    }catch(e){}
+    finally{setTxnsLoading(false);}
+  };
+  const txnMonthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const prevTxnMonth=()=>{
+    if(txnMonth===1){setTxnYear(y=>y-1);setTxnMonth(12);}else{setTxnMonth(m=>m-1);}
+  };
+  const nextTxnMonth=()=>{
+    const _n=new Date();
+    if(txnYear===_n.getFullYear()&&txnMonth===_n.getMonth()+1)return; // don't go future
+    if(txnMonth===12){setTxnYear(y=>y+1);setTxnMonth(1);}else{setTxnMonth(m=>m+1);}
+  };
   const load=async(p,silent)=>{
     if(silent){setSpendRefreshing(true);}else{setLoading(true);}
     try{setD(await apiFetch(`/accounts/${accountId}/card-detail?period=${p||spendPeriod}`));}
@@ -3737,6 +3762,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   useEffect(()=>{
     if(d?.card?.id)loadChallenges(d.card.id);
   },[d?.card?.id]);
+  // Transactions filter — reload when year/month/view changes (or on first mount)
+  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView);},[accountId,txnYear,txnMonth,txnView]);
 
   if(loading)return<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>;
   if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
@@ -4076,10 +4103,10 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           </div>
         </div>
 
-        {/* Spending Breakdown */}
+        {/* Earn Summary */}
         <div className="card" style={{padding:20}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
-            <div style={{fontSize:15,fontWeight:600}}>Spending</div>
+            <div style={{fontSize:15,fontWeight:600}}>Earn Summary 🏆</div>
             <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
               {['mtd','qtd','ytd'].map(p=>(
                 <button key={p} onClick={()=>setSpendPeriod(p)}
@@ -4093,7 +4120,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             </div>
           </div>
           <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14,opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
-            {spendPeriod==='mtd'?'Month to date':spendPeriod==='qtd'?'Quarter to date':'Year to date'} · charges by category
+            {spendPeriod==='mtd'?'Month to date':spendPeriod==='qtd'?'Quarter to date':'Year to date'} · points earned by category
           </div>
           {topCats.length===0
             ?<div style={{padding:30,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No spending data yet.</div>
@@ -4115,13 +4142,47 @@ function AccountCardDetailPage({accountId,onBack,toast}){
               })}
             </div>
           }
+          {/* Base points total */}
           {d.points_earned&&d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
             <div style={{fontSize:11,fontWeight:600,color:'#15803d',textTransform:'uppercase'}}>
-              {eco?.currency_name||'Points'} Earned · {spendPeriod.toUpperCase()}
+              Base {eco?.currency_name||'Points'} Earned · {spendPeriod.toUpperCase()}
             </div>
             <div style={{fontSize:24,fontWeight:700,fontFamily:'Inter',color:'#15803d',marginTop:4}}>
               {Math.round(d.points_earned.total).toLocaleString()}
             </div>
+          </div>}
+          {/* Challenge bonus points */}
+          {(d.challenge_points||[]).length>0&&<div style={{marginTop:12,padding:'12px 14px',background:'#faf5ff',borderRadius:10,border:'1px solid #e9d5ff',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            <div style={{fontSize:11,fontWeight:600,color:'#7c3aed',textTransform:'uppercase',marginBottom:8}}>
+              ⚡ Bonus from Challenges
+            </div>
+            {d.challenge_points.map(ch=>{
+              const earned=Math.round(ch.bonus_pts);
+              const locked=ch.bonus_type==='flat'&&!ch.threshold_met;
+              return(
+                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid #e9d5ff'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:500,marginBottom:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</div>
+                    {ch.category_names&&ch.category_names.length>0&&<div style={{fontSize:10,color:'#7c3aed',opacity:0.8}}>{ch.category_names.join(', ')}</div>}
+                    {ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
+                      ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString()} spent
+                      {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
+                    </div>}
+                    {locked&&<div style={{fontSize:10,color:'#9ca3af',marginTop:1}}>Threshold not yet met</div>}
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}>
+                    {earned>0
+                      ?<div style={{fontFamily:'Inter',fontWeight:700,color:'#7c3aed',fontSize:14}}>+{earned.toLocaleString()}</div>
+                      :<div style={{fontSize:11,color:'#9ca3af'}}>{locked?'Locked':'—'}</div>}
+                    {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'#7c3aed',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
+                  </div>
+                </div>
+              );
+            })}
+            {d.challenge_pts_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
+              <div style={{fontSize:11,color:'#7c3aed',fontWeight:600}}>Total Challenge Bonus</div>
+              <div style={{fontSize:18,fontWeight:700,fontFamily:'Inter',color:'#7c3aed'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
+            </div>}
           </div>}
         </div>
       </div>}
@@ -4241,44 +4302,75 @@ function AccountCardDetailPage({accountId,onBack,toast}){
 
       {/* Recent Transactions */}
       <div className="card" style={{padding:20}}>
-        <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>Recent Transactions</div>
-        {(d.recent_transactions||[]).length===0
-          ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions</div>
-          :<div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead>
-                <tr style={{borderBottom:'2px solid var(--border)'}}>
-                  <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Date</th>
-                  <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px'}}>Description</th>
-                  <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Category</th>
-                  <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Amount</th>
-                  <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Est. Pts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.recent_transactions.filter(t=>t.action==='Expense').map(t=>{
-                  const mm=t.date.slice(5,7).replace(/^0/,'');
-                  const dd=t.date.slice(8,10).replace(/^0/,'');
-                  const pts=t.earn_rate&&t.amount?Math.round(Math.abs(t.amount)*t.earn_rate):null;
-                  return(
-                    <tr key={t.id} style={{borderBottom:'1px solid var(--border)'}}>
-                      <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Inter',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
-                      <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
-                      <td style={{padding:'8px 10px'}}>
-                        {t.points_category
-                          ?<span style={{fontSize:11,padding:'2px 7px',background:'#dcfce7',color:'#15803d',borderRadius:4,whiteSpace:'nowrap'}}>{t.points_category}</span>
-                          :<span style={{fontSize:11,color:'var(--text-muted)'}}>—</span>}
-                      </td>
-                      <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:600,color:'var(--red)',whiteSpace:'nowrap'}}>{fmt(Math.abs(t.amount))}</td>
-                      <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Inter',fontSize:12,color:pts?'#15803d':'var(--text-muted)',whiteSpace:'nowrap'}}>
-                        {pts?`${pts.toLocaleString()} (${t.earn_rate}x)`:'—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* Header row: title + Monthly/YTD toggle + month nav */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
+          <div style={{fontSize:15,fontWeight:600}}>Transactions</div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {/* Monthly / YTD toggle */}
+            <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
+              {[['monthly','Monthly'],['ytd','YTD']].map(([v,label])=>(
+                <button key={v} onClick={()=>setTxnView(v)}
+                  style={{padding:'3px 10px',borderRadius:4,border:'none',cursor:'pointer',fontSize:11,fontWeight:txnView===v?700:400,
+                    background:txnView===v?'var(--bg)':'transparent',
+                    color:txnView===v?'var(--text-primary)':'var(--text-muted)',
+                    boxShadow:txnView===v?'0 1px 2px rgba(0,0,0,0.08)':'none'}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Month/Year nav — only when Monthly view */}
+            {txnView==='monthly'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button onClick={prevTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:600,minWidth:72,textAlign:'center'}}>{txnMonthNames[txnMonth-1]} {txnYear}</span>
+              <button onClick={nextTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
+            {/* YTD year nav */}
+            {txnView==='ytd'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button onClick={()=>setTxnYear(y=>y-1)} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:600,minWidth:40,textAlign:'center'}}>{txnYear}</span>
+              <button onClick={()=>setTxnYear(y=>Math.min(y+1,new Date().getFullYear()))} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
           </div>
+        </div>
+        {txnsLoading
+          ?<div style={{padding:30,textAlign:'center'}}><div className="spinner"/></div>
+          :txns.length===0
+            ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions for this period.</div>
+            :<div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr style={{borderBottom:'2px solid var(--border)'}}>
+                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Date</th>
+                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px'}}>Description</th>
+                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Category</th>
+                    <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Amount</th>
+                    <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Est. Pts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txns.map(t=>{
+                    const mm=t.date.slice(5,7).replace(/^0/,'');
+                    const dd=t.date.slice(8,10).replace(/^0/,'');
+                    const pts=t.earn_rate&&t.amount?Math.round(Math.abs(t.amount)*t.earn_rate):null;
+                    return(
+                      <tr key={t.id} style={{borderBottom:'1px solid var(--border)'}}>
+                        <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Inter',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
+                        <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                        <td style={{padding:'8px 10px'}}>
+                          {t.points_category
+                            ?<span style={{fontSize:11,padding:'2px 7px',background:'#dcfce7',color:'#15803d',borderRadius:4,whiteSpace:'nowrap'}}>{t.points_category}</span>
+                            :<span style={{fontSize:11,color:'var(--text-muted)'}}>—</span>}
+                        </td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Inter',fontSize:13,fontWeight:600,color:'var(--red)',whiteSpace:'nowrap'}}>{fmt(Math.abs(t.amount))}</td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Inter',fontSize:12,color:pts?'#15803d':'var(--text-muted)',whiteSpace:'nowrap'}}>
+                          {pts?`${pts.toLocaleString()} (${t.earn_rate}x)`:'—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
         }
       </div>
     </div>

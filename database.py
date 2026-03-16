@@ -600,10 +600,11 @@ class ChallengeCardLink(Base):
 
 
 class ChallengeCategoryLink(Base):
-    """Junction table: SpendChallenge ↔ PointsCategory (multi-category challenges)."""
+    """Junction table: SpendChallenge ↔ PointsCategory (multi-category challenges).
+    No FK on category_name — stored as plain string to avoid PG UNIQUE constraint dependency."""
     __tablename__ = 'challenge_category_links'
-    challenge_id  = Column(Integer, ForeignKey('spend_challenges.id',         ondelete='CASCADE'), primary_key=True)
-    category_name = Column(String(100), ForeignKey('points_categories.name',  ondelete='CASCADE'), primary_key=True)
+    challenge_id  = Column(Integer, ForeignKey('spend_challenges.id', ondelete='CASCADE'), primary_key=True)
+    category_name = Column(String(100), nullable=False, primary_key=True)
 
 
 # Legacy alias — kept for backward compatibility during migration
