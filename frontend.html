@@ -3715,6 +3715,9 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[txnSummary,setTxnSummary]=useState(null);
   const[availCscs,setAvailCscs]=useState([]);
   const[cscFilter,setCscFilter]=useState('');   // '' = all, '__none__' = no CSC, or a category name
+  const[descFilter,setDescFilter]=useState('');  // free-text description/merchant search
+  const[sortCol,setSortCol]=useState('date');    // 'date'|'description'|'amount'|'csc'|'pts'
+  const[sortDir,setSortDir]=useState('desc');    // 'asc'|'desc'
   const[txnsLoading,setTxnsLoading]=useState(false);
   // Inline CSC editing state
   const[editingCscId,setEditingCscId]=useState(null);
@@ -3802,6 +3805,32 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     }catch(e){toast('Failed: '+(e?.message||''),'error');}
     finally{setAssignLoading(false);}
   };
+  // Sort helper — toggles dir if same col, resets to sensible default for new col
+  const handleSort=(col)=>{
+    if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}
+    else{setSortCol(col);setSortDir(col==='amount'||col==='pts'?'desc':'asc');}
+  };
+  const sortArrow=(col)=>sortCol===col?(sortDir==='asc'?' ▲':' ▼'):'';
+  // Client-side filter + sort applied on top of API-loaded txns
+  const displayTxns=useMemo(()=>{
+    let r=txns;
+    if(descFilter.trim()){
+      const needle=descFilter.toLowerCase();
+      r=r.filter(t=>(t.description||'').toLowerCase().includes(needle)||(t.merchant_name||'').toLowerCase().includes(needle));
+    }
+    return [...r].sort((a,b)=>{
+      let av,bv;
+      if(sortCol==='date'){av=a.date;bv=b.date;}
+      else if(sortCol==='description'){av=(a.description||'').toLowerCase();bv=(b.description||'').toLowerCase();}
+      else if(sortCol==='amount'){av=Math.abs(a.amount||0);bv=Math.abs(b.amount||0);}
+      else if(sortCol==='csc'){av=a.points_category||'';bv=b.points_category||'';}
+      else if(sortCol==='pts'){av=(a.earn_rate||0)*Math.abs(a.amount||0);bv=(b.earn_rate||0)*Math.abs(b.amount||0);}
+      else return 0;
+      if(av<bv)return sortDir==='asc'?-1:1;
+      if(av>bv)return sortDir==='asc'?1:-1;
+      return 0;
+    });
+  },[txns,descFilter,sortCol,sortDir]);
   const txnMonthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const prevTxnMonth=()=>{
     if(txnMonth===1){setTxnYear(y=>y-1);setTxnMonth(12);}else{setTxnMonth(m=>m-1);}
@@ -4117,7 +4146,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   );
 
   return(
-    <div style={{maxWidth:1400,margin:'0 auto'}}>
+    <div style={{width:'100%'}}>
       {ChallengeModal}
       {DeleteConfirm}
       {/* Hero */}
@@ -4453,17 +4482,19 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             </div>}
           </div>
         </div>
-        {/* CSC filter row */}
+        {/* Filter row */}
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
           <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.4px'}}>Filter:</span>
+          <input value={descFilter} onChange={e=>setDescFilter(e.target.value)} placeholder="Search description…"
+            style={{fontSize:12,padding:'3px 10px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:190,outline:'none'}}/>
           <select value={cscFilter} onChange={e=>setCscFilter(e.target.value)}
             style={{fontSize:12,padding:'3px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',cursor:'pointer'}}>
             <option value=''>All categories</option>
             <option value='__none__'>⚠ No CSC assigned</option>
             {availCscs.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
-          {cscFilter&&<button onClick={()=>setCscFilter('')}
-            style={{fontSize:11,padding:'2px 8px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕ Clear</button>}
+          {(cscFilter||descFilter)&&<button onClick={()=>{setCscFilter('');setDescFilter('');}}
+            style={{fontSize:11,padding:'2px 8px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕ Clear all</button>}
         </div>
         {/* Points summary bar */}
         {txnSummary&&txnSummary.total_spend>0&&(
@@ -4559,18 +4590,35 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           :txns.length===0
             ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions for this period.</div>
             :<div style={{overflowX:'auto'}}>
+              {displayTxns.length===0&&<div style={{padding:'10px 0 6px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No matches for "{descFilter}".</div>}
               <table style={{width:'100%',borderCollapse:'collapse'}}>
                 <thead>
-                  <tr style={{borderBottom:'2px solid var(--border)'}}>
-                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Date</th>
-                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px'}}>Description</th>
-                    <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>CSC</th>
-                    <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Amount</th>
-                    <th style={{padding:'6px 10px 8px',textAlign:'right',fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Est. Pts</th>
-                  </tr>
+                  {(()=>{
+                    const _th=(col,label,align='left',extra={})=>{
+                      const active=sortCol===col;
+                      return(
+                        <th key={col} onClick={()=>handleSort(col)}
+                          style={{padding:'6px 10px 8px',textAlign:align,fontSize:11,fontWeight:600,
+                            color:active?'var(--text-primary)':'var(--text-muted)',
+                            textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap',
+                            cursor:'pointer',userSelect:'none',...extra}}>
+                          {label}{sortArrow(col)}
+                        </th>
+                      );
+                    };
+                    return(
+                      <tr style={{borderBottom:'2px solid var(--border)'}}>
+                        {_th('date','Date')}
+                        {_th('description','Description','left',{})}
+                        {_th('csc','CSC')}
+                        {_th('amount','Amount','right')}
+                        {_th('pts','Est. Pts','right')}
+                      </tr>
+                    );
+                  })()}
                 </thead>
                 <tbody>
-                  {txns.map(t=>{
+                  {displayTxns.map(t=>{
                     const mm=t.date.slice(5,7).replace(/^0/,'');
                     const dd=t.date.slice(8,10).replace(/^0/,'');
                     const pts=t.earn_rate&&t.amount?Math.round(Math.abs(t.amount)*t.earn_rate):null;
