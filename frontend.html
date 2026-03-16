@@ -3690,6 +3690,31 @@ function usePlaidLink(toast,onSuccess){
 }
 
 
+class CardDetailErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={error:null};}
+  static getDerivedStateFromError(err){return{error:err};}
+  componentDidCatch(err,info){console.error('CardDetail render error:',err,info);}
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{padding:32,maxWidth:700,margin:'0 auto'}}>
+          <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:10,padding:20}}>
+            <div style={{fontSize:15,fontWeight:700,color:'#991b1b',marginBottom:8}}>⚠ Card detail failed to render</div>
+            <div style={{fontSize:12,color:'#7f1d1d',fontFamily:'monospace',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
+              {this.state.error?.message||String(this.state.error)}
+            </div>
+            <button className="btn btn-ghost" style={{marginTop:14,fontSize:13}}
+              onClick={()=>{this.setState({error:null});this.props.onBack&&this.props.onBack();}}>
+              ← Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function AccountCardDetailPage({accountId,onBack,toast}){
   const[d,setD]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -4418,7 +4443,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 try{
                   await apiFetch(`/challenges/${ch.id}`,{method:'DELETE'});
                   toast('Challenge deleted','success');
-                  loadDetail();
+                  load();
                 }catch(err){toast('Delete failed: '+(err?.message||''),'error');}
               };
               const chFullName=ch.name&&ch.name.length>40?ch.name:ch.name;
@@ -4963,7 +4988,7 @@ function CardsPage({toast}){
   const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
 
   // If an account is selected, show the detail page
-  if(selectedAccount)return<AccountCardDetailPage accountId={selectedAccount} onBack={()=>setSelectedAccount(null)} toast={toast}/>;
+  if(selectedAccount)return<CardDetailErrorBoundary onBack={()=>setSelectedAccount(null)}><AccountCardDetailPage accountId={selectedAccount} onBack={()=>setSelectedAccount(null)} toast={toast}/></CardDetailErrorBoundary>;
 
   // Find linked product info for each account
   const getProductForAccount=(acctId)=>{
