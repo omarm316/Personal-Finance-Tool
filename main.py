@@ -472,33 +472,39 @@ def _recalc_challenge(db, challenge):
 
 def _challenge_bonus_pts(challenge) -> float:
     """Bonus points earned so far based on cached current_spend."""
+    bonus_unlocked = bool(challenge.bonus_unlocked or False)
+    current_spend  = float(challenge.current_spend  or 0)
     if challenge.bonus_type == 'flat':
-        return float(challenge.bonus_amount) if challenge.bonus_unlocked else 0.0
+        return float(challenge.bonus_amount or 0) if bonus_unlocked else 0.0
     # per_dollar
-    if not challenge.bonus_unlocked:
+    if not bonus_unlocked:
         return 0.0
-    eligible = challenge.current_spend
+    eligible = current_spend
     if challenge.spend_cap:
         eligible = min(eligible, challenge.spend_cap)
-    return round(eligible * challenge.bonus_amount, 1)
+    return round(eligible * float(challenge.bonus_amount or 0), 1)
 
 
 def _serialize_challenge(c, eco=None):
     """Serialize a SpendChallenge to a dict for API responses."""
+    # Guard against NULL values left by failed recalc on old rows
+    current_spend  = float(c.current_spend  or 0)
+    bonus_unlocked = bool(c.bonus_unlocked  or False)
+
     bonus_pts = _challenge_bonus_pts(c)
     # Progress toward cap or threshold
     if c.spend_cap:
         progress_target = c.spend_cap
-        progress_pct = min(100, round(c.current_spend / c.spend_cap * 100, 1)) if c.spend_cap else 0
+        progress_pct = min(100, round(current_spend / c.spend_cap * 100, 1))
     elif c.spend_threshold:
         progress_target = c.spend_threshold
-        progress_pct = min(100, round(c.current_spend / c.spend_threshold * 100, 1)) if c.spend_threshold else 0
+        progress_pct = min(100, round(current_spend / c.spend_threshold * 100, 1))
     else:
         progress_target = None
         progress_pct = None
     remaining = None
-    if progress_target and c.current_spend < progress_target:
-        remaining = round(progress_target - c.current_spend, 2)
+    if progress_target and current_spend < progress_target:
+        remaining = round(progress_target - current_spend, 2)
 
     _cd = lambda v: v.date() if isinstance(v, datetime) else v
     today = datetime.utcnow().date()
@@ -506,7 +512,7 @@ def _serialize_challenge(c, eco=None):
         status = 'upcoming'
     elif today > _cd(c.end_date):
         status = 'expired'
-    elif c.bonus_unlocked and not c.spend_cap:
+    elif bonus_unlocked and not c.spend_cap:
         status = 'unlocked'
     else:
         status = 'active'
@@ -529,8 +535,8 @@ def _serialize_challenge(c, eco=None):
         'spend_threshold': c.spend_threshold,
         'category_names': category_names,
         'additional_card_ids': additional_card_ids,
-        'current_spend': round(c.current_spend, 2),
-        'bonus_unlocked': c.bonus_unlocked,
+        'current_spend': round(current_spend, 2),
+        'bonus_unlocked': bonus_unlocked,
         'bonus_pts_earned': bonus_pts,
         'progress_pct': progress_pct,
         'progress_target': progress_target,
@@ -4063,6 +4069,10 @@ async def get_challenges(
         # Build eco lookup via card → product → ecosystem
         results = []
         for c in challenges:
+            try:
+                _recalc_challenge(db, c)
+            except Exception:
+                pass  # leave cached values intact; serializer guards against None
             eco = None
             card = db.query(Card).filter_by(id=c.card_id).first()
             if card and card.product_id:
@@ -4070,6 +4080,7 @@ async def get_challenges(
                 if prod and prod.ecosystem_id:
                     eco = db.query(PointsEcosystem).filter_by(id=prod.ecosystem_id).first()
             results.append(_serialize_challenge(c, eco))
+        db.commit()  # persist recalculated spend/bonus_unlocked
         return results
     except Exception as e:
         import traceback
