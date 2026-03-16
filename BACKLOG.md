@@ -11,7 +11,7 @@
 |---|------|-------|
 | B1 | **Challenges: NOT NULL constraint errors** | `product_id`, `required_spend`, `reward_value` — comprehensive migration deployed; verify no new columns surface |
 | B2 | **Challenges: "cannot load challenge" error** | `db.rollback()` fix deployed; verify challenge list loads cleanly |
-| B3 | **Blank card page** | Benefits `try/except` + migration fix deployed; verify card detail loads again |
+| B3 | ~~**Blank card page**~~ | ✅ Fixed — `useMemo` not destructured from React |
 
 ---
 
@@ -36,6 +36,7 @@
 | F3 | **Benefits: auto-track from transactions** | If a benefit has `trigger_category` set, auto-update `amount_used` from matching transactions in the current cycle |
 | F4 | **Challenges: suggestions / templates** | "Suggested challenges for your cards" based on `CHALLENGE_TEMPLATES` — already exists on backend, wire to UI |
 | F5 | **Visa/MC merchant category API** | Use Visa Supplier Locator API to look up merchant MCCs programmatically; map MCC → CSC |
+| F6 | **Network-specific CSC overrides** | Amex codes bakeries (e.g. BLUE ANGEL) as Dining; Chase may not. Allow a merchant mapping to specify CSC per-network so the correct earn rate is applied per card. Investigate how widespread network-level categorization differences are before scoping. |
 
 ---
 
@@ -54,6 +55,9 @@
 
 ## ✅ Recently Completed
 
+- **Soft-deleted txn exclusion** — spending totals, monthly trend, challenge recalc, and transaction list all now filter `is_excluded=True` rows; fixes ~$5.20 Dining overcounting from stale PRUPLAZACAFE pending txn
+- **Blank card page** — `useMemo` was missing from React destructure; added `useMemo` + `useRef`
+- **Error Boundary** on card detail page — render crashes now show the actual error instead of blank
 - Benefits & Credits section (full CRUD, usage tracking, progress bars, log usage inline)
 - Merchant CSC teaching system (teach from inline edit, bulk assign from No-CSC view)
 - Inline CSC editing on transactions
