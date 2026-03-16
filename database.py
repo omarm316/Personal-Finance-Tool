@@ -884,7 +884,18 @@ def run_migrations(engine):
             ('parent_key', 'VARCHAR(100)'),
         ],
         'spend_challenges': [
-            ('activation_date', 'DATE'),
+            ('activation_date',  'DATE'),
+            ('name',             "VARCHAR(200) DEFAULT ''"),
+            ('challenge_type',   "VARCHAR(30) DEFAULT 'sub'"),
+            ('bonus_type',       "VARCHAR(20) DEFAULT 'flat'"),
+            ('bonus_amount',     'FLOAT DEFAULT 0'),
+            ('spend_cap',        'FLOAT'),
+            ('spend_threshold',  'FLOAT'),
+            ('current_spend',    'FLOAT DEFAULT 0'),
+            ('bonus_unlocked',   'BOOLEAN DEFAULT FALSE'),
+            ('is_active',        'BOOLEAN DEFAULT TRUE'),
+            ('notes',            'TEXT'),
+            ('created_at',       'TIMESTAMP DEFAULT NOW()'),
         ],
     }
 

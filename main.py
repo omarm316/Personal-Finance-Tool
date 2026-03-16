@@ -4502,6 +4502,7 @@ async def account_transactions(
     month: int = None,
     quarter: int = None,
     action: str = None,
+    csc: str = None,
     db: Session = Depends(get_db),
 ):
     """Filtered transaction list for an account.
@@ -4510,7 +4511,10 @@ async def account_transactions(
     - year + quarter (1-4)  → calendar quarter (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
     - year only             → full calendar year
     - neither               → most recent 200 transactions
-    Optionally filter by action ('Expense', 'Income', etc.).
+    Optionally filter by action ('Expense', 'Income', etc.) and csc (points_category).
+    Pass csc='__none__' to return only transactions with no points_category assigned.
+    Returns {transactions: [...], summary: {total_spend, total_pts, by_csc: {...}},
+             available_cscs: [...]}.
     """
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
@@ -4555,8 +4559,37 @@ async def account_transactions(
     if action:
         q = q.filter(Transaction.action == action)
 
-    txns = q.order_by(Transaction.date.desc()).limit(200).all()
-    return [{
+    # Fetch all matching transactions (before CSC filter) to compute available CSCs
+    all_period_txns = q.order_by(Transaction.date.desc()).limit(500).all()
+    available_cscs = sorted({t.points_category for t in all_period_txns if t.points_category})
+
+    # Apply CSC filter
+    if csc == '__none__':
+        filtered = [t for t in all_period_txns if not t.points_category]
+    elif csc:
+        filtered = [t for t in all_period_txns if t.points_category == csc]
+    else:
+        filtered = all_period_txns
+
+    # Build summary across filtered set (expenses only)
+    total_spend = 0.0
+    total_pts   = 0.0
+    by_csc: dict[str, dict] = {}
+    for t in filtered:
+        if t.amount and t.amount < 0:
+            spend = abs(t.amount)
+            rate  = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
+            pts   = spend * (rate or 0)
+            total_spend += spend
+            total_pts   += pts
+            key = t.points_category or '__none__'
+            if key not in by_csc:
+                by_csc[key] = {'spend': 0.0, 'pts': 0.0, 'count': 0}
+            by_csc[key]['spend'] += spend
+            by_csc[key]['pts']   += pts
+            by_csc[key]['count'] += 1
+
+    rows = [{
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
         'description': t.description_clean or t.description_raw,
         'amount': t.amount,
@@ -4564,7 +4597,22 @@ async def account_transactions(
         'points_category': t.points_category,
         'action': t.action,
         'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
-    } for t in txns]
+    } for t in filtered[:200]]
+
+    return {
+        'transactions': rows,
+        'summary': {
+            'total_spend': round(total_spend, 2),
+            'total_pts': round(total_pts, 0),
+            'by_csc': {k: {
+                'spend': round(v['spend'], 2),
+                'pts': round(v['pts'], 0),
+                'count': v['count'],
+            } for k, v in by_csc.items()},
+        },
+        'available_cscs': available_cscs,
+        'base_rate': base_rate,
+    }
 
 
 @app.get("/api/cards/validate-plaid")
@@ -4594,7 +4642,7 @@ async def validate_cards_plaid(db: Session = Depends(get_db)):
 @app.get("/api/points-categories")
 async def get_points_categories(db: Session = Depends(get_db)):
     cats = db.query(PointsCategory).order_by(PointsCategory.display_order).all()
-    return [{"id": c.id, "name": c.name} for c in cats]
+    return [{"id": c.id, "name": c.name, "is_active": c.is_active, "parent_key": c.parent_key} for c in cats]
 
 
 @app.post("/api/init/import-cards")
