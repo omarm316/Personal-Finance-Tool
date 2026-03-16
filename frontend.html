@@ -3720,6 +3720,15 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[editingCscId,setEditingCscId]=useState(null);
   const[editingCscVal,setEditingCscVal]=useState('');
   const[allCscs,setAllCscs]=useState([]);  // full list of categories for editing
+  // Teach-merchant prompt (shown after inline CSC save when merchant_name is available)
+  const[teachPrompt,setTeachPrompt]=useState(null);  // {merchantName, csc} | null
+  const[teachLoading,setTeachLoading]=useState(false);
+  // Unclassified merchants grouped view (shown when cscFilter==='__none__')
+  const[unclassified,setUnclassified]=useState([]);
+  const[unclassifiedLoading,setUnclassifiedLoading]=useState(false);
+  const[assigningMerchant,setAssigningMerchant]=useState(null);
+  const[assignCscVal,setAssignCscVal]=useState('');
+  const[assignLoading,setAssignLoading]=useState(false);
   const loadTxns=async(yr,mo,view,qtr,csc)=>{
     setTxnsLoading(true);
     try{
@@ -3744,9 +3753,54 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const saveCscEdit=async(txnId,newVal)=>{
     try{
       await apiFetch(`/transactions/${txnId}`,'PATCH',{points_category:newVal||null});
+      // Find the transaction before updating state so we have merchant_name
+      const txn=txns.find(t=>t.id===txnId);
       setTxns(prev=>prev.map(t=>t.id===txnId?{...t,points_category:newVal||null}:t));
       setEditingCscId(null);
+      // Offer to teach this merchant for all past + future transactions
+      if(newVal&&txn?.merchant_name){
+        setTeachPrompt({merchantName:txn.merchant_name,csc:newVal});
+      }
     }catch(e){toast('Failed to save CSC: '+(e?.message||''),'error');}
+  };
+  const teachMerchant=async(merchantName,csc)=>{
+    setTeachLoading(true);
+    try{
+      const r=await apiFetch('/merchant-csc','POST',{
+        merchant_pattern:merchantName,
+        points_category:csc,
+        apply_to_existing:true,
+      });
+      toast(`✓ Saved — ${r.transactions_updated} past transaction${r.transactions_updated!==1?'s':''} updated`,'success');
+      setTeachPrompt(null);
+      // Reload txns so backfilled rows reflect the change
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      if(cscFilter==='__none__') loadUnclassified();
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setTeachLoading(false);}
+  };
+  const loadUnclassified=()=>{
+    setUnclassifiedLoading(true);
+    apiFetch(`/transactions/unclassified-merchants?account_id=${accountId}&limit=50`)
+      .then(r=>{setUnclassified(r.unclassified||[]);})
+      .catch(()=>{})
+      .finally(()=>setUnclassifiedLoading(false));
+  };
+  const assignMerchantCsc=async(merchantName,csc)=>{
+    setAssignLoading(true);
+    try{
+      const r=await apiFetch('/merchant-csc','POST',{
+        merchant_pattern:merchantName,
+        points_category:csc,
+        apply_to_existing:true,
+      });
+      toast(`✓ ${r.transactions_updated} transaction${r.transactions_updated!==1?'s':''} updated`,'success');
+      setAssigningMerchant(null);
+      setAssignCscVal('');
+      loadUnclassified();
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setAssignLoading(false);}
   };
   const txnMonthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const prevTxnMonth=()=>{
@@ -3801,6 +3855,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   },[d?.card?.id]);
   // Transactions filter — reload when year/month/quarter/view/cscFilter changes
   useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter]);
+  // Load grouped unclassified merchants when filter='__none__'
+  useEffect(()=>{if(cscFilter==='__none__')loadUnclassified();},[accountId,cscFilter]);
 
   if(loading)return<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>;
   if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
@@ -4402,6 +4458,82 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             {cscFilter==='__none__'&&txnSummary.by_csc['__none__']&&(
               <span style={{color:'#b45309',fontSize:11}}>⚠ {txnSummary.by_csc['__none__'].count} txns with no CSC — {fmt(txnSummary.by_csc['__none__'].spend)} unoptimized</span>
             )}
+          </div>
+        )}
+        {/* Teach-merchant prompt — shown after inline CSC save */}
+        {teachPrompt&&(
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,
+            padding:'10px 14px',marginBottom:10,background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,fontSize:13}}>
+            <span>📌 Apply <strong>{teachPrompt.csc}</strong> to all past &amp; future transactions from <strong>{teachPrompt.merchantName}</strong>?</span>
+            <div style={{display:'flex',gap:6}}>
+              <button onClick={()=>teachMerchant(teachPrompt.merchantName,teachPrompt.csc)} disabled={teachLoading}
+                style={{padding:'4px 12px',borderRadius:5,border:'none',background:'#2563eb',color:'#fff',fontSize:12,fontWeight:600,cursor:'pointer'}}>
+                {teachLoading?'Saving…':'Yes, apply to all'}
+              </button>
+              <button onClick={()=>setTeachPrompt(null)}
+                style={{padding:'4px 10px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',fontSize:12,cursor:'pointer'}}>
+                Just this one
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Grouped merchant view — shown when filter=__none__ */}
+        {cscFilter==='__none__'&&(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:600,color:'#b45309',marginBottom:8}}>
+              🎓 Teach merchants — assign a CSC to fix all past &amp; future transactions at once
+            </div>
+            {unclassifiedLoading
+              ?<div style={{padding:16,textAlign:'center'}}><div className="spinner"/></div>
+              :unclassified.length===0
+                ?<div style={{fontSize:12,color:'var(--text-muted)',padding:'8px 0'}}>No unclassified merchants for this account.</div>
+                :<div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead>
+                      <tr style={{borderBottom:'2px solid var(--border)'}}>
+                        <th style={{padding:'5px 8px',textAlign:'left',color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Merchant</th>
+                        <th style={{padding:'5px 8px',textAlign:'right',color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Spend</th>
+                        <th style={{padding:'5px 8px',textAlign:'right',color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Txns</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Assign CSC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unclassified.map(u=>(
+                        <tr key={u.merchant} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'6px 8px',fontWeight:500}}>{u.merchant}</td>
+                          <td style={{padding:'6px 8px',textAlign:'right',fontFamily:'Inter',color:'var(--red)',fontWeight:600}}>{fmt(u.total_spend)}</td>
+                          <td style={{padding:'6px 8px',textAlign:'right',color:'var(--text-muted)'}}>{u.count}</td>
+                          <td style={{padding:'6px 8px'}}>
+                            {assigningMerchant===u.merchant?(
+                              <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                                <select autoFocus value={assignCscVal} onChange={e=>setAssignCscVal(e.target.value)}
+                                  style={{fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+                                  <option value=''>— select —</option>
+                                  {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                                </select>
+                                <button onClick={()=>assignCscVal&&assignMerchantCsc(u.merchant,assignCscVal)} disabled={!assignCscVal||assignLoading}
+                                  style={{padding:'2px 8px',borderRadius:4,border:'none',background:'#15803d',color:'#fff',fontSize:11,cursor:'pointer',fontWeight:600}}>
+                                  {assignLoading?'…':'✓'}
+                                </button>
+                                <button onClick={()=>setAssigningMerchant(null)}
+                                  style={{padding:'2px 7px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',fontSize:11,cursor:'pointer'}}>✕</button>
+                              </div>
+                            ):(
+                              <button onClick={()=>{setAssigningMerchant(u.merchant);setAssignCscVal('');}}
+                                style={{padding:'2px 10px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-primary)',fontSize:11,cursor:'pointer',fontWeight:500}}>
+                                Assign →
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+            }
+            <div style={{borderTop:'1px solid var(--border)',marginTop:12,paddingTop:10,fontSize:11,color:'var(--text-muted)',fontStyle:'italic'}}>
+              ↓ Individual unclassified transactions:
+            </div>
           </div>
         )}
         {txnsLoading

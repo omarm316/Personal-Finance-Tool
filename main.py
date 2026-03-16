@@ -1412,6 +1412,15 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         CategorizationRule.notes != '',
     ).all()
 
+    # Pre-load user-taught merchant → CSC mappings (checked before hardcoded patterns)
+    _mpm_rows = db.query(MerchantPointsMapping).all()
+    # Tuples: (pattern_lower, category_name, card_id)
+    _mpm_lookup: list[tuple[str, str, int | None]] = [
+        (m.merchant_pattern.lower(), m.points_category.name, m.card_id)
+        for m in _mpm_rows
+        if m.points_category
+    ]
+
     skipped = 0
     errors  = 0
     # Track DB row IDs matched via content_hash this sync so each row is
@@ -1524,6 +1533,18 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                         gcb_auto = True
                     if 'points:' in rule.notes:
                         points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
+
+            # Check user-taught merchant → CSC mappings first (highest priority
+            # after explicit rule notes), then fall back to hardcoded patterns.
+            if not points_cat and txn_data.get('merchant_name') and _mpm_lookup:
+                _needle = txn_data['merchant_name'].lower()
+                _global_match = None
+                for _pat, _cat, _cid in _mpm_lookup:
+                    if _pat in _needle:
+                        if _cid is None and _global_match is None:
+                            _global_match = _cat
+                if _global_match:
+                    points_cat = _global_match
 
             # Auto-infer points category from merchant name + Plaid PFC when
             # no categorization rule provided one explicitly.
@@ -2554,25 +2575,102 @@ async def backfill_points_categories(db: Session = Depends(get_db)):
 
 
 @app.get("/api/transactions/unclassified-merchants")
-async def unclassified_merchants(limit: int = 50, db: Session = Depends(get_db)):
+async def unclassified_merchants(
+    limit: int = 50,
+    account_id: int = None,
+    db: Session = Depends(get_db),
+):
     """
-    Returns the top merchants (by transaction count) that have a merchant_name
-    but no points_category assigned. Useful for discovering which patterns to
-    add to _MERCHANT_POINTS_PATTERNS next.
+    Returns merchants (grouped by merchant_name) that have no points_category,
+    sorted by total unoptimised spend descending.  Optional account_id filter.
     """
     from sqlalchemy import func as _func
-    rows = (
-        db.query(Transaction.merchant_name, _func.count(Transaction.id).label("n"))
+    q = (
+        db.query(
+            Transaction.merchant_name,
+            _func.count(Transaction.id).label("n"),
+            _func.sum(_func.abs(Transaction.amount)).label("total_spend"),
+        )
         .filter(
             Transaction.points_category == None,   # noqa: E711
             Transaction.merchant_name != None,     # noqa: E711
+            Transaction.action == 'Expense',
         )
-        .group_by(Transaction.merchant_name)
-        .order_by(_func.count(Transaction.id).desc())
+    )
+    if account_id:
+        q = q.filter(Transaction.account_id == account_id)
+    rows = (
+        q.group_by(Transaction.merchant_name)
+        .order_by(_func.sum(_func.abs(Transaction.amount)).desc())
         .limit(limit)
         .all()
     )
-    return {"unclassified": [{"merchant": r[0], "count": r[1]} for r in rows]}
+    return {"unclassified": [
+        {"merchant": r[0], "count": r[1], "total_spend": round(r[2] or 0, 2)}
+        for r in rows
+    ]}
+
+
+@app.post("/api/merchant-csc")
+async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
+    """Save a user-taught merchant → CSC mapping.
+
+    Body: {merchant_pattern, points_category, card_id (optional), apply_to_existing (bool, default true)}
+
+    - Upserts into merchant_points_mappings (pattern + card_id = unique key).
+    - If apply_to_existing=True (default), backfills all matching transactions
+      where points_category IS NULL.
+    Returns {saved, pattern, category, transactions_updated}.
+    """
+    merchant_pattern = (body.get('merchant_pattern') or '').strip()
+    points_category_name = (body.get('points_category') or '').strip()
+    card_id = body.get('card_id')  # None = global (applies to all cards)
+    apply_to_existing = body.get('apply_to_existing', True)
+
+    if not merchant_pattern or not points_category_name:
+        raise HTTPException(status_code=400, detail='merchant_pattern and points_category are required')
+
+    cat = db.query(PointsCategory).filter_by(name=points_category_name, is_active=True).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail=f'Unknown or inactive points category: {points_category_name}')
+
+    # Upsert — same pattern+card_id pair → update, otherwise insert
+    existing_mapping = (
+        db.query(MerchantPointsMapping)
+        .filter_by(merchant_pattern=merchant_pattern, card_id=card_id)
+        .first()
+    )
+    if existing_mapping:
+        existing_mapping.points_category_id = cat.id
+    else:
+        db.add(MerchantPointsMapping(
+            merchant_pattern=merchant_pattern,
+            card_id=card_id,
+            points_category_id=cat.id,
+        ))
+
+    updated = 0
+    if apply_to_existing:
+        # ilike for case-insensitive substring match (mirrors infer logic)
+        txns_to_update = (
+            db.query(Transaction)
+            .filter(
+                Transaction.merchant_name.ilike(f'%{merchant_pattern}%'),
+                Transaction.points_category == None,   # noqa: E711
+            )
+            .all()
+        )
+        for t in txns_to_update:
+            t.points_category = points_category_name
+            updated += 1
+
+    db.commit()
+    return {
+        'saved': True,
+        'pattern': merchant_pattern,
+        'category': points_category_name,
+        'transactions_updated': updated,
+    }
 
 
 @app.post("/api/transactions/backfill-content-hashes")
@@ -4592,6 +4690,7 @@ async def account_transactions(
     rows = [{
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
         'description': t.description_clean or t.description_raw,
+        'merchant_name': t.merchant_name,
         'amount': t.amount,
         'category': t.category_manual or t.category_auto,
         'points_category': t.points_category,

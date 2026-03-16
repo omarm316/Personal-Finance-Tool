@@ -1067,6 +1067,14 @@ def _run_migrations_pg(engine, required_columns):
                 ), {'new': new, 'old': old})
             print('  Migration: remapped categorization_rules set_category')
         # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
+        # Drop stale NOT NULL constraint on spend_challenges.product_id.
+        # Old schema had this column as NOT NULL; current model doesn't include it.
+        # We must make it nullable so INSERTs from the current model succeed.
+        if insp.has_table('spend_challenges'):
+            _sc_cols = {c['name']: c for c in insp.get_columns('spend_challenges')}
+            if 'product_id' in _sc_cols and not _sc_cols['product_id'].get('nullable', True):
+                conn.execute(text('ALTER TABLE spend_challenges ALTER COLUMN product_id DROP NOT NULL'))
+                print('  Migration: dropped NOT NULL on spend_challenges.product_id')
         if insp.has_table('transactions') and insp.has_table('accounts'):
             conn.execute(text("""
                 UPDATE transactions
