@@ -452,7 +452,8 @@ def _recalc_challenge(db, challenge):
         Transaction.date >= effective_start,
         Transaction.date <= end_date,
         Transaction.action == 'Expense',
-        Transaction.amount < 0,   # expenses stored as negative
+        Transaction.amount < 0,           # expenses stored as negative
+        Transaction.is_excluded != True,  # exclude soft-deleted dupes
     )
     if account_ids:
         q = q.filter(Transaction.account_id.in_(account_ids))
@@ -4634,6 +4635,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
 
     # Recent transactions (last 30) — include points_category for display
     txns = db.query(Transaction).filter_by(account_id=account.id)\
+        .filter(Transaction.is_excluded != True)\
         .order_by(Transaction.date.desc()).limit(30).all()
     recent_txns = [{
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
@@ -4659,6 +4661,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             Transaction.date >= lookback,
             Transaction.amount < 0,      # expenses are stored negative
             Transaction.action == 'Expense',
+            Transaction.is_excluded != True,   # exclude soft-deleted (pending→posted dupes)
         )
         .group_by(Transaction.points_category)
         .all()
@@ -4691,6 +4694,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             Transaction.date >= lookback,
             Transaction.amount < 0,      # expenses are stored negative
             Transaction.action == 'Expense',
+            Transaction.is_excluded != True,   # exclude soft-deleted dupes
         )
         .group_by('yr', 'mo').order_by('yr', 'mo').all()
     )
@@ -4832,7 +4836,10 @@ async def account_transactions(
                 elif r.points_category:
                     bonus_by_name[r.points_category.name] = r.multiplier
 
-    q = db.query(Transaction).filter_by(account_id=account_id)
+    q = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.is_excluded != True,   # hide soft-deleted (pending→posted dupes)
+    )
     if year and month:
         from datetime import date as _date
         import calendar as _cal
