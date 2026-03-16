@@ -3703,11 +3703,12 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[challengeVals,setChallengeVals]=useState({});
   const[confirmDeleteId,setConfirmDeleteId]=useState(null);
   const[suggestions,setSuggestions]=useState([]);
-  const load=async(p)=>{
-    setLoading(true);
+  const[spendRefreshing,setSpendRefreshing]=useState(false);
+  const load=async(p,silent)=>{
+    if(silent){setSpendRefreshing(true);}else{setLoading(true);}
     try{setD(await apiFetch(`/accounts/${accountId}/card-detail?period=${p||spendPeriod}`));}
-    catch(e){toast('Failed to load card detail','error');}
-    finally{setLoading(false);}
+    catch(e){if(!silent)toast('Failed to load card detail','error');}
+    finally{if(silent){setSpendRefreshing(false);}else{setLoading(false);}}
   };
   const loadChallenges=async(cardId)=>{
     if(!cardId)return;
@@ -3731,7 +3732,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   },[]);
 
   useEffect(()=>{load();},[accountId]);
-  useEffect(()=>{load(spendPeriod);},[spendPeriod]);
+  useEffect(()=>{if(d)load(spendPeriod,true);},[spendPeriod]);
   // When card detail loads, load challenges for this card
   useEffect(()=>{
     if(d?.card?.id)loadChallenges(d.card.id);
@@ -4053,27 +4054,23 @@ function AccountCardDetailPage({accountId,onBack,toast}){
 
       {p&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
         <div className="card" style={{padding:20}}>
-          <div style={{fontSize:15,fontWeight:600,marginBottom:4}}>Earning Structure</div>
-          {eco&&<div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>{eco.currency_name} &middot; {eco.is_cash_back?'Cash Back':`${eco.conservative_cpp}\u00A2 (conservative) / ${eco.your_cpp}\u00A2 (yours) per point`}</div>}
-          <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',paddingBottom:6,borderBottom:'1px solid var(--border)',marginBottom:2}}>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:600}}>Earning Structure</div>
+            {eco&&<div style={{fontSize:11,color:'var(--text-muted)'}}>{eco.currency_name}{eco.is_cash_back?' · Cash Back':''}</div>}
+          </div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',paddingBottom:6,borderBottom:'1px solid var(--border)',marginBottom:2}}>
             <span>Category</span>
             <span style={{textAlign:'center'}}>Rate</span>
-            <span style={{textAlign:'center',fontSize:10}}>\u00A2/$<br/>(cons.)</span>
-            <span style={{textAlign:'center',fontSize:10}}>\u00A2/$<br/>(yours)</span>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'#f0f9ff'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'#f0f9ff'}}>
             <span style={{fontSize:12,fontWeight:600,paddingLeft:4}}>All Purchases (Base)</span>
             <span style={{textAlign:'center',fontSize:13,fontWeight:700,color:'var(--blue)',fontFamily:'Inter'}}>{d.base_rate}x</span>
-            <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',color:'var(--text-muted)'}}>{eco?((d.base_rate*eco.conservative_cpp).toFixed(1)):d.base_rate.toFixed(1)}</span>
-            <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',fontWeight:600}}>{eco?((d.base_rate*eco.your_cpp).toFixed(1)):d.base_rate.toFixed(1)}</span>
           </div>
           <div style={{maxHeight:320,overflowY:'auto'}}>
             {(d.earning_structure||[]).filter(e=>e.bonus>0).map((e,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 50px 50px 55px',gap:'0 8px',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
                 <span style={{fontSize:12,paddingLeft:4}}>{e.category}</span>
                 <span style={{textAlign:'center',fontSize:13,fontWeight:700,color:'#059669',fontFamily:'Inter'}}>{e.total}x</span>
-                <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',color:'var(--text-muted)'}}>{eco?((e.total*eco.conservative_cpp).toFixed(1)):e.total.toFixed(1)}</span>
-                <span style={{textAlign:'center',fontSize:12,fontFamily:'Inter',fontWeight:600}}>{eco?((e.total*eco.your_cpp).toFixed(1)):e.total.toFixed(1)}</span>
               </div>
             ))}
           </div>
@@ -4095,31 +4092,35 @@ function AccountCardDetailPage({accountId,onBack,toast}){
               ))}
             </div>
           </div>
-          <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14}}>Charges by category with points earned</div>
+          <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14,opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            {spendPeriod==='mtd'?'Month to date':spendPeriod==='qtd'?'Quarter to date':'Year to date'} · charges by category
+          </div>
           {topCats.length===0
             ?<div style={{padding:30,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No spending data yet.</div>
-            :<div style={{display:'flex',flexDirection:'column',gap:8}}>
-              {topCats.map((s,i)=>(
-                <div key={i}>
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}>
-                    <span style={{fontWeight:500}}>{s.category==='Other'?'General (Non-Category)':s.category}</span>
-                    <span style={{fontFamily:'Inter',fontWeight:600}}>{fmt(s.amount)}</span>
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <div style={{flex:1,height:8,background:'var(--border)',borderRadius:4,overflow:'hidden'}}>
-                      <div style={{height:'100%',width:`${(s.amount/maxSpend*100)}%`,background:'var(--blue)',borderRadius:4,transition:'width 0.4s ease'}}/>
+            :<div style={{display:'flex',flexDirection:'column',gap:8,opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+              {topCats.map((s,i)=>{
+                const catLabel=s.category==='Other'?'General (Non-Category)':s.category;
+                const pts=Math.round(s.points_earned);
+                return(
+                  <div key={i}>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}>
+                      <span style={{fontWeight:500}}>{catLabel} <span style={{fontWeight:400,color:'var(--blue)'}}>{s.earn_rate}x</span></span>
+                      <span style={{fontFamily:'Inter',fontWeight:600,color:'#15803d'}}>{pts.toLocaleString()} pts</span>
                     </div>
-                    <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'Inter',minWidth:48,textAlign:'right'}}>{s.earn_rate}x {'\u2192'} {Math.round(s.points_earned).toLocaleString()}pts</span>
+                    <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{height:'100%',width:`${(s.amount/maxSpend*100)}%`,background:'var(--blue)',borderRadius:3,transition:'width 0.4s ease'}}/>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           }
-          {d.points_earned&&d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0'}}>
-            <div style={{fontSize:11,fontWeight:600,color:'#15803d',textTransform:'uppercase'}}>Points Earned (3 mo)</div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4}}>
-              <div style={{fontSize:24,fontWeight:700,fontFamily:'Inter',color:'#15803d'}}>{Math.round(d.points_earned.total).toLocaleString()}</div>
-              {eco&&!eco.is_cash_back&&<div style={{fontSize:13,color:'#15803d'}}>{'\u2248'} ${(d.points_earned.total*eco.your_cpp/100).toFixed(2)} value</div>}
+          {d.points_earned&&d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            <div style={{fontSize:11,fontWeight:600,color:'#15803d',textTransform:'uppercase'}}>
+              {eco?.currency_name||'Points'} Earned · {spendPeriod.toUpperCase()}
+            </div>
+            <div style={{fontSize:24,fontWeight:700,fontFamily:'Inter',color:'#15803d',marginTop:4}}>
+              {Math.round(d.points_earned.total).toLocaleString()}
             </div>
           </div>}
         </div>
@@ -4184,7 +4185,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             :challenges.map(ch=>{
               const statusColor={upcoming:'#6b7280',active:'var(--blue)',unlocked:'#059669',expired:'#9ca3af'}[ch.status]||'var(--text-muted)';
               const barColor={upcoming:'#d1d5db',active:'var(--blue)',unlocked:'#059669',expired:'#d1d5db'}[ch.status]||'var(--border)';
-              const estVal=ch.bonus_pts_earned&&ch.your_cpp?((ch.bonus_pts_earned*ch.your_cpp)/100).toFixed(2):null;
+              const estVal=null; // valuation display removed per design decision
               return(
                 <div key={ch.id} style={{padding:'14px 0',borderBottom:'1px solid var(--border)',opacity:ch.is_active?1:0.55}}>
                   <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>

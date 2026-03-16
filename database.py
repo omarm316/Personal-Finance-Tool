@@ -582,14 +582,14 @@ class SpendChallenge(Base):
     created_at      = Column(DateTime, default=datetime.utcnow)
 
     card             = relationship('Card', back_populates='spend_challenges')
-    # Additional cards this challenge also applies to (e.g. 2 Freedom cards same quarter)
-    additional_cards = relationship('Card', secondary='challenge_card_links',
-                                    primaryjoin='SpendChallenge.id==ChallengeCardLink.challenge_id',
-                                    secondaryjoin='ChallengeCardLink.card_id==Card.id')
-    # Categories for category-specific challenges (supports multi-select)
-    categories       = relationship('PointsCategory', secondary='challenge_category_links',
-                                    primaryjoin='SpendChallenge.id==ChallengeCategoryLink.challenge_id',
-                                    secondaryjoin='ChallengeCategoryLink.category_name==PointsCategory.name')
+    # Direct 1-to-many relationships to the junction tables.
+    # Using simple FK relationships (not complex secondary joins) for reliability.
+    # Access card_ids via:  [lnk.card_id      for lnk in challenge.card_links]
+    # Access cat names via: [lnk.category_name for lnk in challenge.category_links]
+    card_links     = relationship('ChallengeCardLink',     cascade='all, delete-orphan',
+                                  foreign_keys='ChallengeCardLink.challenge_id')
+    category_links = relationship('ChallengeCategoryLink', cascade='all, delete-orphan',
+                                  foreign_keys='ChallengeCategoryLink.challenge_id')
 
 
 class ChallengeCardLink(Base):

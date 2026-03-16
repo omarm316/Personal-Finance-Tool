@@ -427,8 +427,10 @@ def _recalc_challenge(db, challenge):
     primary_card = db.query(Card).filter_by(id=challenge.card_id).first()
     if primary_card and primary_card.account_id:
         account_ids.append(primary_card.account_id)
-    for extra_card in challenge.additional_cards:
-        if extra_card.account_id and extra_card.account_id not in account_ids:
+    # Additional cards via direct link table (avoids complex secondary join)
+    for lnk in challenge.card_links:
+        extra_card = db.query(Card).filter_by(id=lnk.card_id).first()
+        if extra_card and extra_card.account_id and extra_card.account_id not in account_ids:
             account_ids.append(extra_card.account_id)
 
     # Expenses are stored as negative amounts (Plaid sign is flipped on import).
@@ -442,8 +444,8 @@ def _recalc_challenge(db, challenge):
     if account_ids:
         q = q.filter(Transaction.account_id.in_(account_ids))
 
-    # Category filter — use junction table; expand each selected category to include L2 children
-    cat_names = [cat.name for cat in challenge.categories]
+    # Category filter — use direct link table
+    cat_names = [lnk.category_name for lnk in challenge.category_links]
     if cat_names:
         children = [c.name for c in db.query(PointsCategory)
                     .filter(PointsCategory.parent_key.in_(cat_names)).all()]
@@ -499,9 +501,9 @@ def _serialize_challenge(c, eco=None):
     else:
         status = 'active'
 
-    # Multi-card and multi-category info from junction tables
-    additional_card_ids = [card.id for card in c.additional_cards]
-    category_names = [cat.name for cat in c.categories]
+    # Multi-card and multi-category info via direct link tables
+    additional_card_ids = [lnk.card_id      for lnk in c.card_links]
+    category_names      = [lnk.category_name for lnk in c.category_links]
 
     return {
         'id': c.id,
@@ -3963,15 +3965,19 @@ async def get_challenges(
 
 
 def _sync_challenge_links(db, challenge, additional_card_ids, category_names):
-    """Helper: replace junction-table rows for a challenge after create/update."""
-    # Additional cards
-    db.query(ChallengeCardLink).filter_by(challenge_id=challenge.id).delete()
+    """Helper: replace junction-table rows for a challenge after create/update.
+    Uses the direct relationship collections so SQLAlchemy stays in sync."""
+    # Replace card links
+    db.query(ChallengeCardLink).filter_by(challenge_id=challenge.id)\
+        .delete(synchronize_session=False)
     for cid in (additional_card_ids or []):
         db.add(ChallengeCardLink(challenge_id=challenge.id, card_id=int(cid)))
-    # Categories
-    db.query(ChallengeCategoryLink).filter_by(challenge_id=challenge.id).delete()
+    # Replace category links
+    db.query(ChallengeCategoryLink).filter_by(challenge_id=challenge.id)\
+        .delete(synchronize_session=False)
     for name in (category_names or []):
-        db.add(ChallengeCategoryLink(challenge_id=challenge.id, category_name=name))
+        if name:
+            db.add(ChallengeCategoryLink(challenge_id=challenge.id, category_name=name))
 
 
 @app.get("/api/challenges/suggestions")
