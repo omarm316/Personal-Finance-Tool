@@ -429,7 +429,11 @@ def _recalc_challenge(db, challenge):
         if act > effective_start:
             effective_start = act
 
-    end_date = _d(challenge.end_date)
+    # Cap at today — for active challenges the end_date is in the future, so
+    # capping ensures we only count posted transactions, not phantom future ones.
+    # For expired challenges end_date <= today so min() keeps the challenge window.
+    today = datetime.utcnow().date()
+    end_date = min(_d(challenge.end_date), today)
 
     # Collect account IDs: primary card + all additional cards
     account_ids = []
@@ -4159,7 +4163,13 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
         db.flush()  # get c.id so junction rows can reference it
         _sync_challenge_links(db, c, data.get('additional_card_ids'), data.get('category_names'))
         db.flush()
-        _recalc_challenge(db, c)
+        try:
+            _recalc_challenge(db, c)
+        except Exception as recalc_err:
+            # Recalc is best-effort — don't block challenge creation if it fails.
+            # The GET endpoint will retry recalc on every load.
+            import traceback as _tb
+            print(f"[recalc warn] challenge {c.id}: {recalc_err}\n{_tb.format_exc()}")
         db.commit()
         db.refresh(c)
         return _serialize_challenge(c)
