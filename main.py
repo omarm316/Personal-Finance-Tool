@@ -4348,7 +4348,16 @@ async def get_challenges(
         if active_only:
             q = q.filter_by(is_active=True)
         if card_id is not None:
-            q = q.filter_by(card_id=card_id)
+            # Include challenges where this card is primary OR linked via ChallengeCardLink
+            q = q.filter(
+                or_(
+                    SpendChallenge.card_id == card_id,
+                    SpendChallenge.id.in_(
+                        db.query(ChallengeCardLink.challenge_id)
+                        .filter(ChallengeCardLink.card_id == card_id)
+                    )
+                )
+            )
         challenges = q.order_by(SpendChallenge.end_date.desc()).all()
         # Build eco lookup via card → product → ecosystem
         results = []
