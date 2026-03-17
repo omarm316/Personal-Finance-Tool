@@ -4072,9 +4072,20 @@ async def cards_portfolio(db: Session = Depends(get_db)):
         active_challenges_out: list[dict] = []
         if card:
             try:
-                challenges = db.query(SpendChallenge).filter_by(
-                    card_id=card.id, is_active=True
-                ).all()
+                challenges = (
+                    db.query(SpendChallenge)
+                    .filter(SpendChallenge.is_active == True)
+                    .filter(
+                        or_(
+                            SpendChallenge.card_id == card.id,
+                            SpendChallenge.id.in_(
+                                db.query(ChallengeCardLink.challenge_id)
+                                .filter(ChallengeCardLink.card_id == card.id)
+                            )
+                        )
+                    )
+                    .all()
+                )
                 for ch in challenges:
                     cs = _serialize_challenge(ch, eco)
                     if cs['status'] not in ('active', 'unlocked'):
@@ -4996,9 +5007,22 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     challenge_pts_total = 0.0
     if card:
         try:
-            active_challenges = db.query(SpendChallenge).filter_by(
-                card_id=card.id, is_active=True
-            ).all()
+            # Include challenges where this card is the primary card
+            # OR where it appears as an additional linked card
+            active_challenges = (
+                db.query(SpendChallenge)
+                .filter(SpendChallenge.is_active == True)
+                .filter(
+                    or_(
+                        SpendChallenge.card_id == card.id,
+                        SpendChallenge.id.in_(
+                            db.query(ChallengeCardLink.challenge_id)
+                            .filter(ChallengeCardLink.card_id == card.id)
+                        )
+                    )
+                )
+                .all()
+            )
             for ch in active_challenges:
                 try:
                     _recalc_challenge(db, ch)
