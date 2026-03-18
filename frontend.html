@@ -4203,7 +4203,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                     <input type="checkbox"
                       checked={(v.additional_card_ids||[]).map(Number).includes(ac.id)}
                       onChange={()=>setV('additional_card_ids',toggleArr((v.additional_card_ids||[]).map(Number),ac.id))}/>
-                    {ac.card_name||`Card #${ac.id}`}
+                    {ac.card_name||`Card #${ac.id}`}{ac.last_four?` ···${ac.last_four}`:''}
                   </label>
                 ))}
               </div>
