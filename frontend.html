@@ -12,7 +12,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:200px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
+  --sidebar-w:168px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
   --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
   --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
@@ -45,7 +45,7 @@ body{overflow:hidden}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
 .topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
-.content{flex:1;overflow-y:auto;padding:24px 32px}
+.content{flex:1;overflow-y:auto;padding:24px 20px}
 .card{background:#ffffff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{padding:18px 20px}
@@ -4945,7 +4945,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
 
   return(
-    <div style={{maxWidth:860,margin:'0 auto'}}>
+    <div>
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
         <div style={{display:'flex',alignItems:'center',gap:12}}>
