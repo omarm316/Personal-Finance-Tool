@@ -490,13 +490,73 @@ def _challenge_bonus_pts(challenge) -> float:
     return round(eligible * float(challenge.bonus_amount or 0), 1)
 
 
-def _serialize_challenge(c, eco=None):
-    """Serialize a SpendChallenge to a dict for API responses."""
-    # Guard against NULL values left by failed recalc on old rows
-    current_spend  = float(c.current_spend  or 0)
-    bonus_unlocked = bool(c.bonus_unlocked  or False)
+def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
+    """
+    Eligible spend for a SINGLE account only — used for per-card display.
 
-    bonus_pts = _challenge_bonus_pts(c)
+    Identical date/category logic to _recalc_challenge but scoped to one
+    account so linked-card challenges show each card's own spend rather than
+    the multi-card aggregate stored in challenge.current_spend.
+    """
+    from sqlalchemy import func as _func
+
+    def _d(v):
+        return v.date() if isinstance(v, datetime) else v
+
+    effective_start = _d(challenge.start_date)
+    if challenge.activation_date:
+        act = _d(challenge.activation_date)
+        if act > effective_start:
+            effective_start = act
+
+    today = datetime.utcnow().date()
+    end_date = min(_d(challenge.end_date), today)
+
+    q = db.query(_func.sum(Transaction.amount)).filter(
+        Transaction.date >= effective_start,
+        Transaction.date <= end_date,
+        Transaction.action == 'Expense',
+        Transaction.amount < 0,
+        Transaction.is_excluded != True,
+        Transaction.account_id == account_id,
+    )
+    cat_names = [lnk.category_name for lnk in challenge.category_links]
+    if cat_names:
+        children = [c.name for c in db.query(PointsCategory)
+                    .filter(PointsCategory.parent_key.in_(cat_names)).all()]
+        valid_cats = list(set(cat_names + children))
+        q = q.filter(Transaction.points_category.in_(valid_cats))
+
+    return float(abs(q.scalar() or 0))
+
+
+def _serialize_challenge(c, eco=None, spend_override: float = None):
+    """Serialize a SpendChallenge to a dict for API responses.
+
+    spend_override: when provided, substitutes c.current_spend for display.
+                    Pass the result of _challenge_spend_for_card() when
+                    rendering a challenge in a single card's context so the
+                    card sees its own spend rather than the aggregate across
+                    all linked cards.
+    """
+    if spend_override is not None:
+        current_spend  = float(spend_override)
+        bonus_unlocked = (
+            c.spend_threshold is None
+            or current_spend >= float(c.spend_threshold or 0)
+        )
+        if c.bonus_type == 'flat':
+            bonus_pts = float(c.bonus_amount or 0) if bonus_unlocked else 0.0
+        else:  # per_dollar
+            eligible = current_spend
+            if c.spend_cap:
+                eligible = min(eligible, float(c.spend_cap))
+            bonus_pts = round(eligible * float(c.bonus_amount or 0), 1)
+    else:
+        # Guard against NULL values left by failed recalc on old rows
+        current_spend  = float(c.current_spend  or 0)
+        bonus_unlocked = bool(c.bonus_unlocked  or False)
+        bonus_pts = _challenge_bonus_pts(c)
     # Progress toward cap or threshold
     if c.spend_cap:
         progress_target = c.spend_cap
@@ -4198,6 +4258,427 @@ async def cards_portfolio(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/cards/earn-summary")
+async def cards_earn_summary(
+    period: str = 'qtd',
+    year: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Points earned by ecosystem (and cash-back dollars) for a given period.
+
+    period: 'mtd' | 'qtd' | 'ytd'  (default: qtd)
+    year:   calendar year (default: current year)
+
+    For the current year, MTD/QTD/YTD are cut off at today.
+    For past years, the same calendar window is used but capped at period-end.
+
+    Returns per-ecosystem totals, cash-back total, and active challenges.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from sqlalchemy import func as _func
+
+    today = _date.today()
+    if year is None:
+        year = today.year
+    is_current = (year == today.year)
+
+    # ── date range ──────────────────────────────────────────────────────────
+    if period == 'mtd':
+        start = _date(year, today.month, 1)
+        end   = today if is_current else _date(year, today.month,
+                    _cal.monthrange(year, today.month)[1])
+    elif period == 'qtd':
+        q0 = ((today.month - 1) // 3) * 3 + 1          # first month of current quarter
+        start = _date(year, q0, 1)
+        end   = today if is_current else _date(year, q0 + 2,
+                    _cal.monthrange(year, q0 + 2)[1])
+    else:  # ytd
+        start = _date(year, 1, 1)
+        end   = today if is_current else _date(year, 12, 31)
+
+    # ── base data ────────────────────────────────────────────────────────────
+    ecosystems_map = {e.id: e for e in db.query(PointsEcosystem).all()}
+    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
+    cat_parent_map = {c.name: c.parent_key for c in all_categories}
+
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .filter(Account.account_type.ilike('%credit%'))
+        .all()
+    )
+    acct_ids = [a.id for a in credit_accounts]
+
+    # Build per-account earn-rate info (one product cache to avoid N queries)
+    products_cache: dict[int, tuple] = {}
+    acct_info: dict[int, dict] = {}
+    card_by_acct: dict[int, Card] = {}
+    for c in db.query(Card).all():
+        if c.account_id and c.account_id not in card_by_acct:
+            card_by_acct[c.account_id] = c
+
+    for acct in credit_accounts:
+        card = card_by_acct.get(acct.id)
+        product = None
+        if acct.product_id:
+            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+        if not product and card and card.product_id:
+            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+        eco_id = None
+        if product and product.ecosystem_id:
+            eco_id = product.ecosystem_id
+        elif card and card.ecosystem_id:
+            eco_id = card.ecosystem_id
+
+        base_rate  = 1.0
+        bonus_by_name: dict[str, float] = {}
+        if product:
+            pid = product.id
+            if pid not in products_cache:
+                rates = db.query(CardProductReward).filter_by(product_id=pid).all()
+                _b = 1.0
+                _bb: dict[str, float] = {}
+                for r in rates:
+                    if r.is_base_rate:
+                        _b = r.multiplier
+                    elif r.points_category_id and r.points_category:
+                        _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb)
+            base_rate, bonus_by_name = products_cache[product.id]
+
+        eco = ecosystems_map.get(eco_id) if eco_id else None
+        acct_info[acct.id] = {
+            'base_rate':    base_rate,
+            'bonus_by_name': bonus_by_name,
+            'eco_id':       eco_id,
+            'eco':          eco,
+            'is_cash_back': eco.is_cash_back if eco else False,
+            'account_name': acct.account_name,
+            'mask':         acct.mask,
+        }
+
+    # ── single aggregate query ───────────────────────────────────────────────
+    rows = (
+        db.query(
+            Transaction.account_id,
+            Transaction.points_category,
+            _func.sum(Transaction.amount).label('total'),
+        )
+        .filter(
+            Transaction.account_id.in_(acct_ids),
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.action == 'Expense',
+            Transaction.amount < 0,
+            Transaction.is_excluded != True,
+        )
+        .group_by(Transaction.account_id, Transaction.points_category)
+        .all()
+    )
+
+    # ── accumulate ───────────────────────────────────────────────────────────
+    eco_totals: dict[int, dict] = {}
+    cash_back_total = 0.0
+    cash_back_by_acct: dict[int, float] = {}
+
+    for acct_id, pts_cat, total in rows:
+        info = acct_info.get(acct_id)
+        if not info:
+            continue
+        amt  = abs(float(total or 0))
+        rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
+        pts  = amt * rate
+        eco_id = info['eco_id']
+
+        if info['is_cash_back']:
+            cash_back_total += pts
+            cash_back_by_acct[acct_id] = cash_back_by_acct.get(acct_id, 0.0) + pts
+        elif eco_id:
+            if eco_id not in eco_totals:
+                eco_totals[eco_id] = {'points': 0.0, 'by_acct': {}, 'by_cat': {}}
+            eco_totals[eco_id]['points'] += pts
+            eco_totals[eco_id]['by_acct'][acct_id] = \
+                eco_totals[eco_id]['by_acct'].get(acct_id, 0.0) + pts
+            cat_key = pts_cat or 'Other'
+            eco_totals[eco_id]['by_cat'][cat_key] = \
+                eco_totals[eco_id]['by_cat'].get(cat_key, 0.0) + pts
+
+    # ── shape output ─────────────────────────────────────────────────────────
+    ecosystems_out = []
+    for eco_id, data in eco_totals.items():
+        eco = ecosystems_map.get(eco_id)
+        if not eco:
+            continue
+        pts   = round(data['points'])
+        cpp   = float(eco.your_cpp)
+        value = round(pts * cpp, 2)
+        cards = [
+            {
+                'account_id':   aid,
+                'account_name': acct_info.get(aid, {}).get('account_name', ''),
+                'mask':         acct_info.get(aid, {}).get('mask', ''),
+                'points':       round(p),
+            }
+            for aid, p in sorted(data['by_acct'].items(), key=lambda x: -x[1])
+        ]
+        ecosystems_out.append({
+            'id':            eco_id,
+            'name':          eco.name,
+            'currency_name': eco.currency_name,
+            'your_cpp':      cpp,
+            'is_cash_back':  eco.is_cash_back,
+            'points_earned': pts,
+            'est_value':     value,
+            'cards':         cards,
+        })
+    ecosystems_out.sort(key=lambda x: x['est_value'], reverse=True)
+
+    cash_back_cards = [
+        {
+            'account_id':   aid,
+            'account_name': acct_info.get(aid, {}).get('account_name', ''),
+            'mask':         acct_info.get(aid, {}).get('mask', ''),
+            'amount':       round(amt, 2),
+        }
+        for aid, amt in sorted(cash_back_by_acct.items(), key=lambda x: -x[1])
+    ]
+
+    # Active challenges (summarised — used for the landing page strip)
+    active_challenges_out: list[dict] = []
+    try:
+        _today = datetime.utcnow().date()
+        _d_fn = lambda v: v.date() if isinstance(v, datetime) else v
+        for ch in db.query(SpendChallenge).filter_by(is_active=True).all():
+            if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
+                continue
+            pcard = db.query(Card).filter_by(id=ch.card_id).first()
+            ch_eco = None
+            if pcard:
+                pprod = db.query(CardProduct).filter_by(id=pcard.product_id).first() \
+                        if pcard.product_id else None
+                eid = (pprod.ecosystem_id if pprod else None) or pcard.ecosystem_id
+                ch_eco = ecosystems_map.get(eid) if eid else None
+            ser = _serialize_challenge(ch, eco=ch_eco)
+            ser['card_name']  = pcard.card_name  if pcard else None
+            ser['last_four']  = pcard.last_four  if pcard else None
+            ser['account_id'] = pcard.account_id if pcard else None
+            active_challenges_out.append(ser)
+    except Exception:
+        db.rollback()
+
+    return {
+        'period':      period,
+        'year':        year,
+        'start':       start.isoformat(),
+        'end':         end.isoformat(),
+        'ecosystems':  ecosystems_out,
+        'cash_back':   {'total': round(cash_back_total, 2), 'cards': cash_back_cards},
+        'active_challenges': active_challenges_out,
+    }
+
+
+@app.get("/api/ecosystems/{eco_id}/earn-detail")
+async def ecosystem_earn_detail(
+    eco_id: int,
+    period: str = 'qtd',
+    year: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Per-category earn breakdown for a single ecosystem (e.g. Chase UR).
+    Returned to power the Ecosystem Detail Page.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from sqlalchemy import func as _func
+
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+
+    today = _date.today()
+    if year is None:
+        year = today.year
+    is_current = (year == today.year)
+
+    if period == 'mtd':
+        start = _date(year, today.month, 1)
+        end   = today if is_current else _date(year, today.month,
+                    _cal.monthrange(year, today.month)[1])
+    elif period == 'qtd':
+        q0    = ((today.month - 1) // 3) * 3 + 1
+        start = _date(year, q0, 1)
+        end   = today if is_current else _date(year, q0 + 2,
+                    _cal.monthrange(year, q0 + 2)[1])
+    else:
+        start = _date(year, 1, 1)
+        end   = today if is_current else _date(year, 12, 31)
+
+    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
+    cat_parent_map = {c.name: c.parent_key for c in all_categories}
+
+    # Accounts in this ecosystem
+    products_cache: dict[int, tuple] = {}
+    card_by_acct: dict[int, Card] = {}
+    for c in db.query(Card).all():
+        if c.account_id and c.account_id not in card_by_acct:
+            card_by_acct[c.account_id] = c
+
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .filter(Account.account_type.ilike('%credit%'))
+        .all()
+    )
+    eco_accts = []
+    acct_info: dict[int, dict] = {}
+    for acct in credit_accounts:
+        card = card_by_acct.get(acct.id)
+        product = None
+        if acct.product_id:
+            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+        if not product and card and card.product_id:
+            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+        a_eco_id = None
+        if product and product.ecosystem_id:
+            a_eco_id = product.ecosystem_id
+        elif card and card.ecosystem_id:
+            a_eco_id = card.ecosystem_id
+
+        if a_eco_id != eco_id:
+            continue
+
+        base_rate = 1.0
+        bonus_by_name: dict[str, float] = {}
+        if product:
+            pid = product.id
+            if pid not in products_cache:
+                rates = db.query(CardProductReward).filter_by(product_id=pid).all()
+                _b = 1.0
+                _bb: dict[str, float] = {}
+                for r in rates:
+                    if r.is_base_rate:
+                        _b = r.multiplier
+                    elif r.points_category_id and r.points_category:
+                        _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb)
+            base_rate, bonus_by_name = products_cache[product.id]
+
+        eco_accts.append(acct.id)
+        acct_info[acct.id] = {
+            'base_rate':     base_rate,
+            'bonus_by_name': bonus_by_name,
+            'account_name':  acct.account_name,
+            'mask':          acct.mask,
+            'card_name':     card.card_name if card else None,
+        }
+
+    if not eco_accts:
+        return {
+            'eco_id': eco_id, 'name': eco.name, 'currency_name': eco.currency_name,
+            'your_cpp': eco.your_cpp, 'period': period, 'year': year,
+            'start': start.isoformat(), 'end': end.isoformat(),
+            'total_points': 0, 'est_value': 0,
+            'by_category': [], 'by_card': [], 'active_challenges': [],
+        }
+
+    rows = (
+        db.query(
+            Transaction.account_id,
+            Transaction.points_category,
+            _func.sum(Transaction.amount).label('total'),
+        )
+        .filter(
+            Transaction.account_id.in_(eco_accts),
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.action == 'Expense',
+            Transaction.amount < 0,
+            Transaction.is_excluded != True,
+        )
+        .group_by(Transaction.account_id, Transaction.points_category)
+        .all()
+    )
+
+    by_cat: dict[str, float] = {}
+    by_acct: dict[int, float] = {}
+    total_pts = 0.0
+    for acct_id, pts_cat, total in rows:
+        info = acct_info.get(acct_id)
+        if not info:
+            continue
+        amt  = abs(float(total or 0))
+        rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
+        pts  = amt * rate
+        total_pts += pts
+        cat_key = pts_cat or 'Other'
+        by_cat[cat_key]   = by_cat.get(cat_key, 0.0)   + pts
+        by_acct[acct_id]  = by_acct.get(acct_id, 0.0)  + pts
+
+    cpp   = float(eco.your_cpp)
+    total_pts_r = round(total_pts)
+
+    by_cat_out = sorted(
+        [{'category': k, 'points': round(v), 'pct': round(v / total_pts * 100, 1) if total_pts else 0}
+         for k, v in by_cat.items()],
+        key=lambda x: -x['points'],
+    )
+    by_card_out = sorted(
+        [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
+          'mask': acct_info[aid]['mask'], 'points': round(p)}
+         for aid, p in by_acct.items()],
+        key=lambda x: -x['points'],
+    )
+
+    # Active challenges for this ecosystem's cards
+    active_ch_out: list[dict] = []
+    try:
+        card_ids_in_eco = [
+            card_by_acct[aid].id for aid in eco_accts if aid in card_by_acct
+        ]
+        _today = datetime.utcnow().date()
+        _d_fn  = lambda v: v.date() if isinstance(v, datetime) else v
+        for ch in (db.query(SpendChallenge)
+                   .filter(SpendChallenge.is_active == True)
+                   .filter(or_(
+                       SpendChallenge.card_id.in_(card_ids_in_eco),
+                       SpendChallenge.id.in_(
+                           db.query(ChallengeCardLink.challenge_id)
+                           .filter(ChallengeCardLink.card_id.in_(card_ids_in_eco))
+                       )
+                   )).all()):
+            if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
+                continue
+            pcard = db.query(Card).filter_by(id=ch.card_id).first()
+            ser = _serialize_challenge(ch, eco=eco)
+            ser['card_name']  = pcard.card_name  if pcard else None
+            ser['last_four']  = pcard.last_four  if pcard else None
+            ser['account_id'] = pcard.account_id if pcard else None
+            active_ch_out.append(ser)
+    except Exception:
+        db.rollback()
+
+    return {
+        'eco_id':        eco_id,
+        'name':          eco.name,
+        'currency_name': eco.currency_name,
+        'your_cpp':      cpp,
+        'period':        period,
+        'year':          year,
+        'start':         start.isoformat(),
+        'end':           end.isoformat(),
+        'total_points':  total_pts_r,
+        'est_value':     round(total_pts_r * cpp, 2),
+        'by_category':   by_cat_out,
+        'by_card':       by_card_out,
+        'active_challenges': active_ch_out,
+    }
+
+
 @app.get("/api/cards/swipe-advisor")
 async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(get_db)):
     """
@@ -4359,6 +4840,14 @@ async def get_challenges(
                 )
             )
         challenges = q.order_by(SpendChallenge.end_date.desc()).all()
+        # When fetching for a specific card, look up its account once so we
+        # can display per-card spend rather than the multi-card aggregate.
+        per_card_acct_id = None
+        if card_id is not None:
+            _this_card = db.query(Card).filter_by(id=card_id).first()
+            if _this_card:
+                per_card_acct_id = _this_card.account_id
+
         # Build eco lookup via card → product → ecosystem
         results = []
         for c in challenges:
@@ -4372,7 +4861,12 @@ async def get_challenges(
                 prod = db.query(CardProduct).filter_by(id=card.product_id).first()
                 if prod and prod.ecosystem_id:
                     eco = db.query(PointsEcosystem).filter_by(id=prod.ecosystem_id).first()
-            results.append(_serialize_challenge(c, eco))
+            # Per-card spend override: only count this card's transactions
+            spend_ov = (
+                _challenge_spend_for_card(db, c, per_card_acct_id)
+                if per_card_acct_id is not None else None
+            )
+            results.append(_serialize_challenge(c, eco, spend_override=spend_ov))
         db.commit()  # persist recalculated spend/bonus_unlocked
         return results
     except Exception as e:
@@ -5034,12 +5528,26 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             )
             for ch in active_challenges:
                 try:
-                    _recalc_challenge(db, ch)
+                    _recalc_challenge(db, ch)   # keeps aggregate spend fresh in DB
                 except Exception:
                     pass
             db.commit()
             for ch in active_challenges:
-                bp = _challenge_bonus_pts(ch)
+                # Use per-card spend so linked cards show their own spend,
+                # not the multi-card aggregate stored in ch.current_spend.
+                per_spend = _challenge_spend_for_card(db, ch, account.id)
+                per_unlocked = (
+                    ch.spend_threshold is None
+                    or per_spend >= float(ch.spend_threshold or 0)
+                )
+                if ch.bonus_type == 'flat':
+                    bp = float(ch.bonus_amount or 0) if per_unlocked else 0.0
+                else:
+                    eligible = per_spend
+                    if ch.spend_cap:
+                        eligible = min(eligible, float(ch.spend_cap))
+                    bp = round(eligible * float(ch.bonus_amount or 0), 1)
+
                 challenge_points.append({
                     'id': ch.id,
                     'name': ch.name,
@@ -5048,11 +5556,11 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
                     'bonus_type': ch.bonus_type,
                     'category_names': [lnk.category_name for lnk in ch.category_links],
                     'spend_cap': ch.spend_cap,
-                    'current_spend': round(ch.current_spend or 0, 2),
+                    'current_spend': round(per_spend, 2),   # per-card, not aggregate
                     'progress_pct': min(100, round(
-                        (ch.current_spend or 0) / ch.spend_cap * 100, 1
+                        per_spend / float(ch.spend_cap) * 100, 1
                     )) if ch.spend_cap else None,
-                    'threshold_met': ch.bonus_unlocked,
+                    'threshold_met': per_unlocked,
                 })
                 challenge_pts_total += bp
         except Exception:

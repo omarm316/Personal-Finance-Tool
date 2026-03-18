@@ -4916,20 +4916,187 @@ function AccountCardDetailPage({accountId,onBack,toast}){
 }
 
 
+function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectAccount,toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[period,setPeriod]=useState(initPeriod||'qtd');
+  const[year,setYear]=useState(initYear||new Date().getFullYear());
+  const years=useMemo(()=>{const y=new Date().getFullYear();return[y,y-1,y-2];},[]);
+  const ecoColor=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
+    if(n.includes('amex')||n.includes('membership'))return'#059669';
+    if(n.includes('hilton'))return'#7c3aed';
+    if(n.includes('citi'))return'#0891b2';
+    if(n.includes('marriott'))return'#b45309';
+    if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+    return'var(--blue)';
+  },[ecoName]);
+
+  const load=useCallback(async(p,y)=>{
+    setLoading(true);
+    try{setData(await apiFetch(`/ecosystems/${ecoId}/earn-detail?period=${p}&year=${y}`));}
+    catch(e){toast('Failed to load ecosystem data','error');}
+    finally{setLoading(false);}
+  },[ecoId]);
+
+  useEffect(()=>{load(period,year);},[period,year]);
+
+  const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
+
+  return(
+    <div style={{maxWidth:860,margin:'0 auto'}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button className="btn btn-ghost" style={{fontSize:13,padding:'6px 12px'}} onClick={onBack}>← Overview</button>
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:ecoColor}}>{ecoName}</div>
+            {data&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1}}>{data.currency_name} · {data.your_cpp*100}¢/pt</div>}
+          </div>
+        </div>
+        {/* Period selector */}
+        <div style={{display:'flex',gap:6,alignItems:'center'}}>
+          <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:8,padding:3}}>
+            {['mtd','qtd','ytd'].map(p=>(
+              <button key={p} onClick={()=>setPeriod(p)}
+                style={{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:period===p?700:400,
+                  background:period===p?'var(--bg)':'transparent',color:period===p?'var(--text-primary)':'var(--text-muted)',
+                  boxShadow:period===p?'0 1px 3px rgba(0,0,0,0.08)':'none',textTransform:'uppercase'}}>
+                {p}
+              </button>
+            ))}
+          </div>
+          <select value={year} onChange={e=>setYear(Number(e.target.value))}
+            style={{fontSize:12,fontWeight:600,border:'1px solid var(--border)',borderRadius:8,padding:'5px 10px',background:'var(--bg)',color:'var(--text-primary)'}}>
+            {years.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {loading?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>:data&&(
+        <>
+          {/* Hero stat */}
+          <div style={{textAlign:'center',padding:'28px 20px 32px',marginBottom:24,background:'var(--bg)',borderRadius:16,border:`2px solid ${ecoColor}22`}}>
+            <div style={{fontSize:48,fontWeight:800,fontFamily:'Inter',color:ecoColor,lineHeight:1,letterSpacing:'-1px'}}>
+              {data.total_points.toLocaleString()}
+            </div>
+            <div style={{fontSize:14,color:'var(--text-muted)',marginTop:6}}>{data.currency_name}</div>
+            <div style={{fontSize:22,fontWeight:600,fontFamily:'Inter',color:'var(--text-primary)',marginTop:10}}>
+              ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+            </div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>estimated value</div>
+          </div>
+
+          {/* Points by category */}
+          {data.by_category.length>0&&<div className="card" style={{marginBottom:16}}>
+            <div className="section-header"><div className="section-title">Points by Category</div></div>
+            <div style={{padding:'4px 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
+              {data.by_category.map(cat=>(
+                <div key={cat.category}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
+                    <span style={{fontWeight:500}}>{cat.category||'Other'}</span>
+                    <span style={{fontFamily:'Inter',color:'var(--text-muted)'}}>{cat.points.toLocaleString()} pts <span style={{color:'var(--text-muted)',fontSize:11}}>({cat.pct}%)</span></span>
+                  </div>
+                  <div style={{height:6,borderRadius:6,background:'var(--border)',overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:6,width:`${Math.round(cat.points/maxCatPts*100)}%`,background:ecoColor,transition:'width 0.6s ease'}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>}
+
+          {/* Cards */}
+          {data.by_card.length>0&&<div className="card" style={{marginBottom:16}}>
+            <div className="section-header"><div className="section-title">Cards</div></div>
+            <div style={{padding:'0 0 4px'}}>
+              {data.by_card.map(c=>(
+                <div key={c.account_id}
+                  style={{display:'flex',alignItems:'center',padding:'12px 20px',borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
+                  onClick={()=>onSelectAccount(c.account_id)}
+                  onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <div style={{flex:1}}>
+                    <span style={{fontSize:13,fontWeight:600}}>{c.account_name}</span>
+                    {c.mask&&<span style={{fontSize:11,color:'var(--text-muted)',marginLeft:6}}>···{c.mask}</span>}
+                  </div>
+                  <span style={{fontFamily:'Inter',fontSize:14,fontWeight:700,color:ecoColor}}>{c.points.toLocaleString()}</span>
+                  <span style={{fontSize:12,color:'var(--text-muted)',marginLeft:4,marginRight:12}}> pts</span>
+                  <span style={{color:'var(--text-muted)'}}>›</span>
+                </div>
+              ))}
+            </div>
+          </div>}
+
+          {/* Active challenges */}
+          {data.active_challenges.length>0&&<div>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',marginBottom:10,letterSpacing:0.3,textTransform:'uppercase'}}>Active Challenges</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+              {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
+            </div>
+          </div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChallengeCard({ch}){
+  const progress=ch.progress_pct||0;
+  const isThreshold=ch.spend_threshold&&!ch.bonus_unlocked;
+  return(
+    <div className="card" style={{padding:'16px 18px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</div>
+          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+            {ch.card_name&&<span>{ch.card_name}{ch.last_four?` ···${ch.last_four}`:''}</span>}
+            {ch.category_names?.length>0&&<span style={{marginLeft:4}}>· {ch.category_names.join(', ')}</span>}
+          </div>
+        </div>
+        <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,marginLeft:8,flexShrink:0,
+          background:ch.status==='unlocked'?'#dcfce7':ch.status==='active'?'#dbeafe':'#f3f4f6',
+          color:ch.status==='unlocked'?'#15803d':ch.status==='active'?'#1e40af':'var(--text-muted)',
+          fontWeight:600,textTransform:'uppercase'}}>
+          {ch.status}
+        </span>
+      </div>
+      {isThreshold&&<>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text-muted)',marginBottom:4}}>
+          <span>${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} spent</span>
+          <span>${(ch.spend_threshold).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
+        </div>
+        <div style={{height:5,borderRadius:5,background:'var(--border)',overflow:'hidden',marginBottom:6}}>
+          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'var(--blue)',transition:'width 0.5s ease'}}/>
+        </div>
+        {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)'}}>${ch.remaining_spend.toLocaleString(undefined,{maximumFractionDigits:0})} to go</div>}
+      </>}
+      {!isThreshold&&ch.bonus_type==='per_dollar'&&<div style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>
+        <span style={{fontWeight:700,fontFamily:'Inter',fontSize:16,color:'var(--blue)'}}>+{ch.bonus_amount}x</span>
+        {ch.spend_cap&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names?.join(', ')||'all spend'} · ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
+      </div>}
+    </div>
+  );
+}
+
 function CardsPage({toast}){
   const[accounts,setAccounts]=useState([]);
   const[allAccounts,setAllAccounts]=useState([]);
   const[products,setProducts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[selectedAccount,setSelectedAccount]=useState(null);
+  const[selectedEcosystem,setSelectedEcosystem]=useState(null); // {id,name}
   const[suggestions,setSuggestions]=useState([]);
   const[linking,setLinking]=useState({});
   const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
   const[swipeData,setSwipeData]=useState(null);
   const[swipeLoading,setSwipeLoading]=useState(false);
-  // Portfolio state
-  const[portfolioData,setPortfolioData]=useState(null);
-  const[portfolioLoading,setPortfolioLoading]=useState(true);
+  // Earn summary state
+  const[earnData,setEarnData]=useState(null);
+  const[earnLoading,setEarnLoading]=useState(true);
+  const[earnPeriod,setEarnPeriod]=useState('qtd');
+  const[earnYear,setEarnYear]=useState(new Date().getFullYear());
+  const earnYears=useMemo(()=>{const y=new Date().getFullYear();return[y,y-1,y-2];},[]);
   // Legacy card management state
   const[cards,setCards]=useState([]);
   const[editing,setEditing]=useState(null);
@@ -4952,14 +5119,14 @@ function CardsPage({toast}){
     finally{setLoading(false);}
   },[]);
 
-  const loadPortfolio=useCallback(async()=>{
-    setPortfolioLoading(true);
-    try{setPortfolioData(await apiFetch('/cards/portfolio'));}
-    catch(e){setPortfolioData(null);}
-    finally{setPortfolioLoading(false);}
+  const loadEarnSummary=useCallback(async(p,y)=>{
+    setEarnLoading(true);
+    try{setEarnData(await apiFetch(`/cards/earn-summary?period=${p}&year=${y}`));}
+    catch(e){setEarnData(null);}
+    finally{setEarnLoading(false);}
   },[]);
 
-
+  useEffect(()=>{loadEarnSummary(earnPeriod,earnYear);},[earnPeriod,earnYear]);
 
   const loadSwipe=async()=>{
     setSwipeLoading(true);
@@ -4994,7 +5161,7 @@ function CardsPage({toast}){
     }catch(e){toast('Unlink failed','error');}
   };
 
-  useEffect(()=>{load().then(()=>Promise.all([loadSuggestions(),loadPortfolio()]));},[load]);
+  useEffect(()=>{load().then(()=>loadSuggestions());},[load]);
 
   // Legacy card management
   const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
@@ -5008,8 +5175,18 @@ function CardsPage({toast}){
 
   const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
 
-  // If an account is selected, show the detail page
+  // Account detail takes highest priority
   if(selectedAccount)return<CardDetailErrorBoundary onBack={()=>setSelectedAccount(null)}><AccountCardDetailPage accountId={selectedAccount} onBack={()=>setSelectedAccount(null)} toast={toast}/></CardDetailErrorBoundary>;
+
+  // Ecosystem detail page
+  if(selectedEcosystem)return(
+    <EcosystemDetailPage
+      ecoId={selectedEcosystem.id} ecoName={selectedEcosystem.name}
+      initPeriod={earnPeriod} initYear={earnYear}
+      onBack={()=>setSelectedEcosystem(null)}
+      onSelectAccount={(id)=>setSelectedAccount(id)}
+      toast={toast}/>
+  );
 
   // Find linked product info for each account
   const getProductForAccount=(acctId)=>{
@@ -5144,236 +5321,120 @@ function CardsPage({toast}){
           </div>
         </div>
       ):(
-        /* ACCOUNTS — Portfolio Landing */
+        /* ACCOUNTS — Portfolio Overview */
         <div>
-          {/* ── Portfolio Summary KPIs ── */}
-          {portfolioLoading
-            ?<div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
-              {[0,1,2,3].map(i=><div key={i} className="card metric-card"><div className="metric-label">Loading…</div><div className="metric-value" style={{color:'var(--text-muted)'}}>—</div></div>)}
+          {/* ── Period selector ── */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:28,flexWrap:'wrap',gap:12}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:700,margin:0}}>Portfolio Overview</h2>
+              {earnData&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{earnData.start} → {earnData.end}</div>}
             </div>
-            :portfolioData
-            ?<div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
-              <div className="card metric-card">
-                <div className="metric-label">Net Annual Cost</div>
-                <div className="metric-value" style={{color:portfolioData.summary.net_annual_cost>0?'var(--red)':'var(--green)'}}>
-                  {portfolioData.summary.net_annual_cost>0?'':'-'}${Math.abs(portfolioData.summary.net_annual_cost).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}
-                </div>
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
-                  ${portfolioData.summary.total_annual_fees.toLocaleString(undefined,{maximumFractionDigits:0})} fees − ${portfolioData.summary.total_annual_credits.toLocaleString(undefined,{maximumFractionDigits:0})} credits
-                </div>
-              </div>
-              <div className="card metric-card">
-                <div className="metric-label">Credits Remaining</div>
-                <div className="metric-value" style={{color:'var(--green)'}}>
-                  ${portfolioData.summary.total_annual_credits_remaining.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}
-                </div>
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>this cycle · across all cards</div>
-              </div>
-              <div className="card metric-card">
-                <div className="metric-label">Avg Utilization</div>
-                <div className="metric-value" style={{color:portfolioData.summary.avg_utilization==null?'var(--text-muted)':portfolioData.summary.avg_utilization>30?'var(--amber)':'var(--green)'}}>
-                  {portfolioData.summary.avg_utilization!=null?`${portfolioData.summary.avg_utilization}%`:'—'}
-                </div>
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{portfolioData.summary.card_count} active cards</div>
-              </div>
-              <div className="card metric-card">
-                <div className="metric-label">Active Challenges</div>
-                <div className="metric-value" style={{color:portfolioData.summary.active_challenge_count>0?'var(--blue)':'var(--text-muted)'}}>
-                  {portfolioData.summary.active_challenge_count}
-                </div>
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
-                  {portfolioData.summary.ecosystems.map(e=>e.ecosystem).join(' · ')||'—'}
-                </div>
-              </div>
-            </div>
-            :<div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
-              <div className="card metric-card"><div className="metric-label">Credit Card Accounts</div><div className="metric-value">{accounts.length}</div></div>
-              <div className="card metric-card"><div className="metric-label">Products Linked</div><div className="metric-value" style={{color:linkedCount>0?'var(--green)':'var(--text-muted)'}}>{linkedCount}</div></div>
-              <div className="card metric-card"><div className="metric-label">Needs Linking</div><div className="metric-value" style={{color:unlinkedCount>0?'var(--amber)':'var(--green)'}}>{unlinkedCount}</div></div>
-            </div>
-          }
-
-          {/* ── Upcoming Dates Strip ── */}
-          {portfolioData&&(()=>{
-            const urgent=[
-              ...portfolioData.summary.upcoming_statements.filter(x=>x.days<=7).map(x=>({...x,type:'statement'})),
-              ...portfolioData.summary.upcoming_payments.filter(x=>x.days<=7).map(x=>({...x,type:'payment'})),
-            ].sort((a,b)=>a.days-b.days);
-            if(!urgent.length)return null;
-            return(
-              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
-                {urgent.map((u,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'6px 12px',borderRadius:20,fontSize:12,fontWeight:500,
-                    background:u.type==='payment'?'#fef2f2':'#fffbeb',
-                    border:`1px solid ${u.type==='payment'?'#fca5a5':'#fcd34d'}`,
-                    color:u.type==='payment'?'#991b1b':'#92400e'}}>
-                    <span>{u.type==='payment'?'💳':'📅'}</span>
-                    <span>{u.name}{u.mask?` ···${u.mask}`:''}</span>
-                    <span style={{fontWeight:700}}>{u.type==='payment'?'payment':'statement'} in {u.days===0?'today':`${u.days}d`}</span>
-                  </div>
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:8,padding:3}}>
+                {['mtd','qtd','ytd'].map(p=>(
+                  <button key={p} onClick={()=>setEarnPeriod(p)}
+                    style={{padding:'5px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:earnPeriod===p?700:400,
+                      background:earnPeriod===p?'var(--bg)':'transparent',color:earnPeriod===p?'var(--text-primary)':'var(--text-muted)',
+                      boxShadow:earnPeriod===p?'0 1px 3px rgba(0,0,0,0.08)':'none',textTransform:'uppercase'}}>
+                    {p}
+                  </button>
                 ))}
               </div>
-            );
-          })()}
-
-          {/* ── Auto-suggestions ── */}
-          {suggestions.length>0&&<div className="card" style={{marginBottom:16,border:'2px solid #dbeafe'}}>
-            <div className="section-header" style={{paddingBottom:8}}>
-              <div className="section-title" style={{color:'#1d4ed8'}}>Auto-detected Product Matches</div>
-              <button className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
+              <select value={earnYear} onChange={e=>setEarnYear(Number(e.target.value))}
+                style={{fontSize:12,fontWeight:600,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--bg)',color:'var(--text-primary)'}}>
+                {earnYears.map(y=><option key={y} value={y}>{y}</option>)}
+              </select>
             </div>
-            <div style={{padding:'0 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
-              {suggestions.map(s=>(
-                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:600}}>{s.account_name}{s.mask?` ···${s.mask}`:''}</div>
-                    <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{'\u2192'} {s.suggested_product_name}</div>
-                  </div>
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':s.confidence==='medium'?'#fef9c3':'#f3f4f6',color:s.confidence==='high'?'#15803d':s.confidence==='medium'?'#854d0e':'var(--text-muted)',fontWeight:600}}>{s.confidence}</span>
-                  <button className="btn btn-sm btn-success" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>
-                    {linking[s.account_id]?'...':'Confirm'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>}
-
-          {/* ── Card Grid ── */}
-          <div className="card">
-            <div className="section-header">
-              <div className="section-title">Credit Card Accounts</div>
-              {!portfolioData&&<div style={{fontSize:11,color:'var(--text-muted)'}}>Needs Linking: {unlinkedCount}</div>}
-            </div>
-            {(loading||portfolioLoading)
-              ?<div className="loading"><div className="spinner"/></div>
-              :accounts.length===0
-              ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No credit card accounts found. Connect a bank with credit cards via Settings.</div>
-              :(portfolioData?portfolioData.cards:[]).length===0&&portfolioData
-              ?<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No portfolio data loaded.</div>
-              :<div style={{padding:'0 0 8px'}}>
-                {/* Portfolio card rows — sorted by blended value when portfolio loaded */}
-                {(portfolioData
-                  ? portfolioData.cards
-                  : accounts.map(a=>({account_id:a.id,account_name:a.account_name,mask:a.mask,balance:a.balance,blended_cpp:null,base_cpp:null,base_rate:null,annual_fee:null,annual_credits_remaining:null,annual_credits_total:null,utilization:null,days_to_statement:null,days_to_payment:null,active_challenges:[],ecosystem:null,ecosystem_currency:null,network:null,has_product:getProductForAccount(a.id)!=null}))
-                ).map(c=>{
-                  const prod=portfolioData?null:getProductForAccount(c.account_id);
-                  const acct=accounts.find(a=>a.id===c.account_id);
-                  const netCost=c.annual_fee!=null&&c.annual_credits_total!=null?c.annual_fee-c.annual_credits_total:null;
-                  const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
-                  const daysColor=(d)=>d==null?'var(--text-muted)':d<=3?'var(--red)':d<=7?'var(--amber)':'var(--text-secondary)';
-                  return(
-                    <div key={c.account_id}
-                      style={{display:'flex',alignItems:'stretch',gap:0,borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
-                      onClick={()=>setSelectedAccount(c.account_id)}
-                      onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-
-                      {/* ── Left: identity ── */}
-                      <div style={{flex:'0 0 240px',padding:'14px 16px 14px 20px',minWidth:0,display:'flex',flexDirection:'column',justifyContent:'center',gap:3}}>
-                        <div style={{display:'flex',alignItems:'center',gap:7}}>
-                          {c.network&&<span style={{fontSize:10,fontWeight:800,letterSpacing:0.3,color:networkColor[c.network]||'var(--text-secondary)',background:'var(--border)',borderRadius:4,padding:'1px 5px'}}>{c.network}</span>}
-                          <span style={{fontSize:14,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.account_name}</span>
-                          {c.mask&&<span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>···{c.mask}</span>}
-                        </div>
-                        <div style={{fontSize:11,color:'var(--text-muted)'}}>
-                          {c.ecosystem||c.product_name||(prod?prod.card_name:'No product linked')}
-                        </div>
-                        {/* Utilization bar */}
-                        {c.utilization!=null&&<div style={{marginTop:4}}>
-                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text-muted)',marginBottom:2}}>
-                            <span>Utilization</span>
-                            <span style={{color:c.utilization>30?'var(--amber)':c.utilization>60?'var(--red)':'var(--green)',fontWeight:600}}>{c.utilization}%</span>
-                          </div>
-                          <div style={{height:4,borderRadius:4,background:'var(--border)',overflow:'hidden'}}>
-                            <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,c.utilization)}%`,
-                              background:c.utilization>60?'var(--red)':c.utilization>30?'var(--amber)':'var(--green)'}}/>
-                          </div>
-                        </div>}
-                      </div>
-
-                      {/* ── Centre: fees & credits ── */}
-                      <div style={{flex:'0 0 170px',padding:'14px 16px',borderLeft:'1px solid var(--border)',display:'flex',flexDirection:'column',justifyContent:'center',gap:4}}>
-                        {c.annual_fee!=null
-                          ?<>
-                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
-                              <span style={{color:'var(--text-muted)'}}>Annual fee</span>
-                              <span style={{fontWeight:600,color:c.annual_fee>0?'var(--red)':'var(--text-muted)',fontFamily:'Inter'}}>{c.annual_fee>0?`$${c.annual_fee.toLocaleString(undefined,{maximumFractionDigits:0})}`:'$0'}</span>
-                            </div>
-                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
-                              <span style={{color:'var(--text-muted)'}}>Credits left</span>
-                              <span style={{fontWeight:600,color:c.annual_credits_remaining>0?'var(--green)':'var(--text-muted)',fontFamily:'Inter'}}>{c.annual_credits_total>0?`$${c.annual_credits_remaining.toLocaleString(undefined,{maximumFractionDigits:0})} / $${c.annual_credits_total.toLocaleString(undefined,{maximumFractionDigits:0})}`:'—'}</span>
-                            </div>
-                            <div style={{display:'flex',justifyContent:'space-between',fontSize:11}}>
-                              <span style={{color:'var(--text-muted)'}}>Net cost</span>
-                              <span style={{fontWeight:600,color:netCost!=null&&netCost<=0?'var(--green)':'var(--text-secondary)',fontFamily:'Inter'}}>{netCost!=null?(netCost<=0?`+$${Math.abs(netCost).toLocaleString(undefined,{maximumFractionDigits:0})}`:`$${netCost.toLocaleString(undefined,{maximumFractionDigits:0})}`): '—'}</span>
-                            </div>
-                          </>
-                          :<div style={{fontSize:12,color:'var(--text-muted)'}}>No product linked</div>
-                        }
-                      </div>
-
-                      {/* ── Right side: value + dates ── */}
-                      <div style={{flex:1,padding:'14px 16px',borderLeft:'1px solid var(--border)',display:'flex',alignItems:'center',gap:16}}>
-
-                        {/* Blended value */}
-                        {c.blended_cpp!=null
-                          ?<div style={{textAlign:'center',minWidth:80}}>
-                            <div style={{fontSize:22,fontWeight:800,fontFamily:'Inter',color:'#059669',lineHeight:1}}>{c.blended_cpp.toFixed(1)}¢</div>
-                            <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>per dollar</div>
-                            {c.challenge_incremental_cpp>0&&<div style={{fontSize:10,color:'var(--blue)',marginTop:2}}>+{c.challenge_incremental_cpp.toFixed(2)}¢ challenge</div>}
-                          </div>
-                          :<div style={{minWidth:80,textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>—</div>
-                        }
-
-                        {/* Challenges summary */}
-                        {c.active_challenges&&c.active_challenges.length>0&&<div style={{flex:1,minWidth:0}}>
-                          {c.active_challenges.slice(0,2).map(ch=>(
-                            <div key={ch.id} style={{fontSize:11,color:'var(--blue)',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                              <span style={{fontWeight:600}}>⚡ {ch.name}</span>
-                              {ch.description&&<span style={{color:'var(--text-muted)',marginLeft:4}}>{ch.description}</span>}
-                            </div>
-                          ))}
-                          {c.active_challenges.length>2&&<div style={{fontSize:10,color:'var(--text-muted)'}}>+{c.active_challenges.length-2} more</div>}
-                        </div>}
-
-                        {/* Dates */}
-                        <div style={{display:'flex',flexDirection:'column',gap:4,textAlign:'right',minWidth:90,marginLeft:'auto'}}>
-                          {c.days_to_statement!=null&&<div style={{fontSize:11}}>
-                            <span style={{color:'var(--text-muted)'}}>Statement </span>
-                            <span style={{fontWeight:600,color:daysColor(c.days_to_statement)}}>{c.days_to_statement===0?'today':`${c.days_to_statement}d`}</span>
-                          </div>}
-                          {c.days_to_payment!=null&&<div style={{fontSize:11}}>
-                            <span style={{color:'var(--text-muted)'}}>Payment </span>
-                            <span style={{fontWeight:600,color:daysColor(c.days_to_payment)}}>{c.days_to_payment===0?'today':`${c.days_to_payment}d`}</span>
-                          </div>}
-                        </div>
-                      </div>
-
-                      {/* Arrow */}
-                      <div style={{display:'flex',alignItems:'center',paddingRight:16,color:'var(--text-muted)',fontSize:16}}>{'\u203A'}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            }
           </div>
 
-          {/* ── Product linking for unlinked accounts (only show when there are unlinked) ── */}
-          {!portfolioLoading&&unlinkedCount>0&&<div className="card" style={{marginTop:14}}>
-            <div className="section-header"><div className="section-title" style={{fontSize:13}}>Link Products to Unlinked Accounts</div></div>
-            <div style={{padding:'0 0 8px'}}>
-              {accounts.filter(a=>!getProductForAccount(a.id)).map(acct=>(
-                <div key={acct.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 20px',borderBottom:'1px solid var(--border)'}}>
-                  <div style={{flex:1,fontSize:13,fontWeight:500}}>{acct.account_name}{acct.mask?` ···${acct.mask}`:''}</div>
-                  <select style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',background:'var(--bg)',color:'var(--text-primary)',maxWidth:220}}
-                    value="" onChange={e=>{if(e.target.value)linkProduct(acct.id,parseInt(e.target.value));}}>
-                    <option value="">Select product…</option>
-                    {products.map(p=><option key={p.id} value={p.id}>{p.card_name}</option>)}
-                  </select>
+          {/* ── Suggestions banner ── */}
+          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'2px solid #dbeafe'}}>
+            <div className="section-header" style={{paddingBottom:8}}>
+              <div className="section-title" style={{color:'#1d4ed8',fontSize:13}}>Auto-detected Product Matches</div>
+              <button className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
+            </div>
+            <div style={{padding:'0 20px 14px',display:'flex',flexDirection:'column',gap:8}}>
+              {suggestions.map(s=>(
+                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 12px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
+                  <div style={{flex:1,fontSize:13,fontWeight:600}}>{s.account_name}{s.mask?` ···${s.mask}`:''} <span style={{fontWeight:400,color:'var(--text-muted)'}}>→ {s.suggested_product_name}</span></div>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':'#fef9c3',color:s.confidence==='high'?'#15803d':'#854d0e',fontWeight:600}}>{s.confidence}</span>
+                  <button className="btn btn-sm btn-success" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>{linking[s.account_id]?'...':'Confirm'}</button>
                 </div>
               ))}
             </div>
           </div>}
+
+          {/* ── Ecosystem cards + challenges ── */}
+          {earnLoading
+            ?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>
+            :earnData?(()=>{
+              const ecoColor=(name)=>{
+                const n=(name||'').toLowerCase();
+                if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
+                if(n.includes('amex')||n.includes('membership'))return'#059669';
+                if(n.includes('hilton'))return'#7c3aed';
+                if(n.includes('citi'))return'#0891b2';
+                if(n.includes('marriott'))return'#b45309';
+                if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+                return'#3b82f6';
+              };
+              const pointsEcos=earnData.ecosystems.filter(e=>!e.is_cash_back);
+              const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
+              return(
+                <>
+                  <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:32}}>
+                    {pointsEcos.map(eco=>{
+                      const col=ecoColor(eco.name);
+                      return(
+                        <div key={eco.id}
+                          style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:14,background:'var(--bg)',
+                            border:`1px solid ${col}33`,borderLeft:`4px solid ${col}`,cursor:'pointer',transition:'background 0.15s'}}
+                          onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
+                          onMouseEnter={e=>{e.currentTarget.style.background=`${col}08`;}}
+                          onMouseLeave={e=>{e.currentTarget.style.background='var(--bg)';}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:16,fontWeight:700,color:col}}>{eco.name}</div>
+                            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:28,fontWeight:800,fontFamily:'Inter',letterSpacing:'-0.5px',lineHeight:1}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:4}}>≈ ${eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                          </div>
+                          <div style={{color:'var(--text-muted)',fontSize:20,marginLeft:4}}>›</div>
+                        </div>
+                      );
+                    })}
+                    {cashTotal>0&&(
+                      <div style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:14,background:'var(--bg)',border:'1px solid #d9770633',borderLeft:'4px solid #d97706'}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:16,fontWeight:700,color:'#d97706'}}>Cash Back</div>
+                          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>Earned this period</div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:28,fontWeight:800,fontFamily:'Inter',lineHeight:1}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                        </div>
+                      </div>
+                    )}
+                    {pointsEcos.length===0&&cashTotal===0&&(
+                      <div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13,lineHeight:1.6}}>
+                        No earn data for this period.<br/>Make sure accounts are linked to card products.
+                      </div>
+                    )}
+                  </div>
+
+                  {earnData.active_challenges.length>0&&(
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:10}}>
+                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()
+            :<div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>Could not load portfolio data.</div>
+          }
         </div>
       )}
     </div>
