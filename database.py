@@ -802,6 +802,14 @@ CHALLENGE_TEMPLATES = [
     ("world_of_hyatt", "Second Free Night Certificate ($30K total)",
      "annual_threshold", "benefit", 1, None, 30000, "annual",
      "Earn second Cat 1-4 certificate when annual spend hits $30K."),
+
+    # ── United Quest ──────────────────────────────────────────────────────
+    ("united_quest", "Second 10,000-Mile Anniversary Award Discount ($20K spend)",
+     "annual_threshold", "flat", 10000, None, 20000, "annual",
+     "Earn a second 10,000-mile anniversary award discount after $20K calendar-year spend."),
+    ("united_quest", "2 Economy Plus Seat Upgrades ($40K spend)",
+     "annual_threshold", "benefit", 2, None, 40000, "annual",
+     "Earn 2 Economy Plus seat upgrade certificates after $40K calendar-year spend."),
 ]
 
 
@@ -1253,6 +1261,10 @@ def seed_points_categories(session):
         ("Walmart",                10, "Groceries"),   # Visa/MC classify as grocery
         ("Target",                 11, "Groceries"),   # Same MCC as grocery at most issuers
         ("Amazon",                 12, "Online Shopping"),
+        # ── L2: United co-branded categories ──────────────────────────────
+        ("United Purchases",       34, "Airlines"),   # United-operated flights, bags, upgrades, etc.
+        # ── L2: luxury hotel channel → Hotels ─────────────────────────────
+        ("Renowned Hotels & Resorts", 35, "Hotels"),  # Prepaid bookings via United's Renowned Hotels
         # ── L2: co-branded retail (no meaningful L1 parent) ───────────────
         ("Best Buy",               20, None),
         ("Marshalls",              21, None),
@@ -1474,6 +1486,38 @@ def seed_card_products(session):
 
         ("capital_one_savor_one", "Capital One SavorOne", "Cash Back", "not_held", 0, [],
          {"_base": 1, "Dining": 2, "Groceries": 2, "Online Shopping": 2}),
+
+        ("united_quest", "United Quest℠ Card", "United MileagePlus", "active", 350, [
+            # Dollar credits
+            ("United TravelBank Credit", 200, "annual", "United"),
+            ("Renowned Hotels Credit", 150, "annual", "Renowned Hotels & Resorts"),
+            ("JSX Flight Credit", 150, "annual", "Airlines"),
+            ("Instacart Credit ($10+$5/mo, through 12/31/27)", 15, "monthly", None),
+            ("Rideshare Credit (requires annual enrollment; $12 in December)", 8, "monthly", "Ground Transportation"),
+            ("Avis/Budget Rental Credit (two $40 credits via United Cars)", 80, "annual", "Car Rental"),
+            # Non-dollar perks
+            ("Free Checked Bags (1st & 2nd bag, cardholder + 1 companion; ticket must be on card)", 0, "annual", "United"),
+            ("10,000-Mile Anniversary Award Discount (auto-applied at anniversary)", 0, "annual", None),
+            ("1,000 Card Bonus PQP", 0, "annual", None),
+            ("Global Entry / TSA PreCheck / NEXUS Credit (every 4 years; using 'annual' as closest available frequency)", 120, "annual", None),
+            ("United Inflight 25% Back (food, beverages, WiFi on United-operated flights)", 0, "annual", "United"),
+            ("Priority Boarding", 0, "annual", None),
+            ("Complimentary Instacart+ (3 months at opening, 50% off after through 12/31/27)", 0, "annual", None),
+        ], {
+            # multiplier = BONUS above base (total earn − 1).
+            # Base 1x → multiplier=1 for base row.
+            # United Purchases total 3x → additional 2x above base.
+            # Renowned Hotels total 5x → additional 4x above base.
+            # Travel (non-United) total 2x → additional 1x above base.
+            # Dining total 2x → additional 1x above base.
+            # Streaming total 2x → additional 1x above base.
+            "_base": 1,
+            "United Purchases": 2,
+            "Renowned Hotels & Resorts": 4,
+            "Airlines": 1,
+            "Dining": 1,
+            "Streaming": 1,
+        }),
     ]
 
     for product_key, card_name, eco_name, status, annual_fee, benefits, rates in products:
