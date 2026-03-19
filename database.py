@@ -770,12 +770,12 @@ _CAT_REMAP = [
 # Spend amounts in dollars; bonus_amount in pts/$ or flat pts or # of benefits.
 CHALLENGE_TEMPLATES = [
     # ── Hilton Aspire ─────────────────────────────────────────────────────
-    ("hilton_aspire", "Free Night Certificate (annual $30K spend)",
+    ("hilton_aspire", "Free Night Award (annual $30K spend)",
      "annual_threshold", "benefit", 1, None, 30000, "annual",
-     "Earn one Free Night Reward Certificate. Resets every Jan 1."),
-    ("hilton_aspire", "Diamond Status Requalification ($30K)",
-     "annual_threshold", "benefit", 1, None, 30000, "annual",
-     "Maintain Hilton Diamond status for the following year."),
+     "Earn one Free Night Reward Certificate after $30K calendar-year spend. Resets every Jan 1."),
+    ("hilton_aspire", "Second Free Night Award ($60K spend)",
+     "annual_threshold", "benefit", 1, None, 60000, "annual",
+     "Earn a second Free Night Reward Certificate after $60K calendar-year spend. Resets every Jan 1."),
 
     # ── Hilton Surpass ────────────────────────────────────────────────────
     ("hilton_surpass", "Free Night Certificate (annual $15K spend)",
@@ -1404,12 +1404,13 @@ def seed_card_products(session):
          {"_base": 1, "Groceries": 5, "Gas Stations": 2, "Online Shopping": 2}),
 
         ("hilton_aspire", "Hilton Honors Aspire", "Hilton Honors", "active", 550, [
-            ("$250 Hilton Resort Credit", 250, "annual", "Hilton"),
-            ("$200 Airline Fee Credit", 200, "calendar_year", "Airlines"),
-            ("$50 Hilton Quarterly Credit", 200, "annual", "Hilton"),
-            ("Diamond Status", 0, "annual", None),
-            ("Free Weekend Night Cert", 0, "annual", "Hilton"),
-        ], {"_base": 3, "Dining": 4, "Food Delivery": 4, "Airlines": 4, "Car Rental": 4, "Hilton": 11}),
+            ("$400 Hilton Resort Credit ($200 semi-annual, Hilton resort properties)", 200, "semi-annual", "Hilton"),
+            ("$200 Flight Credit ($50/quarter, direct or Amex Travel)", 50, "quarterly", "Airlines"),
+            ("$209 CLEAR+ Credit (annual)", 209, "annual", None),
+            ("Free Night Award (annual, at card anniversary)", 0, "annual", "Hilton"),
+            ("$100 Waldorf/Conrad On-Property Credit (per qualifying 2-night+ stay)", 100, "annual", "Hilton"),
+            ("Complimentary Hilton Diamond Status", 0, "annual", None),
+        ], {"_base": 3, "Dining": 4, "Airlines": 4, "Car Rental": 4, "Hilton": 11}),
 
         ("hilton_surpass", "Hilton Honors Surpass", "Hilton Honors", "not_held", 150, [
             ("Gold Status", 0, "annual", None),
