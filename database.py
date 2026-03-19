@@ -491,6 +491,10 @@ class CardProductReward(Base):
     points_category_id = Column(Integer, ForeignKey('points_categories.id', ondelete='CASCADE'), nullable=True)
     multiplier = Column(Float, nullable=False)     # Points per dollar (base or additional)
     is_base_rate = Column(Boolean, default=False)  # True = applies to ALL spend
+    reward_type = Column(String, nullable=False, server_default='fixed', default='fixed')
+    # reward_type values:
+    #   'fixed'             — standard fixed-rate bonus (default)
+    #   'auto_top_category' — dynamic best-category (e.g. Citi Custom Cash 5% on top eligible cat)
 
     product = relationship("CardProduct", back_populates="rewards")
     points_category = relationship("PointsCategory")
@@ -905,6 +909,9 @@ def run_migrations(engine):
             ('notes',            'TEXT'),
             ('created_at',       'TIMESTAMP DEFAULT NOW()'),
         ],
+        'card_product_rewards': [
+            ('reward_type', "VARCHAR(50) DEFAULT 'fixed'"),
+        ],
         'card_benefits': [
             ('trigger_category', 'VARCHAR(100)'),
             ('notes',            'TEXT'),
@@ -1242,6 +1249,10 @@ def seed_points_categories(session):
         ("Streaming",              26, None),
         ("Chase Travel",           25, None),   # booking-channel L1 (Chase portal)
         ("Spa & Salon",            24, None),
+        ("Transit",                36, None),
+        ("Home Improvement",       37, None),
+        ("Fitness & Gyms",         38, None),
+        ("Live Entertainment",     39, None),
         # ── L2: hotel brands → Hotels ─────────────────────────────────────
         ("Hilton",                 17, "Hotels"),
         ("Marriott",               18, "Hotels"),
@@ -1451,8 +1462,14 @@ def seed_card_products(session):
             ("Free Night Cert (up to 35k pts)", 0, "annual", "Marriott"),
         ], {"_base": 2, "Marriott": 4}),
 
-        ("citi_custom_cash", "Citi Custom Cash", "Citi ThankYou", "active", 0, [],
-         {"_base": 1, "Gas Stations": 4}),
+        ("citi_custom_cash", "Citi Custom Cash® Card", "Citi ThankYou", "active", 0, [
+            ("Citi Travel Portal Bonus (5x Hotels/Cars/Attractions)", 0, "annual", None),
+         ], {"_base": 1, "_auto_top": [
+            # Earn 5x (4 additional above 1x base) on whichever eligible category has
+            # highest spend each billing cycle, capped at $500/cycle.
+            "Dining", "Gas Stations", "Groceries", "Airlines", "Transit",
+            "Streaming", "Drugstore", "Home Improvement", "Fitness & Gyms", "Live Entertainment",
+         ]}),
 
         ("citi_double_cash", "Citi Double Cash", "Citi ThankYou", "active", 0, [],
          {"_base": 2}),
@@ -1539,16 +1556,25 @@ def seed_card_products(session):
         base_rate = rates.get('_base', 1)
         session.add(CardProductReward(
             product_id=product.id, points_category_id=None,
-            multiplier=base_rate, is_base_rate=True,
+            multiplier=base_rate, is_base_rate=True, reward_type='fixed',
         ))
+        # _auto_top: list of category names that compete for 5x each billing cycle
+        auto_top_cats = rates.get('_auto_top', [])
+        for cat_name in auto_top_cats:
+            cat_id = cat_map.get(cat_name)
+            if cat_id:
+                session.add(CardProductReward(
+                    product_id=product.id, points_category_id=cat_id,
+                    multiplier=4, is_base_rate=False, reward_type='auto_top_category',
+                ))
         for cat_name, additional in rates.items():
-            if cat_name == '_base':
+            if cat_name in ('_base', '_auto_top'):
                 continue
             cat_id = cat_map.get(cat_name)
             if cat_id and additional > 0:
                 session.add(CardProductReward(
                     product_id=product.id, points_category_id=cat_id,
-                    multiplier=additional, is_base_rate=False,
+                    multiplier=additional, is_base_rate=False, reward_type='fixed',
                 ))
 
         # Refresh benefits only if the seed defines any (preserves manually-added ones

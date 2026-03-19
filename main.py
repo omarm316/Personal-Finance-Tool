@@ -400,6 +400,82 @@ def calc_earn_rate(
     return base_rate
 
 
+def calc_auto_top_category_points(db, account_id, product, start_date, end_date):
+    """
+    For auto_top_category cards (e.g. Citi Custom Cash):
+    Each calendar month within [start_date, end_date]:
+      - Find eligible categories (CardProductReward rows with reward_type='auto_top_category')
+      - Group account transactions by category for that month
+      - Top category (by absolute spend) gets 5x on first $500, 1x above $500
+      - All other eligible categories get 1x (same as base)
+      - Non-eligible categories get base earn rate
+    Returns total points earned.
+    """
+    from calendar import monthrange
+    import datetime as dt
+
+    # Get eligible categories for auto_top_category
+    auto_rewards = [r for r in product.rewards if getattr(r, 'reward_type', 'fixed') == 'auto_top_category']
+    base_reward  = next((r for r in product.rewards if r.is_base_rate), None)
+    base_rate    = float(base_reward.multiplier if base_reward else 1)
+
+    eligible_cat_names = set()
+    for r in auto_rewards:
+        if r.points_category:
+            eligible_cat_names.add(r.points_category.name)
+
+    bonus_multiplier = base_rate + (float(auto_rewards[0].multiplier) if auto_rewards else 4)
+    spend_cap = 500.0
+
+    # Iterate month by month
+    total_points = 0.0
+    current = start_date.replace(day=1)
+    while current <= end_date:
+        month_end = current.replace(day=monthrange(current.year, current.month)[1])
+        period_end = min(month_end, end_date)
+
+        # All transactions for this account in this month
+        txns = db.query(Transaction).filter(
+            Transaction.account_id == account_id,
+            Transaction.date >= current,
+            Transaction.date <= period_end,
+            Transaction.action == 'Expense',
+            Transaction.amount < 0,
+            Transaction.is_excluded != True,
+        ).all()
+
+        # Group by category
+        cat_spend: dict[str, float] = {}
+        for t in txns:
+            cat = t.points_category or 'Other'
+            cat_spend[cat] = cat_spend.get(cat, 0.0) + abs(float(t.amount))
+
+        # Find top eligible category by spend
+        top_cat = None
+        top_amt = 0.0
+        for cat, amt in cat_spend.items():
+            if cat in eligible_cat_names and amt > top_amt:
+                top_cat = cat
+                top_amt = amt
+
+        # Calculate points for this month
+        for cat, amt in cat_spend.items():
+            if cat == top_cat:
+                bonus_spend = min(amt, spend_cap)
+                over_spend = max(0.0, amt - spend_cap)
+                total_points += bonus_spend * bonus_multiplier + over_spend * base_rate
+            else:
+                total_points += amt * base_rate
+
+        # Advance to next month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+    return round(total_points, 1)
+
+
 def _recalc_challenge(db, challenge):
     """
     Recompute current_spend and bonus_unlocked for a SpendChallenge from
@@ -4312,9 +4388,12 @@ async def cards_earn_summary(
     acct_ids = [a.id for a in credit_accounts]
 
     # Build per-account earn-rate info (one product cache to avoid N queries)
+    # products_cache maps product_id → (_base_rate, _bonus_by_name, _has_auto_top)
     products_cache: dict[int, tuple] = {}
     acct_info: dict[int, dict] = {}
     card_by_acct: dict[int, Card] = {}
+    # product_objs_cache maps product_id → CardProduct object (for auto_top_category calculation)
+    product_objs_cache: dict[int, object] = {}
     for c in db.query(Card).all():
         if c.account_id and c.account_id not in card_by_acct:
             card_by_acct[c.account_id] = c
@@ -4335,29 +4414,39 @@ async def cards_earn_summary(
 
         base_rate  = 1.0
         bonus_by_name: dict[str, float] = {}
+        has_auto_top = False
         if product:
             pid = product.id
+            product_objs_cache[pid] = product
             if pid not in products_cache:
                 rates = db.query(CardProductReward).filter_by(product_id=pid).all()
                 _b = 1.0
                 _bb: dict[str, float] = {}
+                _has_auto = False
                 for r in rates:
                     if r.is_base_rate:
                         _b = r.multiplier
                     elif r.points_category_id and r.points_category:
-                        _bb[r.points_category.name] = r.multiplier
-                products_cache[pid] = (_b, _bb)
-            base_rate, bonus_by_name = products_cache[product.id]
+                        rtype = getattr(r, 'reward_type', 'fixed') or 'fixed'
+                        if rtype == 'auto_top_category':
+                            _has_auto = True
+                            # skip — handled by calc_auto_top_category_points
+                        else:
+                            _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb, _has_auto)
+            base_rate, bonus_by_name, has_auto_top = products_cache[product.id]
 
         eco = ecosystems_map.get(eco_id) if eco_id else None
         acct_info[acct.id] = {
-            'base_rate':    base_rate,
+            'base_rate':     base_rate,
             'bonus_by_name': bonus_by_name,
-            'eco_id':       eco_id,
-            'eco':          eco,
-            'is_cash_back': eco.is_cash_back if eco else False,
-            'account_name': acct.account_name,
-            'mask':         acct.mask,
+            'eco_id':        eco_id,
+            'eco':           eco,
+            'is_cash_back':  eco.is_cash_back if eco else False,
+            'account_name':  acct.account_name,
+            'mask':          acct.mask,
+            'has_auto_top':  has_auto_top,
+            'product':       product,
         }
 
     # ── single aggregate query ───────────────────────────────────────────────
@@ -4388,6 +4477,9 @@ async def cards_earn_summary(
         info = acct_info.get(acct_id)
         if not info:
             continue
+        # auto_top_category accounts are handled separately below
+        if info.get('has_auto_top'):
+            continue
         amt  = abs(float(total or 0))
         rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
         pts  = amt * rate
@@ -4405,6 +4497,30 @@ async def cards_earn_summary(
             cat_key = pts_cat or 'Other'
             eco_totals[eco_id]['by_cat'][cat_key] = \
                 eco_totals[eco_id]['by_cat'].get(cat_key, 0.0) + pts
+
+    # ── auto_top_category accounts (e.g. Citi Custom Cash) ───────────────────
+    auto_top_acct_ids = [aid for aid, info in acct_info.items() if info.get('has_auto_top')]
+    for acct_id in auto_top_acct_ids:
+        info = acct_info[acct_id]
+        product = info.get('product')
+        eco_id  = info['eco_id']
+        if not product:
+            continue
+        try:
+            pts = calc_auto_top_category_points(db, acct_id, product, start, end)
+        except Exception:
+            pts = 0.0
+        if info['is_cash_back']:
+            cash_back_total += pts
+            cash_back_by_acct[acct_id] = cash_back_by_acct.get(acct_id, 0.0) + pts
+        elif eco_id:
+            if eco_id not in eco_totals:
+                eco_totals[eco_id] = {'points': 0.0, 'by_acct': {}, 'by_cat': {}}
+            eco_totals[eco_id]['points'] += pts
+            eco_totals[eco_id]['by_acct'][acct_id] = \
+                eco_totals[eco_id]['by_acct'].get(acct_id, 0.0) + pts
+            eco_totals[eco_id]['by_cat']['Auto-Optimized (5% Top Category)'] = \
+                eco_totals[eco_id]['by_cat'].get('Auto-Optimized (5% Top Category)', 0.0) + pts
 
     # ── shape output ─────────────────────────────────────────────────────────
     ecosystems_out = []
