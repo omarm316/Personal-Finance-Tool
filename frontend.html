@@ -7981,7 +7981,7 @@ function App(){
   const setPage=useCallback((p)=>navigate(p),[navigate]);
   const[categories,setCategories]=useState([]);
   const[banks,setBanks]=useState([]);
-  const[collapsed,setCollapsed]=useState(()=>{try{return localStorage.getItem('nav-collapsed')==='1';}catch(e){return false;}});
+  const[collapsed,setCollapsed]=useState(()=>{try{const v=localStorage.getItem('nav-collapsed');return v===null?true:v==='1';}catch(e){return true;}});
   const[refreshKey,setRefreshKey]=useState(0);
   const[refreshing,setRefreshing]=useState(false);
   const[pendingDupScan,setPendingDupScan]=useState(false);
@@ -8056,7 +8056,7 @@ function App(){
   return(
     <div style={{display:'flex',height:'100vh'}}>
       <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync} collapsed={collapsed} setCollapsed={setCollapsed}/>
-      <div className="main" style={{marginLeft:collapsed?56:200}}>
+      <div className="main" style={{marginLeft:collapsed?56:168}}>
         <div className="topbar">
           <div className="topbar-title">{titles[page]}</div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
