@@ -4461,7 +4461,13 @@ async def cards_earn_summary(
                         if pcard.product_id else None
                 eid = (pprod.ecosystem_id if pprod else None) or pcard.ecosystem_id
                 ch_eco = ecosystems_map.get(eid) if eid else None
-            ser = _serialize_challenge(ch, eco=ch_eco)
+            # Use per-card spend so the landing page shows the primary
+            # card's own eligible spend, not the multi-card aggregate.
+            spend_ov = (
+                _challenge_spend_for_card(db, ch, pcard.account_id)
+                if pcard and pcard.account_id else None
+            )
+            ser = _serialize_challenge(ch, eco=ch_eco, spend_override=spend_ov)
             ser['card_name']  = pcard.card_name  if pcard else None
             ser['last_four']  = pcard.last_four  if pcard else None
             ser['account_id'] = pcard.account_id if pcard else None
@@ -5241,7 +5247,7 @@ async def suggest_products_for_accounts(db: Session = Depends(get_db)):
                     'citi': ['citi', 'citibank'], 'discover': ['discover'],
                     'hilton': ['hilton'], 'hyatt': ['hyatt'], 'marriott': ['marriott'],
                     'capital_one': ['capital one'], 'fidelity': ['fidelity'],
-                    'best_buy': ['best buy'],
+                    'best_buy': ['best buy'], 'united': ['united'],
                 }
                 for key, patterns in issuer_map.items():
                     if key in pkey:
