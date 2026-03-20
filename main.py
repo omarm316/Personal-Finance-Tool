@@ -371,6 +371,17 @@ def infer_points_category(
     return None
 
 
+# Expense categories that are fees/charges and do NOT earn points
+_NON_EARNING_CATS: frozenset[str] = frozenset({
+    'Annual Fee',
+    'Late Fee',
+    'Card Interest Expense',
+    'Interest Charge',
+    'Finance Charges',
+    'Bank Fees',
+})
+
+
 def calc_earn_rate(
     bonus_by_name: dict[str, float],
     base_rate: float,
@@ -524,12 +535,17 @@ def _recalc_challenge(db, challenge):
 
     # Expenses are stored as negative amounts (Plaid sign is flipped on import).
     # Sum the absolute value by negating the sum of negative amounts.
+    # Exclude fee/charge categories that should not count toward challenge spend.
     q = db.query(_func.sum(Transaction.amount)).filter(
         Transaction.date >= effective_start,
         Transaction.date <= end_date,
         Transaction.action == 'Expense',
         Transaction.amount < 0,           # expenses stored as negative
         Transaction.is_excluded != True,  # exclude soft-deleted dupes
+        or_(
+            Transaction.points_category == None,
+            ~Transaction.points_category.in_(_NON_EARNING_CATS),
+        ),
     )
     if account_ids:
         q = q.filter(Transaction.account_id.in_(account_ids))
@@ -595,6 +611,10 @@ def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
         Transaction.amount < 0,
         Transaction.is_excluded != True,
         Transaction.account_id == account_id,
+        or_(
+            Transaction.points_category == None,
+            ~Transaction.points_category.in_(_NON_EARNING_CATS),
+        ),
     )
     cat_names = [lnk.category_name for lnk in challenge.category_links]
     if cat_names:
@@ -4460,9 +4480,25 @@ async def cards_earn_summary(
             Transaction.account_id.in_(acct_ids),
             Transaction.date >= start,
             Transaction.date <= end,
-            Transaction.action == 'Expense',
-            Transaction.amount < 0,
             Transaction.is_excluded != True,
+            or_(
+                # Purchases: expenses stored as negative amounts, exclude fee categories
+                and_(
+                    Transaction.action == 'Expense',
+                    Transaction.amount < 0,
+                    or_(
+                        Transaction.points_category == None,
+                        ~Transaction.points_category.in_(_NON_EARNING_CATS),
+                    ),
+                ),
+                # Returns: income with a spending points_category reduces points
+                and_(
+                    Transaction.action == 'Income',
+                    Transaction.amount > 0,
+                    Transaction.points_category != None,
+                    ~Transaction.points_category.in_(_NON_EARNING_CATS),
+                ),
+            ),
         )
         .group_by(Transaction.account_id, Transaction.points_category)
         .all()
@@ -4480,7 +4516,7 @@ async def cards_earn_summary(
         # auto_top_category accounts are handled separately below
         if info.get('has_auto_top'):
             continue
-        amt  = abs(float(total or 0))
+        amt  = max(0.0, -(float(total or 0)))   # net: expenses negative, returns positive → net spend ≥ 0
         rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
         pts  = amt * rate
         eco_id = info['eco_id']
@@ -5562,7 +5598,12 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         'category': t.category_manual or t.category_auto,
         'points_category': t.points_category,
         'action': t.action,
-        'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
+        'earn_rate': (
+            calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
+            if t.action == 'Expense' and t.amount < 0
+               and t.points_category not in _NON_EARNING_CATS
+            else 0
+        ),
     } for t in txns]
 
     # Spending grouped by points_category — uses the earn-rate waterfall.
@@ -5577,15 +5618,29 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
-            Transaction.amount < 0,      # expenses are stored negative
-            Transaction.action == 'Expense',
             Transaction.is_excluded != True,   # exclude soft-deleted (pending→posted dupes)
+            or_(
+                and_(
+                    Transaction.action == 'Expense',
+                    Transaction.amount < 0,
+                    or_(
+                        Transaction.points_category == None,
+                        ~Transaction.points_category.in_(_NON_EARNING_CATS),
+                    ),
+                ),
+                and_(
+                    Transaction.action == 'Income',
+                    Transaction.amount > 0,
+                    Transaction.points_category != None,
+                    ~Transaction.points_category.in_(_NON_EARNING_CATS),
+                ),
+            ),
         )
         .group_by(Transaction.points_category)
         .all()
     )
     for pts_cat_name, total, count in pts_cat_spend:
-        amt = round(abs(total or 0), 2)  # abs: negative stored → positive display
+        amt = round(max(0.0, -(float(total or 0))), 2)  # net: expenses negative, returns positive → net spend ≥ 0
         rate = calc_earn_rate(bonus_by_name, base_rate, pts_cat_name, cat_parent_map)
         pts = round(amt * rate, 0)
         label = pts_cat_name or 'Other'
