@@ -795,9 +795,9 @@ CHALLENGE_TEMPLATES = [
      "Activate by 3/14. Same categories as Freedom."),
 
     # ── Marriott Bonvoy Brilliant ─────────────────────────────────────────
-    ("marriott_bonvoy_brilliant", "Free Night Certificate (annual $60K spend)",
-     "annual_threshold", "benefit", 1, None, 60000, "annual",
-     "Earn one Free Night Award (up to 85K points). Resets Jan 1."),
+    ("marriott_bonvoy_brilliant", "Earned Choice Award",
+     "annual_threshold", "flat", 0, None, 60000, "annual",
+     "Choose one: 5 Nightly Upgrade Awards, Free Night up to 85K pts, or 50K bonus points. Resets Jan 1."),
 
     # ── World of Hyatt ────────────────────────────────────────────────────
     ("world_of_hyatt", "Free Night Certificate (annual $15K spend)",
@@ -1480,17 +1480,25 @@ def seed_card_products(session):
             ("Free Night Cert (after $15k)", 0, "annual", "Hyatt"),
         ], {"_base": 1, "Dining": 1, "Spa & Salon": 1, "Hyatt": 3}),
 
-        ("marriott_bonvoy_brilliant", "Marriott Bonvoy Brilliant", "Marriott Bonvoy", "active", 650, [
-            ("$300 Marriott Credit", 300, "annual", "Marriott"),
-            ("Platinum Elite Status", 0, "annual", None),
-            ("Free Night Cert (up to 85k pts)", 0, "annual", "Marriott"),
-            ("$100 Dining Credit", 100, "annual", "Dining"),
-            ("Priority Pass Select", 0, "annual", None),
-        ], {"_base": 2, "Dining": 1, "Airlines": 1, "Marriott": 4}),
+        ("marriott_bonvoy_brilliant", "Marriott Bonvoy Brilliant® American Express® Card", "Marriott Bonvoy", "active", 650, [
+            ("$25/mo Dining Credit ($300/yr; statement credit at restaurants worldwide)", 25, "monthly", "Dining"),
+            ("Free Night Award (annual, up to 85K Bonvoy pts; issued on renewal)", 0, "annual", "Hotels"),
+            ("Marriott Bonvoy Platinum Elite Status", 0, "annual", None),
+            ("25 Elite Night Credits", 0, "annual", None),
+            ("Priority Pass Select (unlimited visits + 2 guests)", 0, "annual", None),
+            ("Global Entry/TSA PreCheck Credit (every 4 yrs; up to $120)", 120, "annual", None),
+            ("$100 On-Property Credit (St. Regis/Ritz-Carlton; per qualifying 2-night+ stay)", 100, "annual", "Hotels"),
+            ("Cell Phone Protection (up to $800/claim, $50 deductible)", 0, "annual", None),
+        ], {"_base": 2, "Dining": 1, "Airlines": 1, "Hotels": 4}),
 
-        ("marriott_bonvoy_boundless", "Marriott Bonvoy Boundless", "Marriott Bonvoy", "not_held", 95, [
-            ("Free Night Cert (up to 35k pts)", 0, "annual", "Marriott"),
-        ], {"_base": 2, "Marriott": 4}),
+        ("marriott_bonvoy_boundless", "Marriott Bonvoy Boundless® Credit Card", "Marriott Bonvoy", "active", 95, [
+            ("Anniversary Free Night Award (up to 35K pts; can top off with 25K more)", 0, "annual", "Marriott"),
+            ("Marriott Bonvoy Silver Elite Status", 0, "annual", None),
+            ("15 Elite Night Credits", 0, "annual", None),
+            ("DashPass Membership (1 yr complimentary; activate by 12/31/2027)", 0, "annual", "Food Delivery"),
+        # Earning: 6x Marriott (2 base + 4 bonus); 3x Groceries/Gas Stations/Dining (2 base + 1 bonus,
+        # combined $6,000/yr cap across the three categories); 2x base on everything else.
+        ], {"_base": 2, "Marriott": 4, "Groceries": 1, "Gas Stations": 1, "Dining": 1}),
 
         ("citi_custom_cash", "Citi Custom Cash® Card", "Citi ThankYou", "active", 0, [
             ("Citi Travel Portal Bonus (5x Hotels/Cars/Attractions)", 0, "annual", None),
