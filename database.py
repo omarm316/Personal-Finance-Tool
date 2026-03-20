@@ -832,6 +832,17 @@ CHALLENGE_TEMPLATES = [
     ("united_explorer", "10K Mile Award Discount ($20K spend)",
      "annual_threshold", "flat", 10000, None, 20000, "annual",
      "Earn a 10,000-mile anniversary award discount after $20,000 in calendar-year purchases."),
+
+    # ── Marriott Bonvoy Boundless ──────────────────────────────────────────
+    ("marriott_bonvoy_boundless", "$50 Airline Credit (H1)",
+     "annual_threshold", "flat", 50, None, 250, "semi-annual",
+     "$50 statement credit after $250 in direct airline purchases Jan 1–Jun 30."),
+    ("marriott_bonvoy_boundless", "$50 Airline Credit (H2)",
+     "annual_threshold", "flat", 50, None, 250, "semi-annual",
+     "$50 statement credit after $250 in direct airline purchases Jul 1–Dec 31."),
+    ("marriott_bonvoy_boundless", "Gold Elite Status Upgrade",
+     "annual_threshold", "flat", 0, None, 35000, "annual",
+     "Marriott Bonvoy Gold Elite status after $35,000 in calendar-year spend."),
 ]
 
 
