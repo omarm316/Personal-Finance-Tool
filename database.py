@@ -807,6 +807,11 @@ CHALLENGE_TEMPLATES = [
      "annual_threshold", "benefit", 1, None, 30000, "annual",
      "Earn second Cat 1-4 certificate when annual spend hits $30K."),
 
+    # ── Delta SkyMiles Gold ───────────────────────────────────────────────
+    ("delta_gold", "$200 Delta Flight Credit ($10K calendar-year spend)",
+     "annual_threshold", "flat", 200, None, 10000, "annual",
+     "Earn a $200 Delta Flight Credit after $10,000 in calendar-year purchases. Resets every Jan 1."),
+
     # ── United Quest ──────────────────────────────────────────────────────
     ("united_quest", "Second 10,000-Mile Anniversary Award Discount ($20K spend)",
      "annual_threshold", "flat", 10000, None, 20000, "annual",
@@ -1503,6 +1508,25 @@ def seed_card_products(session):
 
         ("capital_one_savor_one", "Capital One SavorOne", "Cash Back", "not_held", 0, [],
          {"_base": 1, "Dining": 2, "Groceries": 2, "Online Shopping": 2}),
+
+        ("delta_gold", "Delta SkyMiles® Gold American Express Card", "Delta SkyMiles", "active", 150, [
+            # Auto-trigger benefits — no spend required
+            ("Free First Checked Bag (cardmember + up to 8 companions)", 0, "annual", "Delta"),
+            ("Zone 5 Priority Boarding", 0, "annual", None),
+            ("20% Inflight Discount (food & beverages, excl. Wi-Fi)", 0, "annual", "Delta"),
+            ("TakeOff 15 — 15% Off Award Flights", 0, "annual", None),
+            ("$100 Delta Stays Credit (prepaid hotels/vacation rentals via delta.com/stays)", 100, "annual", "Hotels"),
+            ("Uber One Credit (up to 6 months; promotional)", 9.99, "monthly", "Rideshare: Uber"),
+        ], {
+            # Base 1x on all purchases
+            "_base": 1,
+            # Delta purchases (direct): 2x total → 1 additional above base
+            "Delta": 1,
+            # Dining: 2x total → 1 additional above base
+            "Dining": 1,
+            # Groceries: 2x total → 1 additional above base
+            "Groceries": 1,
+        }),
 
         ("united_quest", "United Quest℠ Card", "United MileagePlus", "active", 350, [
             # Dollar credits
