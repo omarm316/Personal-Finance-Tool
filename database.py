@@ -1309,7 +1309,7 @@ def seed_points_ecosystems(session):
         ("Marriott Bonvoy", "Marriott Bonvoy Points", "Hotel", 0.7, False, "Standard night avg"),
         ("World of Hyatt", "World of Hyatt Points", "Hotel", 1.7, False, "Standard night avg"),
         ("IHG Rewards", "IHG One Rewards Points", "Hotel", 0.5, False, "Standard night avg"),
-        ("Delta SkyMiles", "Delta SkyMiles", "Airline", 1.0, False, "Domestic economy avg"),
+        ("Delta SkyMiles", "Delta SkyMiles", "Airline", 1.2, False, "Domestic economy avg"),
         ("United MileagePlus", "United MileagePlus Miles", "Airline", 1.0, False, "Domestic economy avg"),
         ("AA AAdvantage", "AAdvantage Miles", "Airline", 1.0, False, "Domestic economy avg"),
         ("Southwest RR", "Rapid Rewards Points", "Airline", 1.0, False, "Wanna Get Away avg"),
@@ -1336,12 +1336,18 @@ def seed_points_ecosystems(session):
         else:
             # Always refresh descriptive/factual fields.
             # conservative_cpp is updated from seed (floor value from card issuer data).
-            # your_cpp is intentionally NOT touched — that's the user's personal valuation.
+            # your_cpp is intentionally NOT touched — that's the user's personal valuation,
+            # EXCEPT when it still equals the old default (meaning user never customised it),
+            # in which case we bump it to the new seed value.
             existing.currency_name = currency
             existing.eco_type = eco_type
             existing.is_cash_back = is_cash
+            old_cons = float(existing.conservative_cpp or 0)
             existing.conservative_cpp = cons_cpp
             existing.conservative_basis = basis
+            # Bump your_cpp if user hasn't diverged from the previous conservative default.
+            if abs(float(existing.your_cpp or 0) - old_cons) < 0.001:
+                existing.your_cpp = cons_cpp
     session.commit()
 
 

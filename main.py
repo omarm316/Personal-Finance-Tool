@@ -4522,6 +4522,20 @@ async def cards_earn_summary(
             eco_totals[eco_id]['by_cat']['Auto-Optimized (5% Top Category)'] = \
                 eco_totals[eco_id]['by_cat'].get('Auto-Optimized (5% Top Category)', 0.0) + pts
 
+    # ── ensure all linked non-cash ecosystems appear (even with $0 earned) ───
+    # This guarantees Delta SkyMiles, United MileagePlus, etc. always show on
+    # the landing page as long as the user has a card linked to that ecosystem.
+    for acct_id, info in acct_info.items():
+        eco_id = info.get('eco_id')
+        if not eco_id:
+            continue
+        if info.get('is_cash_back'):
+            continue
+        if eco_id not in eco_totals:
+            eco_totals[eco_id] = {'points': 0.0, 'by_acct': {acct_id: 0.0}, 'by_cat': {}}
+        elif acct_id not in eco_totals[eco_id]['by_acct']:
+            eco_totals[eco_id]['by_acct'][acct_id] = 0.0
+
     # ── shape output ─────────────────────────────────────────────────────────
     ecosystems_out = []
     for eco_id, data in eco_totals.items():
