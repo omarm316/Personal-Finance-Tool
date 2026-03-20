@@ -819,6 +819,19 @@ CHALLENGE_TEMPLATES = [
     ("united_quest", "2 Economy Plus Seat Upgrades ($40K spend)",
      "annual_threshold", "benefit", 2, None, 40000, "annual",
      "Earn 2 Economy Plus seat upgrade certificates after $40K calendar-year spend."),
+
+    # ── Atmos Ascent ──────────────────────────────────────────────────────
+    ("atmos_ascent", "Annual Companion Fare",
+     "annual_threshold", "flat", 99, None, 6000, "annual",
+     "$99 companion fare (+taxes from $23) for saver/main cabin within North America including Hawaii"),
+
+    # ── United Explorer ───────────────────────────────────────────────────
+    ("united_explorer", "$100 United TravelBank Credit ($10K spend)",
+     "annual_threshold", "flat", 100, None, 10000, "annual",
+     "Earn a $100 United TravelBank credit after $10,000 in calendar-year purchases."),
+    ("united_explorer", "10K Mile Award Discount ($20K spend)",
+     "annual_threshold", "flat", 10000, None, 20000, "annual",
+     "Earn a 10,000-mile anniversary award discount after $20,000 in calendar-year purchases."),
 ]
 
 
@@ -1270,6 +1283,7 @@ def seed_points_categories(session):
         ("Southwest",              30, "Airlines"),
         ("JetBlue",                31, "Airlines"),
         ("Alaska Airlines",        32, "Airlines"),
+        ("Hawaiian Airlines",      33, "Airlines"),
         # ── L2: rideshare brands → Ground Transportation ──────────────────
         ("Rideshare: Lyft",        14, "Ground Transportation"),
         ("Rideshare: Uber",        15, "Ground Transportation"),
@@ -1286,6 +1300,10 @@ def seed_points_categories(session):
         ("Marshalls",              21, None),
         ("West Elm",               22, None),
         ("C&B",                    23, None),
+        # ── L2: EV / utilities → Ground Transportation ────────────────────
+        ("EV Charging",            40, "Ground Transportation"),
+        # ── L2: cable → Streaming ─────────────────────────────────────────
+        ("Cable",                  41, "Streaming"),
     ]
     for name, order, parent in cats:
         existing = session.query(PointsCategory).filter_by(name=name).first()
@@ -1324,6 +1342,7 @@ def seed_points_ecosystems(session):
         ("Target Circle", "Target Circle Earnings", "Cash", 1.0, True, "1:1 at Target"),
         ("Costco Rewards", "Costco Cash Back", "Cash", 1.0, True, "Annual check"),
         ("Apple Cash", "Apple Cash", "Cash", 1.0, True, "1:1 cash value"),
+        ("Atmos Rewards", "Atmos Rewards Points", "Airline", 1.5, False, "TPG valuation"),
     ]
     for name, currency, eco_type, cons_cpp, is_cash, basis in ecosystems:
         existing = session.query(PointsEcosystem).filter_by(name=name).first()
@@ -1565,6 +1584,74 @@ def seed_card_products(session):
             "Dining": 1,
             "Streaming": 1,
         }),
+
+        # Business card — $0 annual fee; earns 2x Amex MR on all purchases up to $50K/year (then 1x).
+        # Foreign transaction fee: 2.7%. No bonus categories. Welcome offer: 15K MR after $3K spend/3 months.
+        ("amex_blue_business_plus", "The Blue Business® Plus Credit Card from American Express (Business)",
+         "Amex MR", "not_held", 0, [
+            # Amex Venue Collection: 10% back on concessions at participating stadiums/arenas,
+            # up to $250 back per calendar year. Available to all US Amex cardholders.
+            ("Amex Venue Collection Concessions Credit (10% back, up to $250/yr)", 250, "annual", None,
+             "10% back on food & beverage concessions at Amex Venue Collection stadiums/arenas. Max $250/yr."),
+            ("Extended Warranty Protection", 0, "annual", None,
+             "Extends manufacturer warranty by up to 1 additional year on warranties of 5 years or less."),
+            ("Purchase Protection", 0, "annual", None,
+             "Covers eligible purchases against theft/accidental damage for 90 days. Up to $1,000/occurrence, $50,000/year."),
+            ("Employee Cards at No Additional Cost", 0, "annual", None,
+             "Add employee cards free; all spend earns 2x MR and counts toward the $50K annual cap."),
+        ], {
+            # Flat 2x Membership Rewards on all eligible purchases up to $50,000/calendar year.
+            # Drops to 1x above $50K. No bonus categories — base rate IS the 2x rate.
+            "_base": 2,
+        }),
+
+        ("atmos_ascent", "Atmos Rewards Ascent Visa Signature",
+         "Atmos Rewards", "active", 95, [
+            ("Free First Checked Bag", 0, "annual", None,
+             "Cardholder + up to 6 companions on same reservation; Alaska/Hawaiian flights; must pay with card"),
+            ("Preferred Boarding", 0, "annual", None,
+             "Cardholder + up to 6 companions on same reservation"),
+            ("Inflight Purchase Rebate", 0, "annual", None,
+             "20% back on food, beverages, Wi-Fi on Alaska/Hawaiian flights"),
+            ("Alaska Lounge+ Discount", 100, "annual", None,
+             "Membership reduced from $795 to $695"),
+        ], {
+            "_base": 1,
+            "Alaska Airlines": 2,    # total 3x → additional 2x above base
+            "Hawaiian Airlines": 2,  # total 3x → additional 2x above base
+            "Gas Stations": 1,       # total 2x
+            "EV Charging": 1,        # total 2x
+            "Cable": 1,              # total 2x
+            "Streaming": 1,          # total 2x
+            "Ground Transportation": 1,  # total 2x (Transit / Rideshare)
+        }),
+
+        ("united_explorer", "United℠ Explorer Card",
+         "United MileagePlus", "active", 150, [
+            ("Free First Checked Bag", 0, "annual", None,
+             "Cardholder + 1 companion; United-operated flights; must pay with card"),
+            ("Priority Boarding", 0, "annual", None, None),
+            ("United Club Passes", 0, "annual", None,
+             "2 one-time passes per year; no guest access"),
+            ("Global Entry / TSA PreCheck / NEXUS", 120, "annual", None,
+             "Every 4 years in practice — statement credit on application fee"),
+            ("25% Back on United Inflight", 0, "annual", None,
+             "Food, beverages, Wi-Fi on United-operated flights"),
+            ("United Hotels Credit", 100, "annual", "Hotels",
+             "Up to $50/stay, max 2 stays/year; prepaid via United Hotels portal"),
+            ("Rideshare Credit", 5, "monthly", "Ground Transportation",
+             "Requires annual enrollment"),
+            ("Avis/Budget Rental Credit", 50, "annual", "Car Rental",
+             "Up to $25/rental, max 2 rentals/year via cars.united.com"),
+            ("JSX Flight Credit", 100, "annual", "Airlines", None),
+            ("Instacart Credit", 10, "monthly", None,
+             "Through 12/31/2027"),
+        ], {
+            "_base": 1,
+            "United Purchases": 1,  # total 2x
+            "Dining": 1,            # total 2x
+            "Hotels": 1,            # total 2x (direct hotel purchases)
+        }),
     ]
 
     for product_key, card_name, eco_name, status, annual_fee, benefits, rates in products:
@@ -1611,13 +1698,16 @@ def seed_card_products(session):
         # when benefits list is empty — use explicit None sentinel if you want to clear)
         if benefits:
             session.query(CardBenefit).filter_by(product_id=product.id).delete()
-            for ben_name, amount, frequency, trigger in benefits:
+            for ben_tuple in benefits:
+                ben_name, amount, frequency, trigger = ben_tuple[:4]
+                ben_notes = ben_tuple[4] if len(ben_tuple) > 4 else None
                 session.add(CardBenefit(
                     product_id=product.id,
                     benefit_name=ben_name,
                     amount=amount,
                     reset_frequency=frequency,
                     trigger_category=trigger,
+                    notes=ben_notes,
                 ))
 
     session.commit()
