@@ -8,53 +8,54 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@600;700;800&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:168px;--bg:#ffffff;--sidebar-bg:#ffffff;--sidebar-text:#64748b;
-  --sidebar-hover-bg:#f1f5f9;--sidebar-active-bg:#eff6ff;--sidebar-active-color:#2563eb;
+  --sidebar-w:168px;--bg:#f7f8fb;--sidebar-bg:#0f172a;--sidebar-text:#94a3b8;
+  --sidebar-hover-bg:rgba(255,255,255,0.07);--sidebar-active-bg:rgba(96,165,250,0.14);--sidebar-active-color:#60a5fa;
   --card-bg:#ffffff;--border:#e2e8f0;--text-primary:#0f172a;--text-secondary:#64748b;--text-muted:#94a3b8;
   --blue:#3b82f6;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
-  --radius:12px;--shadow:0 2px 8px rgba(0,0,0,0.07),0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.1);
+  --radius:14px;--shadow:0 1px 3px rgba(0,0,0,0.05),0 1px 2px rgba(0,0,0,0.03);--shadow-md:0 8px 24px rgba(0,0,0,0.1);
 }
 html,body,#root{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-primary)}
 body{overflow:hidden}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--border);box-shadow:none;transition:width 0.22s ease;overflow:hidden}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:none;box-shadow:2px 0 12px rgba(0,0,0,0.15);transition:width 0.22s ease;overflow:hidden}
 .sidebar.collapsed{width:56px}
-.sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;min-height:72px}
+.sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px;min-height:72px}
 .sidebar.collapsed .sidebar-logo{justify-content:center;padding:18px 0 16px}
-.sidebar-logo h1{font-size:15px;font-weight:700;color:var(--text-primary);letter-spacing:-0.3px}
-.sidebar-logo p{font-size:11px;color:var(--text-muted);margin-top:2px}
-.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center}
+.sidebar-logo h1{font-size:15px;font-weight:700;color:#f1f5f9;letter-spacing:-0.3px}
+.sidebar-logo p{font-size:11px;color:rgba(148,163,184,0.7);margin-top:2px}
+.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--sidebar-text);padding:4px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center}
 .sidebar.collapsed .sidebar-toggle{margin-left:0}
-.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
+.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:#e2e8f0}
 .sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
 .sidebar.collapsed .sidebar-nav{padding:12px 6px}
 .nav-section-label{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;padding:12px 10px 4px;white-space:nowrap;overflow:hidden}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;white-space:nowrap;overflow:hidden}
 .sidebar.collapsed .nav-item{justify-content:center;padding:9px 0;gap:0}
-.nav-item:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
+.nav-item:hover{background:var(--sidebar-hover-bg);color:#e2e8f0}
 .nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-color);font-weight:600}
 .sidebar.collapsed .nav-item.active{box-shadow:none}
 .nav-icon{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
-.sidebar-footer{padding:16px 10px;border-top:1px solid var(--border);overflow:hidden}
+.sidebar-footer{padding:16px 10px;border-top:1px solid rgba(255,255,255,0.08);overflow:hidden}
 .sidebar.collapsed .sidebar-footer{padding:12px 6px}
 .sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease;flex:1;min-width:0}
-.topbar{background:#ffffff;border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar{background:rgba(247,248,251,0.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:600;color:var(--text-primary)}
 .content{flex:1;overflow-y:auto;padding:24px 20px}
-.card{background:#ffffff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.card{background:var(--card-bg);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);transition:box-shadow 0.2s ease,transform 0.2s ease}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
-.metric-card{padding:18px 20px}
+.metric-card{padding:20px 22px;transition:transform 0.2s ease,box-shadow 0.2s ease}
+.metric-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .metric-label{font-size:12px;font-weight:600;letter-spacing:0;color:var(--text-primary);margin-bottom:8px}
 .metric-value{font-size:22px;font-weight:700;font-family:'Inter Tight',sans-serif;letter-spacing:-0.5px;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
-.btn-primary{background:var(--blue);color:#fff}
-.btn-primary:hover{background:#2563eb}
+.btn-primary{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,0.3)}
+.btn-primary:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 2px 6px rgba(37,99,235,0.4)}
 .btn-secondary{background:#f3f4f6;color:var(--text-primary);border:1px solid var(--border)}
 .btn-secondary:hover{background:#e9eaec}
 .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
@@ -63,21 +64,21 @@ body{overflow:hidden}
 .btn-ghost{background:transparent;color:var(--text-secondary)}
 .btn-ghost:hover{background:#f3f4f6}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
-.btn-outline-white{background:transparent;color:var(--text-secondary);border:1px solid var(--border)}
-.btn-outline-white:hover{background:var(--sidebar-hover-bg);border-color:var(--text-muted)}
+.btn-outline-white{background:transparent;color:var(--sidebar-text);border:1px solid rgba(255,255,255,0.15)}
+.btn-outline-white:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.25)}
 .filters{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;width:200px}
-.search-input:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
-.filter-select{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa;cursor:pointer}
+.search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--card-bg);width:200px;transition:border-color 0.15s,box-shadow 0.15s}
+.search-input:focus{border-color:var(--blue);background:var(--card-bg);box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
+.filter-select{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--card-bg);cursor:pointer;transition:border-color 0.15s}
 .filter-label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
-.date-input{border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:#fafafa}
+.date-input{border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--card-bg);transition:border-color 0.15s}
 .filter-count{margin-left:auto;font-size:12px;color:var(--text-muted);white-space:nowrap}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
-thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;background:transparent}
+thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:2px solid var(--border);white-space:nowrap;background:var(--card-bg);position:sticky;top:0;z-index:2}
 tbody tr{border-bottom:1px solid #f3f4f6;transition:background 0.1s}
 tbody tr:last-child{border-bottom:none}
-tbody tr:hover{background:#f9faff}
+tbody tr:hover{background:#f0f4ff}
 tbody tr.row-locked{background:#eff6ff}
 tbody tr.row-locked:hover{background:#dbeafe}
 tbody tr.row-review{background:#fffbeb}
@@ -87,7 +88,7 @@ tbody tr.row-excluded{opacity:0.45;background:#f9fafb}
 tbody tr.row-excluded:hover{background:#f3f4f6}
 tbody tr.row-excluded td{text-decoration:line-through;color:var(--text-muted)}
 td{padding:11px 14px;font-size:13.5px}
-.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap;letter-spacing:0.1px}
 .badge-transfer{background:#f3f4f6;color:#6b7280}
 .badge-income{background:#f0fdf4;color:#059669}
 .badge-expense{background:#fef2f2;color:#dc2626}
@@ -103,14 +104,14 @@ td{padding:11px 14px;font-size:13.5px}
 .toast.error{border-left:3px solid var(--red)}
 @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .review-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;display:flex;align-items:center;justify-content:center}
-.review-panel{background:#fff;border-radius:16px;padding:28px;width:480px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.review-panel{background:var(--card-bg);border-radius:18px;padding:30px;width:480px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,0.18),0 8px 24px rgba(0,0,0,0.08)}
 .review-field{margin-bottom:16px}
 .review-field label{font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px}
-.review-field select,.review-field input{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit;outline:none}
+.review-field select,.review-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:14px;font-family:inherit;outline:none;background:var(--bg);transition:border-color 0.15s,box-shadow 0.15s}
 .review-field select:focus,.review-field input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
 .review-actions{display:flex;gap:8px;margin-top:24px;justify-content:flex-end}
 .loading{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);font-size:14px;gap:10px}
-.spinner{width:18px;height:18px;border:2px solid #e5e7eb;border-top-color:var(--blue);border-radius:50%;animation:spin 0.7s linear infinite}
+.spinner{width:20px;height:20px;border:2.5px solid #e5e7eb;border-top-color:var(--blue);border-radius:50%;animation:spin 0.7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);gap:8px}
 .empty-icon{font-size:36px;opacity:0.4}
@@ -122,17 +123,18 @@ td{padding:11px 14px;font-size:13.5px}
 .settings-label{font-size:14px;font-weight:500}
 .settings-desc{font-size:12px;color:var(--text-muted);margin-top:2px}
 .bank-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:20px;padding:3px 10px;font-size:11px;color:#059669}
-.content::-webkit-scrollbar{width:6px}
+.content::-webkit-scrollbar{width:5px}
 .content::-webkit-scrollbar-track{background:transparent}
-.content::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
-.sel-pill{display:flex;gap:2px;background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:4px;height:34px;box-sizing:border-box;align-items:center}
+.content::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:5px}
+.content::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+.sel-pill{display:flex;gap:2px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:4px;height:34px;box-sizing:border-box;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
 .sel-pill button{border:none;cursor:pointer;border-radius:7px;padding:3px 12px;font-size:12px;font-weight:500;height:26px;font-family:inherit;transition:background 0.15s,color 0.15s}
-.sel-drop{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;background:#ffffff;color:var(--text-primary);cursor:pointer;height:34px;box-sizing:border-box;font-family:inherit;outline:none}
+.sel-drop{font-size:12px;border:1px solid var(--border);border-radius:8px;padding:4px 8px;background:var(--card-bg);color:var(--text-primary);cursor:pointer;height:34px;box-sizing:border-box;font-family:inherit;outline:none;transition:border-color 0.15s}
 .sel-drop:focus{border-color:var(--sidebar-active-color);box-shadow:0 0 0 2px rgba(37,99,235,0.12)}
 /* ── Mobile bottom nav bar ────────────────────────────────────────────────── */
 .mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;
   background:var(--card-bg);border-top:1px solid var(--border);z-index:200;
-  justify-content:space-around;align-items:stretch;}
+  justify-content:space-around;align-items:stretch;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
 .mobile-nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:3px;border:none;background:none;cursor:pointer;
   color:var(--text-muted);font-size:9px;font-weight:500;padding:6px 0;
@@ -314,12 +316,12 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
               <button className="btn btn-sm btn-outline-white" style={{justifyContent:'center',padding:'7px 0',width:'100%'}} onClick={onSync} title="Sync">↻</button>
             </div>
           :<>
-            <button onClick={toggleBanks} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 10px 6px',color:'var(--text-muted)'}}>
+            <button onClick={toggleBanks} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',background:'none',border:'none',cursor:'pointer',padding:'0 10px 6px',color:'rgba(148,163,184,0.7)'}}>
               <span style={{fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:1}}>Connected Banks</span>
               <span style={{fontSize:11,lineHeight:1,transition:'transform 0.18s',display:'inline-block',transform:banksOpen?'rotate(0deg)':'rotate(-90deg)'}}>{banksOpen?'▾':'▾'}</span>
             </button>
             {banksOpen&&(
-              uniqueBanks.length===0?<div style={{fontSize:12,color:'var(--sidebar-text)',padding:'4px 10px'}}>No banks connected</div>
+              uniqueBanks.length===0?<div style={{fontSize:12,color:'rgba(148,163,184,0.5)',padding:'4px 10px'}}>No banks connected</div>
                 :uniqueBanks.map((b,i)=><div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.institution_name}</span></div>)
             )}
             <div style={{display:'flex',gap:6,marginTop:banksOpen?12:8}}>
@@ -4977,15 +4979,19 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
       {loading?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>:data&&(
         <>
           {/* Hero stat */}
-          <div style={{textAlign:'center',padding:'28px 20px 32px',marginBottom:24,background:'var(--bg)',borderRadius:16,border:`2px solid ${ecoColor}22`}}>
-            <div style={{fontSize:48,fontWeight:800,fontFamily:'Inter',color:ecoColor,lineHeight:1,letterSpacing:'-1px'}}>
+          <div style={{textAlign:'center',padding:'36px 24px 40px',marginBottom:24,borderRadius:20,
+            background:`linear-gradient(135deg,${ecoColor}0a 0%,${ecoColor}04 50%,transparent 100%)`,
+            border:`1px solid ${ecoColor}18`,position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-40,right:-40,width:120,height:120,borderRadius:'50%',background:`${ecoColor}06`}}/>
+            <div style={{position:'absolute',bottom:-30,left:-30,width:80,height:80,borderRadius:'50%',background:`${ecoColor}05`}}/>
+            <div style={{fontSize:52,fontWeight:800,fontFamily:'Inter Tight',color:ecoColor,lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
               {data.total_points.toLocaleString()}
             </div>
-            <div style={{fontSize:14,color:'var(--text-muted)',marginTop:6}}>{data.currency_name}</div>
-            <div style={{fontSize:22,fontWeight:600,fontFamily:'Inter',color:'var(--text-primary)',marginTop:10}}>
+            <div style={{fontSize:14,color:'var(--text-muted)',marginTop:8,position:'relative'}}>{data.currency_name}</div>
+            <div style={{fontSize:24,fontWeight:700,fontFamily:'Inter Tight',color:'var(--text-primary)',marginTop:12,letterSpacing:'-0.5px',position:'relative'}}>
               ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
             </div>
-            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>estimated value</div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:3,position:'relative'}}>estimated value</div>
           </div>
 
           {/* Points by category */}
@@ -4998,8 +5004,8 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                     <span style={{fontWeight:500}}>{cat.category||'Other'}</span>
                     <span style={{fontFamily:'Inter',color:'var(--text-muted)'}}>{cat.points.toLocaleString()} pts <span style={{color:'var(--text-muted)',fontSize:11}}>({cat.pct}%)</span></span>
                   </div>
-                  <div style={{height:6,borderRadius:6,background:'var(--border)',overflow:'hidden'}}>
-                    <div style={{height:'100%',borderRadius:6,width:`${Math.round(cat.points/maxCatPts*100)}%`,background:ecoColor,transition:'width 0.6s ease'}}/>
+                  <div style={{height:7,borderRadius:7,background:'var(--border)',overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:7,width:`${Math.round(cat.points/maxCatPts*100)}%`,background:`linear-gradient(90deg,${ecoColor},${ecoColor}cc)`,transition:'width 0.6s ease'}}/>
                   </div>
                 </div>
               ))}
@@ -5387,31 +5393,37 @@ function CardsPage({toast}){
                       const col=ecoColor(eco.name);
                       return(
                         <div key={eco.id}
-                          style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:14,background:'var(--bg)',
-                            border:`1px solid ${col}33`,borderLeft:`4px solid ${col}`,cursor:'pointer',transition:'background 0.15s'}}
+                          style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:16,
+                            background:`linear-gradient(135deg,${col}08 0%,${col}03 100%)`,
+                            border:`1px solid ${col}22`,cursor:'pointer',transition:'all 0.2s ease',
+                            boxShadow:`0 1px 3px ${col}10`}}
                           onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
-                          onMouseEnter={e=>{e.currentTarget.style.background=`${col}08`;}}
-                          onMouseLeave={e=>{e.currentTarget.style.background='var(--bg)';}}>
+                          onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow=`0 6px 20px ${col}18`;e.currentTarget.style.borderColor=`${col}44`;}}
+                          onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow=`0 1px 3px ${col}10`;e.currentTarget.style.borderColor=`${col}22`;}}>
+                          <div style={{width:4,alignSelf:'stretch',borderRadius:4,background:`linear-gradient(180deg,${col},${col}88)`,marginRight:4}}/>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:16,fontWeight:700,color:col}}>{eco.name}</div>
                             <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
                           </div>
                           <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:28,fontWeight:800,fontFamily:'Inter',letterSpacing:'-0.5px',lineHeight:1}}>{eco.points_earned.toLocaleString()}</div>
-                            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:4}}>≈ ${eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                            <div style={{fontSize:30,fontWeight:800,fontFamily:'Inter Tight',letterSpacing:'-1px',lineHeight:1,color:col}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:5}}>≈ ${eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
-                          <div style={{color:'var(--text-muted)',fontSize:20,marginLeft:4}}>›</div>
+                          <div style={{color:col,fontSize:18,marginLeft:4,opacity:0.5}}>›</div>
                         </div>
                       );
                     })}
                     {cashTotal>0&&(
-                      <div style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:14,background:'var(--bg)',border:'1px solid #d9770633',borderLeft:'4px solid #d97706'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:16,
+                        background:'linear-gradient(135deg,#d9770608 0%,#d9770603 100%)',border:'1px solid #d9770622',
+                        boxShadow:'0 1px 3px #d9770610'}}>
+                        <div style={{width:4,alignSelf:'stretch',borderRadius:4,background:'linear-gradient(180deg,#d97706,#d9770688)',marginRight:4}}/>
                         <div style={{flex:1}}>
                           <div style={{fontSize:16,fontWeight:700,color:'#d97706'}}>Cash Back</div>
                           <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>Earned this period</div>
                         </div>
                         <div style={{textAlign:'right'}}>
-                          <div style={{fontSize:28,fontWeight:800,fontFamily:'Inter',lineHeight:1}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                          <div style={{fontSize:30,fontWeight:800,fontFamily:'Inter Tight',lineHeight:1,letterSpacing:'-1px',color:'#d97706'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                         </div>
                       </div>
                     )}
