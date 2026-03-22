@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finance — Personal Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    --bg: #0c0c10;
+    --surface: rgba(255,255,255,0.04);
+    --surface-hover: rgba(255,255,255,0.07);
+    --surface-border: rgba(255,255,255,0.06);
+    --surface-elevated: rgba(255,255,255,0.08);
+    --gold: #d4a44a;
+    --gold-soft: rgba(212,164,74,0.12);
+    --gold-glow: 0 0 24px rgba(212,164,74,0.2);
+    --text-primary: #e8e8ed;
+    --text-secondary: #8b8d9e;
+    --text-muted: #55566a;
+    --sidebar-bg: #0a0a0e;
+    --danger: #f87171;
+    --success: #34d399;
+
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background 0.4s ease, color 0.3s ease;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  body.light {
+    --bg: #f3f1ec;
+    --surface: #ffffff;
+    --surface-hover: #f9f8f5;
+    --surface-border: rgba(0,0,0,0.07);
+    --surface-elevated: #ffffff;
+    --gold: #b8860b;
+    --gold-soft: rgba(184,134,11,0.08);
+    --gold-glow: 0 0 20px rgba(184,134,11,0.12);
+    --text-primary: #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --sidebar-bg: #1a1a2e;
+    --danger: #ef4444;
+    --success: #10b981;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 190px;
+    background: var(--sidebar-bg);
+    display: flex; flex-direction: column;
+    z-index: 100;
+    overflow: hidden;
+    transition: background 0.3s ease;
+  }
+
+  .sidebar-logo {
+    padding: 24px 20px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .sidebar-logo h1 {
+    font-size: 17px; font-weight: 400; color: #fff; letter-spacing: -0.3px;
+  }
+  .sidebar-logo p {
+    font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 3px; letter-spacing: 0.3px;
+  }
+
+  .sidebar-nav {
+    flex: 1; padding: 12px 8px; overflow: hidden;
+  }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    font-size: 13px; font-weight: 300;
+    color: rgba(255,255,255,0.4);
+    text-decoration: none;
+    border-radius: 8px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 1px;
+  }
+  .sidebar-nav a:hover {
+    color: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.04);
+  }
+  .sidebar-nav a.active {
+    color: var(--gold);
+    background: var(--gold-soft);
+    border-left-color: var(--gold);
+    font-weight: 400;
+  }
+  .sidebar-nav a svg {
+    width: 16px; height: 16px; flex-shrink: 0;
+    stroke: currentColor; fill: none; stroke-width: 1.5;
+  }
+
+  .sidebar-footer {
+    padding: 14px 16px 18px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .sidebar-footer .status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: rgba(255,255,255,0.35); margin-bottom: 10px;
+  }
+  .sidebar-footer .status .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #34d399;
+  }
+  .sidebar-footer .btn-row {
+    display: flex; gap: 6px;
+  }
+  .sidebar-footer .btn-ghost {
+    flex: 1; padding: 6px 0;
+    font-size: 11px; font-weight: 400; font-family: 'DM Sans', sans-serif;
+    color: rgba(255,255,255,0.4);
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .sidebar-footer .btn-ghost:hover {
+    color: rgba(255,255,255,0.7);
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  /* Top Bar */
+  .topbar {
+    position: fixed;
+    top: 0; left: 190px; right: 0;
+    height: 52px;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--surface-border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px;
+    z-index: 90;
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  .topbar-title {
+    font-size: 20px; font-weight: 400; letter-spacing: -0.3px;
+    min-width: 120px;
+  }
+  .topbar-tabs {
+    display: flex; gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    padding: 3px;
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  .topbar-tabs button {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px; font-weight: 400;
+    padding: 5px 16px;
+    border: none; border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .topbar-tabs button:hover { color: var(--text-primary); }
+  .topbar-tabs button.active {
+    background: var(--gold);
+    color: #0c0c10;
+  }
+
+  .theme-toggle {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--surface-border);
+    background: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .theme-toggle:hover {
+    border-color: var(--gold);
+    background: var(--gold-soft);
+  }
+  .theme-toggle svg {
+    width: 15px; height: 15px;
+    stroke: var(--text-secondary);
+    fill: none; stroke-width: 1.5;
+    transition: stroke 0.2s ease;
+  }
+  .theme-toggle:hover svg { stroke: var(--gold); }
+  .theme-toggle .icon-sun { display: none; }
+  body.light .theme-toggle .icon-moon { display: none; }
+  body.light .theme-toggle .icon-sun { display: block; }
+
+  /* Main Content */
+  .main {
+    margin-left: 190px;
+    padding-top: 52px;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .main::-webkit-scrollbar { width: 5px; }
+  .main::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb { background: var(--surface-border); border-radius: 3px; }
+  .main::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  .page { display: none; padding: 32px 36px 48px; }
+  .page.active { display: block; }
+
+  /* Section Labels */
+  .section-label {
+    font-size: 10px; font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    transition: color 0.3s ease;
+  }
+
+  /* Cards Page — Header */
+  .cards-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .cards-header h2 {
+    font-size: 20px; font-weight: 400; letter-spacing: -0.3px;
+  }
+  .cards-header-controls {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .pill-group {
+    display: flex; gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    padding: 2px;
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  .pill-group button {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px; font-weight: 400;
+    padding: 4px 12px;
+    border: none; border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .pill-group button.active {
+    background: var(--gold);
+    color: #0c0c10;
+  }
+  .year-dropdown {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px; font-weight: 400;
+    padding: 5px 10px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    appearance: none;
+    transition: all 0.3s ease;
+  }
+
+  /* Ecosystem Rows */
+  .eco-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px; }
+  .eco-row {
+    display: flex; align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .eco-row:hover {
+    border-color: rgba(212,164,74,0.3);
+    transform: translateY(-1px);
+    box-shadow: var(--gold-glow);
+  }
+  body.light .eco-row:hover {
+    border-color: rgba(184,134,11,0.3);
+  }
+  .eco-icon {
+    width: 44px; height: 28px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 500; color: rgba(255,255,255,0.8); letter-spacing: 0.5px;
+  }
+  .eco-info { margin-left: 14px; flex: 1; }
+  .eco-name { font-size: 14px; font-weight: 400; color: var(--text-primary); transition: color 0.3s ease; }
+  .eco-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; transition: color 0.3s ease; }
+  .eco-value-wrap { text-align: right; margin-right: 12px; }
+  .eco-value {
+    font-size: 28px; font-weight: 300; color: var(--gold);
+    letter-spacing: -1px;
+    transition: color 0.3s ease;
+  }
+  .eco-est { font-size: 12px; color: var(--text-muted); margin-top: 2px; transition: color 0.3s ease; }
+  .eco-chevron {
+    font-size: 16px; color: var(--text-muted); font-weight: 300;
+    transition: color 0.3s ease;
+  }
+
+  /* Cash Back Row */
+  .cashback-row {
+    display: flex; align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 36px;
+    transition: all 0.2s ease;
+  }
+  .cashback-icon {
+    width: 44px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--gold), #e8c36a);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .cashback-info { margin-left: 14px; flex: 1; }
+  .cashback-name { font-size: 14px; font-weight: 400; color: var(--text-primary); transition: color 0.3s ease; }
+  .cashback-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; transition: color 0.3s ease; }
+  .cashback-value {
+    font-size: 28px; font-weight: 300; color: var(--gold);
+    letter-spacing: -1px;
+    transition: color 0.3s ease;
+  }
+
+  /* Card Carousel */
+  .card-scroll-wrap { margin-bottom: 36px; }
+  .card-scroll {
+    display: flex; gap: 14px;
+    overflow-x: auto; padding-bottom: 8px;
+  }
+  .card-scroll::-webkit-scrollbar { height: 4px; }
+  .card-scroll::-webkit-scrollbar-track { background: transparent; }
+  .card-scroll::-webkit-scrollbar-thumb { background: var(--surface-border); border-radius: 2px; }
+  .cc-card {
+    width: 220px; height: 138px; flex-shrink: 0;
+    border-radius: 14px;
+    padding: 16px 18px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  }
+  .cc-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+  }
+  .cc-card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .cc-card-name { font-size: 12px; font-weight: 300; color: #fff; }
+  .cc-chip {
+    width: 14px; height: 10px; border-radius: 2px;
+    background: rgba(255,255,255,0.3);
+  }
+  .cc-card-last4 { font-size: 11px; color: rgba(255,255,255,0.6); }
+
+  /* Challenges */
+  .challenges-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .challenge-card {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s ease;
+  }
+  .challenge-name { font-size: 13px; font-weight: 400; color: var(--text-primary); transition: color 0.3s ease; }
+  .challenge-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; transition: color 0.3s ease; }
+  .challenge-bar-track {
+    height: 4px; border-radius: 4px;
+    background: var(--surface-border);
+    margin-top: 10px;
+    overflow: hidden;
+    transition: background 0.3s ease;
+  }
+  .challenge-bar-fill {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--gold), rgba(212,164,74,0.8));
+    transition: width 0.4s ease;
+  }
+  .challenge-footer {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--text-muted); margin-top: 6px;
+    transition: color 0.3s ease;
+  }
+
+  /* Dashboard Page */
+  .metric-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin-bottom: 28px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    padding: 20px;
+    transition: all 0.3s ease;
+  }
+  .metric-label {
+    font-size: 10px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    transition: color 0.3s ease;
+  }
+  .metric-value {
+    font-size: 26px; font-weight: 300;
+    letter-spacing: -1px;
+    color: var(--text-primary);
+    transition: color 0.3s ease;
+  }
+  .metric-change {
+    font-size: 11px; margin-top: 6px;
+    display: flex; align-items: center; gap: 3px;
+  }
+  .metric-change.up { color: var(--success); }
+  .metric-change.down { color: var(--danger); }
+
+  .dash-split {
+    display: grid; grid-template-columns: 3fr 2fr; gap: 16px;
+    margin-bottom: 28px;
+  }
+  .dash-panel {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    transition: all 0.3s ease;
+  }
+  .dash-panel .section-label { margin-bottom: 18px; }
+
+  /* SVG Chart */
+  .chart-wrap { width: 100%; height: 160px; }
+  .chart-wrap svg { width: 100%; height: 100%; }
+
+  /* Category Bars */
+  .cat-row {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .cat-row:last-child { margin-bottom: 0; }
+  .cat-name { font-size: 12px; font-weight: 300; color: var(--text-secondary); width: 60px; flex-shrink: 0; transition: color 0.3s ease; }
+  .cat-bar-wrap { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-border); overflow: hidden; transition: background 0.3s ease; }
+  .cat-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+  .cat-amt { font-size: 12px; font-weight: 300; color: var(--text-primary); width: 56px; text-align: right; flex-shrink: 0; transition: color 0.3s ease; }
+
+  /* Recent Activity */
+  .activity-table { width: 100%; }
+  .activity-row {
+    display: grid; grid-template-columns: 80px 1fr 100px 100px;
+    align-items: center;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--surface-border);
+    transition: border-color 0.3s ease;
+  }
+  .activity-row:last-child { border-bottom: none; }
+  .activity-date { font-size: 12px; color: var(--text-muted); transition: color 0.3s ease; }
+  .activity-desc { font-size: 13px; color: var(--text-primary); transition: color 0.3s ease; }
+  .activity-cat {
+    display: inline-block;
+    background: var(--surface-elevated);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 400;
+    padding: 3px 10px;
+    border-radius: 20px;
+    transition: all 0.3s ease;
+  }
+  .activity-amt { text-align: right; font-size: 13px; font-weight: 300; transition: color 0.3s ease; }
+  .activity-amt.positive { color: var(--success); }
+
+  /* Transactions Page */
+  .filter-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+  }
+  .filter-bar input[type="text"] {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px; font-weight: 300;
+    padding: 7px 12px;
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    flex: 1; min-width: 160px;
+    outline: none;
+    transition: all 0.3s ease;
+  }
+  .filter-bar input[type="text"]:focus {
+    border-color: rgba(212,164,74,0.3);
+    box-shadow: 0 0 0 3px rgba(212,164,74,0.08);
+  }
+  body.light .filter-bar input[type="text"]:focus {
+    border-color: rgba(184,134,11,0.3);
+    box-shadow: 0 0 0 3px rgba(184,134,11,0.08);
+  }
+  .filter-bar select {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px; font-weight: 300;
+    padding: 7px 10px;
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    appearance: none;
+    outline: none;
+    transition: all 0.3s ease;
+  }
+  .filter-count {
+    font-size: 11px; color: var(--text-muted); white-space: nowrap; margin-left: auto;
+    transition: color 0.3s ease;
+  }
+
+  .txn-table { width: 100%; border-collapse: collapse; }
+  .txn-header {
+    font-size: 10px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--surface-border);
+    position: sticky; top: 0;
+    transition: color 0.3s ease, border-color 0.3s ease;
+  }
+  .txn-header th {
+    padding: 10px 12px; text-align: left; font-weight: 500;
+  }
+  .txn-header th:last-child { text-align: right; }
+  .txn-row {
+    border-bottom: 1px solid var(--surface-border);
+    transition: background 0.15s ease, border-color 0.3s ease;
+    cursor: default;
+  }
+  .txn-row:hover { background: var(--surface-hover); }
+  .txn-row:last-child { border-bottom: none; }
+  .txn-row td { padding: 12px; font-size: 13px; font-weight: 300; }
+  .txn-row td:last-child { text-align: right; }
+  .txn-date { color: var(--text-muted); transition: color 0.3s ease; }
+  .txn-desc { color: var(--text-primary); transition: color 0.3s ease; }
+  .txn-cat-pill {
+    display: inline-block;
+    background: var(--surface-elevated);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 400;
+    padding: 3px 10px;
+    border-radius: 20px;
+    transition: all 0.3s ease;
+  }
+  .txn-card-name { font-size: 11px; color: var(--text-muted); transition: color 0.3s ease; }
+  .txn-amt { font-weight: 300; }
+  .txn-amt.positive { color: var(--success); }
+  .txn-status {
+    font-size: 10px; color: var(--text-muted); transition: color 0.3s ease;
+  }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>Finance</h1>
+    <p>Personal dashboard</p>
+  </div>
+  <nav class="sidebar-nav">
+    <a data-nav="dashboard" href="#">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="4" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="11" width="7" height="10" rx="1.5"/></svg>
+      Dashboard
+    </a>
+    <a data-nav="transactions" href="#">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      Transactions
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      Budgets
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 24 24"><path d="M3 20l4-8 4 4 4-10 6 14"/></svg>
+      Net Worth
+    </a>
+    <a data-nav="cards" class="active" href="#">
+      <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>
+      Cards
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 24 24"><path d="M3 21V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v12a2 2 0 01-2 2H3z"/></svg>
+      Accounts
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001.08 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1.08z"/></svg>
+      Settings
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status"><span class="dot"></span> 4 banks connected</div>
+    <div class="btn-row">
+      <button class="btn-ghost">+ Bank</button>
+      <button class="btn-ghost">Sync</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Top Bar -->
+<header class="topbar">
+  <div class="topbar-title" id="topbar-title">Cards</div>
+  <div class="topbar-tabs">
+    <button data-tab="dashboard">Dashboard</button>
+    <button data-tab="transactions">Transactions</button>
+    <button data-tab="cards" class="active">Cards</button>
+  </div>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+    <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+  </button>
+</header>
+
+<!-- Main Content -->
+<main class="main">
+
+  <!-- CARDS PAGE -->
+  <div class="page active" id="page-cards">
+    <div class="cards-header">
+      <h2>Portfolio</h2>
+      <div class="cards-header-controls">
+        <div class="pill-group">
+          <button>MTD</button>
+          <button class="active">QTD</button>
+          <button>YTD</button>
+        </div>
+        <select class="year-dropdown">
+          <option>2026</option>
+          <option>2025</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label">Points Ecosystems</div>
+    <div class="eco-stack">
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#1a3a6c,#2563eb)">UR</div>
+        <div class="eco-info"><div class="eco-name">Chase Ultimate Rewards</div><div class="eco-sub">Points &middot; 2.0 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">10,231</div><div class="eco-est">&asymp; $204</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#4c1d95,#7c3aed)">H</div>
+        <div class="eco-info"><div class="eco-name">Hilton Honors</div><div class="eco-sub">Points &middot; 0.5 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">25,839</div><div class="eco-est">&asymp; $129</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#065f46,#059669)">MR</div>
+        <div class="eco-info"><div class="eco-name">Amex Membership Rewards</div><div class="eco-sub">Points &middot; 2.0 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">5,892</div><div class="eco-est">&asymp; $118</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#78350f,#d97706)">M</div>
+        <div class="eco-info"><div class="eco-name">Marriott Bonvoy</div><div class="eco-sub">Points &middot; 0.8 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">7,124</div><div class="eco-est">&asymp; $57</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#7f1d1d,#ef4444)">WH</div>
+        <div class="eco-info"><div class="eco-name">World of Hyatt</div><div class="eco-sub">Points &middot; 1.7 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">2,169</div><div class="eco-est">&asymp; $37</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#164e63,#06b6d4)">TY</div>
+        <div class="eco-info"><div class="eco-name">Citi ThankYou</div><div class="eco-sub">Points &middot; 1.7 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">2,077</div><div class="eco-est">&asymp; $35</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+      <div class="eco-row">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#1e3a5f,#60a5fa)">DL</div>
+        <div class="eco-info"><div class="eco-name">Delta SkyMiles</div><div class="eco-sub">Miles &middot; 1.2 cpp</div></div>
+        <div class="eco-value-wrap"><div class="eco-value">1,450</div><div class="eco-est">&asymp; $17</div></div>
+        <div class="eco-chevron">&rsaquo;</div>
+      </div>
+    </div>
+
+    <div class="cashback-row">
+      <div class="cashback-icon">$</div>
+      <div class="cashback-info"><div class="cashback-name">Cash Back</div><div class="cashback-sub">Earned this period</div></div>
+      <div class="cashback-value">$9,028.72</div>
+    </div>
+
+    <div class="section-label">Your Cards</div>
+    <div class="card-scroll-wrap">
+      <div class="card-scroll">
+        <div class="cc-card" style="background:linear-gradient(135deg,#0f766e,#0d9488)">
+          <div class="cc-card-top"><span class="cc-card-name">Freedom Flex</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;5780</span>
+        </div>
+        <div class="cc-card" style="background:linear-gradient(135deg,#3b0764,#7c3aed)">
+          <div class="cc-card-top"><span class="cc-card-name">Hilton Aspire</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;1006</span>
+        </div>
+        <div class="cc-card" style="background:linear-gradient(135deg,#1f2937,#4b5563)">
+          <div class="cc-card-top"><span class="cc-card-name">United Quest</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;8991</span>
+        </div>
+        <div class="cc-card" style="background:linear-gradient(135deg,#78350f,#b45309)">
+          <div class="cc-card-top"><span class="cc-card-name">Delta Gold</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;1006</span>
+        </div>
+        <div class="cc-card" style="background:linear-gradient(135deg,#7f1d1d,#991b1b)">
+          <div class="cc-card-top"><span class="cc-card-name">Bonvoy Boundless</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;3663</span>
+        </div>
+        <div class="cc-card" style="background:linear-gradient(135deg,#312e81,#4338ca)">
+          <div class="cc-card-top"><span class="cc-card-name">World of Hyatt</span><span class="cc-chip"></span></div>
+          <span class="cc-card-last4">&middot;&middot;&middot;1677</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Active Challenges</div>
+    <div class="challenges-grid">
+      <div class="challenge-card">
+        <div class="challenge-name">Spend $4,000 in 3 months</div>
+        <div class="challenge-meta">Freedom Flex &middot; Sign-up Bonus</div>
+        <div class="challenge-bar-track"><div class="challenge-bar-fill" style="width:72%"></div></div>
+        <div class="challenge-footer"><span>72%</span><span>$1,120 remaining</span></div>
+      </div>
+      <div class="challenge-card">
+        <div class="challenge-name">15 dining transactions</div>
+        <div class="challenge-meta">Hilton Aspire &middot; Quarterly Bonus</div>
+        <div class="challenge-bar-track"><div class="challenge-bar-fill" style="width:53%"></div></div>
+        <div class="challenge-footer"><span>53%</span><span>7 transactions left</span></div>
+      </div>
+      <div class="challenge-card">
+        <div class="challenge-name">Earn 5,000 base points</div>
+        <div class="challenge-meta">Marriott Boundless &middot; Status Challenge</div>
+        <div class="challenge-bar-track"><div class="challenge-bar-fill" style="width:38%"></div></div>
+        <div class="challenge-footer"><span>38%</span><span>3,100 pts remaining</span></div>
+      </div>
+      <div class="challenge-card">
+        <div class="challenge-name">Spend $2,000 on travel</div>
+        <div class="challenge-meta">United Quest &middot; Offer</div>
+        <div class="challenge-bar-track"><div class="challenge-bar-fill" style="width:91%"></div></div>
+        <div class="challenge-footer"><span>91%</span><span>$180 remaining</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div class="page" id="page-dashboard">
+    <div class="metric-row">
+      <div class="metric-card">
+        <div class="metric-label">Total Spend</div>
+        <div class="metric-value">$14,280</div>
+        <div class="metric-change up"><span>&uarr;</span> 8.2% vs last period</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Points Earned</div>
+        <div class="metric-value">53,332</div>
+        <div class="metric-change up"><span>&uarr;</span> 12.4% vs last period</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Avg Earn Rate</div>
+        <div class="metric-value">2.8x</div>
+        <div class="metric-change up"><span>&uarr;</span> 0.3x vs last period</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Est Value</div>
+        <div class="metric-value">$42,180</div>
+        <div class="metric-change down"><span>&darr;</span> 2.1% vs last period</div>
+      </div>
+    </div>
+
+    <div class="dash-split">
+      <div class="dash-panel">
+        <div class="section-label">Spending Trend</div>
+        <div class="chart-wrap">
+          <svg viewBox="0 0 400 160" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="goldFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <!-- Grid lines -->
+            <line x1="50" y1="20" x2="380" y2="20" stroke="var(--surface-border)" stroke-width="0.5"/>
+            <line x1="50" y1="55" x2="380" y2="55" stroke="var(--surface-border)" stroke-width="0.5"/>
+            <line x1="50" y1="90" x2="380" y2="90" stroke="var(--surface-border)" stroke-width="0.5"/>
+            <line x1="50" y1="125" x2="380" y2="125" stroke="var(--surface-border)" stroke-width="0.5"/>
+            <!-- Fill area -->
+            <path d="M105,95 L185,70 L265,85 L345,40 L345,125 L105,125 Z" fill="url(#goldFill)"/>
+            <!-- Line -->
+            <polyline points="105,95 185,70 265,85 345,40" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- Dots -->
+            <circle cx="105" cy="95" r="3" fill="var(--gold)"/>
+            <circle cx="185" cy="70" r="3" fill="var(--gold)"/>
+            <circle cx="265" cy="85" r="3" fill="var(--gold)"/>
+            <circle cx="345" cy="40" r="3.5" fill="var(--gold)" stroke="var(--bg)" stroke-width="2"/>
+            <!-- Labels -->
+            <text x="105" y="145" fill="var(--text-muted)" font-size="10" font-family="DM Sans" text-anchor="middle">Dec</text>
+            <text x="185" y="145" fill="var(--text-muted)" font-size="10" font-family="DM Sans" text-anchor="middle">Jan</text>
+            <text x="265" y="145" fill="var(--text-muted)" font-size="10" font-family="DM Sans" text-anchor="middle">Feb</text>
+            <text x="345" y="145" fill="var(--text-muted)" font-size="10" font-family="DM Sans" text-anchor="middle">Mar</text>
+            <!-- Y-axis labels -->
+            <text x="40" y="24" fill="var(--text-muted)" font-size="9" font-family="DM Sans" text-anchor="end">$16k</text>
+            <text x="40" y="59" fill="var(--text-muted)" font-size="9" font-family="DM Sans" text-anchor="end">$12k</text>
+            <text x="40" y="94" fill="var(--text-muted)" font-size="9" font-family="DM Sans" text-anchor="end">$8k</text>
+            <text x="40" y="129" fill="var(--text-muted)" font-size="9" font-family="DM Sans" text-anchor="end">$4k</text>
+          </svg>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="section-label">Top Categories</div>
+        <div class="cat-row">
+          <span class="cat-name">Dining</span>
+          <div class="cat-bar-wrap"><div class="cat-bar" style="width:100%;background:var(--gold)"></div></div>
+          <span class="cat-amt">$3,200</span>
+        </div>
+        <div class="cat-row">
+          <span class="cat-name">Travel</span>
+          <div class="cat-bar-wrap"><div class="cat-bar" style="width:87.5%;background:color-mix(in srgb, var(--gold) 75%, var(--text-muted))"></div></div>
+          <span class="cat-amt">$2,800</span>
+        </div>
+        <div class="cat-row">
+          <span class="cat-name">Groceries</span>
+          <div class="cat-bar-wrap"><div class="cat-bar" style="width:65.6%;background:color-mix(in srgb, var(--gold) 55%, var(--text-muted))"></div></div>
+          <span class="cat-amt">$2,100</span>
+        </div>
+        <div class="cat-row">
+          <span class="cat-name">Gas</span>
+          <div class="cat-bar-wrap"><div class="cat-bar" style="width:43.75%;background:color-mix(in srgb, var(--gold) 35%, var(--text-muted))"></div></div>
+          <span class="cat-amt">$1,400</span>
+        </div>
+        <div class="cat-row">
+          <span class="cat-name">Shopping</span>
+          <div class="cat-bar-wrap"><div class="cat-bar" style="width:30.6%;background:color-mix(in srgb, var(--gold) 22%, var(--text-muted))"></div></div>
+          <span class="cat-amt">$980</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Recent Activity</div>
+    <div class="dash-panel" style="padding:4px 24px">
+      <div class="activity-table">
+        <div class="activity-row">
+          <span class="activity-date">Mar 21</span>
+          <span class="activity-desc">Whole Foods</span>
+          <span><span class="activity-cat">Groceries</span></span>
+          <span class="activity-amt">-$67.43</span>
+        </div>
+        <div class="activity-row">
+          <span class="activity-date">Mar 20</span>
+          <span class="activity-desc">United Airlines</span>
+          <span><span class="activity-cat">Airlines</span></span>
+          <span class="activity-amt">-$423.00</span>
+        </div>
+        <div class="activity-row">
+          <span class="activity-date">Mar 20</span>
+          <span class="activity-desc">Uber Eats</span>
+          <span><span class="activity-cat">Dining</span></span>
+          <span class="activity-amt">-$34.50</span>
+        </div>
+        <div class="activity-row">
+          <span class="activity-date">Mar 19</span>
+          <span class="activity-desc">Hilton Garden Inn</span>
+          <span><span class="activity-cat">Hotels</span></span>
+          <span class="activity-amt">-$189.00</span>
+        </div>
+        <div class="activity-row">
+          <span class="activity-date">Mar 18</span>
+          <span class="activity-desc">Amazon</span>
+          <span><span class="activity-cat">Shopping</span></span>
+          <span class="activity-amt positive">+$45.99</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRANSACTIONS PAGE -->
+  <div class="page" id="page-transactions">
+    <div class="filter-bar">
+      <input type="text" placeholder="Search transactions...">
+      <select><option>All Periods</option><option>This Month</option><option>Last Month</option></select>
+      <select><option>All Categories</option><option>Dining</option><option>Travel</option><option>Groceries</option><option>Gas</option><option>Shopping</option></select>
+      <select><option>All Types</option><option>Debit</option><option>Credit</option></select>
+      <span class="filter-count">10 showing</span>
+    </div>
+
+    <table class="txn-table">
+      <thead>
+        <tr class="txn-header">
+          <th>Date</th>
+          <th>Description</th>
+          <th>Category</th>
+          <th>Card</th>
+          <th>Amount</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 21</td>
+          <td class="txn-desc">Whole Foods</td>
+          <td><span class="txn-cat-pill">Groceries</span></td>
+          <td class="txn-card-name">Freedom Flex</td>
+          <td class="txn-amt">-$67.43</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 20</td>
+          <td class="txn-desc">United Airlines</td>
+          <td><span class="txn-cat-pill">Airlines</span></td>
+          <td class="txn-card-name">United Quest</td>
+          <td class="txn-amt">-$423.00</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 20</td>
+          <td class="txn-desc">Uber Eats</td>
+          <td><span class="txn-cat-pill">Dining</span></td>
+          <td class="txn-card-name">Citi Custom Cash</td>
+          <td class="txn-amt">-$34.50</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 19</td>
+          <td class="txn-desc">Hilton Garden Inn</td>
+          <td><span class="txn-cat-pill">Hotels</span></td>
+          <td class="txn-card-name">Hilton Aspire</td>
+          <td class="txn-amt">-$189.00</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 19</td>
+          <td class="txn-desc">Shell Gas</td>
+          <td><span class="txn-cat-pill">Gas</span></td>
+          <td class="txn-card-name">Freedom Flex</td>
+          <td class="txn-amt">-$52.10</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 18</td>
+          <td class="txn-desc">Amazon</td>
+          <td><span class="txn-cat-pill">Shopping</span></td>
+          <td class="txn-card-name">Amex Blue Business</td>
+          <td class="txn-amt">-$156.78</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 18</td>
+          <td class="txn-desc">Starbucks</td>
+          <td><span class="txn-cat-pill">Dining</span></td>
+          <td class="txn-card-name">Freedom Flex</td>
+          <td class="txn-amt">-$6.25</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 17</td>
+          <td class="txn-desc">Delta Airlines</td>
+          <td><span class="txn-cat-pill">Airlines</span></td>
+          <td class="txn-card-name">Delta Gold</td>
+          <td class="txn-amt">-$312.00</td>
+          <td class="txn-status">Pending</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 17</td>
+          <td class="txn-desc">Costco</td>
+          <td><span class="txn-cat-pill">Groceries</span></td>
+          <td class="txn-card-name">Citi Custom Cash</td>
+          <td class="txn-amt">-$234.56</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+        <tr class="txn-row">
+          <td class="txn-date">Mar 16</td>
+          <td class="txn-desc">Return - Amazon</td>
+          <td><span class="txn-cat-pill">Shopping</span></td>
+          <td class="txn-card-name">Amex Blue Business</td>
+          <td class="txn-amt positive">+$45.99</td>
+          <td class="txn-status">Posted</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+  // Theme toggle
+  const toggle = document.getElementById('theme-toggle');
+  toggle.addEventListener('click', () => {
+    document.body.classList.toggle('light');
+  });
+
+  // Page navigation
+  const pages = {
+    cards: { title: 'Cards', el: document.getElementById('page-cards') },
+    dashboard: { title: 'Dashboard', el: document.getElementById('page-dashboard') },
+    transactions: { title: 'Transactions', el: document.getElementById('page-transactions') }
+  };
+
+  function switchPage(name) {
+    if (!pages[name]) return;
+    // Hide all pages
+    Object.values(pages).forEach(p => p.el.classList.remove('active'));
+    // Show target
+    pages[name].el.classList.add('active');
+    // Update title
+    document.getElementById('topbar-title').textContent = pages[name].title;
+    // Update topbar tabs
+    document.querySelectorAll('.topbar-tabs button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === name);
+    });
+    // Update sidebar
+    document.querySelectorAll('.sidebar-nav a').forEach(a => {
+      a.classList.toggle('active', a.dataset.nav === name);
+    });
+  }
+
+  // Topbar tab clicks
+  document.querySelectorAll('.topbar-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.tab));
+  });
+
+  // Sidebar nav clicks
+  document.querySelectorAll('.sidebar-nav a[data-nav]').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchPage(a.dataset.nav);
+    });
+  });
+
+  // Pill group toggle (period selector)
+  document.querySelectorAll('.pill-group').forEach(group => {
+    group.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
