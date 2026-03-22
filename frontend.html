@@ -2418,7 +2418,131 @@ function DashboardPage({categories,toast}){
         );
       })()}
 
-      {/* ── Section 1: Full-width Budget & Spending ──────────────────────────── */}
+      {/* ── Spending Trend + Budget Overview (two columns) ──────────────────── */}
+      {(()=>{
+        /* Derive monthly spending totals from budgetActuals + budgetActualsPrior */
+        const MO_LABELS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const curY=new Date().getFullYear();
+        const curM=new Date().getMonth()+1;
+        const months6=Array.from({length:6},(_,i)=>{
+          const d=new Date(curY,curM-1-(5-i),1);
+          return{year:d.getFullYear(),month:d.getMonth()+1,label:MO_LABELS[d.getMonth()]};
+        });
+        const getMonthTotal=(yr,mo)=>{
+          const src=yr===curY?budgetActuals:budgetActualsPrior;
+          return Object.values(src).reduce((s,catMonths)=>s+(catMonths?.[String(mo)]||0),0);
+        };
+        const spendData=months6.map(m=>({...m,amount:getMonthTotal(m.year,m.month)}));
+        const maxSpend=Math.max(...spendData.map(d=>d.amount),100);
+        /* SVG dimensions */
+        const W=500,H=160,pad={t:10,r:15,b:28,l:44};
+        const cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;
+        const pts=spendData.map((d,i)=>[
+          pad.l+(i/(spendData.length-1))*cW,
+          pad.t+cH-(d.amount/maxSpend)*cH
+        ]);
+        /* Catmull-Rom smooth path */
+        const smoothPath=(points)=>{
+          if(points.length<2)return'';
+          let d=`M${points[0][0]},${points[0][1]}`;
+          for(let i=0;i<points.length-1;i++){
+            const p0=points[Math.max(i-1,0)];
+            const p1=points[i];
+            const p2=points[i+1];
+            const p3=points[Math.min(i+2,points.length-1)];
+            const t=0.3;
+            const cp1x=p1[0]+(p2[0]-p0[0])*t;
+            const cp1y=p1[1]+(p2[1]-p0[1])*t;
+            const cp2x=p2[0]-(p3[0]-p1[0])*t;
+            const cp2y=p2[1]-(p3[1]-p1[1])*t;
+            d+=` C${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+          }
+          return d;
+        };
+        const pathD=smoothPath(pts);
+        const areaD=pts.length>=2?pathD+` L${pts[pts.length-1][0]},${pad.t+cH} L${pts[0][0]},${pad.t+cH} Z`:'';
+
+        /* Budget overview bars — top 6 categories for current month */
+        const mo=viewMonth||(new Date().getMonth()+1);
+        const mStr=String(mo);
+        const SKIP=new Set(['Transfer','Work']);
+        const budgetRows=[];
+        const allCats=new Set([...Object.keys(budgetTargets),...Object.keys(budgetActuals)]);
+        allCats.forEach(cat=>{
+          if(SKIP.has(cat))return;
+          const budget=budgetTargets[cat]?.[mStr]?.amount||0;
+          const actual=budgetActuals[cat]?.[mStr]||0;
+          if(budget<=0&&actual<=0)return;
+          const pct=budget>0?Math.round((actual/budget)*100):actual>0?100:0;
+          budgetRows.push({cat:normalizeCat(cat),budget,actual,pct});
+        });
+        budgetRows.sort((a,b)=>b.actual-a.actual);
+        const topBudgetRows=budgetRows.slice(0,6);
+
+        return(
+          <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:16,marginBottom:20}}>
+            {/* Spending Trend Chart */}
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Spending Trend</div>
+              <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:180}}>
+                <defs>
+                  <linearGradient id="spendAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--gold)" stopOpacity="0.25"/>
+                    <stop offset="100%" stopColor="var(--gold)" stopOpacity="0"/>
+                  </linearGradient>
+                </defs>
+                {/* Grid lines */}
+                {[0,0.25,0.5,0.75,1].map((p,i)=>{
+                  const y=pad.t+(1-p)*cH;
+                  const val=maxSpend*p;
+                  return(
+                    <g key={i}>
+                      <line x1={pad.l} y1={y} x2={W-pad.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
+                      <text x={pad.l-6} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text>
+                    </g>
+                  );
+                })}
+                {/* X labels */}
+                {spendData.map((d,i)=>(
+                  <text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{d.label}</text>
+                ))}
+                {/* Area fill */}
+                {areaD&&<path d={areaD} fill="url(#spendAreaGrad)"/>}
+                {/* Line */}
+                {pathD&&<path d={pathD} fill="none" stroke="var(--gold)" strokeWidth={2} strokeLinecap="round"/>}
+                {/* Dots */}
+                {pts.map((p,i)=>(
+                  <circle key={i} cx={p[0]} cy={p[1]} r={3} fill="var(--gold)"/>
+                ))}
+              </svg>
+            </div>
+
+            {/* Budget Overview Bars */}
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Budget Overview</div>
+              <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                {topBudgetRows.map(r=>{
+                  const over=r.pct>100;
+                  return(
+                    <div key={r.cat}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                        <span style={{fontSize:13,fontWeight:300,color:'var(--text-primary)'}}>{r.cat}</span>
+                        <span style={{fontSize:11,fontWeight:300,color:'var(--text-secondary)'}}>{r.pct}%</span>
+                      </div>
+                      <div style={{height:4,background:'var(--elevated)',borderRadius:2,overflow:'hidden'}}>
+                        <div style={{height:'100%',borderRadius:2,width:`${Math.min(r.pct,100)}%`,
+                          background:over?'var(--red)':'var(--gold)',transition:'width 0.4s ease'}}/>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Full-width Budget & Spending Detail ──────────────────────────── */}
       <div style={{marginTop:0}}>
         <BudgetAndSpendingCard
           targets={budgetTargets} actuals={budgetActuals}
@@ -8254,7 +8378,20 @@ function App(){
       <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync} collapsed={collapsed} setCollapsed={setCollapsed}/>
       <div className="main" style={{marginLeft:collapsed?56:190}}>
         <div className="topbar">
-          <div className="topbar-title">{titles[page]}</div>
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
+            <div className="topbar-title">{titles[page]}</div>
+            {/* Quick access tabs */}
+            <div style={{display:'flex',gap:2,background:'var(--elevated)',borderRadius:8,padding:2,border:'1px solid var(--border)'}}>
+              {[{id:'dashboard',label:'Dashboard'},{id:'transactions',label:'Transactions'},{id:'cards',label:'Cards'}].map(t=>(
+                <button key={t.id} onClick={()=>setPage(t.id)}
+                  style={{padding:'4px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11,fontWeight:page===t.id?500:400,
+                    background:page===t.id?'var(--gold)':'transparent',color:page===t.id?'#0c0c10':'var(--text-muted)',
+                    transition:'all 0.15s',letterSpacing:'0.2px'}}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             {banks.length>0&&<span className="bank-badge">{banks.length} account{banks.length!==1?'s':''} connected</span>}
             <button className="btn btn-ghost" onClick={()=>setTheme(theme==='dark'?'light':'dark')} title="Toggle theme" style={{padding:'6px 8px'}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{theme==='dark'?<><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></>:<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>}</svg></button>
