@@ -4950,8 +4950,10 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('amex')||n.includes('membership'))return'#059669';
     if(n.includes('hilton'))return'#7c3aed';
     if(n.includes('citi'))return'#0891b2';
-    if(n.includes('marriott'))return'#b45309';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'#b45309';
     if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+    if(n.includes('hyatt'))return'#9f1239';
+    if(n.includes('united')||n.includes('mileageplus'))return'#374151';
     return'var(--blue)';
   },[ecoName]);
 
@@ -5081,9 +5083,9 @@ function ChallengeCard({ch}){
           </div>
         </div>
         <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,marginLeft:8,flexShrink:0,
-          background:ch.status==='unlocked'?'#dcfce7':ch.status==='active'?'#dbeafe':'#f3f4f6',
-          color:ch.status==='unlocked'?'#15803d':ch.status==='active'?'#1e40af':'var(--text-muted)',
-          fontWeight:500,textTransform:'uppercase'}}>
+          background:ch.status==='unlocked'?'rgba(52,211,153,0.12)':ch.status==='active'?'var(--gold-soft)':'var(--elevated)',
+          color:ch.status==='unlocked'?'var(--green)':ch.status==='active'?'var(--gold)':'var(--text-muted)',
+          fontWeight:500,textTransform:'uppercase',letterSpacing:'0.5px'}}>
           {ch.status}
         </span>
       </div>
@@ -5092,13 +5094,13 @@ function ChallengeCard({ch}){
           <span>${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} spent</span>
           <span>${(ch.spend_threshold).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
         </div>
-        <div style={{height:5,borderRadius:5,background:'var(--border)',overflow:'hidden',marginBottom:6}}>
-          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'var(--blue)',transition:'width 0.5s ease'}}/>
+        <div style={{height:5,borderRadius:5,background:'var(--elevated)',overflow:'hidden',marginBottom:6}}>
+          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.5s ease'}}/>
         </div>
         {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)'}}>${ch.remaining_spend.toLocaleString(undefined,{maximumFractionDigits:0})} to go</div>}
       </>}
       {!isThreshold&&ch.bonus_type==='per_dollar'&&<div style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>
-        <span style={{fontWeight:400,fontFamily:'DM Sans',fontSize:16,color:'var(--blue)'}}>+{ch.bonus_amount}x</span>
+        <span style={{fontWeight:400,fontFamily:'DM Sans',fontSize:16,color:'var(--gold)'}}>+{ch.bonus_amount}x</span>
         {ch.spend_cap&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names?.join(', ')||'all spend'} · ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
       </div>}
     </div>
@@ -5231,12 +5233,12 @@ function CardsPage({toast}){
   return(
     <div>
       {/* Tab switcher */}
-      <div style={{display:'flex',gap:4,marginBottom:20,background:'var(--border)',borderRadius:8,padding:3,width:'fit-content'}}>
-        {[{id:'accounts',label:'My Accounts'},{id:'swipe',label:'Where Should I Swipe?'},{id:'cards',label:'Card Management'}].map(t=>(
+      <div style={{display:'flex',gap:2,marginBottom:24,background:'var(--elevated)',borderRadius:10,padding:3,width:'fit-content',border:'1px solid var(--border)'}}>
+        {[{id:'accounts',label:'Portfolio'},{id:'swipe',label:'Swipe Advisor'},{id:'cards',label:'Card Management'}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
-            style={{padding:'6px 18px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:tab===t.id?600:400,
-              background:tab===t.id?'var(--bg)':'transparent',color:tab===t.id?'var(--text-primary)':'var(--text-muted)',
-              boxShadow:tab===t.id?'0 1px 3px rgba(0,0,0,0.08)':'none'}}>
+            style={{padding:'6px 18px',borderRadius:8,border:'none',cursor:'pointer',fontSize:12,fontWeight:500,letterSpacing:'0.2px',
+              background:tab===t.id?'var(--gold)':'transparent',color:tab===t.id?'#0c0c10':'var(--text-muted)',
+              transition:'all 0.15s'}}>
             {t.label}
           </button>
         ))}
@@ -5352,39 +5354,39 @@ function CardsPage({toast}){
           {/* ── Period selector ── */}
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:28,flexWrap:'wrap',gap:12}}>
             <div>
-              <h2 style={{fontSize:18,fontWeight:400,margin:0}}>Portfolio Overview</h2>
-              {earnData&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{earnData.start} → {earnData.end}</div>}
+              <h2 style={{fontSize:20,fontWeight:400,margin:0,letterSpacing:'-0.3px'}}>Portfolio</h2>
+              {earnData&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:3,fontWeight:300}}>{earnData.start} — {earnData.end}</div>}
             </div>
-            <div style={{display:'flex',gap:6,alignItems:'center'}}>
-              <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:8,padding:3}}>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <div style={{display:'flex',gap:2,background:'var(--elevated)',borderRadius:10,padding:3,border:'1px solid var(--border)'}}>
                 {['mtd','qtd','ytd'].map(p=>(
                   <button key={p} onClick={()=>setEarnPeriod(p)}
-                    style={{padding:'5px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:earnPeriod===p?700:400,
-                      background:earnPeriod===p?'var(--bg)':'transparent',color:earnPeriod===p?'var(--text-primary)':'var(--text-muted)',
-                      boxShadow:earnPeriod===p?'0 1px 3px rgba(0,0,0,0.08)':'none',textTransform:'uppercase'}}>
+                    style={{padding:'5px 16px',borderRadius:8,border:'none',cursor:'pointer',fontSize:11,fontWeight:500,letterSpacing:'0.5px',
+                      background:earnPeriod===p?'var(--gold)':'transparent',color:earnPeriod===p?'#0c0c10':'var(--text-muted)',
+                      transition:'all 0.15s',textTransform:'uppercase'}}>
                     {p}
                   </button>
                 ))}
               </div>
               <select value={earnYear} onChange={e=>setEarnYear(Number(e.target.value))}
-                style={{fontSize:12,fontWeight:500,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--bg)',color:'var(--text-primary)'}}>
+                style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
                 {earnYears.map(y=><option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           </div>
 
           {/* ── Suggestions banner ── */}
-          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'2px solid #dbeafe'}}>
+          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'1px solid var(--gold)',borderLeft:'3px solid var(--gold)'}}>
             <div className="section-header" style={{paddingBottom:8}}>
-              <div className="section-title" style={{color:'#1d4ed8',fontSize:13}}>Auto-detected Product Matches</div>
+              <div className="section-title" style={{color:'var(--gold)',fontSize:13}}>Auto-detected Product Matches</div>
               <button className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
             </div>
             <div style={{padding:'0 20px 14px',display:'flex',flexDirection:'column',gap:8}}>
               {suggestions.map(s=>(
-                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 12px',background:'#f8faff',borderRadius:8,border:'1px solid #dbeafe'}}>
-                  <div style={{flex:1,fontSize:13,fontWeight:500}}>{s.account_name}{s.mask?` ···${s.mask}`:''} <span style={{fontWeight:400,color:'var(--text-muted)'}}>→ {s.suggested_product_name}</span></div>
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'#dcfce7':'#fef9c3',color:s.confidence==='high'?'#15803d':'#854d0e',fontWeight:500}}>{s.confidence}</span>
-                  <button className="btn btn-sm btn-success" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>{linking[s.account_id]?'...':'Confirm'}</button>
+                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 12px',background:'var(--elevated)',borderRadius:8,border:'1px solid var(--border)'}}>
+                  <div style={{flex:1,fontSize:13,fontWeight:400}}>{s.account_name}{s.mask?` ···${s.mask}`:''} <span style={{fontWeight:300,color:'var(--text-muted)'}}>→ {s.suggested_product_name}</span></div>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'rgba(52,211,153,0.12)':'var(--gold-soft)',color:s.confidence==='high'?'var(--green)':'var(--gold)',fontWeight:500}}>{s.confidence}</span>
+                  <button className="btn btn-sm btn-primary" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>{linking[s.account_id]?'...':'Confirm'}</button>
                 </div>
               ))}
             </div>
@@ -5400,63 +5402,145 @@ function CardsPage({toast}){
                 if(n.includes('amex')||n.includes('membership'))return'#059669';
                 if(n.includes('hilton'))return'#7c3aed';
                 if(n.includes('citi'))return'#0891b2';
-                if(n.includes('marriott'))return'#b45309';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'#b45309';
                 if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+                if(n.includes('hyatt'))return'#9f1239';
+                if(n.includes('united')||n.includes('mileageplus'))return'#374151';
                 return'#3b82f6';
+              };
+              const ecoGradient=(name)=>{
+                const n=(name||'').toLowerCase();
+                if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,#3b82f6)';
+                if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
+                if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
+                if(n.includes('citi'))return'linear-gradient(135deg,#155e75,#06b6d4)';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'linear-gradient(135deg,#92400e,#d97706)';
+                if(n.includes('delta')||n.includes('skymiles'))return'linear-gradient(135deg,#1e3a5f,#3b82f6)';
+                if(n.includes('hyatt'))return'linear-gradient(135deg,#7f1d1d,#dc2626)';
+                if(n.includes('united')||n.includes('mileageplus'))return'linear-gradient(135deg,#374151,#6b7280)';
+                return'linear-gradient(135deg,#3b82f6,#60a5fa)';
+              };
+              const ecoImg=(name)=>{
+                const n=(name||'').toLowerCase();
+                if(n.includes('chase')||n.includes('ultimate'))return'/static/ecosystems/chase_ur.png';
+                if(n.includes('amex')||n.includes('membership'))return'/static/ecosystems/amex_mr.png';
+                if(n.includes('hilton'))return'/static/ecosystems/hilton_honors.png';
+                if(n.includes('citi'))return'/static/ecosystems/citi_thankyou.png';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'/static/ecosystems/marriott_bonvoy.png';
+                if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
+                if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
+                if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
+                return null;
               };
               const pointsEcos=earnData.ecosystems.filter(e=>!e.is_cash_back);
               const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
               return(
                 <>
-                  <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:32}}>
+                  {/* ── Ecosystem Grid (2 columns) ── */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12,marginBottom:24}}>
                     {pointsEcos.map(eco=>{
                       const col=ecoColor(eco.name);
+                      const img=ecoImg(eco.name);
+                      const grad=ecoGradient(eco.name);
                       return(
                         <div key={eco.id}
-                          style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:16,
-                            background:`linear-gradient(135deg,${col}08 0%,${col}03 100%)`,
-                            border:`1px solid ${col}22`,cursor:'pointer',transition:'all 0.2s ease',
-                            boxShadow:`0 1px 3px ${col}10`}}
+                          style={{display:'flex',alignItems:'center',gap:16,padding:'18px 20px',borderRadius:14,
+                            background:'var(--surface)',border:'1px solid var(--border)',cursor:'pointer',
+                            transition:'all 0.2s ease'}}
                           onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
-                          onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow=`0 6px 20px ${col}18`;e.currentTarget.style.borderColor=`${col}44`;}}
-                          onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow=`0 1px 3px ${col}10`;e.currentTarget.style.borderColor=`${col}22`;}}>
-                          <div style={{width:4,alignSelf:'stretch',borderRadius:4,background:`linear-gradient(180deg,${col},${col}88)`,marginRight:4}}/>
+                          onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor=`${col}44`;}}
+                          onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
+                          <div style={{width:44,height:30,borderRadius:8,background:grad,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+                            {img&&<img src={img} alt="" style={{width:28,height:28,objectFit:'contain',filter:'brightness(0) invert(1)',opacity:0.9}} onError={e=>{e.target.style.display='none'}}/>}
+                          </div>
                           <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:16,fontWeight:400,color:col}}>{eco.name}</div>
-                            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
+                            <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{eco.name}</div>
+                            <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
                           </div>
                           <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:30,fontWeight:400,fontFamily:'DM Sans',letterSpacing:'-1px',lineHeight:1,color:col}}>{eco.points_earned.toLocaleString()}</div>
-                            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:5}}>≈ ${eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                            <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--gold)'}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:4,fontWeight:300}}>{'≈ $'}{eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
-                          <div style={{color:col,fontSize:18,marginLeft:4,opacity:0.5}}>›</div>
+                          <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
                         </div>
                       );
                     })}
-                    {cashTotal>0&&(
-                      <div style={{display:'flex',alignItems:'center',gap:20,padding:'22px 26px',borderRadius:16,
-                        background:'linear-gradient(135deg,#d9770608 0%,#d9770603 100%)',border:'1px solid #d9770622',
-                        boxShadow:'0 1px 3px #d9770610'}}>
-                        <div style={{width:4,alignSelf:'stretch',borderRadius:4,background:'linear-gradient(180deg,#d97706,#d9770688)',marginRight:4}}/>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:16,fontWeight:400,color:'#d97706'}}>Cash Back</div>
-                          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>Earned this period</div>
-                        </div>
-                        <div style={{textAlign:'right'}}>
-                          <div style={{fontSize:30,fontWeight:400,fontFamily:'DM Sans',lineHeight:1,letterSpacing:'-1px',color:'#d97706'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                        </div>
-                      </div>
-                    )}
-                    {pointsEcos.length===0&&cashTotal===0&&(
-                      <div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13,lineHeight:1.6}}>
-                        No earn data for this period.<br/>Make sure accounts are linked to card products.
-                      </div>
-                    )}
                   </div>
 
+                  {/* ── Cash Back (full width) ── */}
+                  {cashTotal>0&&(
+                    <div style={{display:'flex',alignItems:'center',gap:16,padding:'18px 20px',borderRadius:14,
+                      background:'var(--surface)',border:'1px solid var(--border)',marginBottom:24}}>
+                      <div style={{width:44,height:30,borderRadius:8,background:'linear-gradient(135deg,#b45309,#d97706)',flexShrink:0}}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>Cash Back</div>
+                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>Earned this period</div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',lineHeight:1,letterSpacing:'-1px',color:'var(--green)'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Empty state ── */}
+                  {pointsEcos.length===0&&cashTotal===0&&(
+                    <div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13,lineHeight:1.6,fontWeight:300}}>
+                      No earn data for this period.<br/>Make sure accounts are linked to card products.
+                    </div>
+                  )}
+
+                  {/* ── Your Cards (horizontal scroll) ── */}
+                  {accounts.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Your Cards</div>
+                      <div style={{display:'flex',gap:12,overflowX:'auto',paddingBottom:8}}>
+                        {accounts.map(acct=>{
+                          const prod=getProductForAccount(acct.id);
+                          const cardKey=prod?.product_key;
+                          const imgSrc=cardKey?`/static/cards/${cardKey}.png`:null;
+                          const cardGrads={
+                            freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',
+                            freedom:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            hilton_aspire:'linear-gradient(135deg,#4c1d95,#2e1065)',
+                            united_quest:'linear-gradient(135deg,#374151,#111827)',
+                            united_explorer:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            delta_gold:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            bonvoy_boundless:'linear-gradient(135deg,#78350f,#451a03)',
+                            world_of_hyatt:'linear-gradient(135deg,#7f1d1d,#450a0a)',
+                            citi_custom_cash:'linear-gradient(135deg,#155e75,#0c4a5e)',
+                            us_bank_cash_plus:'linear-gradient(135deg,#6b21a8,#4c1d95)',
+                            blue_business_plus:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            sapphire_preferred:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            amex_gold:'linear-gradient(135deg,#b8860b,#8b6914)',
+                          };
+                          const bg=cardGrads[cardKey]||'linear-gradient(135deg,#374151,#1f2937)';
+                          return(
+                            <div key={acct.id} onClick={()=>setSelectedAccount(acct.id)}
+                              style={{width:180,height:114,borderRadius:12,background:bg,padding:'14px 16px',
+                                flexShrink:0,cursor:'pointer',position:'relative',overflow:'hidden',
+                                boxShadow:'0 4px 12px rgba(0,0,0,0.3)',transition:'transform 0.2s ease',
+                                display:'flex',flexDirection:'column',justifyContent:'space-between'}}
+                              onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-3px) scale(1.02)';}}
+                              onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0) scale(1)';}}>
+                              {imgSrc&&<img src={imgSrc} alt="" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:12,opacity:0.3}} onError={e=>{e.target.style.display='none'}}/>}
+                              <div style={{position:'relative',zIndex:1}}>
+                                <div style={{fontSize:10,fontWeight:400,color:'rgba(255,255,255,0.7)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{prod?.card_name||acct.account_name}</div>
+                              </div>
+                              <div style={{position:'relative',zIndex:1,display:'flex',justifyContent:'space-between',alignItems:'flex-end'}}>
+                                <div style={{fontSize:10,color:'rgba(255,255,255,0.6)',fontWeight:300}}>{acct.mask?`···${acct.mask}`:''}</div>
+                                <div style={{width:24,height:18,borderRadius:3,background:'rgba(255,255,255,0.2)',border:'1px solid rgba(255,255,255,0.15)'}}/>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Active Challenges ── */}
                   {earnData.active_challenges.length>0&&(
                     <div>
-                      <div style={{fontSize:11,fontWeight:400,color:'var(--text-muted)',letterSpacing:1.2,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
+                      <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
                       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:10}}>
                         {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
                       </div>
