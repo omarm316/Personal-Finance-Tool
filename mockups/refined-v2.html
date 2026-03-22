@@ -1082,6 +1082,434 @@ html, body {
 .chart-grid-line { stroke: var(--border); stroke-width: 1; }
 .chart-label { font-family: 'DM Sans', sans-serif; font-size: 10px; font-weight: 300; fill: var(--text-muted); }
 .chart-dot { fill: var(--gold); }
+
+/* ===== DAILY BALANCES PAGE ===== */
+.db-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.db-controls label {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.db-controls input[type="date"],
+.db-controls select {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  outline: none;
+  transition: all 0.2s ease;
+}
+.db-controls input[type="date"]:focus,
+.db-controls select:focus { border-color: var(--gold); }
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.db-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.db-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(212,164,74,0.15);
+}
+.db-card.expanded {
+  grid-column: 1 / -1;
+  cursor: default;
+}
+.db-card.expanded:hover { transform: none; }
+.db-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.db-card-name {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+.db-card-institution {
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+.db-card-balance {
+  font-size: 22px;
+  font-weight: 300;
+  color: var(--text-primary);
+  letter-spacing: -1px;
+  margin-top: 10px;
+}
+.db-card-balance.negative { color: var(--red); }
+.db-sparkline { margin-top: 8px; }
+.db-expanded-content { margin-top: 16px; display: none; }
+.db-card.expanded .db-expanded-content { display: block; }
+.db-card.expanded .db-sparkline { display: none; }
+.db-collapse-btn {
+  margin-top: 12px;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: 'DM Sans', sans-serif;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.db-collapse-btn:hover { border-color: var(--gold); color: var(--gold); }
+.db-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+.db-detail-table th {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.db-detail-table td {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.change-pos { color: var(--green); }
+.change-neg { color: var(--red); }
+
+/* ===== CASH FLOW PAGE ===== */
+.cf-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.cf-stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  transition: all 0.2s ease;
+}
+.cf-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+.cf-stat-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.cf-stat-value {
+  font-size: 24px;
+  font-weight: 300;
+  letter-spacing: -1px;
+}
+.cf-stat-value.income { color: var(--green); }
+.cf-stat-value.expense { color: var(--red); }
+.cf-stat-value.net-pos { color: var(--gold); }
+.cf-stat-value.net-neg { color: var(--red); }
+.cf-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
+}
+.cf-breakdown-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+}
+.cf-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.cf-breakdown-row:last-child { margin-bottom: 0; }
+.cf-breakdown-name {
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--text-primary);
+  width: 100px;
+  flex-shrink: 0;
+}
+.cf-breakdown-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: var(--elevated);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cf-breakdown-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.cf-breakdown-bar-fill.green { background: var(--green); }
+.cf-breakdown-bar-fill.red { background: var(--red); }
+.cf-breakdown-bar-fill.gold { background: var(--gold); }
+.cf-breakdown-amount {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  width: 70px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ===== LOANS PAGE ===== */
+.loans-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.loan-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  transition: all 0.2s ease;
+}
+.loan-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+.loan-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.loan-ring-wrap {
+  position: relative;
+  width: 60px; height: 60px;
+  flex-shrink: 0;
+}
+.loan-ring-wrap svg { width: 60px; height: 60px; transform: rotate(-90deg); }
+.loan-ring-bg { fill: none; stroke: var(--elevated); stroke-width: 4; }
+.loan-ring-fill { fill: none; stroke: var(--gold); stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+.loan-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gold);
+}
+.loan-name {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+.loan-institution {
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+.loan-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.loan-detail-item {}
+.loan-detail-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+.loan-detail-value {
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+.loan-timeline-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+/* ===== ECOSYSTEM DETAIL PAGE ===== */
+.eco-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--gold);
+  cursor: pointer;
+  margin-bottom: 16px;
+  border: none;
+  background: none;
+  font-family: 'DM Sans', sans-serif;
+  padding: 0;
+  transition: opacity 0.2s ease;
+}
+.eco-detail-back:hover { opacity: 0.7; }
+.eco-detail-hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.eco-detail-hero-bg {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  pointer-events: none;
+}
+.eco-detail-hero-circle {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.06;
+}
+.eco-detail-hero-points {
+  font-size: 42px;
+  font-weight: 300;
+  color: var(--gold);
+  letter-spacing: -2px;
+  position: relative;
+}
+.eco-detail-hero-currency {
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  position: relative;
+}
+.eco-detail-hero-value {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--text-primary);
+  margin-top: 8px;
+  position: relative;
+}
+.eco-detail-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.eco-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.eco-cat-row:last-child { margin-bottom: 0; }
+.eco-cat-name {
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--text-primary);
+  width: 90px;
+  flex-shrink: 0;
+}
+.eco-cat-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: var(--elevated);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.eco-cat-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.eco-cat-pts {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-primary);
+  width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.eco-cat-pct {
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--text-muted);
+  width: 40px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.eco-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.eco-card-row:last-child { border-bottom: none; }
+.eco-card-row:hover { background: var(--surface-hover); margin: 0 -8px; padding: 10px 8px; border-radius: 8px; }
+.eco-card-row-img {
+  width: 40px;
+  height: 26px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.eco-card-row-info { flex: 1; }
+.eco-card-row-name {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+.eco-card-row-last4 {
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--text-muted);
+}
+.eco-card-row-pts {
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--gold);
+  flex-shrink: 0;
+}
 </style>
 </head>
 <body>
@@ -1189,7 +1617,7 @@ html, body {
       <div class="section-label">Loyalty Ecosystems</div>
       <div class="ecosystem-grid">
         <!-- Chase UR -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('chase-ur')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#1e40af,#3b82f6)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Chase Ultimate Rewards</div>
@@ -1202,7 +1630,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Amex MR -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('amex-mr')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#047857,#10b981)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Amex Membership Rewards</div>
@@ -1215,7 +1643,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Hilton -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('hilton')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#5b21b6,#8b5cf6)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Hilton Honors</div>
@@ -1228,7 +1656,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Marriott -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('marriott')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#92400e,#d97706)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Marriott Bonvoy</div>
@@ -1241,7 +1669,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Delta -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('delta')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#1e3a5f,#3b82f6)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Delta SkyMiles</div>
@@ -1254,7 +1682,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Hyatt -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('hyatt')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#7f1d1d,#dc2626)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">World of Hyatt</div>
@@ -1267,7 +1695,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- United -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('united')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#374151,#6b7280)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">United MileagePlus</div>
@@ -1280,7 +1708,7 @@ html, body {
           <div class="eco-card-chevron"><svg viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg></div>
         </div>
         <!-- Citi TY -->
-        <div class="eco-card">
+        <div class="eco-card" onclick="showEcosystemDetail('citi-ty')">
           <div class="eco-card-img" style="background:linear-gradient(135deg,#155e75,#06b6d4)"></div>
           <div class="eco-card-info">
             <div class="eco-card-name">Citi ThankYou</div>
@@ -1755,23 +2183,176 @@ html, body {
       </div>
     </div>
 
-    <!-- ===== PLACEHOLDER PAGES ===== -->
+    <!-- ===== DAILY BALANCES PAGE ===== -->
     <div class="page" id="page-daily-balances">
-      <div class="placeholder-page">
-        <svg viewBox="0 0 48 48"><rect x="6" y="10" width="36" height="32" rx="4" stroke-width="2"/><path d="M6 18h36" stroke-width="2"/><path d="M16 6v8M32 6v8" stroke-width="2"/></svg>
-        <p>Daily Balances -- Coming soon</p>
+      <h2 class="page-title">Daily Balances</h2>
+      <div class="db-controls">
+        <label>From <input type="date" value="2026-02-20"></label>
+        <label>To <input type="date" value="2026-03-22"></label>
+        <select>
+          <option>All Accounts</option>
+          <option>Chase Checking</option>
+          <option>Chase Savings</option>
+          <option>Citi Checking</option>
+          <option>Freedom Flex</option>
+          <option>Hilton Aspire</option>
+          <option>Investment Account</option>
+        </select>
       </div>
+      <div class="db-grid" id="dbGrid"></div>
     </div>
+
+    <!-- ===== CASH FLOW PAGE ===== -->
     <div class="page" id="page-cashflow">
-      <div class="placeholder-page">
-        <svg viewBox="0 0 48 48"><path d="M24 6v36M18 14h8a5 5 0 010 10H16a5 5 0 000 10h14" stroke-width="2"/></svg>
-        <p>Cash Flow -- Coming soon</p>
+      <div class="header-row">
+        <h2 class="page-title">Cash Flow</h2>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="period-pills">
+            <button class="period-pill active">Monthly</button>
+            <button class="period-pill">Weekly</button>
+          </div>
+          <select class="year-select">
+            <option>2026</option>
+            <option>2025</option>
+            <option>2024</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="cf-summary">
+        <div class="cf-stat-card">
+          <div class="cf-stat-label">Total Income</div>
+          <div class="cf-stat-value income">$51,200</div>
+        </div>
+        <div class="cf-stat-card">
+          <div class="cf-stat-label">Total Expenses</div>
+          <div class="cf-stat-value expense">$37,100</div>
+        </div>
+        <div class="cf-stat-card">
+          <div class="cf-stat-label">Net Cash Flow</div>
+          <div class="cf-stat-value net-pos">$14,100</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="section-label">Monthly Cash Flow</div>
+        <svg id="cfChart" viewBox="0 0 600 220" style="width:100%;height:auto;max-height:240px"></svg>
+      </div>
+
+      <div class="cf-breakdown">
+        <div class="cf-breakdown-card">
+          <div class="section-label">Income Sources</div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Salary</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill green" style="width:100%"></div></div>
+            <span class="cf-breakdown-amount">$7,500</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Interest</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill green" style="width:8%"></div></div>
+            <span class="cf-breakdown-amount">$620</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Refunds</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill green" style="width:3%"></div></div>
+            <span class="cf-breakdown-amount">$230</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Other</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill green" style="width:2%"></div></div>
+            <span class="cf-breakdown-amount">$150</span>
+          </div>
+        </div>
+        <div class="cf-breakdown-card">
+          <div class="section-label">Top Expenses</div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Housing</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill gold" style="width:100%"></div></div>
+            <span class="cf-breakdown-amount">$2,200</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Dining</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill red" style="width:45%"></div></div>
+            <span class="cf-breakdown-amount">$980</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Groceries</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill red" style="width:39%"></div></div>
+            <span class="cf-breakdown-amount">$860</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Transportation</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill red" style="width:30%"></div></div>
+            <span class="cf-breakdown-amount">$650</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Utilities</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill red" style="width:15%"></div></div>
+            <span class="cf-breakdown-amount">$330</span>
+          </div>
+          <div class="cf-breakdown-row">
+            <span class="cf-breakdown-name">Other</span>
+            <div class="cf-breakdown-bar-bg"><div class="cf-breakdown-bar-fill red" style="width:24%"></div></div>
+            <span class="cf-breakdown-amount">$520</span>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- ===== LOANS PAGE ===== -->
     <div class="page" id="page-loans">
-      <div class="placeholder-page">
-        <svg viewBox="0 0 48 48"><path d="M8 40V18l16-12 16 12v22" stroke-width="2"/><path d="M8 40h32" stroke-width="2"/><rect x="18" y="26" width="12" height="14" stroke-width="2"/></svg>
-        <p>Loans -- Coming soon</p>
+      <h2 class="page-title">Loans</h2>
+
+      <div class="section-label">Active Loans</div>
+      <div class="loans-grid" id="loansGrid"></div>
+
+      <div class="loan-timeline-card">
+        <div class="section-label">Payoff Timeline</div>
+        <svg id="loanTimeline" viewBox="0 0 600 140" style="width:100%;height:auto;max-height:160px"></svg>
+      </div>
+    </div>
+
+    <!-- ===== ECOSYSTEM DETAIL PAGE ===== -->
+    <div class="page" id="page-ecosystem-detail">
+      <button class="eco-detail-back" onclick="switchPage('cards')">&#8592; Portfolio</button>
+
+      <div class="header-row">
+        <h2 class="page-title" id="ecoDetailName">Chase Ultimate Rewards</h2>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="period-pills">
+            <button class="period-pill active">MTD</button>
+            <button class="period-pill">QTD</button>
+            <button class="period-pill">YTD</button>
+          </div>
+          <select class="year-select">
+            <option>2026</option>
+            <option>2025</option>
+            <option>2024</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="eco-detail-hero" id="ecoDetailHero">
+        <div class="eco-detail-hero-circle" style="width:180px;height:180px;top:-40px;right:-30px;background:var(--gold)"></div>
+        <div class="eco-detail-hero-circle" style="width:120px;height:120px;bottom:-30px;left:-20px;background:var(--gold)"></div>
+        <div class="eco-detail-hero-points" id="ecoDetailPoints">10,231</div>
+        <div class="eco-detail-hero-currency" id="ecoDetailCurrency">Ultimate Rewards Points</div>
+        <div class="eco-detail-hero-value" id="ecoDetailValue">&#8776; $12,788.75</div>
+      </div>
+
+      <div class="eco-detail-section">
+        <div class="section-label">Points by Category</div>
+        <div id="ecoDetailCategories"></div>
+      </div>
+
+      <div class="eco-detail-section">
+        <div class="section-label">Your Cards</div>
+        <div id="ecoDetailCards"></div>
+      </div>
+
+      <div class="eco-detail-section">
+        <div class="section-label">Active Challenges</div>
+        <div id="ecoDetailChallenges"></div>
       </div>
     </div>
 
@@ -1880,6 +2461,10 @@ function renderCharts() {
   renderSpendChart();
   renderBudgetTrendChart();
   renderNWChart();
+  renderDailyBalances();
+  renderCashFlowChart();
+  renderLoans();
+  renderLoanTimeline();
 }
 
 function renderSpendChart() {
@@ -1996,6 +2581,508 @@ function renderNWChart() {
     }
   });
   svg.innerHTML = html;
+}
+
+// ===== DAILY BALANCES =====
+function generateBalanceData(base, trend, volatility, count) {
+  const data = [];
+  let val = base;
+  for (let i = 0; i < count; i++) {
+    val += trend + (Math.random() - 0.5) * volatility;
+    data.push(Math.round(val * 100) / 100);
+  }
+  return data;
+}
+
+const dbAccounts = [
+  { name: 'Chase Checking', institution: 'Chase', balance: 4200, data: generateBalanceData(3900, 10, 120, 30), negative: false },
+  { name: 'Chase Savings', institution: 'Chase', balance: 15800, data: generateBalanceData(15750, 1.5, 30, 30), negative: false },
+  { name: 'Citi Checking', institution: 'Citi', balance: 2100, data: generateBalanceData(2350, -8, 80, 30), negative: false },
+  { name: 'Freedom Flex', institution: 'Chase', balance: -1400, data: generateBalanceData(-1200, -5, 150, 30), negative: true },
+  { name: 'Hilton Aspire', institution: 'Amex', balance: -800, data: generateBalanceData(-650, -5, 60, 30), negative: true },
+  { name: 'Investment Account', institution: 'Vanguard', balance: 45000, data: generateBalanceData(43500, 50, 400, 30), negative: false },
+];
+
+let expandedDbCard = -1;
+
+function renderDailyBalances() {
+  const grid = document.getElementById('dbGrid');
+  if (!grid || !grid.closest('.page.active')) return;
+  const gold = getCSS('--gold');
+
+  grid.innerHTML = dbAccounts.map((acc, idx) => {
+    const isExpanded = expandedDbCard === idx;
+    const balStr = acc.negative
+      ? '-$' + Math.abs(acc.balance).toLocaleString()
+      : '$' + acc.balance.toLocaleString();
+
+    // Sparkline SVG
+    const sparkW = 80, sparkH = 24;
+    const dMin = Math.min(...acc.data), dMax = Math.max(...acc.data);
+    const dRange = dMax - dMin || 1;
+    const sparkPts = acc.data.map((v, i) => [
+      (i / (acc.data.length - 1)) * sparkW,
+      sparkH - ((v - dMin) / dRange) * (sparkH - 4) - 2
+    ]);
+    const sparkPath = smoothPath(sparkPts);
+
+    // Full chart SVG for expanded view
+    let expandedHtml = '';
+    if (isExpanded) {
+      const cw = 540, ch = 200, pad = { t: 10, r: 15, b: 28, l: 50 };
+      const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+      const pts = acc.data.map((v, i) => [
+        pad.l + (i / (acc.data.length - 1)) * pw,
+        pad.t + ph - ((v - dMin) / dRange) * ph
+      ]);
+      const fullPath = smoothPath(pts);
+      const areaPath = fullPath + ` L${pts[pts.length-1][0]},${pad.t+ph} L${pts[0][0]},${pad.t+ph} Z`;
+      const gridColor = getCSS('--border');
+      const labelColor = getCSS('--text-muted');
+
+      let chartSvg = `<svg viewBox="0 0 ${cw} ${ch}" style="width:100%;height:auto;max-height:220px">`;
+      chartSvg += `<defs><linearGradient id="dbArea${idx}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${gold}" stop-opacity="0.2"/><stop offset="100%" stop-color="${gold}" stop-opacity="0"/></linearGradient></defs>`;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (i / 4) * ph;
+        const val = dMax - (i / 4) * dRange;
+        chartSvg += `<line x1="${pad.l}" y1="${y}" x2="${cw-pad.r}" y2="${y}" stroke="${gridColor}" stroke-width="1"/>`;
+        const fmtVal = Math.abs(val) >= 1000 ? (val/1000).toFixed(1) + 'k' : val.toFixed(0);
+        chartSvg += `<text x="${pad.l-6}" y="${y+3}" text-anchor="end" class="chart-label" fill="${labelColor}">${fmtVal}</text>`;
+      }
+      chartSvg += `<path d="${areaPath}" fill="url(#dbArea${idx})"/>`;
+      chartSvg += `<path d="${fullPath}" fill="none" stroke="${gold}" stroke-width="2" stroke-linecap="round"/>`;
+      chartSvg += `</svg>`;
+
+      // Daily table (last 10 days)
+      let tableHtml = '<table class="db-detail-table"><thead><tr><th>Date</th><th>Balance</th><th>Change</th></tr></thead><tbody>';
+      const last10 = acc.data.slice(-10);
+      for (let i = last10.length - 1; i >= 0; i--) {
+        const dayOffset = last10.length - 1 - i;
+        const d = new Date(2026, 2, 22 - dayOffset);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const bal = last10[i];
+        const prev = i > 0 ? last10[i-1] : (acc.data.length > 10 ? acc.data[acc.data.length - 11] : bal);
+        const change = bal - prev;
+        const changeStr = change >= 0
+          ? '+$' + Math.abs(change).toFixed(2)
+          : '-$' + Math.abs(change).toFixed(2);
+        const changeClass = change >= 0 ? 'change-pos' : 'change-neg';
+        const balFormatted = bal < 0 ? '-$' + Math.abs(bal).toFixed(2) : '$' + bal.toFixed(2);
+        tableHtml += `<tr><td>${dateStr}</td><td>${balFormatted}</td><td class="${changeClass}">${changeStr}</td></tr>`;
+      }
+      tableHtml += '</tbody></table>';
+
+      expandedHtml = `<div class="db-expanded-content" style="display:block">${chartSvg}${tableHtml}<button class="db-collapse-btn" onclick="event.stopPropagation();collapseDbCard()">Collapse</button></div>`;
+    }
+
+    return `<div class="db-card${isExpanded ? ' expanded' : ''}" onclick="${isExpanded ? '' : 'expandDbCard('+idx+')'}">
+      <div class="db-card-header">
+        <div>
+          <div class="db-card-name">${acc.name}</div>
+          <div class="db-card-institution">${acc.institution}</div>
+        </div>
+      </div>
+      <div class="db-card-balance${acc.negative ? ' negative' : ''}">${balStr}</div>
+      ${!isExpanded ? `<div class="db-sparkline"><svg viewBox="0 0 ${sparkW} ${sparkH}" style="width:80px;height:24px"><path d="${sparkPath}" fill="none" stroke="${gold}" stroke-width="1.5" stroke-linecap="round"/></svg></div>` : ''}
+      ${expandedHtml}
+    </div>`;
+  }).join('');
+}
+
+function expandDbCard(idx) {
+  expandedDbCard = idx;
+  renderDailyBalances();
+}
+function collapseDbCard() {
+  expandedDbCard = -1;
+  renderDailyBalances();
+}
+
+// ===== CASH FLOW CHART =====
+function renderCashFlowChart() {
+  const svg = document.getElementById('cfChart');
+  if (!svg || !svg.closest('.page.active')) return;
+  const green = getCSS('--green');
+  const red = getCSS('--red');
+  const gold = getCSS('--gold');
+  const gridColor = getCSS('--border');
+  const labelColor = getCSS('--text-muted');
+
+  const w = 600, h = 220, pad = { t: 15, r: 15, b: 30, l: 50 };
+  const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+  const income =  [8200, 8500, 8900, 8400, 8500, 8700];
+  const expenses = [5800, 6100, 6800, 5900, 6200, 6300];
+  const net = income.map((v, i) => v - expenses[i]);
+
+  const maxVal = 10000;
+  const minVal = -8000;
+  const totalRange = maxVal - minVal;
+  const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+  const zeroY = pad.t + (maxVal / totalRange) * ch;
+  const barGroupW = cw / months.length;
+  const barW = barGroupW * 0.28;
+
+  let html = '';
+  // Grid lines
+  const gridVals = [10000, 5000, 0, -5000];
+  gridVals.forEach(val => {
+    const y = pad.t + ((maxVal - val) / totalRange) * ch;
+    html += `<line x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}" stroke="${gridColor}" stroke-width="1" ${val === 0 ? 'stroke-dasharray="4,3"' : ''}/>`;
+    const label = val === 0 ? '0' : (val > 0 ? '$' + (val/1000) + 'k' : '-$' + (Math.abs(val)/1000) + 'k');
+    html += `<text x="${pad.l-6}" y="${y+3}" text-anchor="end" class="chart-label" fill="${labelColor}">${label}</text>`;
+  });
+
+  // Bars
+  months.forEach((m, i) => {
+    const cx = pad.l + (i + 0.5) * barGroupW;
+    // Income bar (goes UP from zero)
+    const incH = (income[i] / totalRange) * ch;
+    html += `<rect x="${cx - barW - 2}" y="${zeroY - incH}" width="${barW}" height="${incH}" fill="${green}" rx="2" opacity="0.85"/>`;
+    // Expense bar (goes DOWN from zero)
+    const expH = (expenses[i] / totalRange) * ch;
+    html += `<rect x="${cx + 2}" y="${zeroY}" width="${barW}" height="${expH}" fill="${red}" rx="2" opacity="0.85"/>`;
+    // Label
+    html += `<text x="${cx}" y="${h-6}" text-anchor="middle" class="chart-label" fill="${labelColor}">${m}</text>`;
+  });
+
+  // Net line (gold dotted)
+  const netPts = net.map((v, i) => [
+    pad.l + (i + 0.5) * barGroupW,
+    pad.t + ((maxVal - v) / totalRange) * ch
+  ]);
+  const netPath = smoothPath(netPts);
+  html += `<path d="${netPath}" fill="none" stroke="${gold}" stroke-width="2" stroke-dasharray="6,3" stroke-linecap="round"/>`;
+  netPts.forEach(p => {
+    html += `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="${gold}"/>`;
+  });
+
+  svg.innerHTML = html;
+}
+
+// ===== LOANS =====
+const loansData = [
+  { name: 'Auto Loan', institution: 'Chase', original: 18000, remaining: 12400, apr: 4.9, monthly: 380, paidPct: 31, nextPayment: 'Apr 1, 2026', payoffDate: 'Nov 2028' },
+  { name: 'Student Loan', institution: 'FedLoan', original: 35000, remaining: 22100, apr: 5.5, monthly: 450, paidPct: 37, nextPayment: 'Apr 5, 2026', payoffDate: 'Jun 2030' },
+  { name: 'Personal Loan', institution: 'Marcus', original: 8000, remaining: 3200, apr: 8.99, monthly: 250, paidPct: 60, nextPayment: 'Apr 10, 2026', payoffDate: 'Mar 2027' },
+];
+
+function renderLoans() {
+  const grid = document.getElementById('loansGrid');
+  if (!grid || !grid.closest('.page.active')) return;
+  const r = 25, circ = 2 * Math.PI * r;
+
+  grid.innerHTML = loansData.map(loan => {
+    const offset = circ - (loan.paidPct / 100) * circ;
+    return `<div class="loan-card">
+      <div class="loan-header">
+        <div class="loan-ring-wrap">
+          <svg viewBox="0 0 60 60">
+            <circle class="loan-ring-bg" cx="30" cy="30" r="${r}"/>
+            <circle class="loan-ring-fill" cx="30" cy="30" r="${r}" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/>
+          </svg>
+          <div class="loan-ring-pct">${loan.paidPct}%</div>
+        </div>
+        <div>
+          <div class="loan-name">${loan.name}</div>
+          <div class="loan-institution">${loan.institution}</div>
+        </div>
+      </div>
+      <div class="loan-details">
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">Original</div>
+          <div class="loan-detail-value">$${loan.original.toLocaleString()}</div>
+        </div>
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">Remaining</div>
+          <div class="loan-detail-value">$${loan.remaining.toLocaleString()}</div>
+        </div>
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">APR</div>
+          <div class="loan-detail-value">${loan.apr}%</div>
+        </div>
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">Monthly</div>
+          <div class="loan-detail-value">$${loan.monthly}</div>
+        </div>
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">Next Payment</div>
+          <div class="loan-detail-value">${loan.nextPayment}</div>
+        </div>
+        <div class="loan-detail-item">
+          <div class="loan-detail-label">Payoff Date</div>
+          <div class="loan-detail-value">${loan.payoffDate}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderLoanTimeline() {
+  const svg = document.getElementById('loanTimeline');
+  if (!svg || !svg.closest('.page.active')) return;
+  const gold = getCSS('--gold');
+  const labelColor = getCSS('--text-muted');
+  const gridColor = getCSS('--border');
+  const textColor = getCSS('--text-primary');
+
+  const w = 600, h = 140, pad = { t: 10, r: 20, b: 30, l: 110 };
+  const cw = w - pad.l - pad.r;
+  // Timeline from Mar 2026 to Jun 2030 = ~52 months
+  const startMonth = new Date(2026, 2); // Mar 2026
+  const endMonth = new Date(2030, 5);   // Jun 2030
+  const totalMonths = (endMonth.getFullYear() - startMonth.getFullYear()) * 12 + (endMonth.getMonth() - startMonth.getMonth());
+
+  const loans = [
+    { name: 'Personal Loan', endDate: new Date(2027, 2), color: gold },
+    { name: 'Auto Loan', endDate: new Date(2028, 10), color: gold },
+    { name: 'Student Loan', endDate: new Date(2030, 5), color: gold },
+  ];
+
+  const barH = 22, gap = 12;
+  let html = '';
+
+  // Time axis
+  const years = [2026, 2027, 2028, 2029, 2030];
+  years.forEach(yr => {
+    const monthsFromStart = (yr - 2026) * 12 + (yr === 2026 ? 0 : -2);
+    const x = pad.l + (monthsFromStart / totalMonths) * cw;
+    if (x >= pad.l && x <= w - pad.r) {
+      html += `<line x1="${x}" y1="${pad.t}" x2="${x}" y2="${h - pad.b}" stroke="${gridColor}" stroke-width="1"/>`;
+      html += `<text x="${x}" y="${h - 8}" text-anchor="middle" class="chart-label" fill="${labelColor}">${yr}</text>`;
+    }
+  });
+
+  // Bars
+  loans.forEach((loan, i) => {
+    const y = pad.t + i * (barH + gap);
+    const endMonths = (loan.endDate.getFullYear() - startMonth.getFullYear()) * 12 + (loan.endDate.getMonth() - startMonth.getMonth());
+    const barWidth = (endMonths / totalMonths) * cw;
+
+    html += `<text x="${pad.l - 8}" y="${y + barH / 2 + 4}" text-anchor="end" font-family="'DM Sans', sans-serif" font-size="11" font-weight="300" fill="${textColor}">${loan.name}</text>`;
+    html += `<rect x="${pad.l}" y="${y}" width="${barWidth}" height="${barH}" fill="${loan.color}" rx="4" opacity="0.75"/>`;
+  });
+
+  svg.innerHTML = html;
+}
+
+// ===== ECOSYSTEM DETAIL =====
+const ecosystemData = {
+  'chase-ur': {
+    name: 'Chase Ultimate Rewards',
+    currency: 'Ultimate Rewards Points',
+    points: '10,231',
+    value: '$12,788.75',
+    color: '#1e40af',
+    gradient: 'linear-gradient(135deg,#1e40af,#3b82f6)',
+    categories: [
+      { name: 'Dining', pts: 4200, pct: 41 },
+      { name: 'Travel', pts: 2800, pct: 27 },
+      { name: 'Groceries', pts: 1900, pct: 19 },
+      { name: 'Streaming', pts: 800, pct: 8 },
+      { name: 'Other', pts: 531, pct: 5 },
+    ],
+    cards: [
+      { name: 'Freedom Flex', last4: '5780', pts: 6100, gradient: 'linear-gradient(135deg,#0d9488,#115e59)' },
+      { name: 'Freedom', last4: '4747', pts: 2800, gradient: 'linear-gradient(135deg,#1e40af,#1e3a8a)' },
+      { name: 'Freedom', last4: '9156', pts: 1331, gradient: 'linear-gradient(135deg,#374151,#111827)' },
+    ],
+    challenges: [
+      { name: 'Q1 Bonus Category', detail: 'Freedom Flex -- $1,500 in groceries', pct: 72 },
+    ],
+  },
+  'amex-mr': {
+    name: 'Amex Membership Rewards',
+    currency: 'Membership Rewards Points',
+    points: '89,200',
+    value: '$1,427.20',
+    color: '#047857',
+    gradient: 'linear-gradient(135deg,#047857,#10b981)',
+    categories: [
+      { name: 'Dining', pts: 38000, pct: 43 },
+      { name: 'Groceries', pts: 24500, pct: 27 },
+      { name: 'Travel', pts: 15200, pct: 17 },
+      { name: 'Other', pts: 11500, pct: 13 },
+    ],
+    cards: [
+      { name: 'Amex Gold', last4: '9001', pts: 89200, gradient: 'linear-gradient(135deg,#047857,#064e3b)' },
+    ],
+    challenges: [
+      { name: 'Dining Bonus Accelerator', detail: 'Amex Gold -- Spend $2,000 at restaurants', pct: 68 },
+    ],
+  },
+  'hilton': {
+    name: 'Hilton Honors',
+    currency: 'Hilton Honors Points',
+    points: '341,000',
+    value: '$1,705.00',
+    color: '#5b21b6',
+    gradient: 'linear-gradient(135deg,#5b21b6,#8b5cf6)',
+    categories: [
+      { name: 'Hotels', pts: 220000, pct: 65 },
+      { name: 'Dining', pts: 62000, pct: 18 },
+      { name: 'Other', pts: 59000, pct: 17 },
+    ],
+    cards: [
+      { name: 'Hilton Aspire', last4: '7133', pts: 341000, gradient: 'linear-gradient(135deg,#4c1d95,#2e1065)' },
+    ],
+    challenges: [],
+  },
+  'marriott': {
+    name: 'Marriott Bonvoy',
+    currency: 'Bonvoy Points',
+    points: '186,400',
+    value: '$1,304.80',
+    color: '#92400e',
+    gradient: 'linear-gradient(135deg,#92400e,#d97706)',
+    categories: [
+      { name: 'Hotels', pts: 130000, pct: 70 },
+      { name: 'Dining', pts: 28000, pct: 15 },
+      { name: 'Other', pts: 28400, pct: 15 },
+    ],
+    cards: [
+      { name: 'Bonvoy Boundless', last4: '3847', pts: 186400, gradient: 'linear-gradient(135deg,#78350f,#451a03)' },
+    ],
+    challenges: [
+      { name: 'Marriott Elite Night Credit', detail: 'Bonvoy Boundless -- 15 qualifying nights', pct: 40 },
+    ],
+  },
+  'delta': {
+    name: 'Delta SkyMiles',
+    currency: 'SkyMiles',
+    points: '67,300',
+    value: '$807.60',
+    color: '#1e3a5f',
+    gradient: 'linear-gradient(135deg,#1e3a5f,#3b82f6)',
+    categories: [
+      { name: 'Airlines', pts: 45000, pct: 67 },
+      { name: 'Dining', pts: 12300, pct: 18 },
+      { name: 'Other', pts: 10000, pct: 15 },
+    ],
+    cards: [
+      { name: 'Delta Gold', last4: '6214', pts: 67300, gradient: 'linear-gradient(135deg,#1e3a5f,#0f172a)' },
+    ],
+    challenges: [],
+  },
+  'hyatt': {
+    name: 'World of Hyatt',
+    currency: 'Hyatt Points',
+    points: '42,100',
+    value: '$842.00',
+    color: '#7f1d1d',
+    gradient: 'linear-gradient(135deg,#7f1d1d,#dc2626)',
+    categories: [
+      { name: 'Hotels', pts: 30000, pct: 71 },
+      { name: 'Dining', pts: 7100, pct: 17 },
+      { name: 'Other', pts: 5000, pct: 12 },
+    ],
+    cards: [
+      { name: 'Hyatt Card', last4: '8820', pts: 42100, gradient: 'linear-gradient(135deg,#7f1d1d,#450a0a)' },
+    ],
+    challenges: [],
+  },
+  'united': {
+    name: 'United MileagePlus',
+    currency: 'MileagePlus Miles',
+    points: '53,700',
+    value: '$698.10',
+    color: '#374151',
+    gradient: 'linear-gradient(135deg,#374151,#6b7280)',
+    categories: [
+      { name: 'Airlines', pts: 35000, pct: 65 },
+      { name: 'Travel', pts: 10700, pct: 20 },
+      { name: 'Other', pts: 8000, pct: 15 },
+    ],
+    cards: [
+      { name: 'United Quest', last4: '5092', pts: 53700, gradient: 'linear-gradient(135deg,#374151,#111827)' },
+    ],
+    challenges: [],
+  },
+  'citi-ty': {
+    name: 'Citi ThankYou',
+    currency: 'ThankYou Points',
+    points: '28,400',
+    value: '$426.00',
+    color: '#155e75',
+    gradient: 'linear-gradient(135deg,#155e75,#06b6d4)',
+    categories: [
+      { name: 'Dining', pts: 12000, pct: 42 },
+      { name: 'Travel', pts: 8400, pct: 30 },
+      { name: 'Other', pts: 8000, pct: 28 },
+    ],
+    cards: [
+      { name: 'Citi Double Cash', last4: '3310', pts: 28400, gradient: 'linear-gradient(135deg,#155e75,#0e4758)' },
+    ],
+    challenges: [],
+  },
+};
+
+function showEcosystemDetail(ecoId) {
+  const eco = ecosystemData[ecoId];
+  if (!eco) return;
+
+  document.getElementById('ecoDetailName').textContent = eco.name;
+  document.getElementById('ecoDetailPoints').textContent = eco.points;
+  document.getElementById('ecoDetailCurrency').textContent = eco.currency;
+  document.getElementById('ecoDetailValue').innerHTML = '&#8776; ' + eco.value;
+
+  // Hero background tint
+  const hero = document.getElementById('ecoDetailHero');
+  hero.querySelectorAll('.eco-detail-hero-circle').forEach(c => {
+    c.style.background = eco.color;
+  });
+
+  // Categories
+  const catContainer = document.getElementById('ecoDetailCategories');
+  const maxPts = Math.max(...eco.categories.map(c => c.pts));
+  catContainer.innerHTML = eco.categories.map(cat => {
+    const barW = (cat.pts / maxPts) * 100;
+    return `<div class="eco-cat-row">
+      <span class="eco-cat-name">${cat.name}</span>
+      <div class="eco-cat-bar-bg"><div class="eco-cat-bar-fill" style="width:${barW}%;background:${eco.gradient}"></div></div>
+      <span class="eco-cat-pts">${cat.pts.toLocaleString()}</span>
+      <span class="eco-cat-pct">${cat.pct}%</span>
+    </div>`;
+  }).join('');
+
+  // Cards
+  const cardsContainer = document.getElementById('ecoDetailCards');
+  cardsContainer.innerHTML = eco.cards.map(card => {
+    return `<div class="eco-card-row">
+      <div class="eco-card-row-img" style="background:${card.gradient}"></div>
+      <div class="eco-card-row-info">
+        <div class="eco-card-row-name">${card.name}</div>
+        <div class="eco-card-row-last4">&#183;&#183;&#183;${card.last4}</div>
+      </div>
+      <div class="eco-card-row-pts">${card.pts.toLocaleString()} pts</div>
+    </div>`;
+  }).join('');
+
+  // Challenges
+  const challengesContainer = document.getElementById('ecoDetailChallenges');
+  if (eco.challenges.length === 0) {
+    challengesContainer.innerHTML = '<div style="font-size:13px;font-weight:300;color:var(--text-muted);padding:8px 0">No active challenges</div>';
+  } else {
+    challengesContainer.innerHTML = eco.challenges.map(ch => {
+      return `<div class="challenge-card" style="border:none;padding:0;margin-bottom:8px">
+        <div class="challenge-name">${ch.name}</div>
+        <div class="challenge-detail">${ch.detail}</div>
+        <div class="challenge-bar-bg"><div class="challenge-bar-fill" style="width:${ch.pct}%"></div></div>
+        <div class="challenge-pct">${ch.pct}%</div>
+      </div>`;
+    }).join('');
+  }
+
+  // Switch to ecosystem detail page
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-ecosystem-detail').classList.add('active');
+
+  // Update sidebar to show Cards as active (since ecosystem detail is a sub-page of Cards)
+  document.querySelectorAll('.nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.page === 'cards');
+  });
+  document.querySelectorAll('.quick-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.page === 'cards');
+  });
 }
 
 // ===== BUDGET CATEGORY GRID =====
