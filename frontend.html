@@ -1941,8 +1941,8 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
     return b.actual-a.actual;
   });
   if(rows.length===0)return(
-    <div className="card" style={{display:'flex',flexDirection:'column',gap:6}}>
-      <div className="section-header"><div className="section-title">{title}</div></div>
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,display:'flex',flexDirection:'column',gap:6,padding:20}}>
+      <div style={{fontSize:11,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>{title}</div>
       <div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'12px 0 8px'}}>
         {isAnnual?'No budget or spending data for this year yet.':'No budget or spending data for this month yet.'}
       </div>
@@ -1963,26 +1963,26 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
     const over=budget>0&&actual>budget;
     const overAmt=over?actual-budget:0;
     const dotColor=isCredit?'var(--green)':pct===null?'var(--text-muted)':over?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
-    const pillFill=isCredit?'rgba(16,185,129,0.12)':pct===null?'transparent':over?'rgba(239,68,68,0.15)':pct>=0.8?'rgba(245,158,11,0.15)':'rgba(16,185,129,0.12)';
+    const pillFill=isCredit?'rgba(52,211,153,0.12)':pct===null?'transparent':over?'rgba(248,113,113,0.12)':pct>=0.8?'rgba(251,191,36,0.12)':'rgba(52,211,153,0.12)';
     const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
     return(
-      <div style={{padding:'5px 14px',borderBottom:isTotal?'2px solid var(--border)':'1px solid rgba(0,0,0,0.04)',display:'flex',alignItems:'center',gap:10}}>
-        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'rgba(0,0,0,0.03)',height:32,border:'1px solid var(--border)'}}>
+      <div style={{padding:'5px 14px',borderBottom:isTotal?'2px solid var(--border)':'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
+        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'var(--elevated)',height:32,border:'1px solid var(--border)'}}>
           {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,background:pillFill,transition:'width 0.35s ease'}}/>}
           <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',height:'100%',gap:8}}>
             <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
               <span style={{width:7,height:7,borderRadius:'50%',background:dotColor,flexShrink:0}}/>
-              <span style={{fontSize:isTotal?12.5:12,fontWeight:isTotal?700:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cat}</span>
+              <span style={{fontSize:isTotal?12.5:12,fontWeight:isTotal?500:400,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cat}</span>
             </div>
             {!isCredit&&pct!==null&&<span style={{fontSize:11,fontWeight:500,color:dotColor,flexShrink:0}}>{Math.round(pct*100)}%</span>}
             {isCredit&&<span style={{fontSize:11,fontWeight:500,color:'var(--green)',flexShrink:0}}>credit</span>}
           </div>
         </div>
-        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0}}>
+        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0,fontWeight:300,fontFamily:'DM Sans, sans-serif'}}>
           {isCredit
-            ?<span style={{color:'var(--green)',fontWeight:500}}>{fmtSigned(actual)}</span>
+            ?<span style={{color:'var(--green)',fontWeight:400}}>{fmtSigned(actual)}</span>
             :budget>0
-              ?<span style={{fontWeight:isTotal?700:500}}>{fmt(actual)}<span style={{color:'var(--text-muted)',fontWeight:400}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:400}}> +{fmt(overAmt)}</span>}</span>
+              ?<span style={{fontWeight:isTotal?500:400}}>{fmt(actual)}<span style={{color:'var(--text-muted)',fontWeight:300}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:300}}> +{fmt(overAmt)}</span>}</span>
               :<span style={{color:'var(--text-muted)'}}>{fmt(actual)}</span>}
         </div>
       </div>
@@ -1990,10 +1990,8 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
   };
 
   return(
-    <div className="card">
-      <div className="section-header">
-        <div className="section-title">{title}</div>
-      </div>
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+      <div style={{padding:'16px 20px 8px',fontSize:11,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>{title}</div>
       <div style={{padding:'4px 0 8px'}}>
         <PillRow cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
         {rows.map(({cat,budget,actual})=>(
@@ -6086,7 +6084,7 @@ function BudgetsPage({categories,toast}){
     const variance=isIncome?(actual-budget):(budget-actual); // positive = good
     const pct=budget>0?Math.min(actual/budget,1):0;
     const over=budget>0&&actual>budget;
-    const barColor=isIncome?'var(--green)':(over?'var(--red)':'var(--blue)');
+    const barColor=isIncome?'var(--green)':(over?'var(--red)':'var(--gold)');
     const varColor=variance>0?'var(--green)':(variance<0?'var(--red)':'var(--text-muted)');
     const editVal=edits[cat]?.[String(month)]||'';
     const suggestion=suggestions[cat];
@@ -6097,12 +6095,12 @@ function BudgetsPage({categories,toast}){
     /* Mobile: Category | Budget | Actual | Remaining (no progress bar) */
     if(isMob&&!isEditing) return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-        <td style={{fontWeight:500,fontSize:12.5,paddingLeft:10,paddingRight:4,paddingTop:6,paddingBottom:6}}>{cat}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 5px',color:'var(--text-secondary)',minWidth:58}}>{budget>0?fmtRound(budget):'—'}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 5px',minWidth:58}}>
-          {actual!==0?<span style={{color:actualColor,fontWeight:500}}>{fmtRound(actual)}</span>:'—'}
+        <td style={{fontWeight:400,fontSize:12.5,paddingLeft:10,paddingRight:4,paddingTop:6,paddingBottom:6,color:'var(--text-primary)'}}>{cat}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 5px',color:'var(--text-secondary)',minWidth:58}}>{budget>0?fmtRound(budget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 5px',minWidth:58}}>
+          {actual!==0?<span style={{color:actualColor,fontWeight:400}}>{fmtRound(actual)}</span>:'—'}
         </td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 8px',minWidth:58,color:budget>0?(variance>0?'var(--green)':variance<0?'var(--red)':'#d1d5db'):'#d1d5db'}}>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 8px',minWidth:58,color:budget>0?(variance>0?'var(--green)':variance<0?'var(--red)':'var(--text-muted)'):'var(--text-muted)'}}>
           {budget>0?((variance>0?'+':'')+fmtRound(variance)):'—'}
         </td>
       </tr>
@@ -6110,10 +6108,10 @@ function BudgetsPage({categories,toast}){
 
     return(
       <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-        <td style={{fontWeight:500,fontSize:13,minWidth:120,paddingLeft:12}}>{cat}</td>
+        <td style={{fontWeight:400,fontSize:13,minWidth:120,paddingLeft:12,color:'var(--text-primary)'}}>{cat}</td>
         {/* Actual — with progress bar on desktop */}
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 4px'}}>
-          {actual!==0&&<span style={{color:actualColor,fontWeight:500}}>{fmtRound(actual)}</span>}
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 4px'}}>
+          {actual!==0&&<span style={{color:actualColor,fontWeight:400}}>{fmtRound(actual)}</span>}
           {actual!==0&&budget>0&&!isMob&&(
             <div className="mobile-budget-bar" style={{width:60,display:'inline-block',verticalAlign:'middle',marginLeft:6}}>
               <div style={{height:'100%',width:`${pct*100}%`,background:barColor,borderRadius:3,transition:'width 0.3s'}}/>
@@ -6121,21 +6119,21 @@ function BudgetsPage({categories,toast}){
           )}
         </td>
         {/* Budget — shows input in edit mode */}
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,minWidth:80,padding:'6px 8px',position:'relative'}}>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,minWidth:80,padding:'6px 8px',position:'relative'}}>
           {isEditing?(
             <div style={{position:'relative'}}>
               <input type="number" step="1" min="0" value={editVal}
                 onChange={e=>{const v=e.target.value;setEdits(prev=>({...prev,[cat]:{...prev[cat],[String(month)]:v}}));}}
-                style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 24px 4px 6px',fontSize:12,textAlign:'right',fontFamily:'DM Sans',background:'var(--card-bg)'}}
+                style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 24px 4px 6px',fontSize:12,textAlign:'right',fontFamily:'DM Sans',fontWeight:300,background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}
                 placeholder={suggestion?Math.round(suggestion).toString():'0'}/>
               {suggestion&&!editVal&&<span style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--text-muted)',pointerEvents:'none'}}>{Math.round(suggestion)}</span>}
             </div>
           ):(
-            <span style={{color:budget>0?'var(--text-secondary)':'#d1d5db'}}>{budget>0?fmt(budget):'—'}</span>
+            <span style={{color:budget>0?'var(--text-secondary)':'var(--text-muted)',fontWeight:300}}>{budget>0?fmt(budget):'—'}</span>
           )}
         </td>
         {/* Variance — desktop only */}
-        {!isEditing&&<td className="hide-mobile" style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,padding:'6px 8px',color:variance!==0?varColor:'#d1d5db'}}>
+        {!isEditing&&<td className="hide-mobile" style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:300,padding:'6px 8px',color:variance!==0?varColor:'var(--text-muted)'}}>
           {variance!==0?(variance>0?'+':'')+fmtRound(variance):'—'}
         </td>}
         {isEditing&&<td/>}
@@ -6145,27 +6143,27 @@ function BudgetsPage({categories,toast}){
 
   /* ── Month View: section separator ─────────────────────────────────────── */
   const renderSectionHeader=(label)=>(
-    <tr style={{background:'var(--sidebar-bg)',borderTop:'2px solid var(--border)'}}>
-      <td colSpan={4} style={{fontWeight:400,fontSize:12,textTransform:'uppercase',letterSpacing:'0.05em',color:'var(--text-muted)',paddingLeft:12,paddingTop:8,paddingBottom:4}}>{label}</td>
+    <tr style={{background:'var(--elevated)',borderTop:'2px solid var(--border)'}}>
+      <td colSpan={4} style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',paddingLeft:12,paddingTop:8,paddingBottom:4}}>{label}</td>
     </tr>
   );
 
   const renderSectionTotal=(label,totalBudget,totalActual)=>{
     const diff=totalBudget-totalActual;
     if(isMob) return(
-      <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:400}}>
-        <td style={{paddingLeft:10,fontSize:12.5}}>{label}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 5px',color:'var(--text-muted)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+      <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
+        <td style={{paddingLeft:10,fontSize:12.5,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 5px',color:'var(--text-secondary)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
       </tr>
     );
     return(
-      <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:400}}>
-        <td style={{paddingLeft:12,fontSize:13}}>{label}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,padding:'6px 8px',color:'var(--text-muted)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
-        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'#d1d5db'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+      <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
+        <td style={{paddingLeft:12,fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 8px',color:'var(--text-secondary)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
       </tr>
     );
   };
@@ -6173,18 +6171,18 @@ function BudgetsPage({categories,toast}){
   /* ── NET row ───────────────────────────────────────────────────────────── */
   const renderNetRow=(budgetNet,actualNet)=>{
     if(isMob) return(
-      <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
-        <td style={{fontWeight:400,fontSize:13.5,paddingLeft:10,paddingTop:8,paddingBottom:8}}>NET</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:500,color:'var(--text-muted)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
+      <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
+        <td style={{fontWeight:500,fontSize:13,paddingLeft:10,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
+        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
         <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
         <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 8px',color:(budgetNet-actualNet)>=0?'var(--green)':'var(--red)'}}>{((budgetNet-actualNet)>0?'+':'')+fmtRound(budgetNet-actualNet)}</td>
       </tr>
     );
     return(
-    <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)'}}>
-      <td style={{fontWeight:400,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8}}>NET</td>
+    <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
+      <td style={{fontWeight:500,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
       <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
-      <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:500,color:'var(--text-muted)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
       <td className="hide-mobile"/>
     </tr>
   );
@@ -6201,11 +6199,13 @@ function BudgetsPage({categories,toast}){
       {/* Month selector + action buttons */}
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,flexWrap:'wrap',justifyContent:'space-between'}}>
         {/* Desktop: 12-button pill row */}
-        <div className="hide-mobile" style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+        <div className="hide-mobile" style={{display:'flex',gap:2,background:'var(--elevated)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
           {MO.map((label,i)=>(
-            <button key={i} className={`btn btn-sm ${month===i+1?'btn-primary':'btn-ghost'}`}
+            <button key={i}
               onClick={()=>{setMonth(i+1);if(editing){loadSuggestions(year,i+1);const e={};[...allIncomeCats,...allExpenseCats].forEach(cat=>{e[cat]={[String(i+1)]:targets[cat]?.[String(i+1)]?.amount?.toString()||''};});setEdits(e);}}}
-              style={{borderRadius:7,minWidth:36}}>{label}</button>
+              style={{padding:'5px 10px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11,fontWeight:month===i+1?500:300,fontFamily:'DM Sans, sans-serif',minWidth:36,
+                background:month===i+1?'var(--gold)':'transparent',color:month===i+1?'#0c0c10':'var(--text-muted)',
+                transition:'all 0.15s'}}>{label}</button>
           ))}
         </div>
         {/* Mobile: compact prev/next navigator */}
@@ -6228,18 +6228,18 @@ function BudgetsPage({categories,toast}){
       </div>}
 
       {/* P&L Table */}
-      <div className="card" style={{padding:0,overflow:'hidden'}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:0,overflow:'hidden'}}>
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
-            <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
-              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:500,fontSize:12,color:'var(--text-muted)'}}>Category</th>
+            <tr style={{background:'var(--elevated)',borderBottom:'2px solid var(--border)'}}>
+              <th style={{textAlign:'left',padding:'10px 12px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Category</th>
               {isMob
-                ?<><th style={{textAlign:'right',padding:'10px 5px',fontWeight:500,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Budget</th>
-                    <th style={{textAlign:'right',padding:'10px 5px',fontWeight:500,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Actual</th>
-                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:12,color:'var(--text-muted)',minWidth:58}}>Left</th></>
-                :<><th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:12,color:'var(--text-muted)'}}>Actual</th>
-                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:12,color:'var(--text-muted)',minWidth:80}}>{MO[month-1]} Budget</th>
-                    <th className="hide-mobile" style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:12,color:'var(--text-muted)',minWidth:80}}>Variance</th></>
+                ?<><th style={{textAlign:'right',padding:'10px 5px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:58}}>Budget</th>
+                    <th style={{textAlign:'right',padding:'10px 5px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:58}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:58}}>Left</th></>
+                :<><th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:80}}>{MO[month-1]} Budget</th>
+                    <th className="hide-mobile" style={{textAlign:'right',padding:'10px 8px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:80}}>Variance</th></>
               }
             </tr>
           </thead>
@@ -6268,20 +6268,20 @@ function BudgetsPage({categories,toast}){
   const renderAnnualSection=(sectionLabel,catList)=>{
     return(<>
       {/* Section header row */}
-      <tr style={{background:'var(--sidebar-bg)'}}>
-        <td colSpan={14} style={{fontWeight:400,fontSize:11,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{sectionLabel}</td>
+      <tr style={{background:'var(--elevated)'}}>
+        <td colSpan={14} style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{sectionLabel}</td>
       </tr>
       {catList.map(cat=>{
         const annualBudget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=getBudget(cat,m);return s;})();
         if(annualBudget===0) return null;
         return(
           <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-            <td style={{fontWeight:500,fontSize:12,paddingLeft:10,minWidth:140,position:'sticky',left:0,background:'var(--card-bg)',zIndex:1}}>{cat}</td>
+            <td style={{fontWeight:400,fontSize:12,paddingLeft:10,minWidth:140,position:'sticky',left:0,background:'var(--surface)',zIndex:1,color:'var(--text-primary)'}}>{cat}</td>
             {MO.map((mo,i)=>{
               const m=i+1;
               const b=getBudget(cat,m);
               const isCur=m===curMonth&&year===curYear;
-              const cellBg=isCur?'rgba(99,102,241,0.04)':'transparent';
+              const cellBg=isCur?'var(--gold-soft)':'transparent';
               const isIE=inlineEdit&&inlineEdit.cat===cat&&inlineEdit.m===m;
               return(
                 <td key={i} style={{textAlign:'right',padding:'4px 8px',minWidth:76,background:cellBg,cursor:isIE?'default':'pointer',userSelect:'none'}}
@@ -6292,16 +6292,16 @@ function BudgetsPage({categories,toast}){
                       onBlur={()=>commitInlineEdit(cat,m,inlineEditVal)}
                       onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitInlineEdit(cat,m,inlineEditVal);}if(e.key==='Escape'){e.preventDefault();cancelInlineEdit();}}}
                       onClick={e=>e.stopPropagation()}
-                      style={{width:68,border:'1px solid var(--blue)',borderRadius:4,padding:'2px 4px',fontSize:11,textAlign:'right',fontFamily:'DM Sans',background:'#eef2ff',outline:'none'}}/>
+                      style={{width:68,border:'1px solid var(--gold)',borderRadius:6,padding:'2px 4px',fontSize:11,textAlign:'right',fontFamily:'DM Sans',fontWeight:300,background:'var(--elevated)',color:'var(--text-primary)',outline:'none',boxShadow:'0 0 0 2px var(--gold-soft)'}}/>
                   ):b>0?(
-                    <span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:500,color:'var(--text-primary)'}}>{fmt(b)}</span>
+                    <span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:300,color:'var(--text-primary)'}}>{fmt(b)}</span>
                   ):(
-                    <span style={{color:'var(--border)',fontSize:9,opacity:0.4}}>+</span>
+                    <span style={{color:'var(--text-muted)',fontSize:9,opacity:0.4}}>+</span>
                   )}
                 </td>
               );
             })}
-            <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:500,padding:'4px 10px',minWidth:90,borderLeft:'2px solid var(--border)',color:'var(--text-primary)'}}>{annualBudget>0?fmt(annualBudget):'—'}</td>
+            <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'4px 10px',minWidth:90,borderLeft:'2px solid var(--border)',color:'var(--text-primary)'}}>{annualBudget>0?fmt(annualBudget):'—'}</td>
           </tr>
         );
       })}
@@ -6309,19 +6309,19 @@ function BudgetsPage({categories,toast}){
       {(()=>{
         const totBudget=(()=>{let s=0;catList.forEach(c=>{for(let m=1;m<=12;m++)s+=getBudget(c,m);});return s;})();
         return(
-          <tr style={{borderTop:'1px solid var(--border)',background:'#f7f8fa',fontWeight:400}}>
-            <td style={{paddingLeft:10,fontSize:12,position:'sticky',left:0,background:'#f7f8fa',zIndex:1}}>Total {sectionLabel}</td>
+          <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
+            <td style={{paddingLeft:10,fontSize:12,fontWeight:500,color:'var(--text-primary)',position:'sticky',left:0,background:'var(--elevated)',zIndex:1}}>Total {sectionLabel}</td>
             {MO.map((mo,i)=>{
               const m=i+1;
               const tb=catList.reduce((s,c)=>s+getBudget(c,m),0);
               const isCur=m===curMonth&&year===curYear;
               return(
-                <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'rgba(99,102,241,0.06)':'transparent'}}>
-                  <span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400}}>{tb>0?fmt(tb):'—'}</span>
+                <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'var(--gold-soft)':'transparent'}}>
+                  <span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400,color:'var(--text-secondary)'}}>{tb>0?fmt(tb):'—'}</span>
                 </td>
               );
             })}
-            <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{totBudget>0?fmt(totBudget):'—'}</td>
+            <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'4px 10px',borderLeft:'2px solid var(--border)',color:'var(--text-primary)'}}>{totBudget>0?fmt(totBudget):'—'}</td>
           </tr>
         );
       })()}
@@ -6333,25 +6333,25 @@ function BudgetsPage({categories,toast}){
     return(
       <div>
       <div style={{display:'flex',gap:8,marginBottom:10,justifyContent:'flex-end',alignItems:'center'}}>
-        <span style={{fontSize:12,color:'var(--text-muted)',flex:1}}>Click any cell to edit inline · Enter to save · Esc to cancel</span>
+        <span style={{fontSize:11,color:'var(--text-muted)',flex:1,fontWeight:300}}>Click any cell to edit inline · Enter to save · Esc to cancel</span>
         <button className="btn btn-sm btn-secondary" onClick={()=>setPasteModal(true)}>📋 Paste from Excel</button>
         <button className="btn btn-sm btn-ghost" onClick={startYearEdit}>✏ Edit Year</button>
       </div>
-      <div className="card" style={{padding:0,overflow:'hidden'}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:0,overflow:'hidden'}}>
         <div style={{overflowX:'auto'}}>
           <table style={{borderCollapse:'collapse',minWidth:1200}}>
             <thead>
-              <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
-                <th style={{textAlign:'left',padding:'8px 10px',fontWeight:500,fontSize:11,color:'var(--text-muted)',minWidth:140,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:3}}>Category</th>
+              <tr style={{background:'var(--elevated)',borderBottom:'2px solid var(--border)'}}>
+                <th style={{textAlign:'left',padding:'8px 10px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:140,position:'sticky',left:0,background:'var(--elevated)',zIndex:3}}>Category</th>
                 {MO.map((mo,i)=>{
                   const isCur=(i+1)===curMonth&&year===curYear;
                   return(
-                    <th key={i} style={{textAlign:'right',padding:'6px 8px',fontWeight:500,fontSize:10,color:isCur?'var(--blue)':'var(--text-muted)',minWidth:76,background:isCur?'rgba(99,102,241,0.06)':'transparent'}}>
+                    <th key={i} style={{textAlign:'right',padding:'6px 8px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1px',color:isCur?'var(--gold)':'var(--text-muted)',minWidth:76,background:isCur?'var(--gold-soft)':'transparent'}}>
                       {mo}
                     </th>
                   );
                 })}
-                <th style={{textAlign:'right',padding:'8px 10px',fontWeight:500,fontSize:11,color:'var(--text-muted)',minWidth:90,borderLeft:'2px solid var(--border)'}}>Total</th>
+                <th style={{textAlign:'right',padding:'8px 10px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:90,borderLeft:'2px solid var(--border)'}}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -6360,8 +6360,8 @@ function BudgetsPage({categories,toast}){
               {/* Annual NET row */}
               {(()=>{
                 return(
-                  <tr style={{borderTop:'3px solid var(--border)',background:'var(--sidebar-bg)',fontWeight:400}}>
-                    <td style={{paddingLeft:10,fontSize:13,paddingTop:8,paddingBottom:8,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:1}}>NET</td>
+                  <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)',fontWeight:400}}>
+                    <td style={{paddingLeft:10,fontSize:13,fontWeight:500,paddingTop:8,paddingBottom:8,position:'sticky',left:0,background:'var(--gold-soft)',zIndex:1,color:'var(--text-primary)'}}>NET</td>
                     {MO.map((mo,i)=>{
                       const m=i+1;
                       const ib=allIncomeCats.reduce((s,c)=>s+getBudget(c,m),0);
@@ -6369,19 +6369,19 @@ function BudgetsPage({categories,toast}){
                       const nb=ib-eb;
                       const isCur=m===curMonth&&year===curYear;
                       return(
-                        <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'rgba(99,102,241,0.06)':'transparent'}}>
-                          {nb!==0?<span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400,color:nb>=0?'var(--green)':'var(--red)'}}>{nb>=0?fmt(nb):`-${fmt(Math.abs(nb))}`}</span>:<span style={{color:'var(--border)',fontSize:10}}>—</span>}
+                        <td key={i} style={{textAlign:'right',padding:'4px 8px',background:isCur?'var(--gold-soft)':'transparent'}}>
+                          {nb!==0?<span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400,color:nb>=0?'var(--green)':'var(--red)'}}>{nb>=0?fmt(nb):`-${fmt(Math.abs(nb))}`}</span>:<span style={{color:'var(--text-muted)',fontSize:10}}>—</span>}
                         </td>
                       );
                     })}
-                    <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,color:netBudget>=0?'var(--green)':'var(--red)',padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{netBudget>=0?fmt(netBudget):`-${fmt(Math.abs(netBudget))}`}</td>
+                    <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:500,color:netBudget>=0?'var(--green)':'var(--red)',padding:'4px 10px',borderLeft:'2px solid var(--border)'}}>{netBudget>=0?fmt(netBudget):`-${fmt(Math.abs(netBudget))}`}</td>
                   </tr>
                 );
               })()}
             </tbody>
           </table>
         </div>
-        <div style={{padding:'8px 12px',fontSize:11,color:'var(--text-muted)',borderTop:'1px solid var(--border)'}}>
+        <div style={{padding:'8px 12px',fontSize:11,fontWeight:300,color:'var(--text-muted)',borderTop:'1px solid var(--border)'}}>
           Budget planning view — actuals &amp; progress tracking are on the Dashboard. Click any cell to edit inline.
         </div>
       </div>
@@ -6396,26 +6396,26 @@ function BudgetsPage({categories,toast}){
     const setCell=(cat,m,val)=>setYearEdits(prev=>({...prev,[cat]:{...prev[cat],[String(m)]:val}}));
     const renderSection=(label,catList,isIncome)=>(
       <>
-        <tr style={{background:'var(--sidebar-bg)'}}>
-          <td colSpan={13} style={{fontWeight:400,fontSize:11,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{label}</td>
+        <tr style={{background:'var(--elevated)'}}>
+          <td colSpan={13} style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{label}</td>
         </tr>
         {catList.map(cat=>(
           <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-            <td style={{fontWeight:500,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--card-bg)',zIndex:1,whiteSpace:'nowrap'}}>{cat}</td>
+            <td style={{fontWeight:400,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--surface)',zIndex:1,whiteSpace:'nowrap',color:'var(--text-primary)'}}>{cat}</td>
             {MO.map((mo,i)=>{
               const m=i+1;
               const isCur=m===curMonth&&year===curYear;
               const val=yearEdits[cat]?.[String(m)]??'';
               const actual=getActual(cat,m);
               return(
-                <td key={m} style={{padding:'3px 3px',background:isCur?'rgba(99,102,241,0.05)':'transparent',minWidth:82}}>
+                <td key={m} style={{padding:'3px 3px',background:isCur?'var(--gold-soft)':'transparent',minWidth:82}}>
                   <input type="number" step="1" min="0" value={val}
                     onChange={e=>setCell(cat,m,e.target.value)}
-                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:4,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'DM Sans',
-                      background:isCur?'rgba(99,102,241,0.06)':'var(--card-bg)',
-                      outline:isCur?'1px solid var(--blue)':undefined}}
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'DM Sans',fontWeight:300,
+                      background:isCur?'var(--gold-soft)':'var(--elevated)',color:'var(--text-primary)',
+                      outline:isCur?'1px solid var(--gold)':undefined}}
                     placeholder={actual>0?String(Math.round(actual)):''}/>
-                  {actual>0&&<div style={{fontSize:9,color:isIncome?'var(--green)':'var(--text-muted)',textAlign:'right',padding:'1px 3px 0',opacity:0.8}}>
+                  {actual>0&&<div style={{fontSize:9,color:isIncome?'var(--green)':'var(--text-muted)',textAlign:'right',padding:'1px 3px 0',opacity:0.8,fontWeight:300}}>
                     act {fmt(actual)}</div>}
                 </td>
               );
@@ -6427,23 +6427,23 @@ function BudgetsPage({categories,toast}){
     return(
       <div>
         <div style={{display:'flex',gap:8,marginBottom:10,justifyContent:'flex-end',alignItems:'center'}}>
-          <span style={{fontSize:12,color:'var(--text-muted)'}}>Editing all months for {year} · Current month (highlighted) shown first</span>
+          <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>Editing all months for {year} · Current month (highlighted) shown first</span>
           <button className="btn btn-sm btn-ghost" onClick={()=>{setView('annual');setYearEdits({});}}>Cancel</button>
           <button className="btn btn-sm btn-success" onClick={saveYearEdits} disabled={saving}>{saving?'Saving…':'Save Year'}</button>
         </div>
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:0,overflow:'hidden'}}>
           <div style={{overflowX:'auto'}}>
             <table style={{borderCollapse:'collapse',minWidth:1100}}>
               <thead>
-                <tr style={{background:'var(--sidebar-bg)',borderBottom:'2px solid var(--border)'}}>
-                  <th style={{textAlign:'left',padding:'8px 10px',fontWeight:500,fontSize:11,color:'var(--text-muted)',minWidth:150,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:3}}>Category</th>
+                <tr style={{background:'var(--elevated)',borderBottom:'2px solid var(--border)'}}>
+                  <th style={{textAlign:'left',padding:'8px 10px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:150,position:'sticky',left:0,background:'var(--elevated)',zIndex:3}}>Category</th>
                   {MO.map((mo,i)=>{
                     const isCur=(i+1)===curMonth&&year===curYear;
                     return(
-                      <th key={i} style={{textAlign:'center',padding:'6px 4px',fontWeight:isCur?700:600,fontSize:11,
-                        color:isCur?'var(--blue)':'var(--text-muted)',minWidth:82,
-                        background:isCur?'rgba(99,102,241,0.1)':'transparent',
-                        borderBottom:isCur?'2px solid var(--blue)':undefined}}>
+                      <th key={i} style={{textAlign:'center',padding:'6px 4px',fontWeight:isCur?500:400,fontSize:10,textTransform:'uppercase',letterSpacing:'1px',
+                        color:isCur?'var(--gold)':'var(--text-muted)',minWidth:82,
+                        background:isCur?'var(--gold-soft)':'transparent',
+                        borderBottom:isCur?'2px solid var(--gold)':undefined}}>
                         {mo}{isCur?' ★':''}
                       </th>
                     );
@@ -6463,20 +6463,27 @@ function BudgetsPage({categories,toast}){
 
   /* ── KPI strip (shared across both views) ───────────────────────────────── */
   const renderKPIs=()=>{
+    const kpiStyle={background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:18};
     if(view==='month'){
+      const expPct=monthExpenseBudget>0?Math.round(monthExpenseActual/monthExpenseBudget*100):0;
+      const expColor=expPct>=100?'var(--red)':expPct>=80?'var(--amber)':'var(--green)';
       return(
-        <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
-          <div className="card metric-card"><div className="metric-label">Income Budget — {MO[month-1]}</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(monthIncomeBudget)}</div></div>
-          <div className="card metric-card"><div className="metric-label">Expense Budget — {MO[month-1]}</div><div className="metric-value">{fmt(monthExpenseBudget)}</div></div>
-          <div className="card metric-card"><div className="metric-label">Net Budget — {MO[month-1]}</div><div className="metric-value" style={{color:monthNetBudget>=0?'var(--green)':'var(--red)'}}>{monthNetBudget>=0?'+':''}{fmt(monthNetBudget)}</div></div>
+        <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+          <div style={kpiStyle}><div className="metric-label">Income — {MO[month-1]}</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(monthIncomeBudget)}</div><div className="metric-sub">Actual: {fmt(monthIncomeActual)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Expenses — {MO[month-1]}</div><div className="metric-value">{fmt(monthExpenseBudget)}</div><div className="metric-sub">Actual: {fmt(monthExpenseActual)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:expColor}}>{expPct}%</div><div className="metric-sub" style={{color:expColor}}>{fmt(monthExpenseActual)} of {fmt(monthExpenseBudget)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Net — {MO[month-1]}</div><div className="metric-value" style={{color:monthNetBudget>=0?'var(--green)':'var(--red)'}}>{monthNetBudget>=0?'+':''}{fmt(monthNetBudget)}</div><div className="metric-sub">Actual: {monthNetActual>=0?'+':''}{fmt(monthNetActual)}</div></div>
         </div>
       );
     }else{
+      const annExpPct=annualExpenseBudget>0?Math.round(annualExpenseActual/annualExpenseBudget*100):0;
+      const annExpColor=annExpPct>=100?'var(--red)':annExpPct>=80?'var(--amber)':'var(--green)';
       return(
-        <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
-          <div className="card metric-card"><div className="metric-label">Annual Income Budget</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(annualIncomeBudget)}</div></div>
-          <div className="card metric-card"><div className="metric-label">Annual Expense Budget</div><div className="metric-value">{fmt(annualExpenseBudget)}</div></div>
-          <div className="card metric-card"><div className="metric-label">Annual Net Budget</div><div className="metric-value" style={{color:(annualIncomeBudget-annualExpenseBudget)>=0?'var(--green)':'var(--red)'}}>{(annualIncomeBudget-annualExpenseBudget)>=0?'+':''}{fmt(annualIncomeBudget-annualExpenseBudget)}</div></div>
+        <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+          <div style={kpiStyle}><div className="metric-label">Annual Income</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(annualIncomeBudget)}</div><div className="metric-sub">Actual: {fmt(annualIncomeActual)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Annual Expenses</div><div className="metric-value">{fmt(annualExpenseBudget)}</div><div className="metric-sub">Actual: {fmt(annualExpenseActual)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:annExpColor}}>{annExpPct}%</div><div className="metric-sub" style={{color:annExpColor}}>{fmt(annualExpenseActual)} of {fmt(annualExpenseBudget)}</div></div>
+          <div style={kpiStyle}><div className="metric-label">Annual Net</div><div className="metric-value" style={{color:(annualIncomeBudget-annualExpenseBudget)>=0?'var(--green)':'var(--red)'}}>{(annualIncomeBudget-annualExpenseBudget)>=0?'+':''}{fmt(annualIncomeBudget-annualExpenseBudget)}</div></div>
         </div>
       );
     }
@@ -6487,20 +6494,23 @@ function BudgetsPage({categories,toast}){
     <div>
       {/* Top bar: year selector + view toggle */}
       <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16,flexWrap:'wrap'}}>
-        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
+        <div style={{display:'flex',gap:2,background:'var(--elevated)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
           {[curYear-1,curYear,curYear+1].map(y=>(
-            <button key={y} className={`btn btn-sm ${year===y?'btn-primary':'btn-ghost'}`}
-              onClick={()=>{setYear(y);setEditing(false);setSuggestions({});}}
-              style={{borderRadius:7}}>{y}</button>
+            <button key={y} onClick={()=>{setYear(y);setEditing(false);setSuggestions({});}}
+              style={{padding:'5px 16px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:year===y?500:300,fontFamily:'DM Sans, sans-serif',
+                background:year===y?'var(--gold)':'transparent',color:year===y?'#0c0c10':'var(--text-muted)',
+                transition:'all 0.15s',letterSpacing:'0.2px'}}>{y}</button>
           ))}
         </div>
-        <div style={{display:'flex',gap:4,background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:4}}>
-          <button className={`btn btn-sm ${view==='month'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setView('month');setEditing(false);setSuggestions({});setYearEdits({});}}
-            style={{borderRadius:7}}>Month View</button>
-          <button className={`btn btn-sm ${view==='annual'||view==='edit-year'?'btn-primary':'btn-ghost'}`}
-            onClick={()=>{setView('annual');setEditing(false);setSuggestions({});setYearEdits({});setInlineEdit(null);}}
-            style={{borderRadius:7}}>Annual View</button>
+        <div style={{display:'flex',gap:2,background:'var(--elevated)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
+          <button onClick={()=>{setView('month');setEditing(false);setSuggestions({});setYearEdits({});}}
+            style={{padding:'5px 16px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:view==='month'?500:300,fontFamily:'DM Sans, sans-serif',
+              background:view==='month'?'var(--gold)':'transparent',color:view==='month'?'#0c0c10':'var(--text-muted)',
+              transition:'all 0.15s',letterSpacing:'0.2px'}}>Month View</button>
+          <button onClick={()=>{setView('annual');setEditing(false);setSuggestions({});setYearEdits({});setInlineEdit(null);}}
+            style={{padding:'5px 16px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:(view==='annual'||view==='edit-year')?500:300,fontFamily:'DM Sans, sans-serif',
+              background:(view==='annual'||view==='edit-year')?'var(--gold)':'transparent',color:(view==='annual'||view==='edit-year')?'#0c0c10':'var(--text-muted)',
+              transition:'all 0.15s',letterSpacing:'0.2px'}}>Annual View</button>
         </div>
       </div>
 
@@ -6511,23 +6521,23 @@ function BudgetsPage({categories,toast}){
       {loading
         ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
         :(allIncomeCats.length===0&&allExpenseCats.length===0&&Object.keys(targets).length===0)
-          ?<div className="card"><div className="empty"><div className="empty-icon">◉</div><span>No budget data for {year}</span></div></div>
+          ?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:40,textAlign:'center'}}><div style={{color:'var(--text-muted)',fontSize:13,fontWeight:300}}>No budget data for {year}</div></div>
           :view==='month'?renderMonthView():view==='edit-year'?renderEditYearView():renderAnnualView()
       }
 
       {/* ── Paste from Excel modal ─────────────────────────────────────── */}
       {pasteModal&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:9000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
-          <div style={{background:'var(--card-bg)',borderRadius:12,padding:24,maxWidth:860,width:'100%',maxHeight:'82vh',overflow:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:24,maxWidth:860,width:'100%',maxHeight:'82vh',overflow:'auto',boxShadow:'var(--shadow-md)'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-              <h3 style={{margin:0,fontSize:16,fontWeight:400}}>📋 Paste Budget from Excel</h3>
+              <h3 style={{margin:0,fontSize:16,fontWeight:400,color:'var(--text-primary)',fontFamily:'DM Sans, sans-serif'}}>📋 Paste Budget from Excel</h3>
               <button className="btn btn-sm btn-ghost" onClick={closePasteModal}>✕</button>
             </div>
             <p style={{fontSize:12,color:'var(--text-muted)',margin:'0 0 12px',lineHeight:1.5}}>
               Copy from Excel/Sheets and paste below. Expected format: <strong>Category</strong> in column A, then one column per month (Jan–Dec). A header row is automatically detected and skipped. Category names must match exactly.
             </p>
             <textarea
-              style={{width:'100%',height:110,border:'1px solid var(--border)',borderRadius:6,padding:8,fontSize:12,fontFamily:'DM Sans',resize:'vertical',boxSizing:'border-box',background:'var(--sidebar-bg)'}}
+              style={{width:'100%',height:110,border:'1px solid var(--border)',borderRadius:8,padding:10,fontSize:12,fontWeight:300,fontFamily:'DM Sans, sans-serif',resize:'vertical',boxSizing:'border-box',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}
               placeholder={"Category\tJan\tFeb\tMar\tApr\tMay\tJun\tJul\tAug\tSep\tOct\tNov\tDec\nGroceries\t1200\t1200\t1300\t1200\t1200\t1200\t1200\t1200\t1200\t1200\t1200\t1400\nRent\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500\t2500"}
               value={pasteText}
               onChange={e=>{setPasteText(e.target.value);parsePasteText(e.target.value);}}
@@ -6544,20 +6554,20 @@ function BudgetsPage({categories,toast}){
                 <div style={{fontSize:12,fontWeight:500,marginBottom:8,color:'var(--text-primary)'}}>
                   Preview — {parsedRows.length} {parsedRows.length===1?'category':'categories'}, {parsedRows.reduce((s,r)=>s+r.values.filter(v=>v!=null).length,0)} targets to save:
                 </div>
-                <div style={{overflowX:'auto',borderRadius:6,border:'1px solid var(--border)'}}>
+                <div style={{overflowX:'auto',borderRadius:8,border:'1px solid var(--border)'}}>
                   <table style={{borderCollapse:'collapse',fontSize:11,width:'100%'}}>
                     <thead>
-                      <tr style={{background:'var(--sidebar-bg)'}}>
-                        <th style={{textAlign:'left',padding:'5px 10px',fontWeight:500,position:'sticky',left:0,background:'var(--sidebar-bg)',zIndex:1}}>Category</th>
-                        {MO.map(mo=><th key={mo} style={{textAlign:'right',padding:'5px 7px',fontWeight:500,fontFamily:'DM Sans',minWidth:60}}>{mo}</th>)}
+                      <tr style={{background:'var(--elevated)'}}>
+                        <th style={{textAlign:'left',padding:'5px 10px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',position:'sticky',left:0,background:'var(--elevated)',zIndex:1}}>Category</th>
+                        {MO.map(mo=><th key={mo} style={{textAlign:'right',padding:'5px 7px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1px',fontFamily:'DM Sans',color:'var(--text-muted)',minWidth:60}}>{mo}</th>)}
                       </tr>
                     </thead>
                     <tbody>
                       {parsedRows.map(({cat,values})=>(
                         <tr key={cat} style={{borderTop:'1px solid var(--border)'}}>
-                          <td style={{padding:'4px 10px',fontWeight:500,position:'sticky',left:0,background:'var(--card-bg)',zIndex:1}}>{cat}</td>
+                          <td style={{padding:'4px 10px',fontWeight:400,color:'var(--text-primary)',position:'sticky',left:0,background:'var(--surface)',zIndex:1}}>{cat}</td>
                           {values.map((v,i)=>(
-                            <td key={i} style={{textAlign:'right',padding:'4px 7px',fontFamily:'DM Sans',color:v!=null?'var(--text-primary)':'var(--border)',background:v!=null?undefined:'var(--sidebar-bg)'}}>
+                            <td key={i} style={{textAlign:'right',padding:'4px 7px',fontFamily:'DM Sans',fontWeight:300,color:v!=null?'var(--text-primary)':'var(--text-muted)',background:v!=null?undefined:'var(--elevated)'}}>
                               {v!=null?fmt(v):'—'}
                             </td>
                           ))}
