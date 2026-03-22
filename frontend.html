@@ -85,18 +85,19 @@ body{overflow:hidden}
 .btn-outline-white{background:transparent;color:var(--text-secondary);border:1px solid var(--border)}
 .btn-outline-white:hover{background:var(--sidebar-hover-bg);border-color:var(--border-strong)}
 .filters{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.search-input{border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--elevated);width:200px;transition:border-color 0.15s,box-shadow 0.15s}
-.search-input:focus{border-color:var(--gold);background:var(--elevated);box-shadow:0 0 0 3px var(--gold-soft)}
-.filter-select{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--elevated);cursor:pointer;transition:border-color 0.15s,box-shadow 0.15s}
-.filter-select:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-soft)}
-.filter-label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
-.date-input{border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;outline:none;color:var(--text-primary);background:var(--elevated);transition:border-color 0.15s,box-shadow 0.15s}
-.date-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-soft)}
+.search-input{border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;font-weight:300;font-family:'DM Sans',sans-serif;outline:none;color:var(--text-primary);background:var(--elevated);width:200px;transition:border-color 0.2s,box-shadow 0.2s}
+.search-input:focus{border-color:var(--gold);background:var(--elevated);box-shadow:0 0 0 2px var(--gold-soft)}
+.search-input::placeholder{color:var(--text-muted)}
+.filter-select{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:300;font-family:'DM Sans',sans-serif;outline:none;color:var(--text-primary);background:var(--elevated);cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s}
+.filter-select:focus{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-soft)}
+.filter-label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:300;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+.date-input{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:300;font-family:'DM Sans',sans-serif;outline:none;color:var(--text-primary);background:var(--elevated);transition:border-color 0.2s,box-shadow 0.2s}
+.date-input:focus{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-soft)}
 .filter-count{margin-left:auto;font-size:12px;color:var(--text-muted);white-space:nowrap}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
-thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-muted);border-bottom:1px solid var(--border-strong);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
-tbody tr{border-bottom:1px solid var(--border);transition:background 0.1s}
+thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);border-bottom:1px solid var(--border-strong);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
+tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:var(--surface-hover)}
 tbody tr.row-locked{background:rgba(96,165,250,0.06)}
@@ -107,7 +108,7 @@ tbody tr.row-transfer{opacity:0.7}
 tbody tr.row-excluded{opacity:0.45;background:var(--surface-hover)}
 tbody tr.row-excluded:hover{background:var(--elevated)}
 tbody tr.row-excluded td{text-decoration:line-through;color:var(--text-muted)}
-td{padding:11px 14px;font-size:13.5px}
+td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
 .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap;letter-spacing:0.1px}
 .badge-transfer{background:var(--elevated);color:var(--text-muted)}
 .badge-income{background:rgba(52,211,153,0.1);color:var(--green)}
@@ -546,13 +547,13 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
           {txn.enrichment_source&&txn.enrichment_source!=='rule'&&(()=>{
             const src=txn.enrichment_source;
-            const cfg={llm:{bg:'#dbeafe',color:'#1d4ed8',label:'AI'},override:{bg:'#dcfce7',color:'var(--green)',label:'saved'},fallback:{bg:'#f3f4f6',color:'var(--text-muted)',label:'fallback'}};
+            const cfg={llm:{bg:'var(--gold-soft)',color:'var(--gold)',label:'AI'},override:{bg:'rgba(52,211,153,0.12)',color:'var(--green)',label:'saved'},fallback:{bg:'var(--elevated)',color:'var(--text-muted)',label:'fallback'}};
             const c=cfg[src]||cfg.fallback;
             return<span style={{fontSize:10,padding:'1px 6px',borderRadius:10,background:c.bg,color:c.color,fontWeight:500,flexShrink:0}} title={`Enriched by: ${src}`}>{c.label}</span>;
           })()}
           {txn.import_source&&txn.import_source!=='plaid'&&(()=>{
-            const cfg={csv:{bg:'#fef3c7',color:'var(--amber)',label:'CSV'},ofx:{bg:'#fef3c7',color:'var(--amber)',label:'OFX'},manual:{bg:'#f3f4f6',color:'var(--text-muted)',label:'manual'}};
-            const c=cfg[txn.import_source]||{bg:'#f3f4f6',color:'var(--text-muted)',label:txn.import_source};
+            const cfg={csv:{bg:'rgba(251,191,36,0.12)',color:'var(--amber)',label:'CSV'},ofx:{bg:'rgba(251,191,36,0.12)',color:'var(--amber)',label:'OFX'},manual:{bg:'var(--elevated)',color:'var(--text-muted)',label:'manual'}};
+            const c=cfg[txn.import_source]||{bg:'var(--elevated)',color:'var(--text-muted)',label:txn.import_source};
             return<span style={{fontSize:10,padding:'1px 6px',borderRadius:10,background:c.bg,color:c.color,fontWeight:500,flexShrink:0}} title={`Source: ${txn.import_source}`}>{c.label}</span>;
           })()}
         </div>
@@ -568,7 +569,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
       </td>
       <td>
         {!showCategoryForType(displayAction)
-          ?<span style={{color:'#d1d5db',fontSize:13}}>—</span>
+          ?<span style={{color:'var(--text-muted)',fontSize:13}}>—</span>
           :editing
             ?<select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{fontSize:12,padding:'4px 8px',width:130}}>
               <option value="">Unclassified</option>
@@ -599,15 +600,15 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)} style={{fontSize:11}}>{txn.is_split?'Splits':'Split'}</button>
             {locked&&<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13}} onClick={toggleLock} title="Unlock">🔓</button>}
-            <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'#fef9c3':'#f3f4f6',color:gcb?'#854d0e':'var(--text-muted)',border:gcb?'1px solid #fde047':'1px solid var(--border)'}}
+            <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
               onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
               title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
             <button className="btn btn-sm"
-              style={{padding:'4px 7px',fontSize:11,background:'rgba(96,165,250,0.08)',color:'#1d4ed8',border:'1px solid #bfdbfe'}}
+              style={{padding:'4px 7px',fontSize:11,background:'var(--gold-soft)',color:'var(--gold)',border:'1px solid rgba(212,164,74,0.2)'}}
               onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
               title="Create a rule from this transaction">Rule</button>
             <button className="btn btn-sm"
-              style={{padding:'4px 7px',fontSize:11,background:excluded?'#fef2f2':'#f3f4f6',color:excluded?'#991b1b':'var(--text-muted)',border:excluded?'1px solid #fca5a5':'1px solid var(--border)'}}
+              style={{padding:'4px 7px',fontSize:11,background:excluded?'rgba(248,113,113,0.12)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
               onClick={toggleExclude}
               title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
               {excluded?'↩':'⊘'}
@@ -617,13 +618,13 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
       </td>
     </tr>
     {expanded&&txn.splits&&txn.splits.map((s,i)=>(
-      <tr key={`split-${txn.id}-${i}`} style={{background:'#f9fafb',fontSize:12}}>
+      <tr key={`split-${txn.id}-${i}`} style={{background:'var(--elevated)',fontSize:12}}>
         <td></td>
         <td></td>
-        <td style={{paddingLeft:28,color:'var(--text-secondary)'}}>{s.description||<span style={{color:'#d1d5db',fontStyle:'italic'}}>—</span>}</td>
-        <td><span style={{color:'var(--text-secondary)'}}>{s.amount<0?'–':'+'}{fmt(s.amount)}</span></td>
+        <td style={{paddingLeft:28,color:'var(--text-secondary)',fontWeight:300}}>{s.description||<span style={{color:'var(--text-muted)',fontStyle:'italic'}}>—</span>}</td>
+        <td><span style={{color:'var(--text-secondary)',fontWeight:300}}>{s.amount<0?'–':'+'}{fmt(s.amount)}</span></td>
         <td><span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:11}}>{s.action||'Expense'}</span></td>
-        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{s.category}</span>:<span style={{color:'#d1d5db'}}>—</span>}</td>
+        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{s.category}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
         <td></td>
         <td></td>
       </tr>
@@ -1444,28 +1445,28 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
         return(
           <div key={t.id} onClick={()=>setEditTxn(t)}
             style={{padding:'11px 14px',borderBottom:'1px solid var(--border)',
-              background:needsRev?'#fffbeb':t.is_locked?'#eff6ff':'var(--card-bg)',
+              background:needsRev?'rgba(251,191,36,0.06)':t.is_locked?'rgba(96,165,250,0.06)':'var(--card-bg)',
               display:'flex',flexDirection:'column',gap:5,cursor:'pointer',WebkitTapHighlightColor:'transparent'}}>
             {/* Top row: description + amount */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
-              <div style={{fontWeight:500,fontSize:13.5,color:'var(--text)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+              <div style={{fontWeight:300,fontSize:13,color:'var(--text-primary)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                 {t.description_clean||t.description_display||t.description_raw}
               </div>
-              <span style={{fontFamily:'DM Sans',fontWeight:500,fontSize:13.5,flexShrink:0,
+              <span style={{fontFamily:'DM Sans',fontWeight:300,fontSize:13,flexShrink:0,
                 color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
                 {t.amount<0?'–':'+'}{fmt(t.amount)}
               </span>
             </div>
             {/* Bottom row: date · account · category badge */}
             <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-              <span style={{fontSize:11,color:'var(--text-muted)'}}>{fmtDate(t.date)}</span>
-              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
-              <span style={{fontSize:10,padding:'1px 7px',borderRadius:8,
-                background:t.action==='Transfer'?'#f3f4f6':(t.category_final?'#eff6ff':'#f3f4f6'),
-                color:t.action==='Transfer'?'#6b7280':(t.category_final?'#1d4ed8':'#6b7280'),fontWeight:500}}>
+              <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{fmtDate(t.date)}</span>
+              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300,overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+              <span style={{fontSize:10,padding:'1px 7px',borderRadius:4,
+                background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'var(--gold-soft)':'var(--elevated)'),
+                color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--gold)':'var(--text-muted)'),fontWeight:400}}>
                 {catLabel}
               </span>
-              {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:8,background:'#fef3c7',color:'var(--amber)',fontWeight:500}}>Review</span>}
+              {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(251,191,36,0.12)',color:'var(--amber)',fontWeight:400}}>Review</span>}
               {t.is_locked&&<span style={{fontSize:11}}>🔒</span>}
             </div>
           </div>
@@ -1617,10 +1618,10 @@ function TransactionsPage({categories,toast}){
       {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
       {showImport&&<ImportModal accounts={accounts} onClose={()=>setShowImport(false)} onImported={load} toast={toast}/>}
       {showBatchEdit&&<BatchEditModal count={selectedIds.size} categories={categories} onSave={handleBatchSave} onClose={()=>setShowBatchEdit(false)}/>}
-      <div className="card">
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
         {/* ── Row 1: search + type / category / account filters + visibility checkboxes ── */}
         <div className="filters">
-          <input className="search-input" placeholder="Search descriptions…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <input className="search-input" placeholder="Search transactions…" value={search} onChange={e=>setSearch(e.target.value)}/>
           <select className="filter-select" value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
             <option value="">All types</option>
             {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
@@ -1673,26 +1674,27 @@ function TransactionsPage({categories,toast}){
           <button className="btn btn-sm btn-secondary" onClick={startEnrich} disabled={enrichJob?.status==='running'} title="Run AI enrichment on unclassified transactions">{enrichJob?.status==='running'?'Enriching…':'✨ Enrich'}</button>
         </div>
         {/* ── Totals bar: Expenses (net of credits) + Income shown separately ── */}
-        <div style={{padding:'6px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',flexWrap:'wrap'}}>
-          <span><b style={{color:'var(--text-primary)',fontWeight:500}}>{visible.length}</b> transactions</span>
-          {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'DM Sans',fontWeight:500}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
-          {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'DM Sans',fontWeight:500}}>{fmt(visibleIncome)}</b></span>}
+        <div style={{padding:'8px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',fontWeight:300,flexWrap:'wrap'}}>
+          <span><b style={{color:'var(--text-primary)',fontWeight:400}}>{visible.length}</b> transactions</span>
+          {visibleExpenses!==0&&<span>Expenses: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)',fontFamily:'DM Sans',fontWeight:400}}>{visibleExpenses>0?fmt(visibleExpenses):`−${fmt(-visibleExpenses)}`}</b></span>}
+          {visibleIncome>0&&<span>Income: <b style={{color:'var(--green)',fontFamily:'DM Sans',fontWeight:400}}>{fmt(visibleIncome)}</b></span>}
         </div>
         {enrichJob&&(()=>{
           const elapsed=enrichJob.startedAt?Math.round((Date.now()-enrichJob.startedAt)/1000):0;
           const timedOut=enrichJob.status==='running'&&elapsed>90;
+          const bgColor=timedOut?'rgba(251,191,36,0.08)':enrichJob.status==='done'?'rgba(52,211,153,0.08)':enrichJob.status==='error'?'rgba(248,113,113,0.08)':'var(--gold-soft)';
           return(
-          <div style={{padding:'8px 16px',background:timedOut?'#fffbeb':enrichJob.status==='done'?'#dcfce7':enrichJob.status==='error'?'#fee2e2':'#eff6ff',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+          <div style={{padding:'8px 16px',background:bgColor,borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:300}}>
             {enrichJob.status==='running'&&<div className="spinner" style={{width:14,height:14,flexShrink:0}}/>}
-            {enrichJob.status==='done'&&<span style={{color:'var(--green)',fontWeight:500}}>✓</span>}
-            {enrichJob.status==='error'&&<span style={{color:'var(--red)',fontWeight:500}}>✗</span>}
+            {enrichJob.status==='done'&&<span style={{color:'var(--green)',fontWeight:400}}>✓</span>}
+            {enrichJob.status==='error'&&<span style={{color:'var(--red)',fontWeight:400}}>✗</span>}
             <span>
               {enrichJob.status==='running'&&`Enriching… ${enrichJob.processed}/${enrichJob.total||'?'} transactions`}
               {enrichJob.status==='done'&&`Enrichment complete — ${enrichJob.processed} enriched · ${enrichJob.llm_calls} AI calls · ${enrichJob.override_hits} from saved rules`}
               {enrichJob.status==='error'&&`Enrichment failed: ${enrichJob.error||'unknown error'}`}
             </span>
-            {enrichJob.status==='running'&&enrichJob.last&&<span style={{color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}}>last: {enrichJob.last.merchant||enrichJob.last.raw}</span>}
-            {timedOut&&<span style={{color:'#b45309',fontSize:12,fontWeight:500,flexShrink:0}}>Taking longer than usual ({elapsed}s)</span>}
+            {enrichJob.status==='running'&&enrichJob.last&&<span style={{color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200,fontWeight:300}}>last: {enrichJob.last.merchant||enrichJob.last.raw}</span>}
+            {timedOut&&<span style={{color:'var(--amber)',fontSize:12,fontWeight:400,flexShrink:0}}>Taking longer than usual ({elapsed}s)</span>}
             <button className="btn btn-sm btn-ghost" style={{marginLeft:'auto',fontSize:11,flexShrink:0}} onClick={()=>setEnrichJob(null)}>
               {enrichJob.status==='running'?'Hide':'Dismiss'}
             </button>
@@ -1700,8 +1702,8 @@ function TransactionsPage({categories,toast}){
           );
         })()}
         {selectedIds.size>0&&(
-          <div style={{padding:'8px 16px',background:'rgba(96,165,250,0.08)',borderBottom:'1px solid #bfdbfe',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
-            <span style={{fontWeight:500,color:'#1d4ed8'}}>{selectedIds.size} selected</span>
+          <div style={{padding:'8px 16px',background:'var(--gold-soft)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+            <span style={{fontWeight:400,color:'var(--gold)'}}>{selectedIds.size} selected</span>
             <button className="btn btn-sm btn-primary" onClick={()=>setShowBatchEdit(true)}>✎ Edit Selected</button>
             <button className="btn btn-sm btn-ghost" onClick={()=>setSelectedIds(new Set())}>✕ Deselect All</button>
           </div>
