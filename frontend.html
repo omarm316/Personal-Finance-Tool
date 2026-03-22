@@ -4968,31 +4968,80 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
 
   const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
 
+  const ecoGradient=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,#3b82f6)';
+    if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
+    if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
+    if(n.includes('citi'))return'linear-gradient(135deg,#155e75,#06b6d4)';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'linear-gradient(135deg,#92400e,#d97706)';
+    if(n.includes('delta')||n.includes('skymiles'))return'linear-gradient(135deg,#1e3a5f,#3b82f6)';
+    if(n.includes('hyatt'))return'linear-gradient(135deg,#7f1d1d,#dc2626)';
+    if(n.includes('united')||n.includes('mileageplus'))return'linear-gradient(135deg,#374151,#6b7280)';
+    return'linear-gradient(135deg,#3b82f6,#60a5fa)';
+  },[ecoName]);
+
+  const ecoImg=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n.includes('chase')||n.includes('ultimate'))return'/static/ecosystems/chase_ur.png';
+    if(n.includes('amex')||n.includes('membership'))return'/static/ecosystems/amex_mr.png';
+    if(n.includes('hilton'))return'/static/ecosystems/hilton_honors.png';
+    if(n.includes('citi'))return'/static/ecosystems/citi_thankyou.png';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'/static/ecosystems/marriott_bonvoy.png';
+    if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
+    if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
+    if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
+    return null;
+  },[ecoName]);
+
+  const cardGrads={
+    freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',sapphire_preferred:'linear-gradient(135deg,#1e3a5f,#2563eb)',
+    freedom:'linear-gradient(135deg,#0369a1,#0ea5e9)',amex_gold:'linear-gradient(135deg,#b45309,#f59e0b)',
+    blue_business_plus:'linear-gradient(135deg,#1e40af,#60a5fa)',hilton_aspire:'linear-gradient(135deg,#5b21b6,#a78bfa)',
+    united_quest:'linear-gradient(135deg,#374151,#9ca3af)',united_explorer:'linear-gradient(135deg,#1f2937,#6b7280)',
+    delta_gold:'linear-gradient(135deg,#92400e,#d97706)',citi_custom_cash:'linear-gradient(135deg,#155e75,#06b6d4)',
+    bonvoy_brilliant:'linear-gradient(135deg,#7f1d1d,#dc2626)',bonvoy_boundless:'linear-gradient(135deg,#78350f,#d97706)',
+    world_of_hyatt:'linear-gradient(135deg,#9f1239,#f43e5c)',us_bank_cash_plus:'linear-gradient(135deg,#1e3a5f,#3b82f6)',
+    atmos_ascent:'linear-gradient(135deg,#065f46,#34d399)',
+  };
+
   return(
     <div>
+      {/* Back button */}
+      <button onClick={onBack}
+        style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--gold)',
+          cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'DM Sans, sans-serif',
+          padding:0,transition:'opacity 0.2s'}}
+        onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
+        onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+        ← Portfolio
+      </button>
+
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button className="btn btn-ghost" style={{fontSize:13,padding:'6px 12px'}} onClick={onBack}>← Overview</button>
+        <div style={{display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:48,height:34,borderRadius:10,background:ecoGradient,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+            {ecoImg&&<img src={ecoImg} alt="" style={{width:30,height:30,objectFit:'contain',filter:'brightness(0) invert(1)',opacity:0.9}} onError={e=>{e.target.style.display='none'}}/>}
+          </div>
           <div>
-            <div style={{fontSize:20,fontWeight:400,color:ecoColor}}>{ecoName}</div>
-            {data&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1}}>{data.currency_name} · {data.your_cpp*100}¢/pt</div>}
+            <div style={{fontSize:20,fontWeight:400,color:'var(--text-primary)',letterSpacing:'-0.3px'}}>{ecoName}</div>
+            {data&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name} · {(data.your_cpp*100).toFixed(1)}¢/pt</div>}
           </div>
         </div>
         {/* Period selector */}
-        <div style={{display:'flex',gap:6,alignItems:'center'}}>
-          <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:8,padding:3}}>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <div style={{display:'flex',gap:2,background:'var(--elevated)',borderRadius:10,padding:3,border:'1px solid var(--border)'}}>
             {['mtd','qtd','ytd'].map(p=>(
               <button key={p} onClick={()=>setPeriod(p)}
-                style={{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:12,fontWeight:period===p?700:400,
-                  background:period===p?'var(--bg)':'transparent',color:period===p?'var(--text-primary)':'var(--text-muted)',
-                  boxShadow:period===p?'0 1px 3px rgba(0,0,0,0.08)':'none',textTransform:'uppercase'}}>
+                style={{padding:'5px 16px',borderRadius:8,border:'none',cursor:'pointer',fontSize:11,fontWeight:500,letterSpacing:'0.5px',
+                  background:period===p?'var(--gold)':'transparent',color:period===p?'#0c0c10':'var(--text-muted)',
+                  transition:'all 0.15s',textTransform:'uppercase'}}>
                 {p}
               </button>
             ))}
           </div>
           <select value={year} onChange={e=>setYear(Number(e.target.value))}
-            style={{fontSize:12,fontWeight:500,border:'1px solid var(--border)',borderRadius:8,padding:'5px 10px',background:'var(--bg)',color:'var(--text-primary)'}}>
+            style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
             {years.map(y=><option key={y} value={y}>{y}</option>)}
           </select>
         </div>
@@ -5001,64 +5050,70 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
       {loading?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>:data&&(
         <>
           {/* Hero stat */}
-          <div style={{textAlign:'center',padding:'36px 24px 40px',marginBottom:24,borderRadius:20,
-            background:`linear-gradient(135deg,${ecoColor}0a 0%,${ecoColor}04 50%,transparent 100%)`,
-            border:`1px solid ${ecoColor}18`,position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',top:-40,right:-40,width:120,height:120,borderRadius:'50%',background:`${ecoColor}06`}}/>
-            <div style={{position:'absolute',bottom:-30,left:-30,width:80,height:80,borderRadius:'50%',background:`${ecoColor}05`}}/>
-            <div style={{fontSize:52,fontWeight:400,fontFamily:'DM Sans',color:ecoColor,lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
+          <div style={{textAlign:'center',padding:'28px 24px 32px',marginBottom:20,borderRadius:14,
+            background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
+            <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
+            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:'var(--gold)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
               {data.total_points.toLocaleString()}
             </div>
-            <div style={{fontSize:14,color:'var(--text-muted)',marginTop:8,position:'relative'}}>{data.currency_name}</div>
-            <div style={{fontSize:24,fontWeight:400,fontFamily:'DM Sans',color:'var(--text-primary)',marginTop:12,letterSpacing:'-0.5px',position:'relative'}}>
+            <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{data.currency_name}</div>
+            <div style={{fontSize:20,fontWeight:300,fontFamily:'DM Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
               ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
             </div>
-            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:3,position:'relative'}}>estimated value</div>
           </div>
 
           {/* Points by category */}
-          {data.by_category.length>0&&<div className="card" style={{marginBottom:16}}>
-            <div className="section-header"><div className="section-title">Points by Category</div></div>
-            <div style={{padding:'4px 20px 16px',display:'flex',flexDirection:'column',gap:10}}>
+          {data.by_category.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>Points by Category</div>
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
               {data.by_category.map(cat=>(
-                <div key={cat.category}>
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
-                    <span style={{fontWeight:500}}>{cat.category||'Other'}</span>
-                    <span style={{fontFamily:'DM Sans',color:'var(--text-muted)'}}>{cat.points.toLocaleString()} pts <span style={{color:'var(--text-muted)',fontSize:11}}>({cat.pct}%)</span></span>
+                <div key={cat.category} style={{display:'flex',alignItems:'center',gap:12}}>
+                  <span style={{fontSize:13,fontWeight:300,color:'var(--text-primary)',width:90,flexShrink:0}}>{cat.category||'Other'}</span>
+                  <div style={{flex:1,height:6,borderRadius:3,background:'var(--elevated)',overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:3,width:`${Math.round(cat.points/maxCatPts*100)}%`,
+                      background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.4s ease'}}/>
                   </div>
-                  <div style={{height:7,borderRadius:7,background:'var(--border)',overflow:'hidden'}}>
-                    <div style={{height:'100%',borderRadius:7,width:`${Math.round(cat.points/maxCatPts*100)}%`,background:`linear-gradient(90deg,${ecoColor},${ecoColor}cc)`,transition:'width 0.6s ease'}}/>
-                  </div>
+                  <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)',width:60,textAlign:'right',flexShrink:0}}>{cat.points.toLocaleString()}</span>
+                  <span style={{fontSize:11,fontWeight:300,color:'var(--text-muted)',width:40,textAlign:'right',flexShrink:0}}>{cat.pct}%</span>
                 </div>
               ))}
             </div>
           </div>}
 
           {/* Cards */}
-          {data.by_card.length>0&&<div className="card" style={{marginBottom:16}}>
-            <div className="section-header"><div className="section-title">Cards</div></div>
-            <div style={{padding:'0 0 4px'}}>
-              {data.by_card.map(c=>(
-                <div key={c.account_id}
-                  style={{display:'flex',alignItems:'center',padding:'12px 20px',borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background 0.15s'}}
-                  onClick={()=>onSelectAccount(c.account_id)}
-                  onMouseEnter={e=>e.currentTarget.style.background='var(--hover)'}
-                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                  <div style={{flex:1}}>
-                    <span style={{fontSize:13,fontWeight:500}}>{c.account_name}</span>
-                    {c.mask&&<span style={{fontSize:11,color:'var(--text-muted)',marginLeft:6}}>···{c.mask}</span>}
+          {data.by_card.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Your Cards</div>
+            <div>
+              {data.by_card.map((c,i)=>{
+                const pk=c.product_key||'';
+                const grad=cardGrads[pk]||'linear-gradient(135deg,#374151,#6b7280)';
+                return(
+                  <div key={c.account_id}
+                    style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                      borderBottom:i<data.by_card.length-1?'1px solid var(--border)':'none',
+                      cursor:'pointer',transition:'all 0.15s'}}
+                    onClick={()=>onSelectAccount(c.account_id)}
+                    onMouseEnter={e=>{e.currentTarget.style.background='var(--surface-hover)';e.currentTarget.style.margin='0 -8px';e.currentTarget.style.padding='10px 8px';e.currentTarget.style.borderRadius='8px';}}
+                    onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.margin='0';e.currentTarget.style.padding='10px 0';e.currentTarget.style.borderRadius='0';}}>
+                    <div style={{width:40,height:26,borderRadius:6,background:grad,flexShrink:0,overflow:'hidden',position:'relative'}}>
+                      <img src={`/static/cards/${pk}.png`} alt="" style={{width:'100%',height:'100%',objectFit:'cover',opacity:0.4}} onError={e=>{e.target.style.display='none'}}/>
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{c.account_name}</div>
+                      {c.mask&&<div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>···{c.mask}</div>}
+                    </div>
+                    <span style={{fontSize:14,fontWeight:300,color:'var(--gold)',flexShrink:0}}>{c.points.toLocaleString()}</span>
+                    <span style={{color:'var(--text-muted)',fontSize:14,marginLeft:4,opacity:0.4}}>›</span>
                   </div>
-                  <span style={{fontFamily:'DM Sans',fontSize:14,fontWeight:400,color:ecoColor}}>{c.points.toLocaleString()}</span>
-                  <span style={{fontSize:12,color:'var(--text-muted)',marginLeft:4,marginRight:12}}> pts</span>
-                  <span style={{color:'var(--text-muted)'}}>›</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>}
 
           {/* Active challenges */}
-          {data.active_challenges.length>0&&<div>
-            <div style={{fontSize:13,fontWeight:500,color:'var(--text-secondary)',marginBottom:10,letterSpacing:0.3,textTransform:'uppercase'}}>Active Challenges</div>
+          {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Active Challenges</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
               {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
             </div>
