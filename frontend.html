@@ -2812,35 +2812,62 @@ function DeleteAccountModal({account,onDone,onClose}){
    re-renders (same fix as LoanForm — defining it inside AccountsPage would
    create a new function reference each render, causing React to unmount/remount
    the row and swallow click events before modals can open). */
+const INST_COLORS={'ins_3':'#003087','ins_4':'#003087','ins_56':'#003087',/*Chase*/'ins_5':'#016fd0','ins_10':'#016fd0',/*Amex*/'ins_13':'#1b3c6b',/*Citi*/'ins_127989':'#c41230',/*BofA*/'ins_12':'#cc0000','ins_15':'#d22e2e',/*Wells*/'ins_21':'#ff5f00',/*Discover*/'ins_22':'#f7931a',/*Cap1*/'ins_6':'#ef3829',/*HSBC*/'ins_11':'#e31837',/*USB*/'ins_19':'#1a8c39',/*TD*/};
+const instColor=(a)=>{
+  const iid=a.institution_id||a.plaid_item_id||'';
+  if(INST_COLORS[iid])return INST_COLORS[iid];
+  // Deterministic color from institution name hash
+  const s=a.account_name||'';let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);
+  const hues=[210,160,30,340,120,270,50];
+  return `hsl(${hues[Math.abs(h)%hues.length]},45%,45%)`;
+};
+const BUCKET_STYLE={'Checking & Savings':{bg:'rgba(52,211,153,0.10)',color:'var(--green)'},'Investments':{bg:'rgba(96,165,250,0.10)',color:'#60a5fa'},'Credit Cards':{bg:'rgba(251,191,36,0.10)',color:'var(--amber)'},'Loans':{bg:'rgba(248,113,113,0.10)',color:'var(--red)'}};
+
 function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,onCancel,onStartEdit,onSever,onMerge,onDelete}){
   const isEditing=editingId===a.id;
+  const color=instColor(a);
+  const bucketS=BUCKET_STYLE[a.bucket]||{bg:'var(--elevated)',color:'var(--text-muted)'};
+  const bal=a.balance!=null?a.balance:(a.starting_balance||0);
   return(
-    <div style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',alignItems:'center',gap:12}}>
-      <span style={{width:7,height:7,borderRadius:'50%',background:a.is_manual?(a.is_asset?'var(--blue)':'var(--red)'):'#22c55e',flexShrink:0}}/>
-      <div style={{flex:1}}>
-        {isEditing?<>
-          <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4}}/>
-          <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)'}}/>
-        </>:<>
-          <div style={{fontSize:14,fontWeight:500}}>{a.account_name}</div>
-          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
-            {a.account_type}{a.mask?` ····${a.mask}`:''}{a.bucket?` · ${a.bucket}`:''}{a.notes?` · ${a.notes}`:''}
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden',position:'relative'}}>
+      {/* Institution color bar */}
+      <div style={{height:4,background:color}}/>
+      <div style={{padding:'16px 18px'}}>
+        {/* Top row: name + balance */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            {isEditing?<>
+              <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4,background:'var(--elevated)',color:'var(--text-primary)',fontFamily:'DM Sans'}}/>
+              <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)',background:'var(--elevated)',fontFamily:'DM Sans'}}/>
+            </>:<>
+              <div style={{fontSize:14,fontWeight:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.account_name}</div>
+              {a.notes&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontStyle:'italic'}}>{a.notes}</div>}
+            </>}
           </div>
-        </>}
-      </div>
-      {!a.is_manual&&<span className="bank-badge">● Connected</span>}
-      {a.is_manual&&<span style={{fontFamily:'DM Sans',fontSize:13,fontWeight:500,color:a.is_liability?'var(--red)':'var(--green)'}}>{fmt(a.starting_balance||0)}</span>}
-      <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{a.transaction_count} txns</span>
-      <div style={{display:'flex',gap:6,flexShrink:0}}>
-        {isEditing?<>
-          <button className="btn btn-sm btn-success" onClick={()=>onSave(a.id)}>Save</button>
-          <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
-        </>:<>
-          <button className="btn btn-sm btn-secondary" onClick={()=>onStartEdit(a)}>Edit</button>
-          {showPlaidActions&&<button className="btn btn-sm" style={{background:'rgba(251,146,36,0.08)',color:'var(--red)',border:'1px solid rgba(251,146,36,0.3)',fontSize:11}} onClick={()=>onSever(a)}>Sever</button>}
-          <button className="btn btn-sm" style={{background:'rgba(96,165,250,0.08)',color:'var(--blue)',border:'1px solid rgba(96,165,250,0.25)',fontSize:11}} onClick={()=>onMerge(a)}>Merge →</button>
-          <button className="btn btn-sm" style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:11}} onClick={()=>onDelete(a)}>Delete</button>
-        </>}
+          <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}>
+            <div style={{fontFamily:'DM Sans',fontSize:16,fontWeight:400,color:a.is_liability?'var(--red)':'var(--text-primary)'}}>{a.is_liability?'(':''}{fmt(Math.abs(bal))}{a.is_liability?')':''}</div>
+            <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{a.transaction_count} txns</div>
+          </div>
+        </div>
+        {/* Badges row */}
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:isEditing?8:0}}>
+          <span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:bucketS.bg,color:bucketS.color}}>{a.account_type}</span>
+          {a.mask&&<span style={{fontSize:10,fontWeight:400,padding:'2px 8px',borderRadius:10,background:'var(--elevated)',color:'var(--text-muted)'}}>····{a.mask}</span>}
+          {!a.is_manual&&<span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:'rgba(52,211,153,0.10)',color:'var(--green)'}}>● Plaid</span>}
+          {a.is_manual&&<span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:'var(--gold-soft)',color:'var(--gold)'}}>Manual</span>}
+        </div>
+        {/* Actions */}
+        <div style={{display:'flex',gap:6,marginTop:10,flexWrap:'wrap'}}>
+          {isEditing?<>
+            <button className="btn btn-sm btn-success" onClick={()=>onSave(a.id)}>Save</button>
+            <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
+          </>:<>
+            <button className="btn btn-sm btn-secondary" style={{fontSize:11}} onClick={()=>onStartEdit(a)}>Edit</button>
+            {showPlaidActions&&<button className="btn btn-sm" style={{background:'rgba(251,146,36,0.08)',color:'var(--amber)',border:'1px solid rgba(251,146,36,0.3)',fontSize:11}} onClick={()=>onSever(a)}>Sever</button>}
+            <button className="btn btn-sm" style={{background:'rgba(96,165,250,0.08)',color:'#60a5fa',border:'1px solid rgba(96,165,250,0.25)',fontSize:11}} onClick={()=>onMerge(a)}>Merge →</button>
+            <button className="btn btn-sm" style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:11}} onClick={()=>onDelete(a)}>Delete</button>
+          </>}
+        </div>
       </div>
     </div>
   );
@@ -2894,24 +2921,45 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
       {showManual&&<ManualAccountModal onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
       {mergeAccount&&<MergeAccountModal source={mergeAccount} allAccounts={accounts} onDone={handleMergeDone} onClose={()=>setMergeAccount(null)}/>}
       {deleteAccount&&<DeleteAccountModal account={deleteAccount} onDone={handleDeleteDone} onClose={()=>setDeleteAccount(null)}/>}
-      <div className="card" style={{marginBottom:20}}>
-        <div className="section-header">
-          <div className="section-title">Plaid Accounts ({plaidAccounts.length})</div>
+      {/* Summary KPIs */}
+      {(()=>{
+        const totalAssets=accounts.filter(a=>a.is_asset).reduce((s,a)=>s+(a.balance!=null?a.balance:(a.starting_balance||0)),0);
+        const totalLiab=accounts.filter(a=>a.is_liability).reduce((s,a)=>s+Math.abs(a.balance!=null?a.balance:(a.starting_balance||0)),0);
+        return(
+          <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+            <div className="card metric-card"><div className="metric-label">Total Accounts</div><div className="metric-value">{accounts.length}</div></div>
+            <div className="card metric-card"><div className="metric-label">Total Assets</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(totalAssets)}</div></div>
+            <div className="card metric-card"><div className="metric-label">Total Liabilities</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(totalLiab)}</div></div>
+            <div className="card metric-card"><div className="metric-label">Net Worth</div><div className="metric-value" style={{color:totalAssets-totalLiab>=0?'var(--gold)':'var(--red)'}}>{fmt(totalAssets-totalLiab)}</div></div>
+          </div>
+        );
+      })()}
+
+      {/* Plaid Accounts */}
+      <div style={{marginBottom:24}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Plaid Accounts ({plaidAccounts.length})</div>
           <div style={{display:'flex',gap:8}}>
             <button className="btn btn-sm btn-secondary" onClick={onSync}>↻ Sync All</button>
             <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
           </div>
         </div>
-        {plaidAccounts.length===0?<div className="empty"><div className="empty-icon">◫</div><span>No Plaid accounts connected</span></div>
-          :plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true} {...rowProps}/>)}
+        {plaidAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No Plaid accounts connected</div>
+          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+            {plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true} {...rowProps}/>)}
+          </div>}
       </div>
-      <div className="card">
-        <div className="section-header">
-          <div className="section-title">Manual Accounts ({manualAccounts.length})</div>
+
+      {/* Manual Accounts */}
+      <div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Manual Accounts ({manualAccounts.length})</div>
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
         </div>
-        {manualAccounts.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No manual accounts yet</span></div>
-          :manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false} {...rowProps}/>)}
+        {manualAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No manual accounts yet</div>
+          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+            {manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false} {...rowProps}/>)}
+          </div>}
       </div>
     </div>
   );
@@ -3357,7 +3405,14 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
     finally{setBusy(false);e.target.value='';}
   };
 
+  /* Preferences state — persisted in localStorage */
+  const[prefs,setPrefs]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem('user-prefs'))||{};}catch(e){return{};}
+  });
+  const setPref=(k,v)=>{setPrefs(p=>{const n={...p,[k]:v};localStorage.setItem('user-prefs',JSON.stringify(n));return n;});};
+
   const tabs=[
+    {id:'prefs',label:'Preferences'},
     {id:'data',label:'Data Management'},
     {id:'rules',label:'Rules'},
     {id:'bank',label:'Bank Links'},
@@ -3372,6 +3427,77 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
           style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,
             background:'transparent',color:tab===t.id?'var(--gold)':'var(--text-muted)',transition:'all 0.15s',marginBottom:'-1px'}}>{t.label}</button>))}
       </div>
+
+      {tab==='prefs'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Display</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Currency</div><div className="settings-desc">Currency symbol used throughout the app</div></div>
+            <select className="sel-drop" value={prefs.currency||'USD'} onChange={e=>setPref('currency',e.target.value)} style={{width:120}}>
+              {[['USD','$ USD'],['EUR','€ EUR'],['GBP','£ GBP'],['ILS','₪ ILS'],['CAD','$ CAD'],['AUD','$ AUD'],['JPY','¥ JPY']].map(([v,l])=>(
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Date Format</div><div className="settings-desc">How dates are displayed in tables and charts</div></div>
+            <select className="sel-drop" value={prefs.dateFormat||'MM/DD/YYYY'} onChange={e=>setPref('dateFormat',e.target.value)} style={{width:140}}>
+              {['MM/DD/YYYY','DD/MM/YYYY','YYYY-MM-DD'].map(f=><option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Number Format</div><div className="settings-desc">How amounts are formatted (thousands separator)</div></div>
+            <select className="sel-drop" value={prefs.numFormat||'1,234.56'} onChange={e=>setPref('numFormat',e.target.value)} style={{width:140}}>
+              {['1,234.56','1.234,56','1 234.56'].map(f=><option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Behavior</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Default Transaction View</div><div className="settings-desc">Which month loads first on the Transactions page</div></div>
+            <select className="sel-drop" value={prefs.defaultTxnView||'current'} onChange={e=>setPref('defaultTxnView',e.target.value)} style={{width:140}}>
+              <option value="current">Current Month</option>
+              <option value="previous">Previous Month</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Compact Tables</div><div className="settings-desc">Reduce row height in transaction and balance tables</div></div>
+            <button className="btn btn-sm" onClick={()=>setPref('compact',!prefs.compact)}
+              style={{minWidth:56,background:prefs.compact?'var(--green)':'var(--elevated)',color:prefs.compact?'#fff':'var(--text-muted)',border:prefs.compact?'none':'1px solid var(--border)',fontWeight:500,fontSize:12,transition:'all 0.15s'}}>
+              {prefs.compact?'On':'Off'}
+            </button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Show Cents</div><div className="settings-desc">Display decimal places in amounts (e.g. $1,234.56 vs $1,235)</div></div>
+            <button className="btn btn-sm" onClick={()=>setPref('showCents',prefs.showCents===false?true:!(prefs.showCents!==false))}
+              style={{minWidth:56,background:(prefs.showCents!==false)?'var(--green)':'var(--elevated)',color:(prefs.showCents!==false)?'#fff':'var(--text-muted)',border:(prefs.showCents!==false)?'none':'1px solid var(--border)',fontWeight:500,fontSize:12,transition:'all 0.15s'}}>
+              {prefs.showCents!==false?'On':'Off'}
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <div className="section-header"><div className="section-title">Data</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Export All Transactions</div><div className="settings-desc">Download a CSV file of all transactions for external analysis</div></div>
+            <button className="btn btn-sm btn-secondary" onClick={async()=>{
+              try{
+                const resp=await fetch('/api/transactions?limit=999999');
+                const txns=await resp.json();
+                const headers=['date','description_clean','description_raw','amount','category_final','action','account_name','is_excluded'];
+                const rows=txns.map(t=>headers.map(h=>JSON.stringify(t[h]??'')).join(','));
+                const csv=[headers.join(','),...rows].join('\n');
+                const blob=new Blob([csv],{type:'text/csv'});
+                const url=URL.createObjectURL(blob);
+                const link=document.createElement('a');link.href=url;link.download=`transactions-${todayStr()}.csv`;link.click();
+                URL.revokeObjectURL(url);
+                toast(`Exported ${txns.length} transactions`);
+              }catch(e){toast('Export failed','error');}
+            }}>↓ Export CSV</button>
+          </div>
+        </div>
+      </div>}
 
       {tab==='data'&&<div>
         <div className="card" style={{marginBottom:20}}>
