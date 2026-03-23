@@ -439,7 +439,7 @@ function ConfirmModal({title,body,confirmLabel='Confirm',danger=false,requiredIn
   return ReactDOM.createPortal(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
       <div style={{background:'var(--card-bg)',borderRadius:12,padding:'24px 28px',width:420,maxWidth:'92vw',boxShadow:'0 8px 40px rgba(0,0,0,0.22)'}}>
-        <div style={{fontWeight:400,fontSize:15,marginBottom:body?10:16,color:danger?'#b91c1c':'var(--text)'}}>{title}</div>
+        <div style={{fontWeight:400,fontSize:15,marginBottom:body?10:16,color:danger?'var(--red)':'var(--text)'}}>{title}</div>
         {body&&<div style={{fontSize:13,color:'var(--text-secondary)',marginBottom:16,lineHeight:1.55,whiteSpace:'pre-wrap'}}>{body}</div>}
         {requiredInput&&<div style={{marginBottom:16}}>
           <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:6}}>Type <strong>{requiredInput}</strong> to confirm:</div>
@@ -450,7 +450,7 @@ function ConfirmModal({title,body,confirmLabel='Confirm',danger=false,requiredIn
         <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:requiredInput?0:4}}>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy} style={{fontSize:13}}>Cancel</button>
           <button className="btn" disabled={!canConfirm||busy} onClick={handleConfirm}
-            style={{background:danger?'#b91c1c':'var(--primary)',color:'#fff',border:'none',fontSize:13,opacity:canConfirm?1:0.4,cursor:canConfirm?'pointer':'default'}}>
+            style={{background:danger?'var(--red)':'var(--primary)',color:'#fff',border:'none',fontSize:13,opacity:canConfirm?1:0.4,cursor:canConfirm?'pointer':'default'}}>
             {busy?'…':confirmLabel}
           </button>
         </div>
@@ -785,8 +785,8 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
               {locked&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒 Locked</span>}
-              {txn.is_gcb&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'#fef9c3',color:'#854d0e',border:'1px solid #fde047'}}>⭐ GCB</span>}
-              {excluded&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'#991b1b',border:'1px solid #fca5a5'}}>⊘ Excluded</span>}
+              {txn.is_gcb&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.12)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⭐ GCB</span>}
+              {excluded&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)'}}>⊘ Excluded</span>}
               {txn.needs_review&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.1)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⚠ Needs Review</span>}
             </div>
           )}
@@ -817,7 +817,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
                 {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
               </button>
               <button className="btn btn-sm"
-                style={{background:'rgba(248,113,113,0.08)',color:'#991b1b',border:'1px solid #fca5a5',fontSize:12}}
+                style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:12}}
                 onClick={()=>setCm({
                   title:'Delete Transaction',
                   body:`Permanently delete "${txn.description_display||txn.description_raw}" (${fmtDate(txn.date)} · ${fmt(Math.abs(txn.amount))})?\n\nThis cannot be undone.`,
@@ -3107,7 +3107,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'0.05em',color:envColor,background:`${envColor}18`,border:`1px solid ${envColor}40`,borderRadius:20,padding:'2px 8px'}}>{item.environment}</span>
           {item.last_error_code
-            ?<span style={{fontSize:11,fontWeight:500,color:'#b91c1c',background:'#fee2e2',border:'1px solid rgba(248,113,113,0.3)',borderRadius:20,padding:'2px 8px'}} title={item.last_error_message||''}>🔴 {item.last_error_code}</span>
+            ?<span style={{fontSize:11,fontWeight:500,color:'var(--red)',background:'rgba(248,113,113,0.12)',border:'1px solid rgba(248,113,113,0.3)',borderRadius:20,padding:'2px 8px'}} title={item.last_error_message||''}>🔴 {item.last_error_code}</span>
             :item.is_active
               ?<span className="bank-badge">Active</span>
               :<span style={{fontSize:11,fontWeight:500,color:'var(--amber)',background:'rgba(251,191,36,0.12)',border:'1px solid rgba(251,191,36,0.3)',borderRadius:20,padding:'2px 8px'}}>Stale</span>
@@ -3135,11 +3135,11 @@ function BankRow({item,toast,onRenamed,onSynced}){
         <div style={{marginTop:10,background:'rgba(248,113,113,0.08)',border:'1px solid rgba(248,113,113,0.3)',borderRadius:8,padding:'10px 14px'}}>
           <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:12}}>
             <div style={{flex:1}}>
-              <div style={{fontWeight:400,color:'#b91c1c',fontSize:13,marginBottom:4}}>
+              <div style={{fontWeight:400,color:'var(--red)',fontSize:13,marginBottom:4}}>
                 ⚠️ Sync error: {item.last_error_code}
-                {item.last_error_at&&<span style={{fontWeight:400,fontSize:11,color:'#b91c1c',opacity:0.7,marginLeft:8}}>since {item.last_error_at.slice(0,10)}</span>}
+                {item.last_error_at&&<span style={{fontWeight:400,fontSize:11,color:'var(--red)',opacity:0.7,marginLeft:8}}>since {item.last_error_at.slice(0,10)}</span>}
               </div>
-              <div style={{fontSize:12,color:'#7f1d1d'}}>
+              <div style={{fontSize:12,color:'var(--red)',opacity:0.85}}>
                 {item.last_error_code==='ITEM_LOGIN_REQUIRED'
                   ?`${item.institution_name}'s OAuth consent expired (~90-day limit). Click Reconnect to re-authenticate in place — no data is lost.`
                   :item.last_error_message||'Plaid returned an error during the last sync attempt.'
@@ -3147,7 +3147,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
               </div>
             </div>
             {item.last_error_code==='ITEM_LOGIN_REQUIRED'&&(
-              <button className="btn btn-sm btn-primary" style={{flexShrink:0,background:'#b91c1c',border:'none'}} onClick={openReconnect} disabled={reconnecting}>
+              <button className="btn btn-sm btn-primary" style={{flexShrink:0,background:'var(--red)',border:'none'}} onClick={openReconnect} disabled={reconnecting}>
                 {reconnecting?'Opening…':'🔗 Reconnect'}
               </button>
             )}
@@ -3157,12 +3157,12 @@ function BankRow({item,toast,onRenamed,onSynced}){
       {confirmingRemove&&(
         <div style={{marginTop:10,background:'rgba(248,113,113,0.08)',border:'1px solid rgba(248,113,113,0.3)',borderRadius:8,padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
           <div>
-            <div style={{fontWeight:400,color:'#b91c1c',fontSize:13,marginBottom:2}}>⚠️ Remove "{item.institution_name}"?</div>
-            <div style={{fontSize:12,color:'#7f1d1d'}}>This will deactivate the connection — Plaid will stop syncing. Its <strong>{item.account_count} account{item.account_count!==1?'s':''}</strong> and <strong>{item.transaction_count.toLocaleString()} transaction{item.transaction_count!==1?'s':''}</strong> will be kept but no longer updated.</div>
+            <div style={{fontWeight:400,color:'var(--red)',fontSize:13,marginBottom:2}}>⚠️ Remove "{item.institution_name}"?</div>
+            <div style={{fontSize:12,color:'var(--red)',opacity:0.85}}>This will deactivate the connection — Plaid will stop syncing. Its <strong>{item.account_count} account{item.account_count!==1?'s':''}</strong> and <strong>{item.transaction_count.toLocaleString()} transaction{item.transaction_count!==1?'s':''}</strong> will be kept but no longer updated.</div>
           </div>
           <div style={{display:'flex',gap:8,flexShrink:0}}>
             <button className="btn btn-sm btn-ghost" style={{fontSize:12}} onClick={()=>setConfirmingRemove(false)}>Cancel</button>
-            <button className="btn btn-sm" style={{background:'#b91c1c',color:'#fff',fontSize:12,border:'none'}} onClick={async()=>{
+            <button className="btn btn-sm" style={{background:'var(--red)',color:'#fff',fontSize:12,border:'none'}} onClick={async()=>{
               setConfirmingRemove(false);
               try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Connection removed');}
               catch(e){toast('Failed: '+(e.message||e),'error');}
@@ -3869,8 +3869,8 @@ class CardDetailErrorBoundary extends React.Component{
       return(
         <div style={{padding:32,maxWidth:700,margin:'0 auto'}}>
           <div style={{background:'rgba(248,113,113,0.08)',border:'1px solid #fca5a5',borderRadius:10,padding:20}}>
-            <div style={{fontSize:15,fontWeight:400,color:'#991b1b',marginBottom:8}}>⚠ Card detail failed to render</div>
-            <div style={{fontSize:12,color:'#7f1d1d',fontFamily:'monospace',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
+            <div style={{fontSize:15,fontWeight:400,color:'var(--red)',marginBottom:8}}>⚠ Card detail failed to render</div>
+            <div style={{fontSize:12,color:'var(--red)',opacity:0.85,fontFamily:'monospace',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
               {this.state.error?.message||String(this.state.error)}
             </div>
             <button className="btn btn-ghost" style={{marginTop:14,fontSize:13}}
@@ -4697,7 +4697,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 const statusIcon=fullyUsed?'✅':hasUsage?'🟡':'⬜';
                 const freqLabel={annual:'/ year',calendar_year:'/ year','semi-annual':'/ half-year',quarterly:'/ quarter',monthly:'/ month'}[b.reset_frequency]||'/ year';
                 return(
-                  <div key={b.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',background:fullyUsed?'#f0fdf4':'var(--bg)'}}>
+                  <div key={b.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',background:fullyUsed?'rgba(52,211,153,0.06)':'var(--surface)'}}>
                     <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8,marginBottom:8}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
@@ -4792,8 +4792,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           :challenges.length===0
             ?<div style={{padding:'20px 0',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No challenges yet. Click + New to add one.</div>
             :challenges.map(ch=>{
-              const statusColor={upcoming:'#6b7280',active:'var(--blue)',unlocked:'#059669',expired:'#9ca3af'}[ch.status]||'var(--text-muted)';
-              const barColor={upcoming:'#d1d5db',active:'var(--blue)',unlocked:'#059669',expired:'#d1d5db'}[ch.status]||'var(--border)';
+              const statusColor={upcoming:'var(--text-muted)',active:'var(--gold)',unlocked:'var(--green)',expired:'var(--text-muted)'}[ch.status]||'var(--text-muted)';
+              const barColor={upcoming:'var(--border)',active:'var(--gold)',unlocked:'var(--green)',expired:'var(--border)'}[ch.status]||'var(--border)';
               const estVal=null; // valuation display removed per design decision
               return(
                 <div key={ch.id} style={{padding:'14px 0',borderBottom:'1px solid var(--border)',opacity:ch.is_active?1:0.55}}>
@@ -6982,7 +6982,7 @@ function NetWorthPage({toast}){
                             </tr>
                             {/* Transactions oldest→newest */}
                             {reconcileData.transactions.map(t=>(
-                              <tr key={t.id} style={{opacity:t.is_excluded?0.4:1,background:t.is_excluded?'var(--sidebar-bg)':undefined}}>
+                              <tr key={t.id} style={{opacity:t.is_excluded?0.4:1,background:t.is_excluded?'var(--elevated)':undefined}}>
                                 <td style={{color:'var(--text-secondary)',fontSize:13}}>{t.date}</td>
                                 <td>
                                   <div style={{fontSize:13,textDecoration:t.is_excluded?'line-through':'none'}}>{t.description}</div>
