@@ -61,8 +61,13 @@ body{overflow:hidden}
 .sidebar-bank{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
 .bank-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
 .main{margin-left:var(--sidebar-w);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease;flex:1;min-width:0}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar{background:var(--surface);border-bottom:none;padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:500;color:var(--text-primary)}
+.quick-nav{display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:36px;flex-shrink:0}
+.quick-nav button{position:relative;border:none;cursor:pointer;background:transparent;font-family:inherit;font-size:13px;font-weight:400;color:var(--text-muted);padding:0 16px;letter-spacing:0.3px;transition:color 0.15s}
+.quick-nav button[data-active="true"]{color:var(--gold);font-weight:500}
+.quick-nav button::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--gold);transform:scaleX(0);transition:transform 0.2s ease}
+.quick-nav button[data-active="true"]::after{transform:scaleX(1)}
 .content{flex:1;overflow-y:auto;padding:24px 20px;background:var(--bg)}
 .card{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);transition:box-shadow 0.2s ease,transform 0.2s ease}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
@@ -8399,23 +8404,17 @@ function App(){
         <div className="topbar">
           <div style={{display:'flex',alignItems:'center',gap:16}}>
             <div className="topbar-title">{titles[page]}</div>
-            {/* Quick access tabs */}
-            <div style={{display:'flex',gap:16}}>
-              {[{id:'dashboard',label:'Dashboard'},{id:'transactions',label:'Transactions'},{id:'cards',label:'Cards'}].map(t=>(
-                <button key={t.id} onClick={()=>setPage(t.id)}
-                  style={{padding:'4px 0',border:'none',borderBottom:page===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:page===t.id?500:400,
-                    background:'transparent',color:page===t.id?'var(--gold)':'var(--text-muted)',
-                    transition:'all 0.15s',letterSpacing:'0.2px'}}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             {banks.length>0&&<span className="bank-badge">{banks.length} account{banks.length!==1?'s':''} connected</span>}
             <button className="btn btn-ghost" onClick={()=>setTheme(theme==='dark'?'light':'dark')} title="Toggle theme" style={{padding:'6px 8px'}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">{theme==='dark'?<><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></>:<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>}</svg></button>
             <button onClick={handleRefresh} title="Refresh page data" style={{background:'none',border:'1px solid var(--border)',borderRadius:7,padding:'5px 10px',cursor:'pointer',color:'var(--text-muted)',fontSize:15,lineHeight:1,transition:'transform 0.4s',transform:refreshing?'rotate(360deg)':'rotate(0deg)'}}>↻</button>
           </div>
+        </div>
+        <div className="quick-nav hide-mobile">
+          {[{id:'dashboard',label:'Dashboard'},{id:'transactions',label:'Transactions'},{id:'cards',label:'Cards'}].map(t=>(
+            <button key={t.id} data-active={page===t.id} onClick={()=>setPage(t.id)}>{t.label}</button>
+          ))}
         </div>
         <div className="content" key={refreshKey}>
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
