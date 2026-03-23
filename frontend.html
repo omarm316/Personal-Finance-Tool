@@ -7314,6 +7314,79 @@ function LoansPage({toast}){
         ))}
       </div>
 
+      {/* ── Payoff Timeline ───────────────────────────────────────────────── */}
+      {loans.length>0&&(()=>{
+        // Compute payoff months for each loan with enough data
+        const now=new Date();
+        const timelineLoans=loans.map(l=>{
+          const bal=Math.abs(l.current_balance||0);
+          const rate=(l.interest_rate||0)/100/12; // monthly rate
+          const pmt=l.monthly_payment||0;
+          if(!bal||!pmt)return{...l,payoffMonths:null,payoffDate:null};
+          let months;
+          if(l.maturity_date){
+            // If maturity date is set, use it directly
+            const mat=new Date(l.maturity_date);
+            months=Math.max(0,Math.round((mat-now)/(1000*60*60*24*30.44)));
+          }else if(l.remaining_term_months){
+            months=l.remaining_term_months;
+          }else if(rate>0){
+            // Amortization formula: n = -ln(1 - (r*PV)/PMT) / ln(1+r)
+            const x=1-(rate*bal)/pmt;
+            if(x<=0)months=999; // payment too low to ever pay off
+            else months=Math.ceil(-Math.log(x)/Math.log(1+rate));
+          }else{
+            months=Math.ceil(bal/pmt);
+          }
+          const payDate=new Date(now.getFullYear(),now.getMonth()+months,1);
+          return{...l,payoffMonths:months,payoffDate:payDate};
+        }).filter(l=>l.payoffMonths!=null&&l.payoffMonths<600);
+
+        if(!timelineLoans.length)return null;
+
+        const maxMonths=Math.max(...timelineLoans.map(l=>l.payoffMonths),1);
+        const maxYears=Math.ceil(maxMonths/12);
+        const COLORS=['var(--gold)','var(--green)','#60a5fa','#a78bfa','var(--red)','var(--amber)'];
+
+        return(
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Payoff Timeline</div>
+            <div style={{position:'relative',paddingBottom:24}}>
+              {/* Year markers */}
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:12,paddingLeft:140}}>
+                {Array.from({length:Math.min(maxYears+1,31)},(_,i)=>(
+                  <div key={i} style={{fontSize:10,color:'var(--text-muted)',fontFamily:'DM Sans',fontWeight:300,position:'relative'}}>
+                    {i===0?'Now':`${now.getFullYear()+i}`}
+                  </div>
+                ))}
+              </div>
+              {/* Loan bars */}
+              {timelineLoans.map((l,i)=>{
+                const pct=Math.min((l.payoffMonths/maxMonths)*100,100);
+                const color=COLORS[i%COLORS.length];
+                const payLabel=l.payoffDate?l.payoffDate.toLocaleDateString('en-US',{month:'short',year:'numeric'}):`${l.payoffMonths} mo`;
+                return(
+                  <div key={l.id} style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
+                    <div style={{width:128,flexShrink:0,textAlign:'right',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      <div style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{l.lender}</div>
+                      <div style={{fontSize:10,color:'var(--text-muted)',fontWeight:300}}>{fmt(Math.abs(l.current_balance||0))}</div>
+                    </div>
+                    <div style={{flex:1,position:'relative'}}>
+                      <div style={{height:22,background:'var(--elevated)',borderRadius:6,overflow:'hidden',border:'1px solid var(--border)'}}>
+                        <div style={{height:'100%',width:`${pct}%`,background:color,borderRadius:6,opacity:0.75,transition:'width 0.5s ease',display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:pct>15?8:0}}>
+                          {pct>15&&<span style={{fontSize:9,fontWeight:500,color:'#0c0c10',whiteSpace:'nowrap'}}>{payLabel}</span>}
+                        </div>
+                      </div>
+                      {pct<=15&&<span style={{position:'absolute',left:`calc(${pct}% + 6px)`,top:3,fontSize:9,fontWeight:500,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{payLabel}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
         <div style={{padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid var(--border)'}}>
           <span style={{fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Loans ({loans.length})</span>
