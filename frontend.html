@@ -7379,6 +7379,12 @@ function CashFlowPage({toast}){
   const[loading,setLoading]=useState(true);
   const[cm,setCm]=useState(null);
 
+  // ── Analytics state ─────────────────────────────────────────────────
+  const[monthlyTrend,setMonthlyTrend]=useState([]); // [{label,income,expenses}]
+  const[breakdownRange,setBreakdownRange]=useState('month'); // 'month' | 'last30' | 'next30'
+  const[breakdownData,setBdData]=useState({income:{},expenses:{},totalIn:0,totalOut:0});
+  const[bdLoading,setBdLoading]=useState(false);
+
   const load=useCallback(async(autoGen=false)=>{
     setLoading(true);
     try{
@@ -7407,6 +7413,61 @@ function CashFlowPage({toast}){
   },[]);
 
   useEffect(()=>{load(true);},[load]);
+
+  // ── Load 6-month trend for chart ────────────────────────────────────
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const now=new Date();const months=[];
+        for(let i=5;i>=0;i--){
+          const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+          months.push({year:d.getFullYear(),month:d.getMonth()+1,label:d.toLocaleDateString('en-US',{month:'short'})});
+        }
+        const results=await Promise.all(months.map(m=>
+          apiFetch(`/stats?year=${m.year}&month=${m.month}`).catch(()=>({total_income:0,total_expenses:0}))
+        ));
+        setMonthlyTrend(months.map((m,i)=>({label:m.label,income:results[i].total_income||0,expenses:results[i].total_expenses||0})));
+      }catch(_){}
+    })();
+  },[]);
+
+  // ── Load breakdown data based on selected range ─────────────────────
+  useEffect(()=>{
+    (async()=>{
+      setBdLoading(true);
+      try{
+        const now=new Date();const todayS=todayStr();
+        let params='';
+        if(breakdownRange==='month'){
+          params=`year=${now.getFullYear()}&month=${now.getMonth()+1}`;
+        }else if(breakdownRange==='last30'){
+          const d30ago=new Date(now);d30ago.setDate(d30ago.getDate()-30);
+          params=`start_date=${d30ago.toISOString().slice(0,10)}&end_date=${todayS}`;
+        }else{
+          // next30: use overlays + salary data, not stats endpoint
+          const d30=new Date(now);d30.setDate(d30.getDate()+30);
+          const futEnd=d30.toISOString().slice(0,10);
+          const fOvs=overlays.filter(o=>o.flow_date>=todayS&&o.flow_date<=futEnd);
+          const fSals=salaryPayments.filter(sp=>sp.payment_date>=todayS&&sp.payment_date<=futEnd);
+          const incCats={};const expCats={};let tIn=0,tOut=0;
+          fSals.forEach(sp=>{const amt=spTotal(sp);tIn+=amt;const k=sp.description||'Salary';incCats[k]=(incCats[k]||0)+amt;});
+          fOvs.forEach(o=>{
+            if(o.amount>0){tIn+=o.amount;const k=o.description||'Other';incCats[k]=(incCats[k]||0)+o.amount;}
+            else{const amt=Math.abs(o.amount);tOut+=amt;const k=o.description||'Other';expCats[k]=(expCats[k]||0)+amt;}
+          });
+          setBdData({income:incCats,expenses:expCats,totalIn:tIn,totalOut:tOut});
+          setBdLoading(false);
+          return;
+        }
+        const stats=await apiFetch(`/stats?${params}`);
+        // Separate income categories from expense categories
+        // stats.by_category has expense categories; income is total_income
+        const incCats={'Salary / Income':(stats.total_income||0)};
+        setBdData({income:incCats,expenses:stats.by_category||{},totalIn:stats.total_income||0,totalOut:stats.total_expenses||0});
+      }catch(_){setBdData({income:{},expenses:{},totalIn:0,totalOut:0});}
+      finally{setBdLoading(false);}
+    })();
+  },[breakdownRange,overlays,salaryPayments]);
 
   // ── Salary helpers ────────────────────────────────────────────────────
   const openAddSalary=()=>{setEditingSalary(null);setSalaryForm(blankSF());setShowSalaryForm(true);};
@@ -7600,7 +7661,7 @@ function CashFlowPage({toast}){
   return(
     <div>
       {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
-      <h2 style={{fontSize:20,fontWeight:400,letterSpacing:'-0.3px',marginBottom:24}}>Cash Flow</h2>
+      <h2 style={{fontSize:20,fontWeight:400,letterSpacing:'-0.3px',marginBottom:24}}>Cash Flow & Forecasting</h2>
 
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:24}}>
@@ -7625,6 +7686,117 @@ function CashFlowPage({toast}){
           {nextPayEntry&&<div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>+{fmt(spTotal(nextPayEntry))} · {nextPayEntry.person}</span></div>}
         </div>
       </div>
+
+      {/* ── Monthly Cash Flow Chart ────────────────────────────────────────── */}
+      {monthlyTrend.length>0&&(()=>{
+        const maxVal=Math.max(...monthlyTrend.map(m=>Math.max(m.income,m.expenses)),1);
+        const chartH=160;
+        return(
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Monthly Cash Flow — Last 6 Months</div>
+            <div style={{display:'flex',alignItems:'flex-end',gap:8,height:chartH,paddingBottom:24,position:'relative'}}>
+              {/* Horizontal grid lines */}
+              {[0.25,0.5,0.75,1].map(pct=>(
+                <div key={pct} style={{position:'absolute',left:0,right:0,bottom:24+(chartH-24)*pct,height:1,background:'var(--border)',pointerEvents:'none'}}/>
+              ))}
+              {monthlyTrend.map((m,i)=>{
+                const incH=Math.max(2,m.income/maxVal*(chartH-24));
+                const expH=Math.max(2,m.expenses/maxVal*(chartH-24));
+                const net=m.income-m.expenses;
+                return(
+                  <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:0,position:'relative'}}>
+                    <div style={{display:'flex',gap:3,alignItems:'flex-end',flex:1,width:'100%',justifyContent:'center'}}>
+                      <div title={`Income: ${fmt(m.income)}`} style={{width:'38%',maxWidth:28,height:incH,background:'var(--green)',borderRadius:'4px 4px 0 0',opacity:0.85,transition:'height 0.4s ease'}}/>
+                      <div title={`Expenses: ${fmt(m.expenses)}`} style={{width:'38%',maxWidth:28,height:expH,background:'var(--red)',borderRadius:'4px 4px 0 0',opacity:0.85,transition:'height 0.4s ease'}}/>
+                    </div>
+                    <div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,fontWeight:400}}>{m.label}</div>
+                    <div style={{fontSize:9,color:net>=0?'var(--green)':'var(--red)',fontWeight:500,fontFamily:'DM Sans'}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:'flex',gap:20,justifyContent:'center',marginTop:8}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--text-muted)'}}><div style={{width:10,height:10,borderRadius:2,background:'var(--green)',opacity:0.85}}/> Income</div>
+              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--text-muted)'}}><div style={{width:10,height:10,borderRadius:2,background:'var(--red)',opacity:0.85}}/> Expenses</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Income & Expense Breakdowns ─────────────────────────────────────── */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:20}}>
+        {/* Range toggle — spans both columns */}
+        <div style={{gridColumn:'1/-1',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Breakdown</div>
+          <div style={{display:'flex',gap:2,background:'var(--elevated)',borderRadius:8,padding:2,border:'1px solid var(--border)'}}>
+            {[['month','This Month'],['last30','Last 30 Days'],['next30','Next 30 Days']].map(([k,label])=>(
+              <button key={k} onClick={()=>setBreakdownRange(k)}
+                style={{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11,fontWeight:breakdownRange===k?500:400,
+                  background:breakdownRange===k?'var(--gold)':'transparent',color:breakdownRange===k?'#0c0c10':'var(--text-muted)',
+                  transition:'all 0.15s',fontFamily:'inherit'}}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Income sources */}
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:14}}>Income Sources</div>
+          {bdLoading?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>Loading…</div>
+          :Object.keys(breakdownData.income).length===0?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>No income data</div>
+          :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {Object.entries(breakdownData.income).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([cat,amt])=>{
+              const pct=breakdownData.totalIn>0?amt/breakdownData.totalIn*100:0;
+              return(
+                <div key={cat}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                    <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'DM Sans',color:'var(--green)'}}>+{fmt(amt)}</span>
+                  </div>
+                  <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--green)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
+              <span style={{color:'var(--text-muted)'}}>Total</span>
+              <span style={{color:'var(--green)',fontFamily:'DM Sans'}}>+{fmt(breakdownData.totalIn)}</span>
+            </div>
+          </div>}
+        </div>
+
+        {/* Top expenses */}
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:14}}>Top Expenses</div>
+          {bdLoading?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>Loading…</div>
+          :Object.keys(breakdownData.expenses).length===0?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>No expense data</div>
+          :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {Object.entries(breakdownData.expenses).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([cat,amt])=>{
+              const pct=breakdownData.totalOut>0?amt/breakdownData.totalOut*100:0;
+              return(
+                <div key={cat}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                    <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'DM Sans',color:'var(--red)'}}>{fmt(amt)}</span>
+                  </div>
+                  <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--red)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
+              <span style={{color:'var(--text-muted)'}}>Total</span>
+              <span style={{color:'var(--red)',fontFamily:'DM Sans'}}>{fmt(breakdownData.totalOut)}</span>
+            </div>
+          </div>}
+        </div>
+      </div>
+
+      {/* ── Predicted Flows (existing) ─ divider ───────────────────────────── */}
+      <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16,marginTop:8}}>Predicted Cash Flows</div>
 
       {/* ── Salary modal ───────────────────────────────────────────────────── */}
       {showSalaryForm&&(
