@@ -18,7 +18,7 @@
   --border:rgba(255,255,255,0.06);--border-strong:rgba(255,255,255,0.1);
   --text-primary:#e8e8ed;--text-secondary:#a0a0b0;--text-muted:#707080;
   --gold:#d4a44a;--gold-soft:rgba(212,164,74,0.12);--gold-glow:0 0 20px rgba(212,164,74,0.15);
-  --green:#34d399;--red:#f87171;--amber:#fbbf24;
+  --green:#34d399;--red:#f87171;--amber:#fbbf24;--violet:#a78bfa;--violet-soft:rgba(167,139,250,0.12);--violet-border:rgba(167,139,250,0.2);
   --sidebar-bg:#0a0a0e;--sidebar-text:#a0a0b0;--sidebar-hover-bg:rgba(255,255,255,0.04);
   --sidebar-active-bg:rgba(212,164,74,0.1);--sidebar-active-color:#d4a44a;
   --shadow:0 1px 3px rgba(0,0,0,0.3);--shadow-md:0 8px 24px rgba(0,0,0,0.4);
@@ -30,7 +30,7 @@
   --border:rgba(0,0,0,0.08);--border-strong:rgba(0,0,0,0.12);
   --text-primary:#1a1a2e;--text-secondary:#5c5c6f;--text-muted:#9ca3af;
   --gold:#b8860b;--gold-soft:rgba(184,134,11,0.08);--gold-glow:0 0 20px rgba(184,134,11,0.1);
-  --green:#059669;--red:#dc2626;--amber:#d97706;
+  --green:#059669;--red:#dc2626;--amber:#d97706;--violet:#7c3aed;--violet-soft:rgba(124,58,237,0.08);--violet-border:rgba(124,58,237,0.15);
   --sidebar-bg:#f0ede8;--sidebar-text:#5c5c6f;--sidebar-hover-bg:rgba(0,0,0,0.04);
   --sidebar-active-bg:rgba(184,134,11,0.08);--sidebar-active-color:#b8860b;
   --shadow:0 1px 3px rgba(0,0,0,0.06);--shadow-md:0 8px 24px rgba(0,0,0,0.1);
@@ -199,7 +199,7 @@ const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).fo
 const fmtRound=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
-const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','#fca5a5','#bef264'];
+const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','rgba(248,113,113,0.3)','#bef264'];
 // Canonical category colors — primary keys match database.py seed_categories exactly.
 // Legacy aliases kept for backward-compat (old transactions may carry these names).
 const CATEGORY_COLORS={
@@ -765,13 +765,13 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
                       {txn.points_earn.points_category_l1&&(
                         <>
                           <span style={{fontSize:12,color:'var(--green)',background:'rgba(52,211,153,0.15)',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category_l1}</span>
-                          <span style={{fontSize:11,color:'#86efac'}}>›</span>
+                          <span style={{fontSize:11,color:'var(--green)'}}>›</span>
                         </>
                       )}
                       <span style={{fontSize:12,fontWeight:500,color:'var(--green)',background:'rgba(52,211,153,0.15)',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category}</span>
                     </span>
                   ):(
-                    <span style={{fontSize:12,color:'#86efac',fontStyle:'italic'}}>Base rate</span>
+                    <span style={{fontSize:12,color:'var(--green)',fontStyle:'italic'}}>Base rate</span>
                   )}
                   <span style={{fontSize:13,fontWeight:400,color:'var(--green)'}}>{txn.points_earn.earn_rate}x</span>
                 </div>
@@ -779,7 +779,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
                   <div style={{fontSize:18,fontWeight:400,color:'var(--green)'}}>
                     {txn.points_earn.points_estimated.toLocaleString(undefined,{maximumFractionDigits:0})} pts
                   </div>
-                  <div style={{fontSize:11,color:'#22c55e'}}>
+                  <div style={{fontSize:11,color:'var(--green)'}}>
                     ≈ ${(txn.points_earn.points_estimated*txn.points_earn.cpp/100).toFixed(2)} value · {txn.points_earn.currency}
                   </div>
                 </div>
@@ -968,7 +968,7 @@ function ManualTransactionModal({accounts,categories,onClose,onSaved,toast}){
                 ?<select value={s.category||''} onChange={e=>updateSplit(i,'category',e.target.value)} style={{fontSize:12,padding:'4px'}}>
                   <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
-                :<span style={{color:'#d1d5db',fontSize:12}}>—</span>}
+                :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
               </td>
               <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateSplit(i,'is_gcb',e.target.checked)}/></td>
               <td style={{padding:'4px'}}>{splits.length>1&&<button className="btn btn-sm btn-ghost" onClick={()=>removeSplit(i)} style={{padding:'2px 6px',fontSize:13}}>×</button>}</td>
@@ -978,7 +978,7 @@ function ManualTransactionModal({accounts,categories,onClose,onSaved,toast}){
             <div style={{display:'flex',gap:8,alignItems:'center'}}>
               <button className="btn btn-sm btn-secondary" onClick={addSplit}>+ Add Row</button>
               {!splitBalanced&&splits.length>0&&amount&&<button className="btn btn-sm btn-ghost"
-                style={{fontSize:11,color:'#1d4ed8',border:'1px solid #bfdbfe',padding:'3px 9px'}}
+                style={{fontSize:11,color:'var(--blue)',border:'1px solid rgba(96,165,250,0.25)',padding:'3px 9px'}}
                 title={`Adjust last row to cover the ${splitRemaining>0?'unallocated':'excess'} ${fmt(Math.abs(splitRemaining))}`}
                 onClick={()=>{
                   const s=[...splits];
@@ -992,7 +992,7 @@ function ManualTransactionModal({accounts,categories,onClose,onSaved,toast}){
                 :splitBalanced
                   ?<span style={{fontSize:13,fontWeight:500,color:'var(--green)'}}>✓ Balanced</span>
                   :splitRemaining>0
-                    ?<span style={{fontSize:13,fontWeight:500,color:'#b45309'}}>{fmt(splitRemaining)} remaining</span>
+                    ?<span style={{fontSize:13,fontWeight:500,color:'var(--amber)'}}>{fmt(splitRemaining)} remaining</span>
                     :<span style={{fontSize:13,fontWeight:500,color:'var(--red)'}}>{fmt(Math.abs(splitRemaining))} over</span>
               }
             </div>
@@ -1075,7 +1075,7 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
             ?<select value={s.category||''} onChange={e=>updateRow(i,'category',e.target.value)} style={{fontSize:12,padding:'4px'}}>
               <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
-            :<span style={{color:'#d1d5db',fontSize:12}}>—</span>}
+            :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
           </td>
           <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateRow(i,'is_gcb',e.target.checked)}/></td>
           <td style={{padding:'4px'}}><button className="btn btn-sm btn-ghost" onClick={()=>removeRow(i)} style={{padding:'2px 6px',fontSize:13}}>×</button></td></tr>
@@ -1084,7 +1084,7 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
             <button className="btn btn-sm btn-secondary" onClick={addRow}>+ Add Row</button>
             {!balanced&&splits.length>0&&<button className="btn btn-sm btn-ghost"
-              style={{fontSize:11,color:'#1d4ed8',border:'1px solid #bfdbfe',padding:'3px 9px'}}
+              style={{fontSize:11,color:'var(--blue)',border:'1px solid rgba(96,165,250,0.25)',padding:'3px 9px'}}
               title={`Adjust last row to cover the ${remaining>0?'unallocated':'excess'} ${fmt(Math.abs(remaining))}`}
               onClick={()=>{
                 const s=[...splits];
@@ -1097,7 +1097,7 @@ function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
             {balanced
               ?<span style={{fontSize:13,fontWeight:500,color:'var(--green)'}}>✓ Balanced</span>
               :remaining>0
-                ?<span style={{fontSize:13,fontWeight:500,color:'#b45309'}}>{fmt(remaining)} remaining</span>
+                ?<span style={{fontSize:13,fontWeight:500,color:'var(--amber)'}}>{fmt(remaining)} remaining</span>
                 :<span style={{fontSize:13,fontWeight:500,color:'var(--red)'}}>{fmt(Math.abs(remaining))} over</span>
             }
             <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>{fmt(total)} of {fmt(txn.amount)}</div>
@@ -2838,7 +2838,7 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
         </>:<>
           <button className="btn btn-sm btn-secondary" onClick={()=>onStartEdit(a)}>Edit</button>
           {showPlaidActions&&<button className="btn btn-sm" style={{background:'rgba(251,146,36,0.08)',color:'var(--red)',border:'1px solid rgba(251,146,36,0.3)',fontSize:11}} onClick={()=>onSever(a)}>Sever</button>}
-          <button className="btn btn-sm" style={{background:'rgba(96,165,250,0.08)',color:'#1d4ed8',border:'1px solid #bfdbfe',fontSize:11}} onClick={()=>onMerge(a)}>Merge →</button>
+          <button className="btn btn-sm" style={{background:'rgba(96,165,250,0.08)',color:'var(--blue)',border:'1px solid rgba(96,165,250,0.25)',fontSize:11}} onClick={()=>onMerge(a)}>Merge →</button>
           <button className="btn btn-sm" style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:11}} onClick={()=>onDelete(a)}>Delete</button>
         </>}
       </div>
@@ -3081,7 +3081,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
     }catch(e){toast(`Resync failed: ${e.message||e}`,'error');}
     finally{setResyncing(false);}
   };
-  const envColor={'production':'#059669','development':'#d97706','sandbox':'#6366f1'}[item.environment]||'#6b7280';
+  const envColor={'production':'var(--green)','development':'var(--amber)','sandbox':'var(--violet)'}[item.environment]||'var(--text-muted)';
   return(
     <React.Fragment>
     {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
@@ -3838,7 +3838,7 @@ function usePlaidLink(toast,onSuccess){
             <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 0',borderBottom:'1px solid var(--border)'}}>
               <span style={{fontWeight:500,fontSize:13,color:'var(--text)'}}>{a.name}{a.mask?` ••${a.mask}`:''}</span>
               {a.status==='matched'
-                ?<span style={{background:'#d1fae5',color:'#065f46',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>✓ History preserved</span>
+                ?<span style={{background:'rgba(52,211,153,0.12)',color:'var(--green)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>✓ History preserved</span>
                 :<span style={{background:'rgba(96,165,250,0.12)',color:'var(--blue)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>+ New</span>
               }
             </div>
@@ -3873,7 +3873,7 @@ class CardDetailErrorBoundary extends React.Component{
     if(this.state.error){
       return(
         <div style={{padding:32,maxWidth:700,margin:'0 auto'}}>
-          <div style={{background:'rgba(248,113,113,0.08)',border:'1px solid #fca5a5',borderRadius:10,padding:20}}>
+          <div style={{background:'rgba(248,113,113,0.08)',border:'1px solid rgba(248,113,113,0.3)',borderRadius:10,padding:20}}>
             <div style={{fontSize:15,fontWeight:400,color:'var(--red)',marginBottom:8}}>⚠ Card detail failed to render</div>
             <div style={{fontSize:12,color:'var(--red)',opacity:0.85,fontFamily:'monospace',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
               {this.state.error?.message||String(this.state.error)}
@@ -4542,7 +4542,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             <span>Category</span>
             <span style={{textAlign:'center'}}>Rate</span>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'#f0f9ff'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'var(--elevated)'}}>
             <span style={{fontSize:12,fontWeight:500,paddingLeft:4}}>All Purchases (Base)</span>
             <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--blue)',fontFamily:'DM Sans'}}>{d.base_rate}x</span>
           </div>
@@ -4605,8 +4605,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             </div>
           </div>}
           {/* Challenge bonus points */}
-          {(d.challenge_points||[]).length>0&&<div style={{marginTop:12,padding:'12px 14px',background:'#faf5ff',borderRadius:10,border:'1px solid #e9d5ff',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
-            <div style={{fontSize:11,fontWeight:500,color:'#7c3aed',textTransform:'uppercase',marginBottom:8}}>
+          {(d.challenge_points||[]).length>0&&<div style={{marginTop:12,padding:'12px 14px',background:'var(--violet-soft)',borderRadius:10,border:'1px solid var(--violet-border)',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--violet)',textTransform:'uppercase',marginBottom:8}}>
               ⚡ Bonus from Challenges
             </div>
             {d.challenge_points.map(ch=>{
@@ -4623,16 +4623,16 @@ function AccountCardDetailPage({accountId,onBack,toast}){
               };
               const chFullName=ch.name&&ch.name.length>40?ch.name:ch.name;
               return(
-                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid #e9d5ff',gap:6}}>
+                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid var(--violet-border)',gap:6}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:1}}>
                       <div style={{fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}} title={ch.name}>{ch.name}</div>
                       <button onClick={()=>openEdit(ch)} title="Edit"
-                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid #e9d5ff',background:'none',color:'#7c3aed',fontSize:10,cursor:'pointer',lineHeight:1.4}}>✎</button>
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid var(--violet-border)',background:'none',color:'var(--violet)',fontSize:10,cursor:'pointer',lineHeight:1.4}}>✎</button>
                       <button onClick={handleDeleteChallenge} title="Delete"
-                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid #fca5a5',background:'none',color:'#ef4444',fontSize:10,cursor:'pointer',lineHeight:1.4}}>×</button>
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',fontSize:10,cursor:'pointer',lineHeight:1.4}}>×</button>
                     </div>
-                    {ch.category_names&&ch.category_names.length>0&&<div style={{fontSize:10,color:'#7c3aed',opacity:0.8}}>{ch.category_names.join(', ')}</div>}
+                    {ch.category_names&&ch.category_names.length>0&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.8}}>{ch.category_names.join(', ')}</div>}
                     {ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
                       ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString()} spent
                       {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
@@ -4641,20 +4641,20 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                       ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_threshold.toLocaleString()} threshold
                       {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
                     </div>}
-                    {locked&&<div style={{fontSize:10,color:'#9ca3af',marginTop:1}}>Threshold not yet met</div>}
+                    {locked&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>Threshold not yet met</div>}
                   </div>
                   <div style={{textAlign:'right',flexShrink:0,marginLeft:4}}>
                     {earned>0
-                      ?<div style={{fontFamily:'DM Sans',fontWeight:400,color:'#7c3aed',fontSize:14}}>+{earned.toLocaleString()}</div>
-                      :<div style={{fontSize:11,color:'#9ca3af'}}>{locked?'Locked':'—'}</div>}
-                    {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'#7c3aed',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
+                      ?<div style={{fontFamily:'DM Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>+{earned.toLocaleString()}</div>
+                      :<div style={{fontSize:11,color:'var(--text-muted)'}}>{locked?'Locked':'—'}</div>}
+                    {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
                   </div>
                 </div>
               );
             })}
             {d.challenge_pts_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
-              <div style={{fontSize:11,color:'#7c3aed',fontWeight:500}}>Total Challenge Bonus</div>
-              <div style={{fontSize:18,fontWeight:400,fontFamily:'DM Sans',color:'#7c3aed'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
+              <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Challenge Bonus</div>
+              <div style={{fontSize:18,fontWeight:400,fontFamily:'DM Sans',color:'var(--violet)'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
             </div>}
           </div>}
         </div>
@@ -4709,7 +4709,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                           <span style={{fontWeight:500,fontSize:14}}>{b.benefit_name}</span>
                           {b.amount>0&&<span style={{fontSize:13,fontFamily:'DM Sans',color:'var(--green)',fontWeight:400}}>${b.amount.toLocaleString()}</span>}
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>{freqLabel}</span>
-                          {b.trigger_category&&<span style={{fontSize:10,padding:'1px 6px',background:'#ede9fe',color:'#6d28d9',borderRadius:4}}>{b.trigger_category}</span>}
+                          {b.trigger_category&&<span style={{fontSize:10,padding:'1px 6px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4}}>{b.trigger_category}</span>}
                         </div>
                         {b.notes&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{b.notes}</div>}
                       </div>
@@ -4717,7 +4717,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         <button onClick={()=>{setEditingBenefitId(b.id);setBenefitForm({benefit_name:b.benefit_name,amount:String(b.amount),reset_frequency:b.reset_frequency,trigger_category:b.trigger_category||'',notes:b.notes||''});setShowBenefitModal(true);}}
                           style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✎</button>
                         <button onClick={()=>deleteBenefit(b.id,b.benefit_name)}
-                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid #fca5a5',background:'none',color:'#ef4444',cursor:'pointer'}}>×</button>
+                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>×</button>
                       </div>
                     </div>
                     {b.amount>0&&(
@@ -4742,7 +4742,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         <input type="text" value={logUsageNotes} onChange={e=>setLogUsageNotes(e.target.value)}
                           placeholder="Notes (optional)" style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',flex:1,minWidth:120}}/>
                         <button onClick={()=>logUsage(b.id,logUsageAmt,logUsageNotes)} disabled={benefitSaving}
-                          style={{fontSize:12,padding:'4px 10px',borderRadius:5,border:'none',background:'#15803d',color:'#fff',cursor:'pointer',fontWeight:500}}>
+                          style={{fontSize:12,padding:'4px 10px',borderRadius:5,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer',fontWeight:500}}>
                           {benefitSaving?'…':'Save'}
                         </button>
                         <button onClick={()=>{setLogUsageFor(null);setLogUsageAmt('');setLogUsageNotes('');}}
@@ -4755,7 +4755,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                           {hasUsage?'Update Usage':'Log Usage'}
                         </button>
                         {b.usage_id&&<button onClick={()=>clearUsage(b.usage_id,b.id)}
-                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid #fca5a5',background:'none',color:'#ef4444',cursor:'pointer'}}>
+                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>
                           Clear
                         </button>}
                       </div>
@@ -4778,8 +4778,8 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           </div>
           <button className="btn btn-primary btn-sm" style={{fontSize:12,padding:'5px 14px'}} onClick={openNew}>+ New</button>
         </div>
-        {suggestions.length>0&&<div style={{marginBottom:16,padding:'12px 14px',background:'rgba(96,165,250,0.08)',borderRadius:10,border:'1px solid #bfdbfe'}}>
-          <div style={{fontSize:12,fontWeight:500,color:'#1d4ed8',marginBottom:8}}>&#128161; Suggested for this card</div>
+        {suggestions.length>0&&<div style={{marginBottom:16,padding:'12px 14px',background:'rgba(96,165,250,0.08)',borderRadius:10,border:'1px solid rgba(96,165,250,0.25)'}}>
+          <div style={{fontSize:12,fontWeight:500,color:'var(--blue)',marginBottom:8}}>&#128161; Suggested for this card</div>
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
             {suggestions.map((s,i)=>(
               <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:12}}>
@@ -4914,18 +4914,18 @@ function AccountCardDetailPage({accountId,onBack,toast}){
               <span style={{color:'var(--text-muted)',fontSize:11}}>{txnSummary.by_csc[cscFilter].count} txns</span>
             )}
             {cscFilter==='__none__'&&txnSummary.by_csc['__none__']&&(
-              <span style={{color:'#b45309',fontSize:11}}>⚠ {txnSummary.by_csc['__none__'].count} txns with no CSC — {fmt(txnSummary.by_csc['__none__'].spend)} unoptimized</span>
+              <span style={{color:'var(--amber)',fontSize:11}}>⚠ {txnSummary.by_csc['__none__'].count} txns with no CSC — {fmt(txnSummary.by_csc['__none__'].spend)} unoptimized</span>
             )}
           </div>
         )}
         {/* Teach-merchant prompt — shown after inline CSC save */}
         {teachPrompt&&(
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,
-            padding:'10px 14px',marginBottom:10,background:'rgba(96,165,250,0.08)',border:'1px solid #bfdbfe',borderRadius:8,fontSize:13}}>
+            padding:'10px 14px',marginBottom:10,background:'rgba(96,165,250,0.08)',border:'1px solid rgba(96,165,250,0.25)',borderRadius:8,fontSize:13}}>
             <span>📌 Apply <strong>{teachPrompt.csc}</strong> to all past &amp; future transactions from <strong>{teachPrompt.merchantName}</strong>?</span>
             <div style={{display:'flex',gap:6}}>
               <button onClick={()=>teachMerchant(teachPrompt.merchantName,teachPrompt.csc)} disabled={teachLoading}
-                style={{padding:'4px 12px',borderRadius:5,border:'none',background:'#2563eb',color:'#fff',fontSize:12,fontWeight:500,cursor:'pointer'}}>
+                style={{padding:'4px 12px',borderRadius:5,border:'none',background:'var(--blue)',color:'#fff',fontSize:12,fontWeight:500,cursor:'pointer'}}>
                 {teachLoading?'Saving…':'Yes, apply to all'}
               </button>
               <button onClick={()=>setTeachPrompt(null)}
@@ -4938,7 +4938,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         {/* Grouped merchant view — shown when filter=__none__ */}
         {cscFilter==='__none__'&&(
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:500,color:'#b45309',marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:500,color:'var(--amber)',marginBottom:8}}>
               🎓 Teach merchants — assign a CSC to fix all past &amp; future transactions at once
             </div>
             {unclassifiedLoading
@@ -4970,7 +4970,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                                   {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
                                 </select>
                                 <button onClick={()=>assignCscVal&&assignMerchantCsc(u.merchant,assignCscVal)} disabled={!assignCscVal||assignLoading}
-                                  style={{padding:'2px 8px',borderRadius:4,border:'none',background:'#15803d',color:'#fff',fontSize:11,cursor:'pointer',fontWeight:500}}>
+                                  style={{padding:'2px 8px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',fontSize:11,cursor:'pointer',fontWeight:500}}>
                                   {assignLoading?'…':'✓'}
                                 </button>
                                 <button onClick={()=>setAssigningMerchant(null)}
@@ -5046,7 +5046,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                                 {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
                               </select>
                               <button onClick={()=>saveCscEdit(t.id,editingCscVal)}
-                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'#15803d',color:'#fff',cursor:'pointer'}}>✓</button>
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
                               <button onClick={()=>setEditingCscId(null)}
                                 style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
                             </div>
@@ -5055,7 +5055,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                               onClick={()=>{setEditingCscId(t.id);setEditingCscVal(t.points_category||'');}}>
                               {t.points_category
                                 ?<span style={{fontSize:11,padding:'2px 7px',background:'rgba(52,211,153,0.15)',color:'var(--green)',borderRadius:4,whiteSpace:'nowrap'}}>{t.points_category}</span>
-                                :<span style={{fontSize:11,padding:'2px 7px',background:'#fef9c3',color:'var(--amber)',borderRadius:4,whiteSpace:'nowrap',fontStyle:'italic'}}>⚠ unset</span>}
+                                :<span style={{fontSize:11,padding:'2px 7px',background:'rgba(251,191,36,0.12)',color:'var(--amber)',borderRadius:4,whiteSpace:'nowrap',fontStyle:'italic'}}>⚠ unset</span>}
                               <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
                             </div>
                           )}
@@ -7536,7 +7536,7 @@ function CashFlowPage({toast}){
 
   // ── Overlay helpers ───────────────────────────────────────────────────
   const BLANK_OV={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
-  const SOURCE_BADGE={manual:{label:'Manual',bg:'var(--gold-soft)',color:'var(--gold)'},cc_payment:{label:'CC',bg:'rgba(248,113,113,0.12)',color:'var(--red)'},loan_payment:{label:'Loan',bg:'rgba(139,92,246,0.12)',color:'#8b5cf6'}};
+  const SOURCE_BADGE={manual:{label:'Manual',bg:'var(--gold-soft)',color:'var(--gold)'},cc_payment:{label:'CC',bg:'rgba(248,113,113,0.12)',color:'var(--red)'},loan_payment:{label:'Loan',bg:'rgba(139,92,246,0.12)',color:'var(--violet)'}};
   const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_OV);setShowOverlayForm(true);};
   const openEditOverlay=o=>{
     setEditingOverlay(o);
@@ -8196,7 +8196,7 @@ function DailyBalancesPage({toast}){
                       grandTotal+=isLiab?-Math.abs(rawTot??0):(rawTot??0);
                       const dispTot=isLiab?-Math.abs(rawTot??0):(rawTot??0);
                       const totCell=(
-                        <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Sans',fontWeight:500,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispTot<0?'var(--red)':'inherit',background:isLiab?'#fff5f5':dispTot<0?'#fff5f5':undefined,whiteSpace:'nowrap'}}>{fmtBal(dispTot)}</td>
+                        <td key={grp.group+'-t'} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Sans',fontWeight:500,fontSize:12,borderLeft:'2px solid var(--border)',borderBottom:'1px solid var(--border)',color:isLiab?'var(--red)':dispTot<0?'var(--red)':'inherit',background:isLiab?'rgba(248,113,113,0.08)':dispTot<0?'rgba(248,113,113,0.08)':undefined,whiteSpace:'nowrap'}}>{fmtBal(dispTot)}</td>
                       );
                       const acctCells=!collapsed[grp.group]?grp.accounts.map(acct=>{
                         const rawVal=acct.balances[di];
@@ -8214,8 +8214,8 @@ function DailyBalancesPage({toast}){
                           setCellModal({acct_name:acct.account_name,date:d,raw_balance:balBefore,projected_balance:dispVal,entries:projEntries});
                         }:undefined;
                         return(
-                          <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Sans',fontSize:11,borderLeft:'1px solid #f0f0f0',borderBottom:'1px solid #f0f0f0',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'#fefce8':undefined}}>
-                            {fmtBal(dispVal)}{hasProj&&<span style={{marginLeft:2,fontSize:8,color:'#ca8a04',verticalAlign:'super'}}>◈</span>}
+                          <td key={acct.id} onClick={handleClick} title={hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined} style={{padding:'3px 8px',textAlign:'right',fontFamily:'DM Sans',fontSize:11,borderLeft:'1px solid var(--border)',borderBottom:'1px solid var(--border)',color:isLiab?'var(--red)':dispVal<0?'var(--red)':'inherit',fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,background:hasProj?'var(--gold-soft)':undefined}}>
+                            {fmtBal(dispVal)}{hasProj&&<span style={{marginLeft:2,fontSize:8,color:'var(--amber)',verticalAlign:'super'}}>◈</span>}
                           </td>
                         );
                       }):[];
@@ -8224,7 +8224,7 @@ function DailyBalancesPage({toast}){
                     grandTotal=Math.round(grandTotal*100)/100;
                     const gtColor=grandTotal>=0?'var(--green)':'var(--red)';
                     cells.push(
-                      <td key="grand-total" style={{padding:'3px 10px',textAlign:'right',fontFamily:'DM Sans',fontWeight:400,fontSize:12,borderLeft:'3px solid #6366f1',borderBottom:'1px solid #f0f0f0',color:gtColor,background:'#eef2ff',whiteSpace:'nowrap'}}>{fmtBal(grandTotal)}</td>
+                      <td key="grand-total" style={{padding:'3px 10px',textAlign:'right',fontFamily:'DM Sans',fontWeight:400,fontSize:12,borderLeft:'3px solid var(--violet)',borderBottom:'1px solid var(--border)',color:gtColor,background:'var(--violet-soft)',whiteSpace:'nowrap'}}>{fmtBal(grandTotal)}</td>
                     );
                     return cells;
                   })()}
