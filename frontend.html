@@ -137,8 +137,10 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
 .toast.success{border-left:3px solid var(--green)}
 .toast.error{border-left:3px solid var(--red)}
 @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.review-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;display:flex;align-items:center;justify-content:center}
-.review-panel{background:var(--surface);border-radius:18px;padding:30px;width:480px;max-width:90vw;box-shadow:var(--shadow-md)}
+.review-overlay,.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;display:flex;align-items:center;justify-content:center}
+.review-panel,.modal-panel{background:var(--surface);border-radius:18px;padding:30px;width:480px;max-width:90vw;box-shadow:var(--shadow-md)}
+/* Bottom sheet drag handle (mobile) */
+.sheet-handle{display:none;width:36px;height:5px;border-radius:3px;background:var(--text-muted);margin:0 auto 12px;opacity:0.5}
 .review-field{margin-bottom:16px}
 .review-field label{font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px}
 .review-field select,.review-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:14px;font-family:inherit;outline:none;background:var(--elevated);transition:border-color 0.15s,box-shadow 0.15s}
@@ -205,6 +207,16 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
   /* Global mobile touch polish */
   *{-webkit-tap-highlight-color:transparent}
   .btn,.mobile-nav-btn,.nav-item,.badge,.sel-pill button{-webkit-user-select:none;user-select:none}
+  /* Bottom sheet modals on mobile */
+  .review-overlay,.modal-overlay{align-items:flex-end!important;justify-content:stretch!important}
+  .review-panel,.modal-panel,.modal-overlay>.modal,.modal-overlay>.modal-content{
+    width:100%!important;max-width:100vw!important;border-radius:18px 18px 0 0!important;
+    max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:16px 20px calc(16px + env(safe-area-inset-bottom,0px))!important;
+    animation:sheetUp 0.3s cubic-bezier(0.32,0.72,0,1);
+    background:var(--surface);box-shadow:0 -4px 24px rgba(0,0,0,0.3)}
+  .sheet-handle{display:block!important}
+  @keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
   /* Show mobile-only elements */
   .mobile-month-nav{display:flex!important;align-items:center;gap:4px;}
 }
