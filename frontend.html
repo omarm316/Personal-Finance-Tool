@@ -10,7 +10,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="Finance"/>
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
-<link rel="apple-touch-startup-image" href="/static/icons/apple-touch-icon.png"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-pro.png" media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-promax.png" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14.png" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-se.png" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -297,6 +300,30 @@ function useIsMobile(){
     return()=>window.removeEventListener('resize',fn);
   },[]);
   return m;
+}
+
+function CollapsibleSection({title,children,defaultOpen=true,count}){
+  const isMobile=useIsMobile();
+  const[open,setOpen]=useState(defaultOpen||!isMobile);
+  useEffect(()=>{if(!isMobile)setOpen(true);},[isMobile]);
+  const label=count!=null?`${title} (${count})`:title;
+  return(
+    <div style={{marginBottom:16}}>
+      <button onClick={()=>isMobile&&setOpen(!open)} style={{
+        display:'flex',alignItems:'center',gap:8,width:'100%',border:'none',background:'none',
+        cursor:isMobile?'pointer':'default',padding:'10px 0',fontFamily:'inherit'}}>
+        <span style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>{label}</span>
+        {isMobile&&<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"
+          style={{transition:'transform 0.2s',transform:open?'rotate(180deg)':'rotate(0deg)'}}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>}
+        <div style={{flex:1,height:1,background:'var(--border)'}}/>
+      </button>
+      <div style={{overflow:'hidden',maxHeight:open?'none':'0',transition:open?'none':'max-height 0.3s ease',opacity:open?1:0}}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function MobileNav({page,setPage}){
@@ -2471,6 +2498,7 @@ function DashboardPage({categories,toast}){
       })()}
 
       {/* ── Spending Trend + Budget Overview (two columns) ──────────────────── */}
+      <CollapsibleSection title="Charts & Budgets" defaultOpen={true}>
       {(()=>{
         /* Derive monthly spending totals from budgetActuals + budgetActualsPrior */
         const MO_LABELS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2593,8 +2621,10 @@ function DashboardPage({categories,toast}){
           </div>
         );
       })()}
+      </CollapsibleSection>
 
       {/* ── Full-width Budget & Spending Detail ──────────────────────────── */}
+      <CollapsibleSection title="Budget Detail" defaultOpen={true}>
       <div style={{marginTop:0}}>
         <BudgetAndSpendingCard
           targets={budgetTargets} actuals={budgetActuals}
@@ -2611,8 +2641,10 @@ function DashboardPage({categories,toast}){
       {catDetail&&<div style={{marginTop:12}}>
         <CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>
       </div>}
+      </CollapsibleSection>
 
       {/* ── Section 2: Recent Transactions (left) + Net Worth (right) ─────────── */}
+      <CollapsibleSection title="Recent Activity" defaultOpen={true}>
       <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:16,marginTop:20}}>
         {/* Recent Transactions */}
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
@@ -2668,6 +2700,7 @@ function DashboardPage({categories,toast}){
           </div>}
         </div>}
       </div>
+      </CollapsibleSection>
 
       {/* ── Section 2: Budget vs. Actual — Last 12 Months ───────────────────── */}
       <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:20}}>
