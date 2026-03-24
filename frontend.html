@@ -79,6 +79,11 @@ body{overflow:hidden}
 .content{flex:1;overflow-y:auto;padding:24px 20px;background:var(--bg)}
 .card{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);transition:box-shadow 0.2s ease,transform 0.2s ease}
 .metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
+/* Responsive grid utilities — override inline gridTemplateColumns on mobile */
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.grid-auto-sm{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
 .metric-card{padding:18px;transition:all 0.2s ease;border-radius:14px}
 .metric-card:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
 .metric-label{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px}
@@ -107,7 +112,9 @@ body{overflow:hidden}
 .date-input{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:300;font-family:'DM Sans',sans-serif;outline:none;color:var(--text-primary);background:var(--elevated);transition:border-color 0.2s,box-shadow 0.2s}
 .date-input:focus{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-soft)}
 .filter-count{margin-left:auto;font-size:12px;color:var(--text-muted);white-space:nowrap}
-.table-wrap{overflow-x:auto}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;position:relative}
+.table-wrap::after{content:'';position:absolute;right:0;top:0;bottom:0;width:24px;pointer-events:none;background:linear-gradient(to right,transparent,var(--bg));opacity:0;transition:opacity 0.2s}
+@media(max-width:768px){.table-wrap::after{opacity:1}}
 table{width:100%;border-collapse:collapse}
 thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);border-bottom:1px solid var(--border-strong);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
 tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s}
@@ -202,6 +209,12 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
   /* Touch-friendly inputs */
   input,select,textarea{font-size:16px!important}
   .btn,.sel-pill button{min-height:44px;touch-action:manipulation}
+  /* Responsive grids on mobile */
+  .metric-grid{grid-template-columns:repeat(2,1fr)!important}
+  .grid-2{grid-template-columns:1fr!important}
+  .grid-3,.grid-4{grid-template-columns:repeat(2,1fr)!important}
+  .grid-auto-sm{grid-template-columns:1fr!important}
+  .dash-grid{grid-template-columns:1fr!important}
   /* Hide non-essential table columns on mobile — applied per-page */
   .hide-mobile{display:none!important;}
   /* Global mobile touch polish */
@@ -1226,7 +1239,7 @@ function ImportModal({accounts,onClose,onImported,toast}){
           {/* ── PREVIEW STAGE ── */}
           {stage==='preview'&&!preview&&<div className="loading" style={{padding:24}}><div className="spinner"/><span>Analysing file…</span></div>}
           {stage==='preview'&&preview&&<>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,margin:'16px 0'}}>
+            <div className="grid-3" style={{gap:10,margin:'16px 0'}}>
               <div style={{textAlign:'center',padding:'12px 8px',background:'var(--bg)',borderRadius:8}}>
                 <div style={{fontSize:22,fontWeight:400}}>{preview.total_rows}</div>
                 <div style={{fontSize:11,color:'var(--text-muted)'}}>Total rows</div>
@@ -2960,7 +2973,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
         const totalAssets=accounts.filter(a=>a.is_asset).reduce((s,a)=>s+(a.balance!=null?a.balance:(a.starting_balance||0)),0);
         const totalLiab=accounts.filter(a=>a.is_liability).reduce((s,a)=>s+Math.abs(a.balance!=null?a.balance:(a.starting_balance||0)),0);
         return(
-          <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+          <div className="metric-grid grid-4" style={{marginBottom:20}}>
             <div className="card metric-card"><div className="metric-label">Total Accounts</div><div className="metric-value">{accounts.length}</div></div>
             <div className="card metric-card"><div className="metric-label">Total Assets</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(totalAssets)}</div></div>
             <div className="card metric-card"><div className="metric-label">Total Liabilities</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(totalLiab)}</div></div>
@@ -2979,7 +2992,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
           </div>
         </div>
         {plaidAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No Plaid accounts connected</div>
-          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+          :<div className="grid-auto-sm">
             {plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true} {...rowProps}/>)}
           </div>}
       </div>
@@ -2991,7 +3004,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
         </div>
         {manualAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No manual accounts yet</div>
-          :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+          :<div className="grid-auto-sm">
             {manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false} {...rowProps}/>)}
           </div>}
       </div>
@@ -4678,7 +4691,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         <div style={{fontSize:13,color:'var(--amber)'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Go back and use the product dropdown to link it.</div>
       </div>}
 
-      {(c||p)&&<div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+      {(c||p)&&<div className="grid-4" style={{marginBottom:24}}>
         {[
           {label:'Annual Fee',value:c&&c.annual_fee?`$${c.annual_fee}`:(p&&p.notes&&p.notes.includes('$')?p.notes.replace('Annual fee: ',''):'$0'),color:c&&c.annual_fee?'var(--red)':'var(--green)'},
           {label:'Credit Limit',value:c&&c.credit_limit?`$${c.credit_limit.toLocaleString()}`:'--'},
@@ -5427,7 +5440,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           {/* Active challenges */}
           {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
             <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Active Challenges</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+            <div className="grid-auto-sm">
               {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
             </div>
           </div>}
@@ -5805,7 +5818,7 @@ function CardsPage({toast}){
               return(
                 <>
                   {/* ── Ecosystem Grid (2 columns) ── */}
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12,marginBottom:24}}>
+                  <div className="grid-2" style={{marginBottom:24}}>
                     {pointsEcos.map(eco=>{
                       const col=ecoColor(eco.name);
                       const img=ecoImg(eco.name);
@@ -5909,7 +5922,7 @@ function CardsPage({toast}){
                   {earnData.active_challenges.length>0&&(
                     <div>
                       <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
-                      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:10}}>
+                      <div className="grid-auto-sm" style={{gap:10}}>
                         {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
                       </div>
                     </div>
@@ -6635,7 +6648,7 @@ function BudgetsPage({categories,toast}){
       const expPct=monthExpenseBudget>0?Math.round(monthExpenseActual/monthExpenseBudget*100):0;
       const expColor=expPct>=100?'var(--red)':expPct>=80?'var(--amber)':'var(--green)';
       return(
-        <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+        <div className="metric-grid grid-4" style={{marginBottom:16}}>
           <div style={kpiStyle}><div className="metric-label">Income — {MO[month-1]}</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(monthIncomeBudget)}</div><div className="metric-sub">Actual: {fmt(monthIncomeActual)}</div></div>
           <div style={kpiStyle}><div className="metric-label">Expenses — {MO[month-1]}</div><div className="metric-value">{fmt(monthExpenseBudget)}</div><div className="metric-sub">Actual: {fmt(monthExpenseActual)}</div></div>
           <div style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:expColor}}>{expPct}%</div><div className="metric-sub" style={{color:expColor}}>{fmt(monthExpenseActual)} of {fmt(monthExpenseBudget)}</div></div>
@@ -6646,7 +6659,7 @@ function BudgetsPage({categories,toast}){
       const annExpPct=annualExpenseBudget>0?Math.round(annualExpenseActual/annualExpenseBudget*100):0;
       const annExpColor=annExpPct>=100?'var(--red)':annExpPct>=80?'var(--amber)':'var(--green)';
       return(
-        <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+        <div className="metric-grid grid-4" style={{marginBottom:16}}>
           <div style={kpiStyle}><div className="metric-label">Annual Income</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(annualIncomeBudget)}</div><div className="metric-sub">Actual: {fmt(annualIncomeActual)}</div></div>
           <div style={kpiStyle}><div className="metric-label">Annual Expenses</div><div className="metric-value">{fmt(annualExpenseBudget)}</div><div className="metric-sub">Actual: {fmt(annualExpenseActual)}</div></div>
           <div style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:annExpColor}}>{annExpPct}%</div><div className="metric-sub" style={{color:annExpColor}}>{fmt(annualExpenseActual)} of {fmt(annualExpenseBudget)}</div></div>
@@ -6972,7 +6985,7 @@ function NetWorthPage({toast}){
           return<span style={{background:pos?'rgba(52,211,153,0.12)':'rgba(248,113,113,0.12)',color:pos?'var(--green)':'var(--red)',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:500}}>{chg>0?'+':''}{fmt(chg)}{pct!=null?` (${pct>0?'+':''}${pct}%)`:''}</span>;
         };
         return(
-          <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+          <div className="metric-grid grid-4" style={{marginBottom:16}}>
             {[
               {label:'Net Worth',value:()=><span style={{color:currNW>=0?'var(--green)':'var(--red)'}}>{currNW<0?'-':''}{fmt(Math.abs(currNW))}</span>,sub:()=><><NWTrendBadge chg={moChg} pct={moChgPct}/><span style={{fontSize:11,color:'var(--text-muted)'}}>vs last month</span></>},
               {label:'Total Assets',value:()=><span style={{color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>,sub:()=><span style={{fontSize:11,color:'var(--text-muted)'}}>as of {asOf}</span>},
@@ -7074,7 +7087,7 @@ function NetWorthPage({toast}){
           ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
           :<>
             {/* KPI strip */}
-            <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:16}}>
+            <div className="metric-grid grid-3" style={{marginBottom:16}}>
               {[
                 {label:'Starting Balance',val:fmtBal(startBal),color:undefined,sub:timeline?.start_date?`as of ${timeline.start_date}`:''},
                 {label:`Balance as of ${asOf}`,val:fmtBal(asOfBal),color:asOfBal>=0?'var(--green)':'var(--red)',sub:''},
@@ -7429,7 +7442,7 @@ function LoansPage({toast}){
               })}</tbody>
             </table></div>
           </div>}
-          {linkPreview&&<div style={{background:'var(--gold-soft)',border:'1px solid var(--gold)',borderRadius:10,padding:'10px 14px',marginBottom:12,display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+          {linkPreview&&<div className="grid-4" style={{background:'var(--gold-soft)',border:'1px solid var(--gold)',borderRadius:10,padding:'10px 14px',marginBottom:12,gap:8}}>
             {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
               <div key={lbl} style={{textAlign:'center'}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase'}}>{lbl}</div>
@@ -7462,7 +7475,7 @@ function LoansPage({toast}){
           onSave={saveLoan} onCancel={()=>setEditing(null)}/>
       </div>}
 
-      <div className="metric-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+      <div className="metric-grid grid-3" style={{marginBottom:20}}>
         {[
           {label:'Total Principal',val:fmt(totalPrincipal)},
           {label:'Total Balance',val:fmt(Math.abs(totalBalance)),color:'var(--red)'},
@@ -7897,7 +7910,7 @@ function CashFlowPage({toast}){
       <h2 style={{fontSize:20,fontWeight:400,letterSpacing:'-0.3px',marginBottom:24}}>Cash Flow & Forecasting</h2>
 
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
-      <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:24}}>
+      <div className="metric-grid grid-4" style={{marginBottom:24}}>
         <div className="card metric-card">
           <div className="metric-label">Upcoming Income</div>
           <div className="metric-value" style={{color:'var(--green)'}}>+{fmt(totalUpIn)}</div>
@@ -8136,7 +8149,7 @@ function CashFlowPage({toast}){
               <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:10}}>Deposit Amounts Per Account</label>
               {salaryAccounts.length===0
                 ?<div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>No eligible accounts (add Checking / Savings / HSA / FSA / Investment accounts first).</div>
-                :<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(210px,1fr))',gap:10}}>
+                :<div className="grid-auto-sm" style={{gap:10}}>
                   {salaryAccounts.map(a=>(
                     <div key={a.id} style={{display:'flex',flexDirection:'column',gap:3}}>
                       <label style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500}}>{a.account_name} <span style={{opacity:0.55,fontSize:10}}>({a.account_type})</span></label>
@@ -8555,7 +8568,7 @@ function DailyBalancesPage({toast}){
           const chgPos=nwChg>=0;
           const lbl1=isSingle?`${singleLabel} — Today`:'Net Worth — Today';
           return(
-            <div className="metric-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:16}}>
+            <div className="metric-grid grid-4" style={{marginBottom:16}}>
               <div className="card metric-card">
                 <div className="metric-label">{lbl1}</div>
                 <div className="metric-value" style={{color:nwNow>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwNow)}</div>
