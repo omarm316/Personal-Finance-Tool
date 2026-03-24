@@ -1269,6 +1269,12 @@ async def serve_frontend():
     here = os.path.dirname(os.path.abspath(__file__))
     return FileResponse(os.path.join(here, "frontend.html"), media_type="text/html")
 
+# Service worker — must be served from root scope for PWA
+@app.get("/sw.js")
+async def serve_service_worker():
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "static", "sw.js"), media_type="application/javascript")
+
 # ✅ Step 7: OAuth redirect landing route (serve the same frontend)
 @app.get("/plaid/oauth-return")
 async def plaid_oauth_return():
