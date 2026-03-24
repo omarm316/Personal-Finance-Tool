@@ -196,9 +196,9 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
   .sidebar{display:none!important;}
   .main{margin-left:0!important;}
   .content{padding:12px 12px calc(68px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto;}
-  .topbar{padding:env(safe-area-inset-top,0px) 14px 0 14px;height:calc(48px + env(safe-area-inset-top,0px));justify-content:center}
-  .topbar-title{font-size:16px;font-weight:500;text-align:center}
-  .topbar>div:last-child{position:absolute;right:14px;top:env(safe-area-inset-top,0px)}
+  .topbar{padding:env(safe-area-inset-top,0px) 14px 0 14px;height:calc(48px + env(safe-area-inset-top,0px));position:relative}
+  .topbar-title{font-size:16px;font-weight:500}
+  .topbar>div:last-child{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
   .bank-badge{display:none!important}
   .mobile-nav{display:flex;}
   .toast-container{bottom:calc(68px + env(safe-area-inset-bottom,0px));right:12px;left:12px;}
@@ -8900,13 +8900,29 @@ if('serviceWorker' in navigator){
 
 // iOS Add-to-Home-Screen tooltip (shown once)
 (function(){
-  const isIOS=/iPhone|iPad/.test(navigator.userAgent)&&!window.navigator.standalone;
-  const dismissed=localStorage.getItem('pwa-install-dismissed');
+  var isIOS=/iPhone|iPad/.test(navigator.userAgent)&&!window.navigator.standalone;
+  var dismissed=localStorage.getItem('pwa-install-dismissed');
   if(isIOS&&!dismissed){
-    setTimeout(()=>{
-      const tip=document.createElement('div');
+    setTimeout(function(){
+      var tip=document.createElement('div');
       tip.id='ios-install-tip';
-      tip.innerHTML='<div style="position:fixed;bottom:74px;left:12px;right:12px;z-index:9999;background:var(--surface);border:1px solid var(--gold);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4)"><div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:4px">Install Finance App</div><div style="font-size:11px;color:var(--text-muted)">Tap <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="vertical-align:middle;margin:0 2px"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> then "Add to Home Screen"</div></div><button onclick="localStorage.setItem(\'pwa-install-dismissed\',\'1\');this.closest(\'#ios-install-tip\').remove()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-muted);cursor:pointer;font-size:11px;font-family:inherit">Got it</button></div>';
+      tip.style.cssText='position:fixed;bottom:74px;left:12px;right:12px;z-index:9999;background:var(--surface);border:1px solid var(--gold);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4)';
+      var inner=document.createElement('div');
+      inner.style.flex='1';
+      var title=document.createElement('div');
+      title.style.cssText='font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:4px';
+      title.textContent='Install Finance App';
+      var desc=document.createElement('div');
+      desc.style.cssText='font-size:11px;color:var(--text-muted)';
+      desc.textContent='Tap the Share button \u2B06 then "Add to Home Screen"';
+      inner.appendChild(title);
+      inner.appendChild(desc);
+      var btn=document.createElement('button');
+      btn.textContent='Got it';
+      btn.style.cssText='background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-muted);cursor:pointer;font-size:11px;font-family:inherit';
+      btn.onclick=function(){localStorage.setItem('pwa-install-dismissed','1');tip.remove();};
+      tip.appendChild(inner);
+      tip.appendChild(btn);
       document.body.appendChild(tip);
     },3000);
   }
