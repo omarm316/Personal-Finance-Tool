@@ -578,7 +578,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
     try{
       /* Use new smart rule API — uses clean merchant name, deduplicates, priority 200 */
       await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});
-      onSave(txn.id,{});/* Trigger reload */
+      onSave(txn.id,{needs_review:false});/* Mark reviewed + reload */
     }catch(e){}
     finally{setRuleCreating(false);setShowRulePrompt(false);}
   };
@@ -592,7 +592,7 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
         set_description:ruleDesc.trim()||null,priority:100
       })});
       toast&&toast(`Rule created — ${res.reapplied?.updated??0} transactions updated (${res.reapplied?.unlocked??0} unlocked)`);
-      await onSave(txn.id,{});/* Reload */
+      await onSave(txn.id,{needs_review:false});/* Mark reviewed + reload */
     }catch(e){toast&&toast('Failed to create rule: '+e.message,'error');}
     finally{setRuleSaving(false);setShowQuickRule(false);}
   };
@@ -1571,6 +1571,7 @@ function TransactionsPage({categories,toast}){
   const[accountFilter,setAccountFilter]=useState('');
   const[showImport,setShowImport]=useState(false);
   const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
+  const[showMoreMenu,setShowMoreMenu]=useState(false);
   const[selectedIds,setSelectedIds]=useState(new Set());
   const[showBatchEdit,setShowBatchEdit]=useState(false);
   const[showDupes,setShowDupes]=useState(false);
@@ -1581,8 +1582,10 @@ function TransactionsPage({categories,toast}){
   const[sortDir,setSortDir]=useState('asc');
   const toggleSort=col=>{if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortCol(col);setSortDir('asc');}};
 
+  const[tableLoading,setTableLoading]=useState(false);
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
+    setTableLoading(true);
     try{
       let q='?limit=500';
       if(needsReview)q+='&needs_review=true';
@@ -1593,7 +1596,7 @@ function TransactionsPage({categories,toast}){
       const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
       setTxns(t);setAccounts(a);
     }catch(e){toast('Failed to load','error');}
-    finally{if(!silent)setLoading(false);}
+    finally{if(!silent)setLoading(false);setTableLoading(false);}
   },[needsReview,startDate,endDate,accountFilter,catFilter]);
 
   useEffect(()=>{load();},[load]);
@@ -1749,8 +1752,19 @@ function TransactionsPage({categories,toast}){
           {visible.length>0&&<button className="btn btn-sm btn-ghost" onClick={selectAll} title="Select all visible transactions">☑ Select All</button>}
           <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
           <button className="btn btn-sm btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
-          <button className="btn btn-sm btn-secondary" onClick={exportCSV}>↓ CSV</button>
-          <button className="btn btn-sm btn-secondary" onClick={startEnrich} disabled={enrichJob?.status==='running'} title="Run AI enrichment on unclassified transactions">{enrichJob?.status==='running'?'Enriching…':'✨ Enrich'}</button>
+          <div style={{position:'relative'}}>
+            <button className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
+            {showMoreMenu&&<div style={{position:'absolute',right:0,top:'100%',marginTop:4,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:4,zIndex:20,boxShadow:'var(--shadow-md)',minWidth:160}}
+              onMouseLeave={()=>setShowMoreMenu(false)}>
+              <button style={{display:'block',width:'100%',textAlign:'left',border:'none',background:'none',padding:'8px 12px',fontSize:12,color:'var(--text-primary)',cursor:'pointer',borderRadius:6,fontFamily:'inherit'}}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--elevated)'} onMouseLeave={e=>e.currentTarget.style.background='none'}
+                onClick={()=>{exportCSV();setShowMoreMenu(false);}}>↓ Export CSV</button>
+              <button style={{display:'block',width:'100%',textAlign:'left',border:'none',background:'none',padding:'8px 12px',fontSize:12,color:'var(--text-primary)',cursor:'pointer',borderRadius:6,fontFamily:'inherit'}}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--elevated)'} onMouseLeave={e=>e.currentTarget.style.background='none'}
+                disabled={enrichJob?.status==='running'}
+                onClick={()=>{startEnrich();setShowMoreMenu(false);}}>✨ {enrichJob?.status==='running'?'Enriching…':'AI Enrich'}</button>
+            </div>}
+          </div>
         </div>
         {/* ── Totals bar: Expenses (net of credits) + Income shown separately ── */}
         <div style={{padding:'8px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:20,fontSize:12,color:'var(--text-muted)',fontWeight:300,flexWrap:'wrap'}}>
@@ -1787,10 +1801,15 @@ function TransactionsPage({categories,toast}){
             <button className="btn btn-sm btn-ghost" onClick={()=>setSelectedIds(new Set())}>✕ Deselect All</button>
           </div>
         )}
-        {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
-          :visible.length===0?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
+        <div style={{position:'relative'}}>
+        {tableLoading&&<div style={{position:'absolute',inset:0,background:'rgba(var(--bg-rgb,12,12,16),0.6)',zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(2px)',borderRadius:14}}>
+          <div className="spinner"/>
+        </div>}
+        {loading&&txns.length===0?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :visible.length===0&&!tableLoading?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
           :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
         }
+        </div>
       </div>
     </div>
   );
