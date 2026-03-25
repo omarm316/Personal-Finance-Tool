@@ -7011,19 +7011,54 @@ function NetWorthPage({toast}){
         );
       })()}
 
-      {/* Timeline chart */}
-      {tlData.length>1&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',marginBottom:8,textTransform:'uppercase',letterSpacing:'1.5px'}}>Net Worth Over Time (12 months)</div>
-        <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:160}}>
-          <polyline fill="none" stroke="var(--gold)" strokeWidth="2" points={tlPts}/>
-          <polyline fill="url(#nwgrad)" stroke="none" points={`${pad},${chartH-pad} ${tlPts} ${pad+(tlData.length-1)/(tlData.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
-          <defs><linearGradient id="nwgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gold)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--gold)" stopOpacity="0"/></linearGradient></defs>
-          <text x={pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)">{tlData[0]?.date}</text>
-          <text x={chartW-pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlData[tlData.length-1]?.date}</text>
-          <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(maxV)}</text>
-          <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmt(minV)}</text>
-        </svg>
-      </div>}
+      {/* Timeline chart — Catmull-Rom spline matching Dashboard style */}
+      {tlData.length>1&&(()=>{
+        const W=800,H=180,padC={t:14,r:20,b:28,l:52};
+        const cW=W-padC.l-padC.r,cH=H-padC.t-padC.b;
+        const yMax=maxV*1.05;const yMin=minV-(maxV-minV)*0.05;const yRng=yMax-yMin||1;
+        const pts=tlData.map((d,i)=>[
+          padC.l+(i/(tlData.length-1))*cW,
+          padC.t+cH-((d.net_worth-yMin)/yRng)*cH
+        ]);
+        const smoothPath=(points)=>{
+          if(points.length<2)return'';
+          let d=`M${points[0][0]},${points[0][1]}`;
+          for(let i=0;i<points.length-1;i++){
+            const p0=points[Math.max(i-1,0)],p1=points[i],p2=points[i+1],p3=points[Math.min(i+2,points.length-1)];
+            const t=0.3;
+            d+=` C${p1[0]+(p2[0]-p0[0])*t},${p1[1]+(p2[1]-p0[1])*t} ${p2[0]-(p3[0]-p1[0])*t},${p2[1]-(p3[1]-p1[1])*t} ${p2[0]},${p2[1]}`;
+          }
+          return d;
+        };
+        const pathD=smoothPath(pts);
+        const areaD=pathD+` L${pts[pts.length-1][0]},${padC.t+cH} L${pts[0][0]},${padC.t+cH} Z`;
+        const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return(
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Net Worth Over Time</div>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:200}}>
+            <defs><linearGradient id="nwAreaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gold)" stopOpacity="0.25"/><stop offset="100%" stopColor="var(--gold)" stopOpacity="0"/></linearGradient></defs>
+            {[0,0.25,0.5,0.75,1].map((p,i)=>{
+              const y=padC.t+(1-p)*cH;const val=yMin+yRng*p;
+              return(<g key={i}><line x1={padC.l} y1={y} x2={W-padC.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
+                <text x={padC.l-6} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{val>=10000||val<=-10000?`${(val/1000).toFixed(0)}k`:val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text></g>);
+            })}
+            {tlData.map((d,i)=>{
+              if(tlData.length>6&&i%2!==0&&i!==tlData.length-1)return null;
+              const dt=new Date(d.date+'T12:00:00');
+              return<text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{MO[dt.getMonth()]}</text>;
+            })}
+            <path d={areaD} fill="url(#nwAreaGrad)"/>
+            <path d={pathD} fill="none" stroke="var(--gold)" strokeWidth={2} strokeLinecap="round"/>
+            {pts.map((p,i)=>(
+              <g key={i}>
+                <circle cx={p[0]} cy={p[1]} r={3} fill="var(--gold)" style={{cursor:'pointer'}}/>
+                <title>{tlData[i].date}: {fmt(tlData[i].net_worth)}</title>
+              </g>
+            ))}
+          </svg>
+        </div>);
+      })()}
 
       {/* Assets | Liabilities two-column */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
@@ -8452,8 +8487,10 @@ function DailyBalancesPage({toast}){
   // Balance-detail modal state {acct_name, date, raw_balance, projected_balance, entries}
   const[cellModal,setCellModal]=useState(null);
 
-  // Account filter: '' = all, or a specific account id
-  const[acctFilter,setAcctFilter]=useState('');
+  // Account filter: empty set = all, or a set of selected account ids
+  const[acctFilter,setAcctFilter]=useState(new Set());
+  const[acctDropOpen,setAcctDropOpen]=useState(false);
+  const toggleAcctFilter=(id)=>setAcctFilter(prev=>{const s=new Set(prev);if(s.has(id))s.delete(id);else s.add(id);return s;});
 
   const getRange=()=>{
     const n=new Date();
@@ -8521,13 +8558,31 @@ function DailyBalancesPage({toast}){
           <p style={{fontSize:11,color:'var(--text-muted)',marginTop:3,fontWeight:300}}>{numDays} days · end-of-day · italic = projected · <span style={{color:'var(--amber)'}}>◈</span> = click for detail</p>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-          {/* Account filter */}
-          <select className="sel-drop" value={acctFilter} onChange={e=>setAcctFilter(e.target.value)} style={{fontSize:11,padding:'4px 8px',height:30}}>
-            <option value="">All Accounts</option>
-            {groups.flatMap(g=>g.accounts).map(a=>(
-              <option key={a.id} value={String(a.id)}>{a.account_name}</option>
-            ))}
-          </select>
+          {/* Account multi-select filter */}
+          <div style={{position:'relative'}}>
+            <button className="sel-drop" onClick={()=>setAcctDropOpen(p=>!p)}
+              style={{fontSize:11,padding:'4px 8px',height:30,minWidth:140,textAlign:'left',display:'flex',alignItems:'center',gap:4}}>
+              {acctFilter.size===0?'All Accounts':`${acctFilter.size} selected`}
+              <span style={{marginLeft:'auto',fontSize:8}}>▼</span>
+            </button>
+            {acctDropOpen&&<div style={{position:'absolute',top:'100%',left:0,marginTop:4,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:6,zIndex:30,boxShadow:'var(--shadow-md)',minWidth:220,maxHeight:300,overflowY:'auto'}}
+              onMouseLeave={()=>setAcctDropOpen(false)}>
+              {acctFilter.size>0&&<button style={{display:'block',width:'100%',textAlign:'left',border:'none',background:'none',padding:'4px 8px',fontSize:11,color:'var(--amber)',cursor:'pointer',fontFamily:'inherit',marginBottom:4}}
+                onClick={()=>setAcctFilter(new Set())}>✕ Clear all</button>}
+              {groups.map(g=>(
+                <div key={g.group_name}>
+                  <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1px',padding:'6px 8px 2px'}}>{g.group_name}</div>
+                  {g.accounts.map(a=>(
+                    <label key={a.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 8px',borderRadius:6,cursor:'pointer',fontSize:12,color:'var(--text-primary)',fontWeight:300}}
+                      onMouseEnter={e=>e.currentTarget.style.background='var(--elevated)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <input type="checkbox" checked={acctFilter.has(a.id)} onChange={()=>toggleAcctFilter(a.id)} style={{accentColor:'var(--gold)'}}/>
+                      {a.account_name}
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>}
+          </div>
           <div style={{display:'flex',gap:16}}>
             {[['month','This Month'],['quarter','This Quarter'],['custom','Custom']].map(([v,l])=>(
               <button key={v} onClick={()=>setRangeMode(v)}
@@ -8546,15 +8601,17 @@ function DailyBalancesPage({toast}){
 
       {/* ── Filtered groups (account filter applied) ─────────────────────── */}
       {(()=>{
-        const filtId=acctFilter?parseInt(acctFilter):null;
-        // When filtering to a single account, keep only groups that contain it
-        // and narrow accounts list within each group
-        const fGroups=filtId
+        const filtIds=acctFilter.size>0?acctFilter:null;
+        // When filtering to selected accounts, keep only groups that contain them
+        // and narrow accounts list within each group, recompute totals
+        const fGroups=filtIds
           ?groups.map(g=>{
-            const matchAccts=g.accounts.filter(a=>a.id===filtId);
+            const matchAccts=g.accounts.filter(a=>filtIds.has(a.id));
             if(!matchAccts.length)return null;
-            // Recompute group totals from the single account's balances
-            return{...g,accounts:matchAccts,totals:matchAccts[0].balances};
+            // Recompute group totals by summing selected accounts' balances
+            const totals={};
+            matchAccts.forEach(a=>{Object.entries(a.balances||{}).forEach(([d,v])=>{totals[d]=(totals[d]||0)+v;});});
+            return{...g,accounts:matchAccts,totals};
           }).filter(Boolean)
           :groups;
         const isSingle=!!filtId;
