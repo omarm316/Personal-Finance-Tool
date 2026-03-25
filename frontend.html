@@ -2301,7 +2301,7 @@ function CategoryDetailPanel({detail,onClose}){
   );
 }
 
-function DashboardPage({categories,toast}){
+function DashboardPage({categories,toast,setPage}){
   const[stats,setStats]=useState(null);
   const[recent,setRecent]=useState([]);
   const[reviewQ,setReviewQ]=useState([]);
@@ -8932,7 +8932,7 @@ function App(){
           ))}
         </div>
         <div className="content" key={refreshKey}>
-          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast}/>}
+          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
           {page==='cashflow'&&<DailyBalancesPage toast={toast}/>}
