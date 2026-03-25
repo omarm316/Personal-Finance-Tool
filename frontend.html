@@ -2980,32 +2980,55 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
         );
       })()}
 
-      {/* Plaid Accounts */}
-      <div style={{marginBottom:24}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Plaid Accounts ({plaidAccounts.length})</div>
-          <div style={{display:'flex',gap:8}}>
-            <button className="btn btn-sm btn-secondary" onClick={onSync}>↻ Sync All</button>
-            <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
-          </div>
-        </div>
-        {plaidAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No Plaid accounts connected</div>
-          :<div className="grid-auto-sm">
-            {plaidAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={true} {...rowProps}/>)}
-          </div>}
+      {/* Action buttons */}
+      <div style={{display:'flex',gap:8,marginBottom:20}}>
+        <button className="btn btn-sm btn-secondary" onClick={onSync}>↻ Sync All</button>
+        <button className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
+        <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
       </div>
 
-      {/* Manual Accounts */}
-      <div>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Manual Accounts ({manualAccounts.length})</div>
-          <button className="btn btn-sm btn-primary" onClick={()=>setShowManual(true)}>+ Manual Account</button>
-        </div>
-        {manualAccounts.length===0?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'40px 20px',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No manual accounts yet</div>
-          :<div className="grid-auto-sm">
-            {manualAccounts.map(a=><AccountRow key={a.id} a={a} showPlaidActions={false} {...rowProps}/>)}
-          </div>}
-      </div>
+      {/* Accounts grouped by type */}
+      {(()=>{
+        const typeOrder=[
+          {key:'checking',label:'Checking',isAsset:true},
+          {key:'savings',label:'Savings',isAsset:true},
+          {key:'investment',label:'Investments',isAsset:true},
+          {key:'other_asset',label:'Other Assets',isAsset:true},
+          {key:'credit card',label:'Credit Cards',isAsset:false},
+          {key:'loan',label:'Loans',isAsset:false},
+          {key:'other_liability',label:'Other Liabilities',isAsset:false},
+        ];
+        const normalize=t=>{
+          const s=(t||'').toLowerCase();
+          if(s.includes('check'))return'checking';
+          if(s.includes('saving'))return'savings';
+          if(s.includes('invest')||s.includes('brokerage')||s.includes('401')||s.includes('ira'))return'investment';
+          if(s.includes('credit'))return'credit card';
+          if(s.includes('loan')||s.includes('mortgage')||s.includes('student'))return'loan';
+          if(s.includes('other')&&(s.includes('liab')||s.includes('debt')))return'other_liability';
+          return'other_asset';
+        };
+        const grouped={};
+        accounts.forEach(a=>{const k=normalize(a.account_type);(grouped[k]=grouped[k]||[]).push(a);});
+        let lastIsAsset=null;
+        return typeOrder.filter(g=>(grouped[g.key]||[]).length>0).map(g=>{
+          const showDivider=lastIsAsset!==null&&lastIsAsset!==g.isAsset;
+          lastIsAsset=g.isAsset;
+          return(
+            <React.Fragment key={g.key}>
+              {showDivider&&<div style={{borderTop:'2px solid var(--border)',margin:'24px 0 16px',position:'relative'}}>
+                <span style={{position:'absolute',top:-9,left:16,background:'var(--bg)',padding:'0 10px',fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Liabilities</span>
+              </div>}
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:10}}>{g.label} ({grouped[g.key].length})</div>
+                <div className="grid-auto-sm">
+                  {grouped[g.key].map(a=><AccountRow key={a.id} a={a} showPlaidActions={!a.is_manual} {...rowProps}/>)}
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        });
+      })()}
     </div>
   );
 }
@@ -7962,12 +7985,12 @@ function CashFlowPage({toast}){
         {/* Range toggle — spans both columns */}
         <div style={{gridColumn:'1/-1',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Breakdown</div>
-          <div style={{display:'flex',gap:2,background:'var(--elevated)',borderRadius:8,padding:2,border:'1px solid var(--border)'}}>
+          <div style={{display:'flex',gap:16}}>
             {[['month','This Month'],['last30','Last 30 Days'],['next30','Next 30 Days']].map(([k,label])=>(
               <button key={k} onClick={()=>setBreakdownRange(k)}
-                style={{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11,fontWeight:breakdownRange===k?500:400,
-                  background:breakdownRange===k?'var(--gold)':'transparent',color:breakdownRange===k?'#0c0c10':'var(--text-muted)',
-                  transition:'all 0.15s',fontFamily:'inherit'}}>
+                style={{padding:'4px 0',border:'none',borderBottom:breakdownRange===k?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:breakdownRange===k?500:400,
+                  background:'transparent',color:breakdownRange===k?'var(--gold)':'var(--text-muted)',
+                  transition:'all 0.15s',fontFamily:'inherit',letterSpacing:'0.2px'}}>
                 {label}
               </button>
             ))}
