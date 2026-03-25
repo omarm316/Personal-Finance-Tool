@@ -2316,7 +2316,7 @@ function DashboardPage({categories,toast}){
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
   const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
-  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'annual');
+  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'month');
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
   const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
   const[viewYear,_setViewYear]=useState(()=>parseInt(parseHash().params.get('year'))||new Date().getFullYear());
@@ -8535,7 +8535,7 @@ function DailyBalancesPage({toast}){
   if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
   if(!data||!data.dates)return<div style={{padding:20,color:'var(--text-muted)'}}>No data</div>;
 
-  const{dates,groups,today,projection_details={}}=data;
+  const{dates,groups=[],today,projection_details={}}=data;
   const numDays=dates.length;
 
   return(
@@ -8612,7 +8612,7 @@ function DailyBalancesPage({toast}){
             return{...g,accounts:matchAccts,totals};
           }).filter(Boolean)
           :groups;
-        const isSingle=!!filtId;
+        const isSingle=filtIds&&filtIds.size===1;
         const singleAcct=isSingle?fGroups[0]?.accounts[0]:null;
         const singleLabel=singleAcct?singleAcct.account_name:'';
 
