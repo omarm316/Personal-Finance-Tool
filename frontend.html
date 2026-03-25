@@ -2315,7 +2315,7 @@ function DashboardPage({categories,toast}){
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
   const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
-  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'month');
+  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'annual');
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
   const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
   const[viewYear,_setViewYear]=useState(()=>parseInt(parseHash().params.get('year'))||new Date().getFullYear());
@@ -6680,16 +6680,7 @@ function BudgetsPage({categories,toast}){
           ))}
         </div>
         <div style={{width:1,height:20,background:'var(--border)'}}/>
-        <div style={{display:'flex',gap:16}}>
-          <button onClick={()=>{setView('month');setEditing(false);setSuggestions({});setYearEdits({});}}
-            style={{padding:'5px 0',border:'none',borderBottom:view==='month'?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:view==='month'?500:300,fontFamily:'DM Sans, sans-serif',
-              background:'transparent',color:view==='month'?'var(--gold)':'var(--text-muted)',
-              transition:'all 0.15s',letterSpacing:'0.2px'}}>Month View</button>
-          <button onClick={()=>{setView('annual');setEditing(false);setSuggestions({});setYearEdits({});setInlineEdit(null);}}
-            style={{padding:'5px 0',border:'none',borderBottom:(view==='annual'||view==='edit-year')?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:(view==='annual'||view==='edit-year')?500:300,fontFamily:'DM Sans, sans-serif',
-              background:'transparent',color:(view==='annual'||view==='edit-year')?'var(--gold)':'var(--text-muted)',
-              transition:'all 0.15s',letterSpacing:'0.2px'}}>Annual View</button>
-        </div>
+        <span style={{fontSize:12,fontWeight:500,color:'var(--gold)',letterSpacing:'0.2px'}}>Annual View</span>
       </div>
 
       {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
@@ -6700,7 +6691,7 @@ function BudgetsPage({categories,toast}){
         ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
         :(allIncomeCats.length===0&&allExpenseCats.length===0&&Object.keys(targets).length===0)
           ?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:40,textAlign:'center'}}><div style={{color:'var(--text-muted)',fontSize:13,fontWeight:300}}>No budget data for {year}</div></div>
-          :view==='month'?renderMonthView():view==='edit-year'?renderEditYearView():renderAnnualView()
+          :view==='edit-year'?renderEditYearView():renderAnnualView()
       }
 
       {/* ── Paste from Excel modal ─────────────────────────────────────── */}
