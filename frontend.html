@@ -2311,6 +2311,7 @@ function DashboardPage({categories,toast}){
   const[splitTxn,setSplitTxn]=useState(null);
   const[loading,setLoading]=useState(true);
   const hasLoaded=React.useRef(false);
+  const[spendHoverIdx,setSpendHoverIdx]=useState(null);
   const[budgetTargets,setBudgetTargets]=useState({});
   const[budgetActuals,setBudgetActuals]=useState({});
   const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
@@ -2581,9 +2582,6 @@ function DashboardPage({categories,toast}){
         budgetRows.sort((a,b)=>b.actual-a.actual);
         const topBudgetRows=budgetRows.slice(0,6);
 
-        /* Hover state for data labels */
-        const[hoverIdx,setHoverIdx]=React.useState(null);
-
         return(
           <div style={{marginBottom:20}}>
             {/* Spending Trend Chart — full width */}
@@ -2618,10 +2616,10 @@ function DashboardPage({categories,toast}){
                 {/* Dots + hover labels */}
                 {pts.map((p,i)=>(
                   <g key={i}>
-                    <circle cx={p[0]} cy={p[1]} r={hoverIdx===i?5:3} fill="var(--gold)" style={{cursor:'pointer',transition:'r 0.15s'}}
-                      onMouseEnter={()=>setHoverIdx(i)} onMouseLeave={()=>setHoverIdx(null)}
-                      onClick={()=>setHoverIdx(hoverIdx===i?null:i)}/>
-                    {hoverIdx===i&&<>
+                    <circle cx={p[0]} cy={p[1]} r={spendHoverIdx===i?5:3} fill="var(--gold)" style={{cursor:'pointer',transition:'r 0.15s'}}
+                      onMouseEnter={()=>setSpendHoverIdx(i)} onMouseLeave={()=>setSpendHoverIdx(null)}
+                      onClick={()=>setSpendHoverIdx(spendHoverIdx===i?null:i)}/>
+                    {spendHoverIdx===i&&<>
                       <rect x={p[0]-28} y={p[1]-22} width={56} height={16} rx={4} fill="var(--surface)" stroke="var(--border)" strokeWidth={0.5}/>
                       <text x={p[0]} y={p[1]-11} textAnchor="middle" fontSize={9} fill="var(--gold)" fontWeight={500} fontFamily="DM Sans">
                         {spendData[i].amount>=1000?`$${(spendData[i].amount/1000).toFixed(1)}k`:`$${Math.round(spendData[i].amount)}`}
