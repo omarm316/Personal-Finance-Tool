@@ -4619,6 +4619,8 @@ async def cards_earn_summary(
     ]
 
     # Active challenges (summarised — used for the landing page strip)
+    # Multi-card challenges are "exploded" into per-card entries so each
+    # card shows its own spend progress and threshold independently.
     active_challenges_out: list[dict] = []
     try:
         _today = datetime.utcnow().date()
@@ -4626,24 +4628,27 @@ async def cards_earn_summary(
         for ch in db.query(SpendChallenge).filter_by(is_active=True).all():
             if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
                 continue
-            pcard = db.query(Card).filter_by(id=ch.card_id).first()
-            ch_eco = None
-            if pcard:
-                pprod = db.query(CardProduct).filter_by(id=pcard.product_id).first() \
-                        if pcard.product_id else None
-                eid = (pprod.ecosystem_id if pprod else None) or pcard.ecosystem_id
+            # Collect all card IDs: primary + linked
+            all_card_ids = [ch.card_id] + [lnk.card_id for lnk in ch.card_links]
+            for cid in all_card_ids:
+                card_obj = db.query(Card).filter_by(id=cid).first()
+                if not card_obj:
+                    continue
+                ch_eco = None
+                pprod = db.query(CardProduct).filter_by(id=card_obj.product_id).first() \
+                        if card_obj.product_id else None
+                eid = (pprod.ecosystem_id if pprod else None) or card_obj.ecosystem_id
                 ch_eco = ecosystems_map.get(eid) if eid else None
-            # Use per-card spend so the landing page shows the primary
-            # card's own eligible spend, not the multi-card aggregate.
-            spend_ov = (
-                _challenge_spend_for_card(db, ch, pcard.account_id)
-                if pcard and pcard.account_id else None
-            )
-            ser = _serialize_challenge(ch, eco=ch_eco, spend_override=spend_ov)
-            ser['card_name']  = pcard.card_name  if pcard else None
-            ser['last_four']  = pcard.last_four  if pcard else None
-            ser['account_id'] = pcard.account_id if pcard else None
-            active_challenges_out.append(ser)
+                # Per-card spend so each card shows its own progress
+                spend_ov = (
+                    _challenge_spend_for_card(db, ch, card_obj.account_id)
+                    if card_obj.account_id else None
+                )
+                ser = _serialize_challenge(ch, eco=ch_eco, spend_override=spend_ov)
+                ser['card_name']  = card_obj.card_name
+                ser['last_four']  = card_obj.last_four
+                ser['account_id'] = card_obj.account_id
+                active_challenges_out.append(ser)
     except Exception:
         db.rollback()
 
@@ -4813,11 +4818,14 @@ async def ecosystem_earn_detail(
     )
 
     # Active challenges for this ecosystem's cards
+    # Multi-card challenges are "exploded" into per-card entries so each
+    # card shows its own spend progress and threshold independently.
     active_ch_out: list[dict] = []
     try:
         card_ids_in_eco = [
             card_by_acct[aid].id for aid in eco_accts if aid in card_by_acct
         ]
+        card_ids_set = set(card_ids_in_eco)
         _today = datetime.utcnow().date()
         _d_fn  = lambda v: v.date() if isinstance(v, datetime) else v
         for ch in (db.query(SpendChallenge)
@@ -4831,12 +4839,26 @@ async def ecosystem_earn_detail(
                    )).all()):
             if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
                 continue
-            pcard = db.query(Card).filter_by(id=ch.card_id).first()
-            ser = _serialize_challenge(ch, eco=eco)
-            ser['card_name']  = pcard.card_name  if pcard else None
-            ser['last_four']  = pcard.last_four  if pcard else None
-            ser['account_id'] = pcard.account_id if pcard else None
-            active_ch_out.append(ser)
+            # Collect all card IDs involved: primary + linked
+            all_card_ids = [ch.card_id] + [lnk.card_id for lnk in ch.card_links]
+            # Only include cards that belong to this ecosystem
+            eco_card_ids = [cid for cid in all_card_ids if cid in card_ids_set]
+            if not eco_card_ids:
+                continue
+            for cid in eco_card_ids:
+                card_obj = db.query(Card).filter_by(id=cid).first()
+                if not card_obj:
+                    continue
+                # Per-card spend override so each card shows its own progress
+                spend_ov = (
+                    _challenge_spend_for_card(db, ch, card_obj.account_id)
+                    if card_obj.account_id else None
+                )
+                ser = _serialize_challenge(ch, eco=eco, spend_override=spend_ov)
+                ser['card_name']  = card_obj.card_name
+                ser['last_four']  = card_obj.last_four
+                ser['account_id'] = card_obj.account_id
+                active_ch_out.append(ser)
     except Exception:
         db.rollback()
 
