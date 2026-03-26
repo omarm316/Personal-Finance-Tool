@@ -1416,13 +1416,14 @@ function MobileTxnModal({txn,categories,onSave,onClose,toast}){
   const[category,setCategory]=useState(txn.category_final||'');
   const[action,setAction]=useState(txn.action||'Expense');
   const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||'');
+  const[gcb,setGcb]=useState(txn.is_gcb||false);
   const[saving,setSaving]=useState(false);
   const[ruleCreating,setRuleCreating]=useState(false);
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
   const handleSave=async()=>{
     setSaving(true);
     try{
-      const updates={action,needs_review:false,category};
+      const updates={action,needs_review:false,category,is_gcb:gcb};
       if(descClean!==(txn.description_clean||txn.description_display||''))updates.description_clean=descClean;
       await onSave(txn.id,updates);
       onClose();
@@ -1472,6 +1473,17 @@ function MobileTxnModal({txn,categories,onSave,onClose,toast}){
             {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </div>}
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>GCB Tag</label>
+          <button onClick={()=>setGcb(g=>!g)}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
+              border:`1px solid ${gcb?'rgba(251,191,36,0.5)':'var(--border)'}`,borderRadius:8,
+              background:gcb?'rgba(251,191,36,0.08)':'var(--card-bg)',cursor:'pointer',
+              color:gcb?'var(--amber)':'var(--text-muted)',fontSize:14,fontFamily:'inherit'}}>
+            <span>{gcb?'⭐':'☆'}</span>
+            <span>{gcb?'GCB Tagged':'Not GCB'}</span>
+          </button>
+        </div>
         <div style={{display:'flex',gap:10,marginTop:20}}>
           <button onClick={createRule} disabled={ruleCreating}
             style={{flex:1,padding:'11px 0',border:'1px solid var(--border)',borderRadius:10,fontSize:13,fontWeight:500,color:'var(--text-secondary)',background:'var(--card-bg)',cursor:'pointer'}}>
@@ -1555,7 +1567,7 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
   );
 }
 
-function TransactionsPage({categories,toast}){
+function TransactionsPage({categories,toast,refreshKey}){
   const[txns,setTxns]=useState([]);
   const[loading,setLoading]=useState(true);
   const[search,setSearch]=useState('');
@@ -1599,7 +1611,7 @@ function TransactionsPage({categories,toast}){
     finally{if(!silent)setLoading(false);setTableLoading(false);}
   },[needsReview,startDate,endDate,accountFilter,catFilter]);
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   const handleSave=async(id,updates)=>{
     if(updates.__deleted){await load();return;}
@@ -2301,7 +2313,7 @@ function CategoryDetailPanel({detail,onClose}){
   );
 }
 
-function DashboardPage({categories,toast,setPage}){
+function DashboardPage({categories,toast,setPage,refreshKey}){
   const[stats,setStats]=useState(null);
   const[recent,setRecent]=useState([]);
   const[reviewQ,setReviewQ]=useState([]);
@@ -2416,7 +2428,7 @@ function DashboardPage({categories,toast,setPage}){
     const isFirst=!hasLoaded.current;
     hasLoaded.current=true;
     load({silent:!isFirst});
-  },[load]);
+  },[load,refreshKey]);
 
   const handleSave=async(id,updates)=>{
     if(updates.__deleted){await load();return;}
@@ -2916,7 +2928,7 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
   );
 }
 
-function AccountsPage({banks,onConnectBank,onSync,toast}){
+function AccountsPage({banks,onConnectBank,onSync,toast,refreshKey}){
   const[accounts,setAccounts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[showManual,setShowManual]=useState(false);
@@ -2931,7 +2943,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast}){
     try{setAccounts(await apiFetch('/accounts'));}catch(e){}
     finally{setLoading(false);}
   },[]);
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   const plaidAccounts=accounts.filter(a=>!a.is_manual);
   const manualAccounts=accounts.filter(a=>a.is_manual);
@@ -4160,8 +4172,9 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_category:newVal||null})});
       // Find the transaction before updating state so we have merchant_name
       const txn=txns.find(t=>t.id===txnId);
-      setTxns(prev=>prev.map(t=>t.id===txnId?{...t,points_category:newVal||null}:t));
       setEditingCscId(null);
+      // Silently reload txns so earn_rate updates to reflect the new CSC
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
       // Offer to teach this merchant for all past + future transactions
       if(newVal&&txn?.merchant_name){
         setTeachPrompt({merchantName:txn.merchant_name,csc:newVal});
@@ -5507,7 +5520,7 @@ function ChallengeCard({ch}){
   );
 }
 
-function CardsPage({toast}){
+function CardsPage({toast,refreshKey}){
   const[accounts,setAccounts]=useState([]);
   const[allAccounts,setAllAccounts]=useState([]);
   const[products,setProducts]=useState([]);
@@ -5554,7 +5567,7 @@ function CardsPage({toast}){
     finally{setEarnLoading(false);}
   },[]);
 
-  useEffect(()=>{loadEarnSummary(earnPeriod,earnYear);},[earnPeriod,earnYear]);
+  useEffect(()=>{loadEarnSummary(earnPeriod,earnYear);},[earnPeriod,earnYear,refreshKey]);
 
   const loadSwipe=async()=>{
     setSwipeLoading(true);
@@ -5589,7 +5602,7 @@ function CardsPage({toast}){
     }catch(e){toast('Unlink failed','error');}
   };
 
-  useEffect(()=>{load().then(()=>loadSuggestions());},[load]);
+  useEffect(()=>{load().then(()=>loadSuggestions());},[load,refreshKey]);
 
   // Legacy card management
   const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
@@ -5956,7 +5969,7 @@ function CardsPage({toast}){
   );
 }
 
-function GCBPage({toast}){
+function GCBPage({toast,refreshKey}){
   const MO=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const now=new Date();
   const[txns,setTxns]=useState([]);
@@ -5983,7 +5996,7 @@ function GCBPage({toast}){
     }catch(e){setError('Failed to load');toast('Failed to load','error');}
     finally{setLoading(false);}
   },[year,month]);
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   const revenue=txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
   const costs=txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
@@ -6038,7 +6051,7 @@ function GCBPage({toast}){
   );
 }
 
-function BudgetsPage({categories,toast}){
+function BudgetsPage({categories,toast,refreshKey}){
   const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const now=new Date();
   const curYear=now.getFullYear();
@@ -6086,7 +6099,7 @@ function BudgetsPage({categories,toast}){
     }catch(e){setError('Failed to load budget data');toast('Failed to load','error');}
     finally{setLoading(false);}
   },[year]);
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   /* ── Load suggestions when entering edit mode ──────────────────────────── */
   const loadSuggestions=async(yr,mo)=>{
@@ -6785,7 +6798,7 @@ function BudgetsPage({categories,toast}){
   );
 }
 
-function NetWorthPage({toast}){
+function NetWorthPage({toast,refreshKey}){
   /* ── shared "as of" date ─────────────────────────────────────────────── */
   const todayStr=localDateStr(new Date());
   const[asOf,setAsOf]=useState(todayStr);
@@ -6831,7 +6844,7 @@ function NetWorthPage({toast}){
     }catch(e){setError('Failed to load net worth');toast('Failed to load','error');}
     finally{setNwLoading(false);}
   },[asOf]);
-  useEffect(()=>{loadNW();},[loadNW]);
+  useEffect(()=>{loadNW();},[loadNW,refreshKey]);
 
   /* ── Balances: load accounts list ────────────────────────────────────── */
   const loadAccounts=useCallback(async()=>{
@@ -6840,7 +6853,7 @@ function NetWorthPage({toast}){
     catch(e){setError('Failed to load accounts');}
     finally{setBalLoading(false);}
   },[]);
-  useEffect(()=>{loadAccounts();},[loadAccounts]);
+  useEffect(()=>{loadAccounts();},[loadAccounts,refreshKey]);
 
   /* ── Balances: load per-account timeline ─────────────────────────────── */
   const loadTimeline=useCallback(async(id)=>{
@@ -7347,7 +7360,7 @@ function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel
   );
 }
 
-function LoansPage({toast}){
+function LoansPage({toast,refreshKey}){
   const[loans,setLoans]=useState([]);
   const[accounts,setAccounts]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -7372,7 +7385,7 @@ function LoansPage({toast}){
     catch(e){toast('Failed to load loans','error');}
     finally{setLoading(false);}
   },[]);
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   const saveLoan=async()=>{
     const body={...editVals,
@@ -7641,7 +7654,7 @@ function LoansPage({toast}){
 }
 
 /* ── Cash Flow Planner Page ──────────────────────────────────────────────── */
-function CashFlowPage({toast}){
+function CashFlowPage({toast,refreshKey}){
   // Account types eligible as salary deposit destinations
   const SALARY_TYPES=new Set(['Checking','checking','Savings','savings','HSA','hsa','FSA','fsa','Investment','investment','Brokerage','brokerage','IRA','ira','401k','401K']);
 
@@ -7702,7 +7715,7 @@ function CashFlowPage({toast}){
     finally{setLoading(false);}
   },[]);
 
-  useEffect(()=>{load(true);},[load]);
+  useEffect(()=>{load(true);},[load,refreshKey]);
 
   // ── Load 6-month trend for chart ────────────────────────────────────
   useEffect(()=>{
@@ -8472,7 +8485,7 @@ function ReconciliationPanel({toast}){
 }
 
 /* ── Daily Balances Page ─────────────────────────────────────────────────── */
-function DailyBalancesPage({toast}){
+function DailyBalancesPage({toast,refreshKey}){
   const[tab,setTab]=useState('balances'); // 'balances' | 'reconciliation'
   const[data,setData]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -8519,7 +8532,7 @@ function DailyBalancesPage({toast}){
     finally{setLoading(false);}
   },[rangeMode,customStart,customEnd]);
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{load();},[load,refreshKey]);
 
   const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
 
@@ -8931,17 +8944,17 @@ function App(){
             <button key={t.id} data-active={page===t.id} onClick={()=>setPage(t.id)}>{t.label}</button>
           ))}
         </div>
-        <div className="content" key={refreshKey}>
-          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage}/>}
-          {page==='transactions'&&<TransactionsPage categories={categories} toast={toast}/>}
-          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast}/>}
-          {page==='cashflow'&&<DailyBalancesPage toast={toast}/>}
-          {page==='cashplanner'&&<CashFlowPage toast={toast}/>}
-          {page==='networth'&&<NetWorthPage toast={toast}/>}
-          {page==='loans'&&<LoansPage toast={toast}/>}
-          {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast}/>}
-          {page==='cards'&&<CardsPage toast={toast}/>}
-          {page==='gcb'&&<GCBPage toast={toast}/>}
+        <div className="content">
+          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage} refreshKey={refreshKey}/>}
+          {page==='transactions'&&<TransactionsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
+          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
+          {page==='cashflow'&&<DailyBalancesPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='cashplanner'&&<CashFlowPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='networth'&&<NetWorthPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='loans'&&<LoansPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast} refreshKey={refreshKey}/>}
+          {page==='cards'&&<CardsPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='gcb'&&<GCBPage toast={toast} refreshKey={refreshKey}/>}
           {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta} categories={categories} autoScan={pendingDupScan} onAutoScanDone={()=>setPendingDupScan(false)}/>}
         </div>
       </div>
