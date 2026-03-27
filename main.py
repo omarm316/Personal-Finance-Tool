@@ -3538,15 +3538,10 @@ async def get_stats(
     # Compute totals & by-category, handling split transactions correctly.
     # For split parents (is_split=True): skip the parent's own amount and instead
     # accumulate from the individual TransactionSplit line items (each with their own category).
-    # Income-action transactions whose category matches an expense budget category
-    # are treated as credits that offset expenses (e.g. a refund in "Dining" reduces
-    # Dining expense total rather than inflating Income).
+    # This mirrors the logic in /budget/actuals and prevents double-counting.
     total_income = 0.0
     total_expenses = 0.0
     by_category: dict = {}
-
-    # Pre-load expense budget categories to detect refunds that should offset
-    _expense_cats = set(bt.category for bt in db.query(BudgetTarget).all())
 
     for t in transactions:
         if t.action not in BUDGET_TYPES:
@@ -3555,13 +3550,9 @@ async def get_stats(
             for s in splits_map.get(t.id, []):
                 if s.is_gcb:
                     continue
-                cat = s.category or t.category_final or 'Other'
                 if t.action == 'Expense':
-                    contrib = -s.amount
-                    total_expenses += contrib
-                    by_category[cat] = by_category.get(cat, 0) + contrib
-                elif t.action == 'Income' and cat in _expense_cats:
-                    # Refund in expense category → offset expenses
+                    cat = s.category or t.category_final or 'Other'
+                    # charges (s.amount < 0) → -s.amount is positive; credits → negative (nets correctly)
                     contrib = -s.amount
                     total_expenses += contrib
                     by_category[cat] = by_category.get(cat, 0) + contrib
@@ -3570,13 +3561,8 @@ async def get_stats(
         else:
             if t.is_gcb or t.gcb_tagged:
                 continue
-            cat = t.category_final or 'Other'
             if t.action == 'Expense':
-                contrib = -t.amount
-                total_expenses += contrib
-                by_category[cat] = by_category.get(cat, 0) + contrib
-            elif t.action == 'Income' and cat in _expense_cats:
-                # Refund in expense category → offset expenses
+                cat = t.category_final or 'Other'
                 contrib = -t.amount
                 total_expenses += contrib
                 by_category[cat] = by_category.get(cat, 0) + contrib
@@ -7837,11 +7823,13 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     # Pure Income action: contribution = +t.amount
     actuals = {}
 
-    # Pre-load expense budget category names so we can detect income-action refunds
-    # that should offset expense actuals instead of counting as pure income.
-    _expense_budget_cats = set(
-        bt.category
-        for bt in db.query(BudgetTarget).filter_by(year=year).all()
+    # Pre-load expense-type category names so we can detect income-action refunds
+    # (e.g. a Dining refund coded as Income) that should offset that category's
+    # expense actuals instead of counting as pure income.
+    _expense_cats = set(
+        c.name for c in db.query(Category).filter(
+            Category.category_type.in_(['expense', 'both'])
+        ).all()
     )
 
     for t in txns:
@@ -7856,7 +7844,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                 month = str(t.month)
                 if t.action == 'Expense':
                     contrib = -s.amount
-                elif t.action == 'Income' and cat in _expense_budget_cats:
+                elif t.action == 'Income' and cat in _expense_cats:
                     # Refund in an expense category — offsets that category's spend
                     contrib = -s.amount
                 else:
@@ -7871,7 +7859,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
             month = str(t.month)
             if t.action == 'Expense':
                 contrib = -t.amount
-            elif t.action == 'Income' and cat in _expense_budget_cats:
+            elif t.action == 'Income' and cat in _expense_cats:
                 # Refund in an expense category — offsets that category's spend
                 contrib = -t.amount
             else:
