@@ -463,6 +463,59 @@ const BUDGET_TYPES_SET=new Set(['Expense','Income']);
 /* Category only shown for Expense/Income */
 const showCategoryForType=(t)=>BUDGET_TYPES_SET.has(t);
 
+/* ── Reusable multi-select dropdown filter ───────────────────────────── */
+function MultiSelectFilter({options,selected,onChange,label,renderOption}){
+  /* options: [{value,label}], selected: Set, onChange: (newSet)=>void */
+  const[open,setOpen]=useState(false);
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open]);
+  const toggle=v=>{const n=new Set(selected);n.has(v)?n.delete(v):n.add(v);onChange(n);};
+  const allSelected=selected.size===0;
+  const displayText=allSelected?label:`${label} (${selected.size})`;
+  return(
+    <div ref={ref} style={{position:'relative',display:'inline-block'}}>
+      <button onClick={()=>setOpen(o=>!o)} className="filter-select"
+        style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',textAlign:'left',
+          border:selected.size>0?'1px solid var(--gold)':'1px solid var(--border)',
+          background:selected.size>0?'rgba(212,164,74,0.06)':'var(--surface)',
+          color:selected.size>0?'var(--gold)':'var(--text-primary)',
+          minWidth:0,whiteSpace:'nowrap',paddingRight:24,position:'relative'}}>
+        <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{displayText}</span>
+        <span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,opacity:.5}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:220,maxHeight:320,overflowY:'auto',
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'var(--shadow-lg)',
+        zIndex:50,padding:'6px 0',fontSize:13,fontFamily:'inherit'}}>
+        {/* Select-all / clear */}
+        <div style={{display:'flex',justifyContent:'space-between',padding:'4px 12px 8px',borderBottom:'1px solid var(--border)',marginBottom:4}}>
+          <button style={{border:'none',background:'none',color:'var(--gold)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit'}}
+            onClick={()=>onChange(new Set())}>All</button>
+          {selected.size>0&&<button style={{border:'none',background:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit'}}
+            onClick={()=>onChange(new Set())}>Clear</button>}
+        </div>
+        {options.map(o=>(
+          <div key={o.value} onClick={()=>toggle(o.value)}
+            style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',
+              background:selected.has(o.value)?'rgba(212,164,74,0.08)':'transparent',
+              color:selected.has(o.value)?'var(--text-primary)':'var(--text-muted)'}}
+            onMouseEnter={e=>e.currentTarget.style.background=selected.has(o.value)?'rgba(212,164,74,0.12)':'var(--elevated)'}
+            onMouseLeave={e=>e.currentTarget.style.background=selected.has(o.value)?'rgba(212,164,74,0.08)':'transparent'}>
+            <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${selected.has(o.value)?'var(--gold)':'var(--border)'}`,
+              display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,
+              background:selected.has(o.value)?'var(--gold)':'transparent',color:selected.has(o.value)?'#1a1a2e':'transparent'}}>✓</span>
+            <span style={{fontSize:13,fontWeight:selected.has(o.value)?400:300}}>{renderOption?renderOption(o):o.label}</span>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
 function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   const[category,setCategory]=useState(txn.category_final||'');
   const[action,setAction]=useState(txn.action||'Expense');
@@ -1585,13 +1638,13 @@ function TransactionsPage({categories,toast,refreshKey}){
   const[needsReview,setNeedsReview]=useState(false);
   const[startDate,setStartDate]=useState('');
   const[endDate,setEndDate]=useState('');
-  const[catFilter,setCatFilter]=useState('');
-  const[actionFilter,setActionFilter]=useState('');
+  const[catFilter,setCatFilter]=useState(new Set());
+  const[actionFilter,setActionFilter]=useState(new Set());
   const[reviewTxn,setReviewTxn]=useState(null);
   const[showManual,setShowManual]=useState(false);
   const[splitTxn,setSplitTxn]=useState(null);
   const[accounts,setAccounts]=useState([]);
-  const[accountFilter,setAccountFilter]=useState('');
+  const[accountFilter,setAccountFilter]=useState(new Set());
   const[showImport,setShowImport]=useState(false);
   const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
   const[showMoreMenu,setShowMoreMenu]=useState(false);
@@ -1606,6 +1659,8 @@ function TransactionsPage({categories,toast,refreshKey}){
   const toggleSort=col=>{if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortCol(col);setSortDir('asc');}};
 
   const[tableLoading,setTableLoading]=useState(false);
+  const _acctKey=useMemo(()=>[...accountFilter].sort().join(','),[accountFilter]);
+  const _catKey=useMemo(()=>[...catFilter].sort().join(','),[catFilter]);
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
     setTableLoading(true);
@@ -1614,13 +1669,13 @@ function TransactionsPage({categories,toast,refreshKey}){
       if(needsReview)q+='&needs_review=true';
       if(startDate)q+=`&start_date=${startDate}`;
       if(endDate)q+=`&end_date=${endDate}`;
-      if(accountFilter)q+=`&account_id=${accountFilter}`;
-      if(catFilter)q+=`&category=${encodeURIComponent(catFilter)}`;
+      if(accountFilter.size===1)q+=`&account_id=${[...accountFilter][0]}`;
+      if(catFilter.size===1)q+=`&category=${encodeURIComponent([...catFilter][0])}`;
       const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
       setTxns(t);setAccounts(a);
     }catch(e){toast('Failed to load','error');}
     finally{if(!silent)setLoading(false);setTableLoading(false);}
-  },[needsReview,startDate,endDate,accountFilter,catFilter]);
+  },[needsReview,startDate,endDate,_acctKey,_catKey]);
 
   useEffect(()=>{load();},[load,refreshKey]);
 
@@ -1648,7 +1703,8 @@ function TransactionsPage({categories,toast,refreshKey}){
     }catch(e){toast('Batch update failed: '+e.message,'error');}
   };
   /* Clear selection whenever the visible set changes (filter applied) */
-  useEffect(()=>{setSelectedIds(new Set());},[search,catFilter,actionFilter,needsReview,accountFilter,startDate,endDate,showDupes,showExcluded]);
+  const _actionKey=useMemo(()=>[...actionFilter].sort().join(','),[actionFilter]);
+  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,showDupes,showExcluded]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
      A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
@@ -1673,8 +1729,9 @@ function TransactionsPage({categories,toast,refreshKey}){
   if(!showDupes)visible=visible.filter(t=>!isCCPaymentDuplicate(t));
   if(!showExcluded)visible=visible.filter(t=>!t.is_excluded);
   if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
-  if(catFilter)visible=visible.filter(t=>t.category_final===catFilter);
-  if(actionFilter)visible=visible.filter(t=>t.action===actionFilter);
+  if(catFilter.size)visible=visible.filter(t=>catFilter.has(t.category_final));
+  if(actionFilter.size)visible=visible.filter(t=>actionFilter.has(t.action));
+  if(accountFilter.size>1)visible=visible.filter(t=>accountFilter.has(String(t.account_id)));
   if(sortCol){
     const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?(t.category_final||'').toLowerCase():(t.account_name||'').toLowerCase();
     visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
@@ -1729,18 +1786,12 @@ function TransactionsPage({categories,toast,refreshKey}){
         {/* ── Row 1: search + type / category / account filters + visibility checkboxes ── */}
         <div className="filters">
           <input className="search-input" placeholder="Search transactions…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          <select className="filter-select" value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
-            <option value="">All types</option>
-            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
-          </select>
-          <select className="filter-select" value={catFilter} onChange={e=>setCatFilter(e.target.value)}>
-            <option value="">All categories</option>
-            {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
-          <select className="filter-select" value={accountFilter} onChange={e=>setAccountFilter(e.target.value)}>
-            <option value="">All accounts</option>
-            {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
-          </select>
+          <MultiSelectFilter label="All types" options={TXN_TYPES.map(a=>({value:a,label:a}))}
+            selected={actionFilter} onChange={setActionFilter}/>
+          <MultiSelectFilter label="All categories" options={sortedCats(categories).map(c=>({value:c.name,label:c.name}))}
+            selected={catFilter} onChange={setCatFilter}/>
+          <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name+(a.is_manual?' (Manual)':'')}))}
+            selected={accountFilter} onChange={setAccountFilter}/>
           <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
           <label className="filter-label" title="CC payments appear on both the checking account (kept) and the credit card account (hidden by default)"><input type="checkbox" checked={showDupes} onChange={e=>setShowDupes(e.target.checked)}/> Show CC payment credits</label>
           <label className="filter-label" title="Excluded transactions are hidden from totals and balances but not deleted"><input type="checkbox" checked={showExcluded} onChange={e=>setShowExcluded(e.target.checked)}/> Show excluded</label>
@@ -1770,8 +1821,8 @@ function TransactionsPage({categories,toast,refreshKey}){
           <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
           <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
           <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
-          {(startDate||endDate||search||catFilter||actionFilter||needsReview||accountFilter||quickYear)&&
-            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter('');setActionFilter('');setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter('');setQuickYear('');setQuickMonth('');}}>Clear</button>}
+          {(startDate||endDate||search||catFilter.size||actionFilter.size||needsReview||accountFilter.size||quickYear)&&
+            <button className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(new Set());setActionFilter(new Set());setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter(new Set());setQuickYear('');setQuickMonth('');}}>Clear</button>}
           {/* Push action buttons to the right */}
           <span style={{flex:1}}/>
           {visible.length>0&&<button className="btn btn-sm btn-ghost" onClick={selectAll} title="Select all visible transactions">☑ Select All</button>}
