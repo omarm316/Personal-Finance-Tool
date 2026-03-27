@@ -1,5 +1,5 @@
-// Finance Automation — Service Worker
-const CACHE_VERSION = 'v2';
+// Moresheth — Service Worker
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const API_CACHE = `api-${CACHE_VERSION}`;
 

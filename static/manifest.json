@@ -1,7 +1,7 @@
 {
-  "name": "Finance Automation",
-  "short_name": "Finance",
-  "description": "Personal finance dashboard & automation",
+  "name": "Moresheth",
+  "short_name": "Moresheth",
+  "description": "Personal finance — steward of your inheritance",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",

@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>Finance Automation</title>
+<title>Moresheth</title>
 <link rel="manifest" href="/static/manifest.json"/>
 <meta name="theme-color" content="#0c0c10"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Finance"/>
+<meta name="apple-mobile-web-app-title" content="Moresheth"/>
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
 <link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-pro.png" media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)"/>
 <link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-promax.png" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)"/>
@@ -18,7 +19,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=Playfair+Display:wght@400;600&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
@@ -53,8 +54,8 @@ body{overflow:hidden}
 .sidebar.collapsed{width:56px}
 .sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;min-height:72px}
 .sidebar.collapsed .sidebar-logo{justify-content:center;padding:18px 0 16px}
-.sidebar-logo h1{font-size:15px;font-weight:500;color:var(--text-primary);letter-spacing:-0.3px}
-.sidebar-logo p{font-size:11px;color:var(--text-muted);margin-top:2px}
+.sidebar-logo h1{font-family:'Playfair Display',serif;font-size:15px;font-weight:400;color:var(--gold);letter-spacing:1.5px}
+.sidebar-logo p{font-size:10px;color:var(--text-muted);margin-top:2px;letter-spacing:0.5px;font-weight:300}
 .sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--sidebar-text);padding:4px;border-radius:6px;line-height:1;transition:all 0.15s;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center}
 .sidebar.collapsed .sidebar-toggle{margin-left:0}
 .sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
@@ -398,7 +399,17 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
   return(
     <div className={`sidebar${collapsed?' collapsed':''}`}>
       <div className="sidebar-logo">
-        {!collapsed&&<div style={{flex:1}}><h1>Finance</h1><p>Personal dashboard</p></div>}
+        <svg width={collapsed?28:30} height={collapsed?28:30} viewBox="0 0 120 120" style={{flexShrink:0}}>
+          <defs>
+            <radialGradient id="sRim" cx="50%" cy="50%" r="50%"><stop offset="85%" stopColor="#c49a3a"/><stop offset="100%" stopColor="#7a5820"/></radialGradient>
+            <radialGradient id="sFace" cx="40%" cy="35%" r="60%"><stop offset="0%" stopColor="#f0d878"/><stop offset="40%" stopColor="#d4a44a"/><stop offset="100%" stopColor="#9a7030"/></radialGradient>
+          </defs>
+          <circle cx="60" cy="60" r="56" fill="url(#sRim)"/>
+          <circle cx="60" cy="60" r="49" fill="url(#sFace)"/>
+          <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" strokeWidth="0.8" opacity="0.35"/>
+          <text x="60" y="76" textAnchor="middle" fontFamily="'Playfair Display', serif" fontSize="52" fontWeight="600" fill="#b8920a">M</text>
+        </svg>
+        {!collapsed&&<div style={{flex:1}}><h1>Moresheth</h1><p>Personal finance</p></div>}
         <button className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand menu':'Collapse menu'}><Icon name={collapsed?'chevronRight':'chevronLeft'} size={16}/></button>
       </div>
       <nav className="sidebar-nav">
@@ -3976,7 +3987,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
         <div className="card">
           <div className="section-header"><div className="section-title">About</div></div>
           <div style={{padding:'20px',fontSize:13,color:'var(--text-secondary)',lineHeight:1.8}}>
-            <p style={{fontWeight:500,color:'var(--text-primary)'}}>Finance Automation v2.0</p>
+            <p style={{fontWeight:500,color:'var(--text-primary)'}}>Moresheth v2.0</p>
             <p>Plaid sync + rule-based categorization + manual accounts</p>
             <p style={{marginTop:8}}>Stack: FastAPI + SQLAlchemy + SQLite + React</p>
             <p>Features: Transactions, Budgets, Balance Timeline, Net Worth, Cards, GCB Tracking</p>
@@ -8939,7 +8950,7 @@ function App(){
   },[loadMeta]);
 
   const[openPlaid,linkSummaryModal]=usePlaidLink(toast,handleLinkDone);
-  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',cashplanner:'Cash Flows',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
     <div style={{display:'flex',height:'100vh'}}>
@@ -9006,7 +9017,7 @@ if('serviceWorker' in navigator){
       inner.style.flex='1';
       var title=document.createElement('div');
       title.style.cssText='font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:4px';
-      title.textContent='Install Finance App';
+      title.textContent='Install Moresheth';
       var desc=document.createElement('div');
       desc.style.cssText='font-size:11px;color:var(--text-muted)';
       desc.textContent='Tap the Share button \u2B06 then "Add to Home Screen"';
