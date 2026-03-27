@@ -47,17 +47,21 @@ from plaid.exceptions import ApiException as PlaidApiException
 # Bucket mapping: account_type → (bucket_name, is_asset, is_liability)
 # Keys match Plaid subtypes (checking, savings, credit card) and manual types
 ACCOUNT_TYPE_MAP = {
-    # Assets
+    # Assets — Cash & Savings (included in Cash Flow)
     'checking':       ('Cash & Savings', True, False),
     'savings':        ('Cash & Savings', True, False),
     'cash':           ('Cash & Savings', True, False),
     'gift card':      ('Cash & Savings', True, False),
     'money market':   ('Cash & Savings', True, False),
     'cd':             ('Cash & Savings', True, False),
+    'hsa':            ('Cash & Savings', True, False),
+    'fsa':            ('Cash & Savings', True, False),
+    # Assets — Investments
     'investment':     ('Investments', True, False),
     '401k':           ('Investments', True, False),
     'ira':            ('Investments', True, False),
     'brokerage':      ('Investments', True, False),
+    # Assets — Other
     'real_estate':    ('Real Estate', True, False),
     'vehicle':        ('Other Assets', True, False),
     'business_owned': ('Other Assets', True, False),
@@ -3534,10 +3538,15 @@ async def get_stats(
     # Compute totals & by-category, handling split transactions correctly.
     # For split parents (is_split=True): skip the parent's own amount and instead
     # accumulate from the individual TransactionSplit line items (each with their own category).
-    # This mirrors the logic in /budget/actuals and prevents double-counting.
+    # Income-action transactions whose category matches an expense budget category
+    # are treated as credits that offset expenses (e.g. a refund in "Dining" reduces
+    # Dining expense total rather than inflating Income).
     total_income = 0.0
     total_expenses = 0.0
     by_category: dict = {}
+
+    # Pre-load expense budget categories to detect refunds that should offset
+    _expense_cats = set(bt.category for bt in db.query(BudgetTarget).all())
 
     for t in transactions:
         if t.action not in BUDGET_TYPES:
@@ -3546,9 +3555,13 @@ async def get_stats(
             for s in splits_map.get(t.id, []):
                 if s.is_gcb:
                     continue
+                cat = s.category or t.category_final or 'Other'
                 if t.action == 'Expense':
-                    cat = s.category or t.category_final or 'Other'
-                    # charges (s.amount < 0) → -s.amount is positive; credits → negative (nets correctly)
+                    contrib = -s.amount
+                    total_expenses += contrib
+                    by_category[cat] = by_category.get(cat, 0) + contrib
+                elif t.action == 'Income' and cat in _expense_cats:
+                    # Refund in expense category → offset expenses
                     contrib = -s.amount
                     total_expenses += contrib
                     by_category[cat] = by_category.get(cat, 0) + contrib
@@ -3557,8 +3570,13 @@ async def get_stats(
         else:
             if t.is_gcb or t.gcb_tagged:
                 continue
+            cat = t.category_final or 'Other'
             if t.action == 'Expense':
-                cat = t.category_final or 'Other'
+                contrib = -t.amount
+                total_expenses += contrib
+                by_category[cat] = by_category.get(cat, 0) + contrib
+            elif t.action == 'Income' and cat in _expense_cats:
+                # Refund in expense category → offset expenses
                 contrib = -t.amount
                 total_expenses += contrib
                 by_category[cat] = by_category.get(cat, 0) + contrib
@@ -5849,20 +5867,24 @@ async def account_transactions(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    # Earn-rate helpers
+    # Earn-rate helpers — check both account.product_id and card.product_id
+    # to match the logic in /accounts/{id}/card-detail
     all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
     cat_parent_map = {c.name: c.parent_key for c in all_categories}
     base_rate = 1.0
     bonus_by_name: dict[str, float] = {}
+    product = None
+    if account.product_id:
+        product = db.query(CardProduct).filter_by(id=account.product_id).first()
     card = db.query(Card).filter_by(account_id=account_id).first()
-    if card:
-        product = db.query(CardProduct).filter_by(id=card.product_id).first() if card.product_id else None
-        if product:
-            for r in db.query(CardProductReward).filter_by(product_id=product.id).all():
-                if r.is_base_rate:
-                    base_rate = r.multiplier
-                elif r.points_category:
-                    bonus_by_name[r.points_category.name] = r.multiplier
+    if not product and card and card.product_id:
+        product = db.query(CardProduct).filter_by(id=card.product_id).first()
+    if product:
+        for r in db.query(CardProductReward).filter_by(product_id=product.id).all():
+            if r.is_base_rate:
+                base_rate = r.multiplier
+            elif r.points_category:
+                bonus_by_name[r.points_category.name] = r.multiplier
 
     q = db.query(Transaction).filter(
         Transaction.account_id == account_id,
@@ -7806,34 +7828,54 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     ).all()
 
     # Build actuals: {category: {month: net_amount}}
+    # For expense categories the budget tracks NET spend: charges minus credits.
     # Expense action: contribution = -t.amount
     #   → charges (amount < 0): -(-X) = +X  (increases total)
-    #   → CC credits (amount > 0): -(+X) = -X  (reduces total — nets against charges)
-    # Income action: contribution = +t.amount
+    #   → CC credits/refunds (amount > 0): -(+X) = -X  (reduces total)
+    # Income action with an expense category (e.g. refund tagged "Dining"):
+    #   treated as a credit that offsets expenses → contribution = -t.amount
+    # Pure Income action: contribution = +t.amount
     actuals = {}
+
+    # Pre-load expense budget category names so we can detect income-action refunds
+    # that should offset expense actuals instead of counting as pure income.
+    _expense_budget_cats = set(
+        bt.category
+        for bt in db.query(BudgetTarget).filter_by(year=year).all()
+    )
 
     for t in txns:
         if t.is_split:
-            # Use split line items instead of parent transaction
             splits = db.query(TransactionSplit).filter_by(
                 parent_transaction_id=t.id
             ).all()
             for s in splits:
                 if s.is_gcb:
-                    continue  # Skip GCB-tagged splits
+                    continue
                 cat = s.category or t.category_final or 'Other'
                 month = str(t.month)
-                contrib = (-s.amount) if t.action == 'Expense' else s.amount
+                if t.action == 'Expense':
+                    contrib = -s.amount
+                elif t.action == 'Income' and cat in _expense_budget_cats:
+                    # Refund in an expense category — offsets that category's spend
+                    contrib = -s.amount
+                else:
+                    contrib = s.amount
                 if cat not in actuals:
                     actuals[cat] = {}
                 actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
         else:
-            # Skip GCB-tagged whole transactions
             if t.is_gcb or t.gcb_tagged:
                 continue
             cat = t.category_final or 'Other'
             month = str(t.month)
-            contrib = (-t.amount) if t.action == 'Expense' else t.amount
+            if t.action == 'Expense':
+                contrib = -t.amount
+            elif t.action == 'Income' and cat in _expense_budget_cats:
+                # Refund in an expense category — offsets that category's spend
+                contrib = -t.amount
+            else:
+                contrib = t.amount
             if cat not in actuals:
                 actuals[cat] = {}
             actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
@@ -8618,8 +8660,11 @@ async def get_cash_flow(
     db: Session = Depends(get_db),
 ):
     """
-    Compute cash flow for depository accounts only.
-    Returns inflows, outflows, net, CC payments, and loan repayments.
+    Compute cash flow for depository (cash) accounts only:
+    checking, savings, money market, cd, cash.
+    Reflects true cash movement: income, expenses paid from cash,
+    liability payments, and inter-account transfers.
+    Returns categorised inflows/outflows with CC payment and loan breakdowns.
     """
     # Default to current month
     if not start_date:
@@ -8631,47 +8676,95 @@ async def get_cash_flow(
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Get depository account IDs (checking, savings, money market, cd)
-    depository_types = {'checking', 'savings', 'money market', 'cd'}
-    depository_accounts = db.query(Account).filter(
+    # Cash accounts = checking, savings, money market, cd, cash
+    cash_types = {'checking', 'savings', 'money market', 'cd', 'cash', 'hsa', 'fsa'}
+    cash_accounts = db.query(Account).filter(
         Account.is_active == True,
-        Account.account_type.in_(depository_types),
+        Account.account_type.in_(cash_types),
     ).all()
-    dep_ids = [a.id for a in depository_accounts]
+    cash_ids = set(a.id for a in cash_accounts)
+    cash_id_list = list(cash_ids)
 
-    if not dep_ids:
-        return {
-            'start_date': start_date, 'end_date': end_date,
-            'inflows': 0, 'outflows': 0, 'net': 0,
-            'cc_payments': 0, 'loan_repayments': 0, 'transactions': [],
-        }
+    empty = {
+        'start_date': start_date, 'end_date': end_date,
+        'inflows': 0, 'outflows': 0, 'net': 0,
+        'income': 0, 'expenses': 0,
+        'cc_payments': 0, 'loan_repayments': 0, 'transfers_between': 0,
+        'by_inflow': {}, 'by_outflow': {},
+        'transaction_count': 0,
+    }
+    if not cash_id_list:
+        return empty
 
-    # Get transactions for depository accounts in date range (skip excluded + GCB)
     txns = db.query(Transaction).filter(
-        Transaction.account_id.in_(dep_ids),
+        Transaction.account_id.in_(cash_id_list),
         Transaction.date >= start_dt,
         Transaction.date <= end_dt,
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
+        Transaction.is_excluded != True,
+        Transaction.is_gcb != True,
     ).order_by(Transaction.date.desc()).all()
 
     inflows = 0.0
     outflows = 0.0
+    income_total = 0.0
+    expense_total = 0.0
     cc_payments = 0.0
     loan_repayments = 0.0
+    transfers_between = 0.0  # net-zero transfers between own cash accounts
+    by_inflow: dict[str, float] = {}   # category/description → positive amount
+    by_outflow: dict[str, float] = {}  # category/description → positive amount
+
+    # Pre-load all account IDs to detect internal transfers
+    all_account_ids = set(a.id for a in db.query(Account).filter(
+        Account.is_active == True
+    ).all())
+
+    # CC and Loan keywords for detection
+    _CC_KW = ('CREDIT CRD', 'CREDIT CARD', 'AUTOPAY', 'CC PAYMENT', 'CARD PAYMENT')
+    _LOAN_KW = ('LOAN', 'MORTGAGE', 'STUDENT', 'SLS SERVICING', 'FREEDOM MORTGAGE',
+                'LAKEVIEW', 'DOVENMUEHLE', 'ESCROW')
 
     for t in txns:
-        if t.amount > 0:
-            inflows += t.amount
-        else:
-            outflows += t.amount  # negative
-        # Detect CC payments and loan repayments via description/action
         desc_upper = (t.description_raw or '').upper()
-        if t.action == 'Transfer':
-            if any(kw in desc_upper for kw in ['CREDIT CRD', 'CREDIT CARD', 'AUTOPAY', 'CC PAYMENT']):
-                cc_payments += abs(t.amount)
-            elif any(kw in desc_upper for kw in ['LOAN', 'MORTGAGE', 'STUDENT']):
-                loan_repayments += abs(t.amount)
+        action = t.action or ''
+        cat = t.category_final or 'Other'
+
+        if t.amount > 0:
+            # Inflow: income, refunds, or incoming transfers
+            inflows += t.amount
+            if action == 'Income':
+                income_total += t.amount
+                key = cat if cat != 'Other' else 'Other Income'
+                by_inflow[key] = by_inflow.get(key, 0) + t.amount
+            elif action == 'Transfer':
+                # Transfer in — could be from own account or external
+                by_inflow['Transfers In'] = by_inflow.get('Transfers In', 0) + t.amount
+            else:
+                key = f"Refund / {cat}" if cat != 'Other' else 'Refunds'
+                by_inflow[key] = by_inflow.get(key, 0) + t.amount
+        else:
+            amt = abs(t.amount)
+            outflows += t.amount  # keep negative
+
+            if action == 'Transfer':
+                # Detect CC payments vs loan payments vs internal transfers
+                if any(kw in desc_upper for kw in _CC_KW):
+                    cc_payments += amt
+                    by_outflow['Credit Card Payments'] = by_outflow.get('Credit Card Payments', 0) + amt
+                elif any(kw in desc_upper for kw in _LOAN_KW):
+                    loan_repayments += amt
+                    by_outflow['Loan / Mortgage'] = by_outflow.get('Loan / Mortgage', 0) + amt
+                else:
+                    by_outflow['Other Transfers'] = by_outflow.get('Other Transfers', 0) + amt
+            elif action == 'Expense':
+                expense_total += amt
+                by_outflow[cat] = by_outflow.get(cat, 0) + amt
+            else:
+                by_outflow['Other'] = by_outflow.get('Other', 0) + amt
+
+    # Sort breakdowns by amount descending
+    by_inflow_sorted = dict(sorted(by_inflow.items(), key=lambda x: -x[1]))
+    by_outflow_sorted = dict(sorted(by_outflow.items(), key=lambda x: -x[1]))
 
     return {
         'start_date': start_date,
@@ -8679,8 +8772,13 @@ async def get_cash_flow(
         'inflows': round(inflows, 2),
         'outflows': round(outflows, 2),
         'net': round(inflows + outflows, 2),
+        'income': round(income_total, 2),
+        'expenses': round(expense_total, 2),
         'cc_payments': round(cc_payments, 2),
         'loan_repayments': round(loan_repayments, 2),
+        'transfers_between': round(transfers_between, 2),
+        'by_inflow': {k: round(v, 2) for k, v in by_inflow_sorted.items()},
+        'by_outflow': {k: round(v, 2) for k, v in by_outflow_sorted.items()},
         'transaction_count': len(txns),
     }
 

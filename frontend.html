@@ -622,7 +622,6 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
           :<div style={{fontWeight:500,fontSize:13.5}}>{txn.description_display||txn.description_raw}</div>
         }
         <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2,flexWrap:'wrap'}}>
-          {locked&&<span title="Manually edited — protected from sync">🔒</span>}
           {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:11,color:'var(--amber)'}}>{Math.round((txn.category_confidence||0)*100)}% confidence</span>}
           {txn.enrichment_source&&txn.enrichment_source!=='rule'&&(()=>{
             const src=txn.enrichment_source;
@@ -678,7 +677,6 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button className="btn btn-sm" style={{padding:'0',fontSize:13,background:'var(--bg)',color:'var(--text-muted)',border:'1px solid var(--border)',borderRadius:'50%',width:26,height:26,display:'inline-flex',alignItems:'center',justifyContent:'center',flexShrink:0}} onClick={()=>setShowTxnInfo(true)} title="Transaction details">ⓘ</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)} style={{fontSize:11}}>{txn.is_split?'Splits':'Split'}</button>
-            {locked&&<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13}} onClick={toggleLock} title="Unlock">🔓</button>}
             <button className="btn btn-sm" style={{padding:'4px 8px',fontSize:11,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
               onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
               title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
@@ -692,6 +690,8 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
               {excluded?'↩':'⊘'}
             </button>
+            {locked?<button className="btn btn-ghost" style={{padding:'4px 6px',fontSize:13,width:26,height:26,display:'inline-flex',alignItems:'center',justifyContent:'center'}} onClick={toggleLock} title="Unlock — manually edited">🔓</button>
+              :<span style={{display:'inline-block',width:26}}/>}
           </div>
         }
       </td>
@@ -2893,6 +2893,12 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
           <div style={{flex:1,minWidth:0}}>
             {isEditing?<>
               <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} style={{fontSize:14,fontWeight:500,border:'1px solid var(--border)',borderRadius:6,padding:'4px 8px',width:'100%',marginBottom:4,background:'var(--elevated)',color:'var(--text-primary)',fontFamily:'DM Sans'}}/>
+              <select value={editVals.account_type||''} onChange={e=>setEditVals(v=>({...v,account_type:e.target.value}))}
+                style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',marginBottom:4,color:'var(--text-primary)',background:'var(--elevated)',fontFamily:'DM Sans',appearance:'auto'}}>
+                <option value="">— type —</option>
+                {['checking','savings','cash','money market','cd','hsa','fsa','investment','brokerage','401k','ira','credit card','mortgage','loan','student','auto','other'].map(t=>
+                  <option key={t} value={t}>{t.replace(/\b\w/g,c=>c.toUpperCase())}</option>)}
+              </select>
               <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)',background:'var(--elevated)',fontFamily:'DM Sans'}}/>
             </>:<>
               <div style={{fontSize:14,fontWeight:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.account_name}</div>
@@ -2948,7 +2954,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast,refreshKey}){
   const plaidAccounts=accounts.filter(a=>!a.is_manual);
   const manualAccounts=accounts.filter(a=>a.is_manual);
 
-  const startEdit=(a)=>{setEditingId(a.id);setEditVals({account_name:a.account_name||'',notes:a.notes||''});};
+  const startEdit=(a)=>{setEditingId(a.id);setEditVals({account_name:a.account_name||'',notes:a.notes||'',account_type:a.account_type||''});};
   const cancelEdit=()=>{setEditingId(null);setEditVals({});};
   const saveEdit=async(id)=>{
     try{await apiFetch(`/accounts/${id}`,{method:'PATCH',body:JSON.stringify(editVals)});toast('Account updated');setEditingId(null);await load();}
@@ -7717,37 +7723,45 @@ function CashFlowPage({toast,refreshKey}){
 
   useEffect(()=>{load(true);},[load,refreshKey]);
 
-  // ── Load 6-month trend for chart ────────────────────────────────────
+  // ── Load 6-month trend for chart (cash accounts only via /cash-flow) ──
   useEffect(()=>{
     (async()=>{
       try{
         const now=new Date();const months=[];
         for(let i=5;i>=0;i--){
           const d=new Date(now.getFullYear(),now.getMonth()-i,1);
-          months.push({year:d.getFullYear(),month:d.getMonth()+1,label:d.toLocaleDateString('en-US',{month:'short'})});
+          const y=d.getFullYear(),m=d.getMonth()+1;
+          const start=`${y}-${String(m).padStart(2,'0')}-01`;
+          const lastDay=new Date(y,m,0).getDate();
+          const end=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+          months.push({year:y,month:m,label:d.toLocaleDateString('en-US',{month:'short'}),start,end});
         }
         const results=await Promise.all(months.map(m=>
-          apiFetch(`/stats?year=${m.year}&month=${m.month}`).catch(()=>({total_income:0,total_expenses:0}))
+          apiFetch(`/cash-flow?start_date=${m.start}&end_date=${m.end}`).catch(()=>({inflows:0,outflows:0}))
         ));
-        setMonthlyTrend(months.map((m,i)=>({label:m.label,income:results[i].total_income||0,expenses:results[i].total_expenses||0})));
+        setMonthlyTrend(months.map((m,i)=>({label:m.label,income:results[i].inflows||0,expenses:Math.abs(results[i].outflows||0)})));
       }catch(_){}
     })();
   },[]);
 
-  // ── Load breakdown data based on selected range ─────────────────────
+  // ── Load breakdown data based on selected range (cash accounts only) ──
   useEffect(()=>{
     (async()=>{
       setBdLoading(true);
       try{
         const now=new Date();const todayS=todayStr();
-        let params='';
+        let startD,endD;
         if(breakdownRange==='month'){
-          params=`year=${now.getFullYear()}&month=${now.getMonth()+1}`;
+          const y=now.getFullYear(),m=now.getMonth()+1;
+          startD=`${y}-${String(m).padStart(2,'0')}-01`;
+          const lastDay=new Date(y,m,0).getDate();
+          endD=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
         }else if(breakdownRange==='last30'){
           const d30ago=new Date(now);d30ago.setDate(d30ago.getDate()-30);
-          params=`start_date=${d30ago.toISOString().slice(0,10)}&end_date=${todayS}`;
+          startD=d30ago.toISOString().slice(0,10);
+          endD=todayS;
         }else{
-          // next30: use overlays + salary data, not stats endpoint
+          // next30: use overlays + salary data, not cash-flow endpoint
           const d30=new Date(now);d30.setDate(d30.getDate()+30);
           const futEnd=d30.toISOString().slice(0,10);
           const fOvs=overlays.filter(o=>o.flow_date>=todayS&&o.flow_date<=futEnd);
@@ -7762,11 +7776,13 @@ function CashFlowPage({toast,refreshKey}){
           setBdLoading(false);
           return;
         }
-        const stats=await apiFetch(`/stats?${params}`);
-        // Separate income categories from expense categories
-        // stats.by_category has expense categories; income is total_income
-        const incCats={'Salary / Income':(stats.total_income||0)};
-        setBdData({income:incCats,expenses:stats.by_category||{},totalIn:stats.total_income||0,totalOut:stats.total_expenses||0});
+        const cf=await apiFetch(`/cash-flow?start_date=${startD}&end_date=${endD}`);
+        setBdData({
+          income:cf.by_inflow||{},
+          expenses:cf.by_outflow||{},
+          totalIn:cf.inflows||0,
+          totalOut:Math.abs(cf.outflows||0),
+        });
       }catch(_){setBdData({income:{},expenses:{},totalIn:0,totalOut:0});}
       finally{setBdLoading(false);}
     })();
