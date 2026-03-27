@@ -1680,8 +1680,10 @@ function TransactionsPage({categories,toast,refreshKey}){
     visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
   }
 
-  const visibleExpenses=visible.filter(t=>t.action==='Expense').reduce((s,t)=>s+(-t.amount),0);
-  const visibleIncome=visible.filter(t=>t.action==='Income').reduce((s,t)=>s+t.amount,0);
+  const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
+  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
+  const visibleExpenses=_budgetVisible.filter(t=>t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(t.category_final))).reduce((s,t)=>s+(-t.amount),0);
+  const visibleIncome=_budgetVisible.filter(t=>t.action==='Income'&&!_expCatSet.has(t.category_final)).reduce((s,t)=>s+t.amount,0);
   const visibleNet=visibleIncome-visibleExpenses;
 
   const exportCSV=()=>{
