@@ -4900,6 +4900,242 @@ async def ecosystem_earn_detail(
     }
 
 
+@app.get("/api/ecosystems/cash-back/earn-detail")
+async def cash_back_earn_detail(
+    period: str = 'qtd',
+    year: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Aggregated earn detail for ALL cash-back ecosystems.
+    Same shape as single-ecosystem detail but merges all is_cash_back=True ecosystems.
+    Cash back amounts are in dollars (1 point = 1 cent → cpp fixed at 0.01).
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from sqlalchemy import func as _func
+
+    # Gather all cash-back ecosystem IDs
+    cb_ecos = db.query(PointsEcosystem).filter_by(is_cash_back=True).all()
+    cb_eco_ids = {e.id for e in cb_ecos}
+    if not cb_eco_ids:
+        return {
+            'eco_id': 0, 'name': 'Cash Back', 'currency_name': 'Cash Back',
+            'your_cpp': 0.01, 'period': period, 'year': year or _date.today().year,
+            'start': '', 'end': '', 'total_points': 0, 'est_value': 0,
+            'by_category': [], 'by_card': [], 'active_challenges': [],
+            'sub_ecosystems': [],
+        }
+
+    today = _date.today()
+    if year is None:
+        year = today.year
+    is_current = (year == today.year)
+
+    if period == 'mtd':
+        start = _date(year, today.month, 1)
+        end   = today if is_current else _date(year, today.month,
+                    _cal.monthrange(year, today.month)[1])
+    elif period == 'qtd':
+        q0    = ((today.month - 1) // 3) * 3 + 1
+        start = _date(year, q0, 1)
+        end   = today if is_current else _date(year, q0 + 2,
+                    _cal.monthrange(year, q0 + 2)[1])
+    else:
+        start = _date(year, 1, 1)
+        end   = today if is_current else _date(year, 12, 31)
+
+    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
+    cat_parent_map = {c.name: c.parent_key for c in all_categories}
+
+    products_cache: dict[int, tuple] = {}
+    card_by_acct: dict[int, Card] = {}
+    for c in db.query(Card).all():
+        if c.account_id and c.account_id not in card_by_acct:
+            card_by_acct[c.account_id] = c
+
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .filter(Account.account_type.ilike('%credit%'))
+        .all()
+    )
+
+    eco_accts: list[int] = []
+    acct_info: dict[int, dict] = {}
+    acct_eco: dict[int, int] = {}  # track which eco each account belongs to
+
+    for acct in credit_accounts:
+        card = card_by_acct.get(acct.id)
+        product = None
+        if acct.product_id:
+            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+        if not product and card and card.product_id:
+            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+        a_eco_id = None
+        if product and product.ecosystem_id:
+            a_eco_id = product.ecosystem_id
+        elif card and card.ecosystem_id:
+            a_eco_id = card.ecosystem_id
+
+        if a_eco_id not in cb_eco_ids:
+            continue
+
+        base_rate = 1.0
+        bonus_by_name: dict[str, float] = {}
+        if product:
+            pid = product.id
+            if pid not in products_cache:
+                rates = db.query(CardProductReward).filter_by(product_id=pid).all()
+                _b = 1.0
+                _bb: dict[str, float] = {}
+                for r in rates:
+                    if r.is_base_rate:
+                        _b = r.multiplier
+                    elif r.points_category_id and r.points_category:
+                        _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb)
+            base_rate, bonus_by_name = products_cache[product.id]
+
+        eco_accts.append(acct.id)
+        acct_eco[acct.id] = a_eco_id
+        acct_info[acct.id] = {
+            'base_rate':     base_rate,
+            'bonus_by_name': bonus_by_name,
+            'account_name':  acct.account_name,
+            'mask':          acct.mask,
+            'card_name':     card.card_name if card else None,
+        }
+
+    if not eco_accts:
+        return {
+            'eco_id': 0, 'name': 'Cash Back', 'currency_name': 'Cash Back',
+            'your_cpp': 0.01, 'period': period, 'year': year,
+            'start': start.isoformat(), 'end': end.isoformat(),
+            'total_points': 0, 'est_value': 0,
+            'by_category': [], 'by_card': [], 'active_challenges': [],
+            'sub_ecosystems': [],
+        }
+
+    rows = (
+        db.query(
+            Transaction.account_id,
+            Transaction.points_category,
+            _func.sum(Transaction.amount).label('total'),
+        )
+        .filter(
+            Transaction.account_id.in_(eco_accts),
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.action == 'Expense',
+            Transaction.amount < 0,
+            Transaction.is_excluded != True,
+        )
+        .group_by(Transaction.account_id, Transaction.points_category)
+        .all()
+    )
+
+    by_cat: dict[str, float] = {}
+    by_acct: dict[int, float] = {}
+    total_pts = 0.0
+    for acct_id, pts_cat, total in rows:
+        info = acct_info.get(acct_id)
+        if not info:
+            continue
+        amt  = abs(float(total or 0))
+        rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
+        pts  = amt * rate  # for cash back, "points" = cents earned per dollar → dollar value
+        total_pts += pts
+        cat_key = pts_cat or 'Other'
+        by_cat[cat_key]   = by_cat.get(cat_key, 0.0)   + pts
+        by_acct[acct_id]  = by_acct.get(acct_id, 0.0)  + pts
+
+    # For cash back, cpp is 0.01 (1 point = 1 cent)
+    cpp = 0.01
+    total_pts_r = round(total_pts)
+
+    by_cat_out = sorted(
+        [{'category': k, 'points': round(v), 'pct': round(v / total_pts * 100, 1) if total_pts else 0}
+         for k, v in by_cat.items()],
+        key=lambda x: -x['points'],
+    )
+    by_card_out = sorted(
+        [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
+          'mask': acct_info[aid]['mask'], 'points': round(p)}
+         for aid, p in by_acct.items()],
+        key=lambda x: -x['points'],
+    )
+
+    # Sub-ecosystem breakdown (e.g., Discover vs generic Cash Back)
+    eco_name_map = {e.id: e.name for e in cb_ecos}
+    sub_totals: dict[str, float] = {}
+    for aid, pts in by_acct.items():
+        eid = acct_eco.get(aid)
+        ename = eco_name_map.get(eid, 'Cash Back')
+        sub_totals[ename] = sub_totals.get(ename, 0) + pts
+    sub_ecos = sorted(
+        [{'name': k, 'points': round(v)} for k, v in sub_totals.items()],
+        key=lambda x: -x['points'],
+    )
+
+    # Challenges across all cash-back cards
+    active_ch_out: list[dict] = []
+    try:
+        card_ids_in_cb = [
+            card_by_acct[aid].id for aid in eco_accts if aid in card_by_acct
+        ]
+        card_ids_set = set(card_ids_in_cb)
+        _today = datetime.utcnow().date()
+        _d_fn  = lambda v: v.date() if isinstance(v, datetime) else v
+        for ch in (db.query(SpendChallenge)
+                   .filter(SpendChallenge.is_active == True)
+                   .filter(or_(
+                       SpendChallenge.card_id.in_(card_ids_in_cb),
+                       SpendChallenge.id.in_(
+                           db.query(ChallengeCardLink.challenge_id)
+                           .filter(ChallengeCardLink.card_id.in_(card_ids_in_cb))
+                       )
+                   )).all()):
+            if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
+                continue
+            all_card_ids = [ch.card_id] + [lnk.card_id for lnk in ch.card_links]
+            eco_card_ids = [cid for cid in all_card_ids if cid in card_ids_set]
+            for cid in eco_card_ids:
+                card_obj = db.query(Card).filter_by(id=cid).first()
+                if not card_obj:
+                    continue
+                spend_ov = (
+                    _challenge_spend_for_card(db, ch, card_obj.account_id)
+                    if card_obj.account_id else None
+                )
+                # Use the first cash-back eco for serialization
+                ser = _serialize_challenge(ch, eco=cb_ecos[0], spend_override=spend_ov)
+                ser['card_name']  = card_obj.card_name
+                ser['last_four']  = card_obj.last_four
+                ser['account_id'] = card_obj.account_id
+                active_ch_out.append(ser)
+    except Exception:
+        db.rollback()
+
+    return {
+        'eco_id':        0,
+        'name':          'Cash Back',
+        'currency_name': 'Cash Back',
+        'your_cpp':      cpp,
+        'period':        period,
+        'year':          year,
+        'start':         start.isoformat(),
+        'end':           end.isoformat(),
+        'total_points':  total_pts_r,
+        'est_value':     round(total_pts_r * cpp, 2),
+        'by_category':   by_cat_out,
+        'by_card':       by_card_out,
+        'active_challenges': active_ch_out,
+        'sub_ecosystems': sub_ecos,
+    }
+
+
 @app.get("/api/cards/swipe-advisor")
 async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(get_db)):
     """

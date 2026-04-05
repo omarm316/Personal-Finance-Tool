@@ -5580,6 +5580,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const years=useMemo(()=>{const y=new Date().getFullYear();return[y,y-1,y-2];},[]);
   const ecoColor=useMemo(()=>{
     const n=(ecoName||'').toLowerCase();
+    if(n==='cash back')return'#d97706';
     if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
     if(n.includes('amex')||n.includes('membership'))return'#059669';
     if(n.includes('hilton'))return'#7c3aed';
@@ -5588,15 +5589,26 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
     if(n.includes('hyatt'))return'#9f1239';
     if(n.includes('united')||n.includes('mileageplus'))return'#374151';
+    if(n.includes('capital one'))return'#dc2626';
+    if(n.includes('alaska'))return'#065f46';
+    if(n.includes('southwest'))return'#b45309';
+    if(n.includes('jetblue'))return'#0369a1';
+    if(n.includes('discover'))return'#ea580c';
     return'var(--blue)';
   },[ecoName]);
 
+  const isCashBack=ecoId==='cash-back';
   const load=useCallback(async(p,y)=>{
     setLoading(true);
-    try{setData(await apiFetch(`/ecosystems/${ecoId}/earn-detail?period=${p}&year=${y}`));}
+    try{
+      const url=isCashBack
+        ?`/ecosystems/cash-back/earn-detail?period=${p}&year=${y}`
+        :`/ecosystems/${ecoId}/earn-detail?period=${p}&year=${y}`;
+      setData(await apiFetch(url));
+    }
     catch(e){toast('Failed to load ecosystem data','error');}
     finally{setLoading(false);}
-  },[ecoId]);
+  },[ecoId,isCashBack]);
 
   useEffect(()=>{load(period,year);},[period,year]);
 
@@ -5604,6 +5616,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
 
   const ecoGradient=useMemo(()=>{
     const n=(ecoName||'').toLowerCase();
+    if(n==='cash back')return'linear-gradient(135deg,#b45309,#d97706)';
     if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,#3b82f6)';
     if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
     if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
@@ -5612,6 +5625,11 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('delta')||n.includes('skymiles'))return'linear-gradient(135deg,#1e3a5f,#3b82f6)';
     if(n.includes('hyatt'))return'linear-gradient(135deg,#7f1d1d,#dc2626)';
     if(n.includes('united')||n.includes('mileageplus'))return'linear-gradient(135deg,#374151,#6b7280)';
+    if(n.includes('capital one'))return'linear-gradient(135deg,#991b1b,#ef4444)';
+    if(n.includes('alaska'))return'linear-gradient(135deg,#065f46,#34d399)';
+    if(n.includes('southwest'))return'linear-gradient(135deg,#92400e,#f59e0b)';
+    if(n.includes('jetblue'))return'linear-gradient(135deg,#0c4a6e,#38bdf8)';
+    if(n.includes('discover'))return'linear-gradient(135deg,#9a3412,#fb923c)';
     return'linear-gradient(135deg,#3b82f6,#60a5fa)';
   },[ecoName]);
 
@@ -5667,7 +5685,8 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           </div>
           <div>
             <div style={{fontSize:20,fontWeight:400,color:'var(--text-primary)',letterSpacing:'-0.3px'}}>{ecoName}</div>
-            {data&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name} · {(data.your_cpp*100).toFixed(1)}¢/pt</div>}
+            {data&&!isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name} · {(data.your_cpp*100).toFixed(1)}¢/pt</div>}
+            {data&&isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>All cash-back cards</div>}
           </div>
         </div>
         {/* Period selector */}
@@ -5696,18 +5715,18 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
             <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
-            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:'var(--gold)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
-              {data.total_points.toLocaleString()}
+            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:isCashBack?'var(--green)':'var(--gold)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
+              {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
             </div>
-            <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{data.currency_name}</div>
-            <div style={{fontSize:20,fontWeight:300,fontFamily:'DM Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
+            <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
+            {!isCashBack&&<div style={{fontSize:20,fontWeight:300,fontFamily:'DM Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
               ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-            </div>
+            </div>}
           </div>
 
           {/* Points by category */}
           {data.by_category.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>Points by Category</div>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>{isCashBack?'Cash Back by Category':'Points by Category'}</div>
             <div style={{display:'flex',flexDirection:'column',gap:12}}>
               {data.by_category.map(cat=>(
                 <div key={cat.category} style={{display:'flex',alignItems:'center',gap:12}}>
@@ -5716,7 +5735,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                     <div style={{height:'100%',borderRadius:3,width:`${Math.round(cat.points/maxCatPts*100)}%`,
                       background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.4s ease'}}/>
                   </div>
-                  <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)',width:60,textAlign:'right',flexShrink:0}}>{cat.points.toLocaleString()}</span>
+                  <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)',width:60,textAlign:'right',flexShrink:0}}>{isCashBack?`$${(cat.points*0.01).toFixed(2)}`:cat.points.toLocaleString()}</span>
                   <span style={{fontSize:11,fontWeight:300,color:'var(--text-muted)',width:40,textAlign:'right',flexShrink:0}}>{cat.pct}%</span>
                 </div>
               ))}
@@ -5745,7 +5764,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                       <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{c.account_name}</div>
                       {c.mask&&<div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>···{c.mask}</div>}
                     </div>
-                    <span style={{fontSize:14,fontWeight:300,color:'var(--gold)',flexShrink:0}}>{c.points.toLocaleString()}</span>
+                    <span style={{fontSize:14,fontWeight:300,color:isCashBack?'var(--green)':'var(--gold)',flexShrink:0}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
                     <span style={{color:'var(--text-muted)',fontSize:14,marginLeft:4,opacity:0.4}}>›</span>
                   </div>
                 );
@@ -6170,10 +6189,14 @@ function CardsPage({toast,refreshKey}){
                     })}
                   </div>
 
-                  {/* ── Cash Back (full width) ── */}
+                  {/* ── Cash Back (full width, clickable) ── */}
                   {cashTotal>0&&(
                     <div style={{display:'flex',alignItems:'center',gap:16,padding:'18px 20px',borderRadius:14,
-                      background:'var(--surface)',border:'1px solid var(--border)',marginBottom:24}}>
+                      background:'var(--surface)',border:'1px solid var(--border)',marginBottom:24,cursor:'pointer',
+                      transition:'all 0.2s ease'}}
+                      onClick={()=>setSelectedEcosystem({id:'cash-back',name:'Cash Back'})}
+                      onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor='rgba(217,119,6,0.3)';}}
+                      onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
                       <div style={{width:44,height:30,borderRadius:8,background:'linear-gradient(135deg,#b45309,#d97706)',flexShrink:0}}/>
                       <div style={{flex:1}}>
                         <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>Cash Back</div>
@@ -6182,6 +6205,7 @@ function CardsPage({toast,refreshKey}){
                       <div style={{textAlign:'right'}}>
                         <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',lineHeight:1,letterSpacing:'-1px',color:'var(--green)'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                       </div>
+                      <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
                     </div>
                   )}
 
