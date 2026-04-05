@@ -1,4 +1,4 @@
-# Finance App — Backlog
+# Moresheth — Backlog
 
 > Maintained collaboratively. Update priorities here at the start of each session.
 > Status: 🔴 Bug/Blocker · 🟡 High Priority · 🔵 Queued · 💡 Nice-to-Have
@@ -9,21 +9,21 @@
 
 | # | Item | Notes |
 |---|------|-------|
-| B1 | **Challenges: NOT NULL constraint errors** | `product_id`, `required_spend`, `reward_value` — comprehensive migration deployed; verify no new columns surface |
+| B1 | **Challenges: NOT NULL constraint errors** | `product_id`, `required_spend`, `reward_value` — migration deployed; verify no new columns surface |
 | B2 | **Challenges: "cannot load challenge" error** | `db.rollback()` fix deployed; verify challenge list loads cleanly |
-| B3 | ~~**Blank card page**~~ | ✅ Fixed — `useMemo` not destructured from React |
+| B3 | **Txn page Expenses vs KPI mismatch** | User reported Expenses total on Transactions page doesn't match KPI card when filtering by month — needs investigation |
 
 ---
 
-## 🟡 Cards Module — High Priority
+## 🟡 High Priority
 
 | # | Item | Notes |
 |---|------|-------|
-| C1 | **Transaction: filter by description/merchant** | Text search input in the Transactions section; client-side filter on loaded rows |
-| C2 | **Transaction: sortable columns** | Click any column header (Date, Description, Amount, Category, CSC, Rate) to toggle asc/desc |
-| C3 | **Challenge: verify recalc correctness** | Confirm spend from `activation_date` → today is captured correctly after all the datetime fixes |
-| C4 | **Card Research Skill — capture benefits** | When researching a card, extract full benefit list (name, $, frequency) and auto-POST to `/api/card-products/{id}/benefits` |
-| C5 | **Cards Landing Page** | Portfolio overview: total annual fees, total annual credits, points by ecosystem, utilization across all cards, upcoming statement close/payment dates |
+| H1 | **Mobile QA pass** | User working through mobile-specific bugs — awaiting findings |
+| H2 | **Account reclassification** | User should reclassify FSA/HSA accounts from "Other Assets" to correct type using the new dropdown |
+| H3 | **Transaction: filter by description/merchant** | Text search input — already exists; verify working well |
+| H4 | **Challenge: verify recalc correctness** | Confirm spend from `activation_date` → today captured correctly |
+| H5 | **Card Research Skill — capture benefits** | Extract full benefit list and auto-POST to `/api/card-products/{id}/benefits` |
 
 ---
 
@@ -32,11 +32,12 @@
 | # | Item | Notes |
 |---|------|-------|
 | F1 | **Classify merchant with AI** | "Ask AI" button next to null-CSC merchants — Claude web-searches MCC/category → saves as merchant mapping |
-| F2 | **Plaid re-link safety** | Guarantee no duplicate transactions or broken accounts when re-linking a Plaid item |
-| F3 | **Benefits: auto-track from transactions** | If a benefit has `trigger_category` set, auto-update `amount_used` from matching transactions in the current cycle |
-| F4 | **Challenges: suggestions / templates** | "Suggested challenges for your cards" based on `CHALLENGE_TEMPLATES` — already exists on backend, wire to UI |
-| F5 | **Visa/MC merchant category API** | Use Visa Supplier Locator API to look up merchant MCCs programmatically; map MCC → CSC |
-| F6 | **Network-specific CSC overrides** | Amex codes bakeries (e.g. BLUE ANGEL) as Dining; Chase may not. Allow a merchant mapping to specify CSC per-network so the correct earn rate is applied per card. Investigate how widespread network-level categorization differences are before scoping. |
+| F2 | **Plaid re-link safety** | No duplicate transactions or broken accounts when re-linking a Plaid item |
+| F3 | **Benefits: auto-track from transactions** | If a benefit has `trigger_category`, auto-update `amount_used` from matching transactions |
+| F4 | **Challenges: suggestions / templates** | "Suggested challenges for your cards" — backend exists, wire to UI |
+| F5 | **Visa/MC merchant category API** | Use Visa Supplier Locator API to look up merchant MCCs; map MCC → CSC |
+| F6 | **Network-specific CSC overrides** | Per-network merchant mapping for earn rate accuracy |
+| F7 | **Points valuation** | CPP multiplier per ecosystem to show estimated $ value alongside raw points |
 
 ---
 
@@ -44,28 +45,31 @@
 
 | # | Item | Notes |
 |---|------|-------|
-| N1 | **AI-driven UI polish** | Use v0 / Lovable to generate specific isolated components (charts, cards, icon sets) once functionality is stable; manually integrate |
-| N2 | **Component refactor** | Extract the 7k-line frontend.html into proper component files — prerequisite for scalable AI-assisted UI work |
-| N3 | **Dark mode** | CSS variable foundation is already in place |
-| N4 | **Mobile / responsive layout** | Cards page and transaction table don't adapt well to small screens yet |
-| N5 | **Export to CSV/PDF** | Export transactions for the selected period/filter — useful for bank statement reconciliation |
-| N6 | **Points valuation** | Apply a CPP (cents-per-point) multiplier per ecosystem to show estimated $ value alongside raw points |
+| ~~N1~~ | ~~**PWA v2**~~ | ✅ Pull-to-refresh, swipe actions, skeleton loading, virtual scroll, offline support — all shipped |
+| N2 | **Component refactor** | Extract frontend.html into proper component files |
+| N3 | **Export to CSV/PDF** | CSV export exists; add PDF support for statement reconciliation |
+| N4 | **AI-driven UI polish** | Use v0/Lovable for isolated components once functionality stable |
 
 ---
 
 ## ✅ Recently Completed
 
-- **Soft-deleted txn exclusion** — spending totals, monthly trend, challenge recalc, and transaction list all now filter `is_excluded=True` rows; fixes ~$5.20 Dining overcounting from stale PRUPLAZACAFE pending txn
-- **Blank card page** — `useMemo` was missing from React destructure; added `useMemo` + `useRef`
-- **Error Boundary** on card detail page — render crashes now show the actual error instead of blank
-- Benefits & Credits section (full CRUD, usage tracking, progress bars, log usage inline)
-- Merchant CSC teaching system (teach from inline edit, bulk assign from No-CSC view)
-- Inline CSC editing on transactions
-- CSC filter + points summary bar on transactions
-- Monthly / QTD / YTD toggle with period navigation on transactions
-- Challenge bonus section in Earn Summary (progress bar, threshold status)
-- apiFetch signature fixes (DELETE, PATCH, POST methods)
-- Comprehensive `spend_challenges` NOT NULL migration (covers all legacy relic columns)
-- `merchant_points_mappings` wired into sync pipeline (user-taught patterns checked first)
-- Main frame width increase
-- Earn Summary rename + silent period refresh
+- **Multi-select filters** — Type, Category, Account dropdowns on Transactions page now support multiple selections
+- **Account type capitalization** — IRA, HSA, FSA, CD, 401(k) display correctly everywhere
+- **Expense credit-netting** — `/stats` and `/budget/actuals` both net refunds in expense categories
+- **KPI card fix** — Reverted broken income reclassification, re-applied with correct category_type filter
+- **Moresheth branding** — Full rebrand: gold coin logo, Playfair Display, PWA icons/splash, manifest, favicon
+- **Cash Flow rework** — Scoped to checking/savings/cash accounts only, categorized breakdown
+- **Account reclassification** — Dropdown to change account types (HSA/FSA from "other" to "savings")
+- **Lock icon alignment** — Moved to far right with fixed-width spacer for consistent row layout
+- **Budget credit-netting** — Income-action transactions in expense categories offset expenses
+- **Cards earn rate** — Product lookup checks both account.product_id and card.product_id
+- **CSC edit silent reload** — Points estimate updates after CSC change without full page refresh
+- **Refresh preserves state** — refreshKey prop pattern instead of key={refreshKey} destroying components
+- **Mobile GCB tagging** — Toggle in mobile transaction edit modal
+- **Multi-card challenge explosion** — Per-card entries with individual spend tracking
+- **Dashboard "See more"** — setPage prop passed to DashboardPage
+- Cards Landing Page (ecosystem overview, per-card challenges, earn summary)
+- Benefits & Credits CRUD, merchant CSC teaching, inline CSC editing
+- CSC filter + points summary, monthly/QTD/YTD toggle
+- Challenge bonus in Earn Summary, comprehensive NOT NULL migration

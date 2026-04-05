@@ -1465,7 +1465,7 @@ def seed_card_products(session):
         ], {"_base": 1, "Dining": 2, "Airlines": 2, "Ground Transportation": 2}),
 
         ("amex_blue_cash_preferred", "Blue Cash Preferred", "Cash Back", "not_held", 95, [],
-         {"_base": 1, "Groceries": 5, "Gas Stations": 2, "Online Shopping": 2}),
+         {"_base": 1, "Groceries": 5, "Streaming": 5, "Gas Stations": 2, "Transit": 2}),
 
         ("hilton_aspire", "Hilton Honors Aspire", "Hilton Honors", "active", 550, [
             ("$400 Hilton Resort Credit ($200 semi-annual, Hilton resort properties)", 200, "semi-annual", "Hilton"),
@@ -1551,7 +1551,7 @@ def seed_card_products(session):
          {"_base": 2, "Hotels": 3}),
 
         ("capital_one_savor_one", "Capital One SavorOne", "Cash Back", "not_held", 0, [],
-         {"_base": 1, "Dining": 2, "Groceries": 2, "Online Shopping": 2}),
+         {"_base": 1, "Dining": 2, "Groceries": 2, "Streaming": 2, "Live Entertainment": 2}),
 
         ("delta_gold", "Delta SkyMiles® Gold American Express Card", "Delta SkyMiles", "active", 150, [
             # Auto-trigger benefits — no spend required
@@ -1671,6 +1671,49 @@ def seed_card_products(session):
             "Dining": 1,            # total 2x
             "Hotels": 1,            # total 2x (direct hotel purchases)
         }),
+
+        # ── Pure Cash Back Cards ──────────────────────────────────────
+
+        ("wells_fargo_active_cash", "Wells Fargo Active Cash", "Cash Back", "not_held", 0, [],
+         {"_base": 2}),
+
+        ("us_bank_cash_plus", "US Bank Cash+", "Cash Back", "not_held", 0, [],
+         {"_base": 1}),
+        # Note: 5% on 2 user-chosen categories (cap $2K/qtr), 2% on 1 user-chosen category.
+        # User should set their chosen categories via CSC overrides on their card.
+
+        ("bofa_customized_cash", "Bank of America Customized Cash Rewards", "Cash Back", "not_held", 0, [],
+         {"_base": 1, "Groceries": 1}),
+        # 3% on 1 user-chosen category (cap $2.5K/qtr), 2% grocery/wholesale, 1% else.
+        # BofA Preferred Rewards members get 25-75% boost on all earn rates.
+
+        ("amex_blue_cash_everyday", "Blue Cash Everyday", "Cash Back", "not_held", 0, [],
+         {"_base": 1, "Groceries": 2, "Gas Stations": 2, "Online Shopping": 2}),
+        # 3% grocery (cap $6K/yr then 1%), 3% gas, 3% online retail, 1% else.
+
+        ("capital_one_savor", "Capital One Savor", "Cash Back", "not_held", 95, [],
+         {"_base": 1, "Dining": 3, "Groceries": 2, "Streaming": 3, "Live Entertainment": 3}),
+        # 4% dining/entertainment/streaming, 3% grocery, 1% else.
+
+        ("citi_custom_cash", "Citi Custom Cash", "Citi ThankYou", "not_held", 0, [],
+         {"_base": 1, "_auto_top": [
+            "Dining", "Groceries", "Gas Stations", "Travel", "Transit",
+            "Streaming", "Drugstore", "Home Improvement", "Fitness & Gyms", "Live Entertainment",
+         ]}),
+        # 5% on top eligible spend category each billing cycle (cap $500), 1% else.
+        # Earns ThankYou Points, so it's in the Citi ThankYou ecosystem.
+
+        ("target_redcard", "Target REDcard Credit", "Target Circle", "not_held", 0, [],
+         {"_base": 1}),
+        # 5% off Target purchases (modeled as 1x since it's a discount, not points).
+
+        ("amazon_prime_visa", "Amazon Prime Visa", "Cash Back", "not_held", 0, [],
+         {"_base": 1, "Amazon": 4, "Whole Foods": 4, "Dining": 1, "Gas Stations": 1, "Transit": 1}),
+        # 5% Amazon/Whole Foods, 2% dining/gas/transit, 1% else.
+
+        ("walmart_rewards_card", "Capital One Walmart Rewards", "Walmart Rewards", "not_held", 0, [],
+         {"_base": 1, "Walmart": 4}),
+        # 5% Walmart.com, 2% Walmart stores/restaurants/travel, 1% else.
     ]
 
     for product_key, card_name, eco_name, status, annual_fee, benefits, rates in products:

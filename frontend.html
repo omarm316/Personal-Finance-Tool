@@ -2778,7 +2778,7 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
         };
         const cards=[
           {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',pct:csPct,invert:false,gold:false},
-          {label:'Net Worth',value:netWorth?.total!=null?fmt(netWorth.total):'—',pct:null,invert:false,gold:true},
+          {label:'Net Worth',value:netWorth?.net_worth!=null?fmt(netWorth.net_worth):'—',pct:null,invert:false,gold:true},
           {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false,gold:true},
           {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true,gold:false},
           {label:'Net',value:netValue,pct:netPct,invert:false,gold:false},
@@ -5625,6 +5625,13 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
     if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
     if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
+    if(n.includes('capital one'))return'/static/ecosystems/capital_one_miles.png';
+    if(n.includes('ihg'))return'/static/ecosystems/ihg_rewards.png';
+    if(n.includes('aadvantage')||n.includes('aa '))return'/static/ecosystems/aa_aadvantage.png';
+    if(n.includes('southwest'))return'/static/ecosystems/southwest_rr.png';
+    if(n.includes('jetblue'))return'/static/ecosystems/jetblue_trueblue.png';
+    if(n.includes('alaska'))return'/static/ecosystems/alaska_mileage_plan.png';
+    if(n.includes('atmos'))return'/static/ecosystems/atmos_rewards.png';
     return null;
   },[ecoName]);
 
@@ -6118,6 +6125,13 @@ function CardsPage({toast,refreshKey}){
                 if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
                 if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
                 if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
+                if(n.includes('capital one'))return'/static/ecosystems/capital_one_miles.png';
+                if(n.includes('ihg'))return'/static/ecosystems/ihg_rewards.png';
+                if(n.includes('aadvantage')||n.includes('aa '))return'/static/ecosystems/aa_aadvantage.png';
+                if(n.includes('southwest'))return'/static/ecosystems/southwest_rr.png';
+                if(n.includes('jetblue'))return'/static/ecosystems/jetblue_trueblue.png';
+                if(n.includes('alaska'))return'/static/ecosystems/alaska_mileage_plan.png';
+                if(n.includes('atmos'))return'/static/ecosystems/atmos_rewards.png';
                 return null;
               };
               const pointsEcos=earnData.ecosystems.filter(e=>!e.is_cash_back);
