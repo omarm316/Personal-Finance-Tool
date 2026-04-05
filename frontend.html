@@ -455,6 +455,9 @@ const sortedCats=(cats)=>{
 };
 /* Capitalize first letter of each word — used for legacy lowercase DB values */
 const toTitleCase=s=>s?s.replace(/(^|\s|_)(\S)/g,(_,sep,c)=>(sep===' '?sep:' ')+c.toUpperCase()).trim():'';
+/* Display-friendly account type labels (acronyms stay uppercase) */
+const _ACCT_TYPE_LABELS={'cd':'CD','hsa':'HSA','fsa':'FSA','ira':'IRA','401k':'401(k)'};
+const fmtAcctType=s=>s?(_ACCT_TYPE_LABELS[s.toLowerCase()]||toTitleCase(s)):'';
 
 /* 8 canonical transaction types (Section 4B) */
 const TXN_TYPES=['Expense','Income','Transfer','Investment Gain (Loss)','Purchase','Sale','Depreciation','Other'];
@@ -2961,7 +2964,7 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
                 style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',marginBottom:4,color:'var(--text-primary)',background:'var(--elevated)',fontFamily:'DM Sans',appearance:'auto'}}>
                 <option value="">— type —</option>
                 {['checking','savings','cash','money market','cd','hsa','fsa','investment','brokerage','401k','ira','credit card','mortgage','loan','student','auto','other'].map(t=>
-                  <option key={t} value={t}>{t.replace(/\b\w/g,c=>c.toUpperCase())}</option>)}
+                  <option key={t} value={t}>{fmtAcctType(t)}</option>)}
               </select>
               <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes (optional)" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',width:'100%',color:'var(--text-muted)',background:'var(--elevated)',fontFamily:'DM Sans'}}/>
             </>:<>
@@ -2976,7 +2979,7 @@ function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,on
         </div>
         {/* Badges row */}
         <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:isEditing?8:0}}>
-          <span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:bucketS.bg,color:bucketS.color}}>{a.account_type}</span>
+          <span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:bucketS.bg,color:bucketS.color}}>{fmtAcctType(a.account_type)}</span>
           {a.mask&&<span style={{fontSize:10,fontWeight:400,padding:'2px 8px',borderRadius:10,background:'var(--elevated)',color:'var(--text-muted)'}}>····{a.mask}</span>}
           {!a.is_manual&&<span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:'rgba(52,211,153,0.10)',color:'var(--green)'}}>● Plaid</span>}
           {a.is_manual&&<span style={{fontSize:10,fontWeight:500,padding:'2px 8px',borderRadius:10,background:'var(--gold-soft)',color:'var(--gold)'}}>Manual</span>}
@@ -7022,7 +7025,7 @@ function NetWorthPage({toast,refreshKey}){
                       <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                         <div style={{flex:1,minWidth:120}}>
                           <div style={{fontSize:12,fontWeight:400,marginBottom:2,color:'var(--text-primary)'}}>{a.account_name}{a.mask?` ···${a.mask}`:''}</div>
-                          <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}</div>
+                          <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtAcctType(a.account_type)}</div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:6}}>
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>Balance $</span>
@@ -7041,7 +7044,7 @@ function NetWorthPage({toast,refreshKey}){
                         <div>
                           <span style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{a.account_name}{a.mask?<span style={{fontSize:11,color:'var(--text-muted)',marginLeft:4,fontWeight:300}}>···{a.mask}</span>:null}</span>
                           <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
-                            {a.account_type}{a.is_manual?' · Manual':''}
+                            {fmtAcctType(a.account_type)}{a.is_manual?' · Manual':''}
                             {a.start_date?<span style={{marginLeft:8}}>Anchor: {fmtBal(a.starting_balance)} as of {a.start_date}</span>:
                               <span style={{marginLeft:8,color:'var(--amber)'}}>⚠ No starting balance set</span>}
                           </div>
@@ -8289,7 +8292,7 @@ function CashFlowPage({toast,refreshKey}){
                 :<div className="grid-auto-sm" style={{gap:10}}>
                   {salaryAccounts.map(a=>(
                     <div key={a.id} style={{display:'flex',flexDirection:'column',gap:3}}>
-                      <label style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500}}>{a.account_name} <span style={{opacity:0.55,fontSize:10}}>({a.account_type})</span></label>
+                      <label style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500}}>{a.account_name} <span style={{opacity:0.55,fontSize:10}}>({fmtAcctType(a.account_type)})</span></label>
                       <input type="number" step="0.01" min="0" value={salaryForm.allocations[a.id]||''} onChange={e=>setSalaryForm(f=>({...f,allocations:{...f.allocations,[a.id]:e.target.value}}))} placeholder="0.00" style={{...INP,padding:'5px 8px'}}/>
                     </div>
                   ))}
@@ -8367,7 +8370,7 @@ function CashFlowPage({toast,refreshKey}){
               <th>Description</th>
               <th>Person</th>
               {salaryAccounts.map(a=>(
-                <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${a.account_type})`}>{a.account_name}</th>
+                <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${fmtAcctType(a.account_type)})`}>{a.account_name}</th>
               ))}
               <th style={{textAlign:'right',minWidth:100}}>Total</th>
               <th style={{textAlign:'center'}}>Actions</th>
@@ -8516,7 +8519,7 @@ function ReconciliationPanel({toast}){
             <tr key={a.account_id}>
               <td style={{fontWeight:500}}>
                 {a.account_name}
-                <div style={{fontSize:11,color:'var(--text-muted)'}}>{a.account_type}</div>
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtAcctType(a.account_type)}</div>
               </td>
               <td style={{textAlign:'right',fontFamily:'DM Sans'}}>{a.latest?(a.latest.plaid_balance<0?'−':'')+fmt(a.latest.plaid_balance):'—'}</td>
               <td style={{textAlign:'right',fontFamily:'DM Sans'}}>{a.latest?(a.latest.computed_balance<0?'−':'')+fmt(a.latest.computed_balance):'—'}</td>
