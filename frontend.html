@@ -1717,29 +1717,60 @@ function SwipeRow({children,leftActions,rightActions,isOpen,onOpen,onClose}){
   );
 }
 
+/* ── Virtual scroll hook — renders only visible items + buffer ───────── */
+function useVirtualScroll(containerRef,itemCount,itemHeight,overscan=8){
+  const[range,setRange]=useState({start:0,end:40});
+  useEffect(()=>{
+    const el=containerRef.current;if(!el)return;
+    const onScroll=()=>{
+      const scrollTop=el.scrollTop;const viewH=el.clientHeight;
+      const start=Math.max(0,Math.floor(scrollTop/itemHeight)-overscan);
+      const end=Math.min(itemCount,Math.ceil((scrollTop+viewH)/itemHeight)+overscan);
+      setRange(r=>(r.start===start&&r.end===end)?r:{start,end});
+    };
+    onScroll();
+    el.addEventListener('scroll',onScroll,{passive:true});
+    return()=>el.removeEventListener('scroll',onScroll);
+  },[containerRef,itemCount,itemHeight,overscan]);
+  return{start:range.start,end:range.end,totalHeight:itemCount*itemHeight,offsetY:range.start*itemHeight};
+}
+
 /* ── Mobile transaction list: replaces full table on narrow screens ─────── */
 function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
   const isMobile=useIsMobile();
-  // Desktop: full table
-  if(!isMobile) return(
-    <div className="table-wrap"><table>
-      <thead><tr>
-        <th style={{width:28,paddingLeft:12,paddingRight:4}}>
-          <input type="checkbox" title="Select / deselect all visible"
-            checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
-            onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
-            style={{cursor:'pointer'}}/>
-        </th>
-        {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
-          <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
-            {lbl}<span style={{marginLeft:4,opacity:sortCol===col?1:0.25,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
-          </th>
-        ))}
-        <th>Actions</th>
-      </tr></thead>
-      <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
-    </table></div>
-  );
+  // Desktop: full table with virtual scroll for large lists
+  const desktopScrollRef=useRef(null);
+  const ROW_H=44;
+  const virt=useVirtualScroll(desktopScrollRef,visible.length,ROW_H);
+  if(!isMobile){
+    const useVirt=visible.length>80;
+    const rows=useVirt?visible.slice(virt.start,virt.end):visible;
+    return(
+      <div className="table-wrap" ref={desktopScrollRef} style={useVirt?{maxHeight:'70vh',overflowY:'auto'}:undefined}>
+        <table>
+          <thead><tr>
+            <th style={{width:28,paddingLeft:12,paddingRight:4}}>
+              <input type="checkbox" title="Select / deselect all visible"
+                checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
+                onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
+                style={{cursor:'pointer'}}/>
+            </th>
+            {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
+              <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+                {lbl}<span style={{marginLeft:4,opacity:sortCol===col?1:0.25,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
+              </th>
+            ))}
+            <th>Actions</th>
+          </tr></thead>
+          <tbody>
+            {useVirt&&<tr style={{height:virt.offsetY}}><td colSpan="8"/></tr>}
+            {rows.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}
+            {useVirt&&<tr style={{height:Math.max(0,virt.totalHeight-virt.end*ROW_H)}}><td colSpan="8"/></tr>}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   // Mobile: card list with swipe-to-reveal actions
   const[editTxn,setEditTxn]=useState(null);
   const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
@@ -9178,6 +9209,13 @@ function App(){
   },[loadMeta]);
 
   const[openPlaid,linkSummaryModal]=usePlaidLink(toast,handleLinkDone);
+  const[online,setOnline]=useState(navigator.onLine);
+  useEffect(()=>{
+    const on=()=>{setOnline(true);handleRefresh();toast('Back online — refreshing data');};
+    const off=()=>{setOnline(false);toast('You\'re offline — showing cached data','error');};
+    window.addEventListener('online',on);window.addEventListener('offline',off);
+    return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off);};
+  },[handleRefresh]);
   const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',cashplanner:'Cash Flows',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
@@ -9194,6 +9232,10 @@ function App(){
             <button onClick={handleRefresh} title="Refresh page data" style={{background:'none',border:'1px solid var(--border)',borderRadius:7,padding:'5px 10px',cursor:'pointer',color:'var(--text-muted)',fontSize:15,lineHeight:1,transition:'transform 0.4s',transform:refreshing?'rotate(360deg)':'rotate(0deg)'}}>↻</button>
           </div>
         </div>
+        {!online&&<div style={{padding:'6px 16px',background:'rgba(248,113,113,0.1)',borderBottom:'1px solid rgba(248,113,113,0.2)',
+          display:'flex',alignItems:'center',gap:8,fontSize:12,color:'var(--red)',fontWeight:400}}>
+          <span style={{fontSize:14}}>⚡</span>You're offline — showing cached data. Changes will sync when reconnected.
+        </div>}
         <div className="quick-nav hide-mobile">
           {[{id:'dashboard',label:'Dashboard'},{id:'transactions',label:'Transactions'},{id:'cards',label:'Cards'}].map(t=>(
             <button key={t.id} data-active={page===t.id} onClick={()=>setPage(t.id)}>{t.label}</button>
