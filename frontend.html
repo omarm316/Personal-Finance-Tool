@@ -160,6 +160,20 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
 .loading{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);font-size:14px;gap:10px}
 .spinner{width:20px;height:20px;border:2.5px solid #e5e7eb;border-top-color:var(--blue);border-radius:50%;animation:spin 0.7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* ── Pull-to-refresh indicator ── */
+.ptr-indicator{position:fixed;left:50%;transform:translateX(-50%);z-index:100;pointer-events:none;transition:opacity 0.2s}
+.ptr-spinner{width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center}
+.ptr-spinner svg{width:18px;height:18px;color:var(--gold);transition:transform 0.2s}
+.ptr-spinner.releasing svg{animation:spin 0.7s linear infinite}
+/* ── Skeleton shimmer ── */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skeleton{border-radius:8px;background:linear-gradient(90deg,var(--elevated) 25%,rgba(255,255,255,0.06) 50%,var(--elevated) 75%);background-size:800px 100%;animation:shimmer 1.5s ease-in-out infinite}
+[data-theme="light"] .skeleton{background:linear-gradient(90deg,#e8e5df 25%,rgba(255,255,255,0.6) 50%,#e8e5df 75%);background-size:800px 100%}
+.skeleton-text{height:14px;margin-bottom:8px;width:80%}
+.skeleton-text.short{width:40%}
+.skeleton-text.medium{width:60%}
+.skeleton-card{height:90px;margin-bottom:12px}
+.skeleton-row{height:44px;margin-bottom:6px;border-radius:6px}
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px;color:var(--text-muted);gap:8px}
 .empty-icon{font-size:36px;opacity:0.4}
 .dash-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
@@ -248,6 +262,78 @@ const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).fo
 const fmtRound=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
 const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
+/* ── Pull-to-refresh hook (mobile only) ─────────────────────────────── */
+function usePullToRefresh(contentRef,onRefresh){
+  const[ptrState,setPtrState]=useState('idle'); // idle|pulling|releasing|done
+  const[pullY,setPullY]=useState(0);
+  const startY=useRef(0);const active=useRef(false);
+  const THRESHOLD=70;
+  useEffect(()=>{
+    const el=contentRef.current;if(!el)return;
+    const isMobile=()=>window.innerWidth<=768;
+    const onStart=e=>{if(!isMobile()||el.scrollTop>5)return;startY.current=e.touches[0].clientY;active.current=true;};
+    const onMove=e=>{
+      if(!active.current)return;
+      const dy=e.touches[0].clientY-startY.current;
+      if(dy<0||el.scrollTop>5){active.current=false;setPullY(0);setPtrState('idle');return;}
+      /* Dampen the pull distance */
+      const dampened=Math.min(dy*0.45,120);
+      setPullY(dampened);setPtrState(dampened>=THRESHOLD?'releasing':'pulling');
+      if(dy>10)e.preventDefault();
+    };
+    const onEnd=()=>{
+      if(!active.current)return;active.current=false;
+      if(ptrState==='releasing'){setPtrState('done');onRefresh();setTimeout(()=>{setPtrState('idle');setPullY(0);},600);}
+      else{setPtrState('idle');setPullY(0);}
+    };
+    el.addEventListener('touchstart',onStart,{passive:true});
+    el.addEventListener('touchmove',onMove,{passive:false});
+    el.addEventListener('touchend',onEnd,{passive:true});
+    return()=>{el.removeEventListener('touchstart',onStart);el.removeEventListener('touchmove',onMove);el.removeEventListener('touchend',onEnd);};
+  },[contentRef,onRefresh,ptrState]);
+  return{ptrState,pullY};
+}
+
+/* ── Pull-to-refresh indicator component ───────────────────────────── */
+function PullToRefreshIndicator({pullY,ptrState}){
+  if(ptrState==='idle'&&pullY===0)return null;
+  const ready=ptrState==='releasing'||ptrState==='done';
+  const rotation=Math.min(pullY/70*180,180);
+  return(
+    <div className="ptr-indicator" style={{top:Math.max(pullY-20,12),opacity:pullY>10?1:0}}>
+      <div className={`ptr-spinner ${ready?'releasing':''}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+          style={{transform:ready?undefined:`rotate(${rotation}deg)`}}>
+          <path d="M23 4v6h-6M1 20v-6h6"/>
+          <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* ── Skeleton loading placeholders ─────────────────────────────────── */
+function SkeletonCard({height=90,style={}}){return <div className="skeleton skeleton-card" style={{height,...style}}/>;}
+function SkeletonRow({count=5}){return <>{Array.from({length:count},(_,i)=><div key={i} className="skeleton skeleton-row"/>)}</>;}
+function SkeletonDashboard(){return(
+  <div style={{display:'flex',flexDirection:'column',gap:12,padding:4}}>
+    <div className="metric-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
+      {[1,2,3,4].map(i=><SkeletonCard key={i} height={80}/>)}
+    </div>
+    <SkeletonCard height={200}/>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+      <SkeletonCard height={160}/>
+      <SkeletonCard height={160}/>
+    </div>
+  </div>
+);}
+function SkeletonTable({rows=8}){return(
+  <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:16,display:'flex',flexDirection:'column',gap:4}}>
+    <div className="skeleton" style={{height:36,marginBottom:8,borderRadius:6}}/>
+    <SkeletonRow count={rows}/>
+  </div>
+);}
+
 const CHART_COLORS=['#93c5fd','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','rgba(248,113,113,0.3)','#bef264'];
 // Canonical category colors — primary keys match database.py seed_categories exactly.
 // Legacy aliases kept for backward-compat (old transactions may carry these names).
@@ -1582,6 +1668,55 @@ function MobileTxnModal({txn,categories,onSave,onClose,toast}){
   );
 }
 
+/* ── Swipeable row for mobile — reveals action buttons behind the card ── */
+function SwipeRow({children,leftActions,rightActions,isOpen,onOpen,onClose}){
+  const ref=useRef(null);
+  const startX=useRef(0);const startY=useRef(0);const dx=useRef(0);const swiping=useRef(false);const dirLocked=useRef(null);
+  const rightW=rightActions?144:0;const leftW=leftActions?72:0;
+  const[offset,setOffset]=useState(0);
+  useEffect(()=>{if(!isOpen)setOffset(0);},[isOpen]);
+  const onStart=e=>{const touch=e.touches[0];startX.current=touch.clientX;startY.current=touch.clientY;dx.current=0;swiping.current=true;dirLocked.current=null;};
+  const onMove=e=>{
+    if(!swiping.current)return;
+    const touch=e.touches[0];const deltaX=touch.clientX-startX.current;const deltaY=touch.clientY-startY.current;
+    if(dirLocked.current===null){
+      if(Math.abs(deltaX)>8||Math.abs(deltaY)>8){
+        dirLocked.current=Math.abs(deltaX)>Math.abs(deltaY)?'h':'v';
+      }
+      return;
+    }
+    if(dirLocked.current==='v'){swiping.current=false;return;}
+    e.preventDefault();
+    dx.current=deltaX;
+    const base=isOpen?(dx.current>0?0:-rightW):0;
+    const raw=base+deltaX;
+    const clamped=Math.max(-rightW,Math.min(leftW,raw));
+    setOffset(clamped);
+  };
+  const onEnd=()=>{
+    if(!swiping.current&&dirLocked.current!=='h')return;swiping.current=false;
+    const threshold=40;
+    if(offset<-threshold){setOffset(-rightW);onOpen();}
+    else if(offset>threshold){setOffset(leftW);onOpen();}
+    else{setOffset(0);onClose();}
+  };
+  return(
+    <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--border)'}}>
+      {/* Left actions (revealed on swipe right) */}
+      {leftActions&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:leftW,display:'flex'}}>{leftActions}</div>}
+      {/* Right actions (revealed on swipe left) */}
+      {rightActions&&<div style={{position:'absolute',right:0,top:0,bottom:0,width:rightW,display:'flex',justifyContent:'flex-end'}}>{rightActions}</div>}
+      {/* Foreground card */}
+      <div ref={ref}
+        onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+        style={{transform:`translateX(${offset}px)`,transition:swiping.current?'none':'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)',
+          position:'relative',zIndex:2,background:'var(--card-bg)'}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /* ── Mobile transaction list: replaces full table on narrow screens ─────── */
 function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
   const isMobile=useIsMobile();
@@ -1605,8 +1740,9 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
       <tbody>{visible.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}</tbody>
     </table></div>
   );
-  // Mobile: card list — tap any card to open edit modal
+  // Mobile: card list with swipe-to-reveal actions
   const[editTxn,setEditTxn]=useState(null);
+  const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
   return(
     <div>
       {editTxn&&<MobileTxnModal txn={editTxn} categories={categories} onSave={onSave} onClose={()=>setEditTxn(null)} toast={toast}/>}
@@ -1615,34 +1751,55 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
         const isIncome=t.action==='Income';
         const needsRev=t.needs_review&&!t.is_locked;
         const catLabel=t.action==='Transfer'?'Transfer':(t.category_final||'Unclassified');
+        const isOpen=swipedId===t.id;
         return(
-          <div key={t.id} onClick={()=>setEditTxn(t)}
-            style={{padding:'11px 14px',borderBottom:'1px solid var(--border)',
-              background:needsRev?'rgba(251,191,36,0.06)':t.is_locked?'rgba(96,165,250,0.06)':'var(--card-bg)',
-              display:'flex',flexDirection:'column',gap:5,cursor:'pointer',WebkitTapHighlightColor:'transparent'}}>
-            {/* Top row: description + amount */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
-              <div style={{fontWeight:300,fontSize:13,color:'var(--text-primary)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {t.description_clean||t.description_display||t.description_raw}
+          <SwipeRow key={t.id} isOpen={isOpen} onOpen={()=>setSwipedId(t.id)} onClose={()=>setSwipedId(null)}
+            rightActions={
+              <div style={{display:'flex',height:'100%'}}>
+                <button onClick={e=>{e.stopPropagation();setEditTxn(t);setSwipedId(null);}}
+                  style={{width:72,border:'none',background:'var(--blue)',color:'#fff',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3}}>
+                  <span style={{fontSize:16}}>✎</span>Edit
+                </button>
+                {needsRev&&<button onClick={e=>{e.stopPropagation();onReview(t);setSwipedId(null);}}
+                  style={{width:72,border:'none',background:'var(--amber)',color:'#1a1a2e',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3}}>
+                  <span style={{fontSize:16}}>✓</span>Review
+                </button>}
               </div>
-              <span style={{fontFamily:'DM Sans',fontWeight:300,fontSize:13,flexShrink:0,
-                color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
-                {t.amount<0?'–':'+'}{fmt(t.amount)}
-              </span>
+            }
+            leftActions={
+              <button onClick={e=>{e.stopPropagation();onSave(t.id,{is_excluded:!t.is_excluded});setSwipedId(null);toast(t.is_excluded?'Included':'Excluded');}}
+                style={{width:72,border:'none',background:t.is_excluded?'var(--green)':'var(--red)',color:'#fff',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,height:'100%'}}>
+                <span style={{fontSize:16}}>{t.is_excluded?'↩':'⊘'}</span>{t.is_excluded?'Include':'Exclude'}
+              </button>
+            }>
+            <div onClick={()=>setEditTxn(t)}
+              style={{padding:'11px 14px',
+                background:needsRev?'rgba(251,191,36,0.06)':t.is_locked?'rgba(96,165,250,0.06)':'var(--card-bg)',
+                display:'flex',flexDirection:'column',gap:5,cursor:'pointer',WebkitTapHighlightColor:'transparent'}}>
+              {/* Top row: description + amount */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                <div style={{fontWeight:300,fontSize:13,color:'var(--text-primary)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {t.description_clean||t.description_display||t.description_raw}
+                </div>
+                <span style={{fontFamily:'DM Sans',fontWeight:300,fontSize:13,flexShrink:0,
+                  color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
+                  {t.amount<0?'–':'+'}{fmt(t.amount)}
+                </span>
+              </div>
+              {/* Bottom row: date · account · category badge */}
+              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{fmtDate(t.date)}</span>
+                {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300,overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+                <span style={{fontSize:10,padding:'1px 7px',borderRadius:4,
+                  background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'var(--gold-soft)':'var(--elevated)'),
+                  color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--gold)':'var(--text-muted)'),fontWeight:400}}>
+                  {catLabel}
+                </span>
+                {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(251,191,36,0.12)',color:'var(--amber)',fontWeight:400}}>Review</span>}
+                {t.is_locked&&<span style={{fontSize:11}}>🔒</span>}
+              </div>
             </div>
-            {/* Bottom row: date · account · category badge */}
-            <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-              <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{fmtDate(t.date)}</span>
-              {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300,overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
-              <span style={{fontSize:10,padding:'1px 7px',borderRadius:4,
-                background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'var(--gold-soft)':'var(--elevated)'),
-                color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--gold)':'var(--text-muted)'),fontWeight:400}}>
-                {catLabel}
-              </span>
-              {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(251,191,36,0.12)',color:'var(--amber)',fontWeight:400}}>Review</span>}
-              {t.is_locked&&<span style={{fontSize:11}}>🔒</span>}
-            </div>
-          </div>
+          </SwipeRow>
         );
       })}
     </div>
@@ -1899,7 +2056,7 @@ function TransactionsPage({categories,toast,refreshKey}){
         {tableLoading&&<div style={{position:'absolute',inset:0,background:'rgba(var(--bg-rgb,12,12,16),0.6)',zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(2px)',borderRadius:14}}>
           <div className="spinner"/>
         </div>}
-        {loading&&txns.length===0?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+        {loading&&txns.length===0?<SkeletonTable rows={10}/>
           :visible.length===0&&!tableLoading?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
           :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
         }
@@ -2546,7 +2703,7 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
     loadCatDetail(cat,budgetView,viewYear,viewMonth);
   };
 
-  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  if(loading)return<SkeletonDashboard/>;
 
   const hr=new Date().getHours();
   const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
@@ -4451,7 +4608,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   // Load grouped unclassified merchants when filter='__none__'
   useEffect(()=>{if(cscFilter==='__none__')loadUnclassified();},[accountId,cscFilter]);
 
-  if(loading)return<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>;
+  if(loading)return<SkeletonTable rows={8}/>;
   if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
 
   const acct=d.account;
@@ -8045,7 +8202,7 @@ function CashFlowPage({toast,refreshKey}){
 
   const INP={border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:300,fontFamily:'DM Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'};
 
-  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  if(loading)return<SkeletonTable rows={6}/>;
 
   const today=todayStr();
   const futureOvs=overlays.filter(o=>o.flow_date>=today);
@@ -8641,7 +8798,7 @@ function DailyBalancesPage({toast,refreshKey}){
 
   const GRP_COLORS={'Checking & Savings':'rgba(52,211,153,0.08)','Investments':'rgba(96,165,250,0.08)','Other Assets':'rgba(139,92,246,0.08)','Credit Cards':'rgba(251,191,36,0.08)','Loans':'rgba(248,113,113,0.08)','Other Liabilities':'rgba(248,113,113,0.08)'};
 
-  if(loading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+  if(loading)return<SkeletonTable rows={6}/>;
   if(!data||!data.dates)return<div style={{padding:20,color:'var(--text-muted)'}}>No data</div>;
 
   const{dates,groups=[],today,projection_details={}}=data;
@@ -8952,14 +9109,16 @@ function App(){
   const[pendingDupScan,setPendingDupScan]=useState(false);
   const[theme,setTheme]=useState(()=>{try{return localStorage.getItem('theme')||'dark'}catch(e){return'dark'}});
   const{toasts,toast}=useToast();
+  const contentRef=useRef(null);
 
   useEffect(()=>{document.documentElement.setAttribute('data-theme',theme);try{localStorage.setItem('theme',theme)}catch(e){}const tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.content=theme==='dark'?'#0c0c10':'#f5f3ef';},[theme]);
 
-  const handleRefresh=async()=>{
+  const handleRefresh=useCallback(()=>{
     setRefreshing(true);
     setRefreshKey(k=>k+1);
     setTimeout(()=>setRefreshing(false),600);
-  };
+  },[]);
+  const{ptrState,pullY}=usePullToRefresh(contentRef,handleRefresh);
 
   const loadMeta=useCallback(async()=>{
     try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
@@ -9040,7 +9199,8 @@ function App(){
             <button key={t.id} data-active={page===t.id} onClick={()=>setPage(t.id)}>{t.label}</button>
           ))}
         </div>
-        <div className="content">
+        <PullToRefreshIndicator pullY={pullY} ptrState={ptrState}/>
+        <div className="content" ref={contentRef}>
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage} refreshKey={refreshKey}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
           {page==='budgets'&&<BudgetsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
