@@ -39,6 +39,18 @@ from llm_service import enrich_transaction, save_override, _call_groq, VALID_CAT
 from categorization import CategorizationEngine, load_rules_from_excel
 from plaid_integration import setup_plaid_from_env
 from plaid.exceptions import ApiException as PlaidApiException
+import logging
+import time
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s  %(levelname)-5s  %(name)s  %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+logger = logging.getLogger('moresheth')
 
 # ---------------------------------------------------------------------------
 # Account classification helpers
@@ -1012,6 +1024,37 @@ if APP_PASSWORD:
     app.add_middleware(PasswordMiddleware)
 
 
+# Request logging middleware — logs method, path, status, and duration for every API call.
+# Errors (4xx/5xx) are logged at WARNING/ERROR level with details.
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not request.url.path.startswith('/api/'):
+            return await call_next(request)
+        t0 = time.perf_counter()
+        method = request.method
+        path = request.url.path
+        qs = str(request.url.query)
+        try:
+            response = await call_next(request)
+            elapsed = (time.perf_counter() - t0) * 1000
+            status = response.status_code
+            if status >= 500:
+                logger.error(f'{method} {path}{"?" + qs if qs else ""}  → {status}  ({elapsed:.0f}ms)')
+            elif status >= 400:
+                logger.warning(f'{method} {path}{"?" + qs if qs else ""}  → {status}  ({elapsed:.0f}ms)')
+            elif elapsed > 2000:
+                logger.warning(f'{method} {path}{"?" + qs if qs else ""}  → {status}  SLOW ({elapsed:.0f}ms)')
+            else:
+                logger.info(f'{method} {path}{"?" + qs if qs else ""}  → {status}  ({elapsed:.0f}ms)')
+            return response
+        except Exception as exc:
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.exception(f'{method} {path}  → UNHANDLED  ({elapsed:.0f}ms): {exc}')
+            raise
+
+app.add_middleware(RequestLoggingMiddleware)
+
+
 def _login_page():
     return """<!DOCTYPE html><html><head><title>Login</title>
 <style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5}
@@ -1197,6 +1240,8 @@ class BudgetTargetBulk(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
+    logger.info('═══ Moresheth starting up ═══')
+    t0 = time.perf_counter()
     session = SessionLocal()
     try:
         seed_categories(session)
@@ -1209,26 +1254,26 @@ async def startup_event():
                 excel_path = os.path.join(here, fname)
                 if os.path.exists(excel_path):
                     n = load_rules_from_excel(excel_path, session)
-                    print(f"Auto-loaded {n} rules from {fname}")
+                    logger.info(f"Auto-loaded {n} rules from {fname}")
                     break
             else:
-                print("No Excel file found — run /api/init/import-rules manually")
+                logger.info("No Excel file found — run /api/init/import-rules manually")
         else:
-            print(f"Rules loaded: {rule_count} active rules")
+            logger.info(f"Rules loaded: {rule_count} active rules")
 
         # Seed points ecosystems and card products
         try:
             seed_points_ecosystems(session)
-            print("Ecosystems seeded OK")
+            logger.info("Ecosystems seeded OK")
         except Exception as eco_err:
             session.rollback()
-            print(f"WARNING: seed_points_ecosystems failed: {eco_err}")
+            logger.warning(f"seed_points_ecosystems failed: {eco_err}")
         try:
             seed_card_products(session)
-            print("Card products seeded OK")
+            logger.info("Card products seeded OK")
         except Exception as prod_err:
             session.rollback()
-            print(f"WARNING: seed_card_products failed: {prod_err}")
+            logger.warning(f"seed_card_products failed: {prod_err}")
             import traceback
             traceback.print_exc()
 
@@ -1251,15 +1296,20 @@ async def startup_event():
                 _fixed += 1
         if _fixed:
             session.commit()
-            print(f"Fixed {_fixed} balance observations with wrong sign for credit/loan accounts")
+            logger.info(f"Fixed {_fixed} balance observations with wrong sign for credit/loan accounts")
 
-        print("Database initialized")
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.info(f"Database initialized ({elapsed:.0f}ms)")
         client_id = os.getenv("PLAID_CLIENT_ID")
         plaid_env = os.getenv("PLAID_ENV")
         if client_id:
-            print(f"Plaid credentials loaded: {client_id[:8]}... ({plaid_env})")
+            logger.info(f"Plaid credentials loaded: {client_id[:8]}... ({plaid_env})")
         else:
-            print("WARNING: PLAID_CLIENT_ID not found — check your .env file")
+            logger.warning("PLAID_CLIENT_ID not found — check your .env file")
+        total_elapsed = (time.perf_counter() - t0) * 1000
+        accts = session.query(Account).filter_by(is_active=True).count()
+        txns = session.query(Transaction).count()
+        logger.info(f'═══ Moresheth ready — {accts} accounts, {txns:,} transactions ({total_elapsed:.0f}ms) ═══')
     finally:
         session.close()
 
@@ -1551,9 +1601,10 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         try:
             db.commit()
         except Exception:
+            logger.exception('Unexpected error — rolling back')
             db.rollback()
         if snapshot_errors:
-            print(f"[exchange-token] snapshot rebuild warnings: {snapshot_errors}")
+            logger.warning(f"[exchange-token] snapshot rebuild warnings: {snapshot_errors}")
 
         msg = f"Linked {len(accounts)} account(s) and synced {synced} transaction(s)"
         if sync_error:
@@ -1651,7 +1702,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 plaid_account_id=txn_data['plaid_account_id']
             ).first()
             if not account:
-                print(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
+                logger.info(f"[sync] skipping txn — no account for plaid_account_id={txn_data['plaid_account_id']}")
                 skipped += 1
                 sp.rollback()  # close savepoint before continue (nothing to keep)
                 continue
@@ -1682,7 +1733,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 # Adopt the new Plaid ID — all user classifications are preserved
                 hash_match.plaid_transaction_id = txn_data['plaid_transaction_id']
                 content_matched_ids.add(hash_match.id)
-                print(f"[sync] content-hash match: adopted new plaid_id for '{hash_match.description_raw[:40]}'")
+                logger.info(f"[sync] content-hash match: adopted new plaid_id for '{hash_match.description_raw[:40]}'")
                 sp.commit()
                 continue  # do NOT insert a duplicate row
 
@@ -1816,12 +1867,12 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         except Exception as txn_err:
             sp.rollback()  # roll back only THIS row — previously flushed rows are unaffected
             errors += 1
-            print(f"[sync] failed txn {txn_data.get('plaid_transaction_id','?')}: {txn_err}")
+            logger.info(f"[sync] failed txn {txn_data.get('plaid_transaction_id','?')}: {txn_err}")
 
     if skipped:
-        print(f"[sync] {plaid_item.institution_name}: {skipped} transaction(s) skipped — no matching account")
+        logger.info(f"[sync] {plaid_item.institution_name}: {skipped} transaction(s) skipped — no matching account")
     if errors:
-        print(f"[sync] {plaid_item.institution_name}: {errors} transaction(s) failed to write")
+        logger.error(f"[sync] {plaid_item.institution_name}: {errors} transaction(s) failed to write")
 
     # ── Handle modified transactions ─────────────────────────────────────────
     # Plaid sends updated metadata (date shift, merchant enrichment, amount
@@ -1847,11 +1898,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             modified_count += 1
         except Exception as mod_err:
             modified_errors += 1
-            print(f"[sync] {plaid_item.institution_name}: failed to apply modified txn {txn_data.get('plaid_transaction_id','?')}: {mod_err}")
+            logger.error(f"[sync] {plaid_item.institution_name}: failed to apply modified txn {txn_data.get('plaid_transaction_id','?')}: {mod_err}")
     if modified_count:
-        print(f"[sync] {plaid_item.institution_name}: {modified_count} transaction(s) updated (Plaid modified)")
+        logger.info(f"[sync] {plaid_item.institution_name}: {modified_count} transaction(s) updated (Plaid modified)")
     if modified_errors:
-        print(f"[sync] {plaid_item.institution_name}: {modified_errors} modified transaction(s) failed")
+        logger.info(f"[sync] {plaid_item.institution_name}: {modified_errors} modified transaction(s) failed")
 
     # ── Handle removed transactions ───────────────────────────────────────────
     # Plaid removes a transaction when: a date/ID changes on settlement, a
@@ -1871,7 +1922,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 continue
             if existing.is_locked:
                 locked_skipped += 1
-                print(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
+                logger.info(f"[sync] skipping removal of locked txn {plaid_id} — user manually confirmed")
                 continue
             # Soft-delete: exclude from all views but keep the row in the DB
             existing.is_excluded = True
@@ -1880,16 +1931,16 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             if existing.description_clean and note not in existing.description_clean:
                 existing.description_clean = existing.description_clean + note
             removed_count += 1
-            print(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
+            logger.info(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
         except Exception as rem_err:
             removed_errors += 1
-            print(f"[sync] {plaid_item.institution_name}: failed to process removed txn {plaid_id}: {rem_err}")
+            logger.error(f"[sync] {plaid_item.institution_name}: failed to process removed txn {plaid_id}: {rem_err}")
     if removed_count:
-        print(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) soft-deleted (Plaid removed)")
+        logger.info(f"[sync] {plaid_item.institution_name}: {removed_count} transaction(s) soft-deleted (Plaid removed)")
     if removed_errors:
-        print(f"[sync] {plaid_item.institution_name}: {removed_errors} removed transaction(s) failed")
+        logger.info(f"[sync] {plaid_item.institution_name}: {removed_errors} removed transaction(s) failed")
     if locked_skipped:
-        print(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
+        logger.info(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
 
     # Store cursor — use None instead of empty string for clean state
     plaid_item.cursor         = result['next_cursor'] or None
@@ -1899,7 +1950,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     except Exception as commit_err:
         # Commit failed — this is the exception that will propagate to
         # _sync_item_background's except-handler and be stored on the item.
-        print(f"[sync] {plaid_item.institution_name}: final commit failed: {commit_err}")
+        logger.info(f"[sync] {plaid_item.institution_name}: final commit failed: {commit_err}")
         db.rollback()
         raise
     return total_added
@@ -1953,13 +2004,13 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                             is_active=True,
                         ))
                 db.commit()
-                print(f"[sync] {item.institution_name}: {len(accounts)} account(s) reconciled")
+                logger.info(f"[sync] {item.institution_name}: {len(accounts)} account(s) reconciled")
             except Exception as acc_err:
-                print(f"[sync] account refresh failed for {item_id}: {acc_err}")
+                logger.error(f"[sync] account refresh failed for {item_id}: {acc_err}")
             item.cursor = None
             db.commit()
         added = await _sync_item(item, plaid, db)
-        print(f"[sync] {item.institution_name}: {added} transaction(s) added")
+        logger.info(f"[sync] {item.institution_name}: {added} transaction(s) added")
         # Clear any previous error now that sync succeeded
         if item.last_error_code:
             item.last_error_code    = None
@@ -1997,9 +2048,9 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                         source='sync',
                     ))
             db.commit()
-            print(f"[sync] {item.institution_name}: balance observations recorded")
+            logger.info(f"[sync] {item.institution_name}: balance observations recorded")
         except Exception as obs_err:
-            print(f"[sync] {item.institution_name}: balance observation failed: {obs_err}")
+            logger.info(f"[sync] {item.institution_name}: balance observation failed: {obs_err}")
     except PlaidApiException as e:
         # Structured Plaid error — extract code and store for UI display
         import traceback; traceback.print_exc()
@@ -2011,7 +2062,7 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
         except Exception:
             err_code = 'PLAID_ERROR'
             err_msg  = str(e)
-        print(f"[sync] {item_id} Plaid error {err_code}: {err_msg}")
+        logger.info(f"[sync] {item_id} Plaid error {err_code}: {err_msg}")
 
         # Cursor-reset errors: Plaid requires us to start from scratch.
         # Reset cursor and retry once immediately — no user action needed.
@@ -2020,7 +2071,7 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             'INVALID_CURSOR',
         }
         if err_code in CURSOR_RESET_CODES and item and not clear_cursor:
-            print(f"[sync] {item.institution_name}: {err_code} — resetting cursor and retrying once")
+            logger.info(f"[sync] {item.institution_name}: {err_code} — resetting cursor and retrying once")
             try:
                 item.cursor = None
                 item.last_error_code    = None
@@ -2029,10 +2080,10 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                 db.commit()
                 # Immediate retry with clean cursor (clear_cursor=True skips here)
                 added = await _sync_item(item, plaid, db)
-                print(f"[sync] {item.institution_name}: cursor-reset retry succeeded — {added} transaction(s) added")
+                logger.info(f"[sync] {item.institution_name}: cursor-reset retry succeeded — {added} transaction(s) added")
                 return
             except Exception as retry_err:
-                print(f"[sync] {item.institution_name}: cursor-reset retry also failed: {retry_err}")
+                logger.info(f"[sync] {item.institution_name}: cursor-reset retry also failed: {retry_err}")
                 # Fall through to store the error below
 
         # Persist error on item so the UI can show a reconnect warning.
@@ -2047,12 +2098,12 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                     item.last_error_at = datetime.utcnow()
                 db.commit()
         except Exception:
-            pass
+            logger.debug('Suppressed exception', exc_info=True)
     except Exception as e:
         import traceback; traceback.print_exc()
         err_type = type(e).__name__
         institution = getattr(item, 'institution_name', None) or item_id
-        print(f"[sync] {institution} background sync failed ({err_type}): {e}")
+        logger.error(f"[sync] {institution} background sync failed ({err_type}): {e}")
         # Store generic errors on the item so they appear in the health check.
         # Rollback first — a failed DB operation (e.g. constraint violation) leaves
         # the session in ROLLBACK_REQUIRED state; commit without rollback is a no-op.
@@ -2064,7 +2115,7 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                 item.last_error_at      = item.last_error_at or datetime.utcnow()
                 db.commit()
         except Exception as store_err:
-            print(f"[sync] {institution}: could not store error on item: {store_err}")
+            logger.info(f"[sync] {institution}: could not store error on item: {store_err}")
     finally:
         db.close()
 
@@ -2124,7 +2175,7 @@ async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session =
                 cursor_resets += 1
                 item_statuses.append({"institution_name": item.institution_name,
                                       "status": "queued", "cursor_reset": True})
-                print(f"[sync] {item.institution_name}: cursor reset (was stuck) — re-downloading")
+                logger.info(f"[sync] {item.institution_name}: cursor reset (was stuck) — re-downloading")
             else:
                 item_statuses.append({"institution_name": item.institution_name,
                                       "status": "queued", "cursor_reset": False})
@@ -2247,7 +2298,7 @@ async def sync_liabilities(db: Session = Depends(get_db)):
             if isinstance(raw, _date):
                 return datetime(raw.year, raw.month, raw.day)
         except Exception:
-            pass
+            logger.debug('Suppressed exception', exc_info=True)
         try:
             return datetime.strptime(str(raw)[:10], '%Y-%m-%d')
         except Exception:
@@ -2353,7 +2404,7 @@ async def reset_and_resync(background_tasks: BackgroundTasks, db: Session = Depe
     for item in items:
         item.cursor = None
     db.commit()
-    print(f"[reset] deleted {deleted_txns} Plaid transactions; starting fresh sync for {len(items)} item(s)")
+    logger.warning(f"[reset] deleted {deleted_txns} Plaid transactions; starting fresh sync for {len(items)} item(s)")
     # 5. Resync all items (re-fetches accounts + transactions)
     for item in items:
         background_tasks.add_task(_sync_item_background, item.item_id, True)
@@ -2422,7 +2473,7 @@ async def reset_all(background_tasks: BackgroundTasks, db: Session = Depends(get
         item.cursor = None
 
     db.commit()
-    print(f"[reset-all] {txns_deleted} transactions deleted, {ghosts_deleted} ghost accounts removed, {len(items)} cursors cleared")
+    logger.info(f"[reset-all] {txns_deleted} transactions deleted, {ghosts_deleted} ghost accounts removed, {len(items)} cursors cleared")
 
     # 4. Trigger full re-sync for all active items
     for item in items:
@@ -3108,7 +3159,7 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
             try:
                 rebuild_monthly_snapshots(db, acct_id)
             except Exception:
-                pass
+                logger.debug('Suppressed exception', exc_info=True)
 
         return {
             'accounts': results,
@@ -3122,7 +3173,7 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
     except Exception as exc:
         db.rollback()
         detail = f"{type(exc).__name__}: {exc}"
-        print(f"[recover-accounts] UNHANDLED ERROR for item {item_id}:\n{_tb.format_exc()}")
+        logger.info(f"[recover-accounts] UNHANDLED ERROR for item {item_id}:\n{_tb.format_exc()}")
         raise HTTPException(500, f"Recovery failed: {detail}")
 
 
@@ -4215,6 +4266,7 @@ async def cards_portfolio(db: Session = Depends(get_db)):
                     benefit_total += b.amount or 0.0
                     benefit_remaining += ser['remaining']
             except Exception:
+                logger.exception('Unexpected error — rolling back')
                 db.rollback()
         total_annual_credits += benefit_total
         total_annual_credits_remaining += benefit_remaining
@@ -4310,6 +4362,7 @@ async def cards_portfolio(db: Session = Depends(get_db)):
                             'status': cs['status'],
                         })
             except Exception:
+                logger.exception('Unexpected error — rolling back')
                 db.rollback()
 
         blended_frac = base_cpp_frac + challenge_incr_frac
@@ -4671,6 +4724,7 @@ async def cards_earn_summary(
                 ser['account_id'] = card_obj.account_id
                 active_challenges_out.append(ser)
     except Exception:
+        logger.exception('Unexpected error — rolling back')
         db.rollback()
 
     return {
@@ -4881,6 +4935,7 @@ async def ecosystem_earn_detail(
                 ser['account_id'] = card_obj.account_id
                 active_ch_out.append(ser)
     except Exception:
+        logger.exception('Unexpected error — rolling back')
         db.rollback()
 
     return {
@@ -5116,6 +5171,7 @@ async def cash_back_earn_detail(
                 ser['account_id'] = card_obj.account_id
                 active_ch_out.append(ser)
     except Exception:
+        logger.exception('Unexpected error — rolling back')
         db.rollback()
 
     return {
@@ -5311,6 +5367,7 @@ async def get_challenges(
             try:
                 _recalc_challenge(db, c)
             except Exception:
+                logger.exception('Unexpected error — rolling back')
                 db.rollback()  # clear bad session state so the final commit doesn't fail
             eco = None
             card = db.query(Card).filter_by(id=c.card_id).first()
@@ -5409,7 +5466,7 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
             # Recalc is best-effort — don't block challenge creation if it fails.
             # The GET endpoint will retry recalc on every load.
             import traceback as _tb
-            print(f"[recalc warn] challenge {c.id}: {recalc_err}\n{_tb.format_exc()}")
+            logger.info(f"[recalc warn] challenge {c.id}: {recalc_err}\n{_tb.format_exc()}")
         db.commit()
         db.refresh(c)
         return _serialize_challenge(c)
@@ -6006,7 +6063,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
                 try:
                     _recalc_challenge(db, ch)   # keeps aggregate spend fresh in DB
                 except Exception:
-                    pass
+                    logger.debug('Suppressed exception', exc_info=True)
             db.commit()
             for ch in active_challenges:
                 # Use per-card spend so linked cards show their own spend,
@@ -6684,7 +6741,7 @@ async def import_transactions(
                     confidence        = 0.75
                     llm_calls        += 1
             except Exception:
-                pass
+                logger.debug('Suppressed exception', exc_info=True)
 
         # Auto-infer points category from merchant name when no rule provided one.
         # CSV imports have no Plaid PFC, so merchant_name is the only signal here.
@@ -7142,7 +7199,7 @@ async def rebuild_all_snapshots(db: Session = Depends(get_db)):
             rebuild_monthly_snapshots(db, acct.id)
             rebuilt += 1
         except Exception as e:
-            print(f"[rebuild-all-snapshots] account {acct.id} failed: {e}")
+            logger.info(f"[rebuild-all-snapshots] account {acct.id} failed: {e}")
     db.commit()
     return {"rebuilt": True, "accounts_rebuilt": rebuilt}
 
@@ -7435,7 +7492,7 @@ def _do_merge_pair(keep_id: int, discard_id: int, db: Session) -> dict:
     try:
         rebuild_monthly_snapshots(db, keep.id)
     except Exception as e:
-        print(f"[merge-pair] snapshot rebuild failed for account {keep.id}: {e}")
+        logger.info(f"[merge-pair] snapshot rebuild failed for account {keep.id}: {e}")
 
     return {
         'merged': True,
@@ -7538,7 +7595,7 @@ async def sync_account_balances(force: bool = False, db: Session = Depends(get_d
         try:
             plaid_accounts = plaid.get_accounts(item.access_token)
         except Exception as e:
-            print(f"[balance-sync] fetch failed for {item.institution_name}: {e}")
+            logger.info(f"[balance-sync] fetch failed for {item.institution_name}: {e}")
             continue
         for pa in plaid_accounts:
             raw_balance = pa.get('balance')
