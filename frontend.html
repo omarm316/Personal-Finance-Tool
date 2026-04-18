@@ -2674,7 +2674,7 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
         apiFetch(statsQ),
         apiFetch('/transactions?limit=12'),
         apiFetch('/transactions?needs_review=true&limit=50'),
-        apiFetch('/net-worth').catch(()=>null),
+        apiFetch('/net-worth').catch(e=>{console.warn('Net worth fetch failed:',e);return null;}),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/targets?year=${yr-1}`).catch(()=>({categories:{}})),
