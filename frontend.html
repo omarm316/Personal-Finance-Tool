@@ -29,10 +29,10 @@ html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
   --bg:#0e0e10;--surface:#17171c;--surface-hover:#1d1d24;--elevated:#22222b;
   --border:rgba(255,255,255,0.09);--border-strong:rgba(255,255,255,0.16);
   --text-primary:#eeeef2;--text-secondary:#9090a4;--text-muted:#5e5e78;
-  --gold:#c4af8a;--gold-soft:rgba(196,175,138,0.11);--gold-glow:0 0 20px rgba(196,175,138,0.14);
+  --gold:#6ba7f5;--gold-soft:rgba(107,167,245,0.12);--gold-glow:0 0 20px rgba(107,167,245,0.18);--on-gold:#0e0e10;
   --green:#34d399;--red:#f87171;--amber:#fbbf24;--violet:#a78bfa;--violet-soft:rgba(167,139,250,0.12);--violet-border:rgba(167,139,250,0.2);
   --sidebar-bg:#0b0b0e;--sidebar-text:#7878a0;--sidebar-hover-bg:rgba(255,255,255,0.05);
-  --sidebar-active-bg:rgba(196,175,138,0.12);--sidebar-active-color:#c4af8a;
+  --sidebar-active-bg:rgba(107,167,245,0.12);--sidebar-active-color:#6ba7f5;
   --shadow:0 1px 4px rgba(0,0,0,0.40);--shadow-md:0 8px 32px rgba(0,0,0,0.50);
   --card-bg:#17171c;--blue:#60a5fa;
 }
@@ -41,10 +41,10 @@ html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
   --bg:#f4f4f7;--surface:#ffffff;--surface-hover:#f9f9fb;--elevated:#eeeef2;
   --border:rgba(0,0,0,0.08);--border-strong:rgba(0,0,0,0.13);
   --text-primary:#121218;--text-secondary:#505064;--text-muted:#888896;
-  --gold:#7d6b50;--gold-soft:rgba(125,107,80,0.09);--gold-glow:0 0 16px rgba(125,107,80,0.10);
+  --gold:#2d55d6;--gold-soft:rgba(45,85,214,0.08);--gold-glow:0 0 16px rgba(45,85,214,0.12);--on-gold:#ffffff;
   --green:#16a34a;--red:#dc2626;--amber:#d97706;--violet:#7c3aed;--violet-soft:rgba(124,58,237,0.08);--violet-border:rgba(124,58,237,0.15);
   --sidebar-bg:#ebebef;--sidebar-text:#606072;--sidebar-hover-bg:rgba(0,0,0,0.04);
-  --sidebar-active-bg:rgba(125,107,80,0.10);--sidebar-active-color:#7d6b50;
+  --sidebar-active-bg:rgba(45,85,214,0.08);--sidebar-active-color:#2d55d6;
   --shadow:0 1px 3px rgba(0,0,0,0.07);--shadow-md:0 8px 24px rgba(0,0,0,0.12);
   --card-bg:#ffffff;--blue:#3b82f6;
 }
@@ -94,8 +94,9 @@ body{overflow:hidden}
 .metric-value{font-size:25px;font-weight:300;font-family:'DM Sans',sans-serif;letter-spacing:-0.8px;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .metric-sub{font-size:11px;color:var(--text-muted);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit;white-space:nowrap}
-.btn-primary{background:var(--gold);color:#0e0e10}
-.btn-primary:hover{background:#c49940}
+.btn-primary{background:var(--gold);color:#ffffff}
+.btn-primary:hover{filter:brightness(0.88)}
+[data-theme="dark"] .btn-primary{color:#0e0e10}
 .btn-secondary{background:var(--elevated);color:var(--text-primary);border:1px solid var(--border)}
 .btn-secondary:hover{background:var(--surface-hover)}
 .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
@@ -494,15 +495,9 @@ function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed
   return(
     <div className={`sidebar${collapsed?' collapsed':''}`}>
       <div className="sidebar-logo">
-        <svg width={collapsed?28:30} height={collapsed?28:30} viewBox="0 0 120 120" style={{flexShrink:0}}>
-          <defs>
-            <radialGradient id="sRim" cx="50%" cy="50%" r="50%"><stop offset="85%" stopColor="#c49a3a"/><stop offset="100%" stopColor="#7a5820"/></radialGradient>
-            <radialGradient id="sFace" cx="40%" cy="35%" r="60%"><stop offset="0%" stopColor="#f0d878"/><stop offset="40%" stopColor="#d4a44a"/><stop offset="100%" stopColor="#9a7030"/></radialGradient>
-          </defs>
-          <circle cx="60" cy="60" r="56" fill="url(#sRim)"/>
-          <circle cx="60" cy="60" r="49" fill="url(#sFace)"/>
-          <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" strokeWidth="0.8" opacity="0.35"/>
-          <text x="60" y="76" textAnchor="middle" fontFamily="'Playfair Display', serif" fontSize="52" fontWeight="600" fill="#b8920a">M</text>
+        <svg width={collapsed?28:30} height={collapsed?28:30} viewBox="0 0 48 48" style={{flexShrink:0}}>
+          <circle cx="24" cy="24" r="21" fill="var(--gold-soft)" stroke="var(--gold)" strokeWidth="1.5"/>
+          <text x="24" y="32" textAnchor="middle" fontFamily="'Playfair Display', serif" fontSize="22" fontWeight="400" fill="var(--gold)">M</text>
         </svg>
         {!collapsed&&<div style={{flex:1}}><h1>Moresheth</h1><p>Personal finance</p></div>}
         <button className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand menu':'Collapse menu'}><Icon name={collapsed?'chevronRight':'chevronLeft'} size={16}/></button>
@@ -9042,7 +9037,7 @@ function DailyBalancesPage({toast,refreshKey}){
               return(
                 <tr key={d} style={{background:rowBg}}>
                   <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'var(--gold-soft)':isFuture?'var(--elevated)':'var(--surface)',padding:'3px 10px',fontFamily:'DM Sans',fontSize:11,fontWeight:300,borderRight:'2px solid var(--border)',borderBottom:'1px solid var(--border)',whiteSpace:'nowrap',color:isToday?'var(--gold)':isFuture?'var(--text-muted)':'var(--text-secondary)'}}>
-                    {d.slice(5)}{isToday&&<span style={{marginLeft:5,fontSize:9,fontWeight:500,background:'var(--gold)',color:'#0e0e10',borderRadius:3,padding:'1px 4px'}}>TODAY</span>}
+                    {d.slice(5)}{isToday&&<span style={{marginLeft:5,fontSize:9,fontWeight:500,background:'var(--gold)',color:'var(--on-gold)',borderRadius:3,padding:'1px 4px'}}>TODAY</span>}
                   </td>
                   {(()=>{
                     /* For each group: liabilities always shown as (negative) in red */
