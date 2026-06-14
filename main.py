@@ -33,7 +33,7 @@ from database import (
     import_cards_from_excel, import_points_from_excel,
     TransactionSplit, BudgetTarget, Loan, MerchantOverride,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
-    SalaryPayment, SalaryAllocation, BalanceObservation,
+    SalaryPayment, SalaryAllocation, BalanceObservation, PlannedPurchase,
 )
 from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
@@ -3370,7 +3370,9 @@ async def get_transactions(
     if start_date:
         query = query.filter(Transaction.date >= datetime.fromisoformat(start_date))
     if end_date:
-        query = query.filter(Transaction.date <= datetime.fromisoformat(end_date))
+        # Inclusive of entire day
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(Transaction.date <= end_dt)
     if category:
         # Replicate category_final logic: prefer category_manual, fall back to category_auto
         query = query.filter(
@@ -3572,7 +3574,9 @@ async def get_stats(
     if start_date:
         query = query.filter(Transaction.date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        query = query.filter(Transaction.date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        # Inclusive of entire day
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(Transaction.date <= end_dt)
 
     transactions = query.all()
 
@@ -3672,7 +3676,9 @@ async def get_stats_detail(
     if start_date:
         query = query.filter(Transaction.date >= datetime.strptime(start_date, "%Y-%m-%d"))
     if end_date:
-        query = query.filter(Transaction.date <= datetime.strptime(end_date, "%Y-%m-%d"))
+        # Inclusive of entire day
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(Transaction.date <= end_dt)
 
     transactions = query.all()
     split_txn_ids = [t.id for t in transactions if t.is_split]
@@ -7087,7 +7093,9 @@ async def export_csv(
     if start_date:
         query = query.filter(Transaction.date >= datetime.fromisoformat(start_date))
     if end_date:
-        query = query.filter(Transaction.date <= datetime.fromisoformat(end_date))
+        # Inclusive of entire day
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.filter(Transaction.date <= end_dt)
 
     data = [
         {
@@ -9951,6 +9959,95 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
         "category": enriched["category"],
         "source": enriched["source"],
     }
+
+
+# ---------------------------------------------------------------------------
+# V2 Sandbox & Liquidity Forecasting
+# ---------------------------------------------------------------------------
+
+class PlannedPurchaseCreate(BaseModel):
+    name: str
+    amount: float
+    expected_date: str  # ISO format
+    vendor_tag: Optional[str] = None
+
+@app.get("/mockup", response_class=HTMLResponse)
+async def serve_mockup():
+    """Serve the Premium Glassy Blue mockup."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mockup.html")
+    with open(path, "r") as f:
+        return f.read()
+
+@app.get("/v2", response_class=HTMLResponse)
+async def serve_v2():
+    """Serve the new V2 frontend sandbox."""
+    v2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2.html")
+    if not os.path.exists(v2_path):
+        # Fallback if v2.html isn't created yet during development
+        return "<h1>V2 Sandbox</h1><p>v2.html not found yet. Keep building!</p>"
+    with open(v2_path, "r") as f:
+        return f.read()
+
+@app.get("/api/forecast/{account_id}")
+async def get_liquidity_forecast(account_id: int, days: int = 30, db: Session = Depends(get_db)):
+    """Execute the calculate_liquidity_shortfall SQL function."""
+    from sqlalchemy import text
+    
+    # We use a raw SQL execution to call the function
+    sql = text("SELECT * FROM calculate_liquidity_shortfall(:acct_id, :days)")
+    result = db.execute(sql, {"acct_id": account_id, "days": days})
+    
+    forecast = [
+        {
+            "date": row.forecast_date.isoformat(),
+            "balance": float(row.projected_balance),
+            "shortfall": bool(row.shortfall_flag)
+        }
+        for row in result
+    ]
+    return forecast
+
+@app.get("/api/planned-purchases")
+async def get_planned_purchases(db: Session = Depends(get_db)):
+    """List all pending planned purchases."""
+    purchases = db.query(PlannedPurchase).filter_by(status='pending').order_by(PlannedPurchase.expected_date).all()
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "amount": p.amount,
+            "expected_date": p.expected_date.isoformat(),
+            "vendor_tag": p.vendor_tag,
+            "status": p.status
+        }
+        for p in purchases
+    ]
+
+@app.post("/api/planned-purchases")
+async def create_planned_purchase(data: PlannedPurchaseCreate, db: Session = Depends(get_db)):
+    """Create a new planned purchase."""
+    from datetime import date
+    p = PlannedPurchase(
+        name=data.name,
+        amount=data.amount,
+        expected_date=date.fromisoformat(data.expected_date),
+        vendor_tag=data.vendor_tag,
+        status='pending'
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return {"id": p.id, "status": "created"}
+
+@app.delete("/api/planned-purchases/{purchase_id}")
+async def delete_planned_purchase(purchase_id: int, db: Session = Depends(get_db)):
+    """Delete (cancel) a planned purchase."""
+    p = db.query(PlannedPurchase).filter_by(id=purchase_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    db.delete(p)
+    db.commit()
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

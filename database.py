@@ -694,6 +694,22 @@ class CashFlowOverlay(Base):
     account = relationship('Account', foreign_keys=[account_id])
 
 
+class PlannedPurchase(Base):
+    """
+    One-off planned large purchases for liquidity forecasting.
+    """
+    __tablename__ = 'planned_purchases'
+
+    id            = Column(Integer, primary_key=True)
+    name          = Column(String(255), nullable=False)
+    amount        = Column(Float, nullable=False)          # Always positive outflow
+    expected_date = Column(Date, nullable=False)
+    vendor_tag    = Column(String(100), nullable=True)
+    status        = Column(String(50), default='pending')  # pending|completed|cancelled
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class SalaryPayment(Base):
     """
     One income event (paycheck, HSA/FSA contribution, etc.) for one person on one date.

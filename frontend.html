@@ -48,8 +48,8 @@ html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
   --shadow:0 1px 3px rgba(0,0,0,0.06);--shadow-md:0 8px 24px rgba(0,0,0,0.1);
   --card-bg:#ffffff;--blue:#3b82f6;
 }
-html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
-body{overflow:hidden}
+html,body,#root{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary);overflow:hidden;position:fixed;width:100%;}
+body{overflow:hidden;-webkit-overflow-scrolling:touch;}
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--border);box-shadow:none;transition:width 0.22s ease;overflow:hidden}
 .sidebar.collapsed{width:56px}
 .sidebar-logo{padding:18px 14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;min-height:72px}
@@ -162,8 +162,8 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* ── Pull-to-refresh indicator ── */
 .ptr-indicator{position:fixed;left:50%;transform:translateX(-50%);z-index:100;pointer-events:none;transition:opacity 0.2s}
-.ptr-spinner{width:28px;height:28px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center}
-.ptr-spinner svg{width:18px;height:18px;color:var(--gold);transition:transform 0.2s}
+.ptr-spinner{width:36px;height:36px;border-radius:50%;background:var(--elevated);border:1.5px solid var(--gold);box-shadow:0 4px 16px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center}
+.ptr-spinner svg{width:20px;height:20px;color:var(--gold);transition:transform 0.2s}
 .ptr-spinner.releasing svg{animation:spin 0.7s linear infinite}
 /* ── Skeleton shimmer ── */
 @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
@@ -214,12 +214,14 @@ td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
   .sidebar{display:none!important;}
   .main{margin-left:0!important;}
   .content{padding:12px 12px calc(68px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto;}
-  .topbar{padding:env(safe-area-inset-top,0px) 14px 0 14px;height:calc(48px + env(safe-area-inset-top,0px));position:relative}
-  .topbar-title{font-size:16px;font-weight:500}
+  .topbar{padding:env(safe-area-inset-top,0px) 14px 0 14px;height:calc(48px + env(safe-area-inset-top,0px));position:relative;background:var(--bg);border-bottom:1px solid var(--border);}
+  .topbar-title{font-size:16px;font-weight:600;padding-left:4px;}
   .topbar>div:last-child{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
   .bank-badge{display:none!important}
-  .mobile-nav{display:flex;}
-  .toast-container{bottom:calc(68px + env(safe-area-inset-bottom,0px));right:12px;left:12px;}
+  .mobile-nav{display:flex;height:calc(64px + env(safe-area-inset-bottom,0px));}
+  .mobile-nav-btn{padding:8px 0;font-size:11px;font-weight:500;}
+  .mobile-nav-btn.active{color:var(--gold);border-top:none;background:var(--gold-soft);}
+  .toast-container{bottom:calc(74px + env(safe-area-inset-bottom,0px));right:12px;left:12px;}
   .toast{max-width:100%;}
   /* Filters: wrap aggressively */
   .filters{padding:10px 12px;gap:8px;}
@@ -1871,7 +1873,7 @@ function TransactionsPage({categories,toast,refreshKey}){
     if(!silent)setLoading(true);
     setTableLoading(true);
     try{
-      let q='?limit=500';
+      let q='?limit=2000';
       if(needsReview)q+='&needs_review=true';
       if(startDate)q+=`&start_date=${startDate}`;
       if(endDate)q+=`&end_date=${endDate}`;
@@ -1945,8 +1947,26 @@ function TransactionsPage({categories,toast,refreshKey}){
 
   const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
   const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
-  const visibleExpenses=_budgetVisible.filter(t=>t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(t.category_final))).reduce((s,t)=>s+(-t.amount),0);
-  const visibleIncome=_budgetVisible.filter(t=>t.action==='Income'&&!_expCatSet.has(t.category_final)).reduce((s,t)=>s+t.amount,0);
+
+  const calcTxnContrib=(t,type)=>{
+    if(t.is_split&&t.splits&&t.splits.length>0){
+      return t.splits.reduce((sum,s)=>{
+        if(s.is_gcb)return sum;
+        const cat=s.category||'Other';
+        const isExp=t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(cat));
+        if(type==='expense')return isExp?sum+(-s.amount):sum;
+        else return(!isExp&&t.action==='Income')?sum+s.amount:sum;
+      },0);
+    }else{
+      const cat=t.category_final||'Other';
+      const isExp=t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(cat));
+      if(type==='expense')return isExp?(-t.amount):0;
+      else return(!isExp&&t.action==='Income')?t.amount:0;
+    }
+  };
+
+  const visibleExpenses=_budgetVisible.reduce((s,t)=>s+calcTxnContrib(t,'expense'),0);
+  const visibleIncome=_budgetVisible.reduce((s,t)=>s+calcTxnContrib(t,'income'),0);
   const visibleNet=visibleIncome-visibleExpenses;
 
   const exportCSV=()=>{
