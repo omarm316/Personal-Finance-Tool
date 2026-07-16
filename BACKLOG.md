@@ -13,6 +13,7 @@
 | B2 | **Challenges: "cannot load challenge" error** | `db.rollback()` fix deployed; verify challenge list loads cleanly |
 | B3 | **Txn page Expenses vs KPI mismatch** | User reported Expenses total on Transactions page doesn't match KPI card when filtering by month — needs investigation |
 | B4 | **Backend: slow requests under concurrent load** | Page loads trigger a synchronous full Plaid sync across all banks; DB connection pool backed up to 90-100s+ response times during v2.html QA pass. Needs profiling — likely pool size or sync-on-every-load pattern. |
+| B5 | **`/api/cash-flow` returns all zeros** | Cash Flow page (both frontend.html and v2.html use the shared endpoint) shows $0 income/expenses/breakdown for every month and every range toggle (This Month/Last 30/Next 30), despite plenty of transaction activity. Likely scoped to checking/savings only and either the scoping logic or the underlying data tagging is off. Not a v2.html-specific bug — pre-existing backend issue. |
 
 ---
 
