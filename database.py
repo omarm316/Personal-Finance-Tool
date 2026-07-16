@@ -611,6 +611,30 @@ class ChallengeCategoryLink(Base):
     category_name = Column(String(100), nullable=False, primary_key=True)
 
 
+class Redemption(Base):
+    """Points redemption, optionally preceded by a transfer from another
+    ecosystem (e.g. Amex MR -> Hilton Honors, then redeemed for a stay).
+    Transfer partners aren't a separate entity — just another PointsEcosystem
+    row. Lets you compare realized cpp (cash_value_usd / points_redeemed)
+    against an ecosystem's assumed your_cpp."""
+    __tablename__ = 'redemptions'
+
+    id                 = Column(Integer, primary_key=True)
+    ecosystem_id       = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    source_ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)
+    points_redeemed    = Column(Float, nullable=False)
+    points_transferred = Column(Float, nullable=True)
+    transfer_date      = Column(Date, nullable=True)
+    redemption_date    = Column(Date, nullable=False)
+    description        = Column(String(300), nullable=False)
+    cash_value_usd     = Column(Float, nullable=False)
+    notes              = Column(Text, nullable=True)
+    created_at         = Column(DateTime, default=datetime.utcnow)
+
+    ecosystem        = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
+    source_ecosystem = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
+
+
 # Legacy alias — kept for backward compatibility during migration
 CardEarningRate = CardProductReward
 

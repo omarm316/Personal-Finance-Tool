@@ -28,6 +28,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
+    Redemption,
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
@@ -4763,6 +4764,20 @@ async def ecosystem_earn_detail(
     if not eco:
         raise HTTPException(status_code=404, detail="Ecosystem not found")
 
+    # Redemptions aren't period-scoped (like active_challenges below) — show
+    # the full history of what this currency has actually been worth when
+    # redeemed, not just what happened in the selected MTD/QTD/YTD window.
+    redemption_rows = (
+        db.query(Redemption)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(Redemption.redemption_date.desc())
+        .all()
+    )
+    redemptions_out = [_serialize_redemption(r) for r in redemption_rows]
+    total_points_redeemed = sum(r.points_redeemed for r in redemption_rows)
+    total_cash_value_usd = sum(r.cash_value_usd for r in redemption_rows)
+    realized_cpp = round((total_cash_value_usd / total_points_redeemed) * 100, 4) if total_points_redeemed else 0
+
     today = _date.today()
     if year is None:
         year = today.year
@@ -4848,6 +4863,10 @@ async def ecosystem_earn_detail(
             'start': start.isoformat(), 'end': end.isoformat(),
             'total_points': 0, 'est_value': 0,
             'by_category': [], 'by_card': [], 'active_challenges': [],
+            'redemptions': redemptions_out,
+            'total_points_redeemed': total_points_redeemed,
+            'total_cash_value_usd': total_cash_value_usd,
+            'realized_cpp': realized_cpp,
         }
 
     rows = (
@@ -4958,6 +4977,10 @@ async def ecosystem_earn_detail(
         'by_category':   by_cat_out,
         'by_card':       by_card_out,
         'active_challenges': active_ch_out,
+        'redemptions': redemptions_out,
+        'total_points_redeemed': total_points_redeemed,
+        'total_cash_value_usd': total_cash_value_usd,
+        'realized_cpp': realized_cpp,
     }
 
 
@@ -5330,6 +5353,99 @@ async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = De
         eco.currency_name = data['currency_name']
     db.commit()
     return {'status': 'ok', 'name': eco.name}
+
+
+# ---------------------------------------------------------------------------
+# Redemptions — points redeemed (optionally after a transfer from another
+# ecosystem), so realized cpp (cash_value_usd / points_redeemed) can be
+# compared against an ecosystem's assumed your_cpp.
+# ---------------------------------------------------------------------------
+
+def _serialize_redemption(r: Redemption) -> dict:
+    realized_cpp = round((r.cash_value_usd / r.points_redeemed) * 100, 4) if r.points_redeemed else 0
+    return {
+        'id': r.id,
+        'ecosystem_id': r.ecosystem_id,
+        'ecosystem_name': r.ecosystem.name if r.ecosystem else None,
+        'source_ecosystem_id': r.source_ecosystem_id,
+        'source_ecosystem_name': r.source_ecosystem.name if r.source_ecosystem else None,
+        'points_redeemed': r.points_redeemed,
+        'points_transferred': r.points_transferred,
+        'transfer_date': r.transfer_date.isoformat() if r.transfer_date else None,
+        'redemption_date': r.redemption_date.isoformat(),
+        'description': r.description,
+        'cash_value_usd': r.cash_value_usd,
+        'realized_cpp': realized_cpp,
+        'notes': r.notes,
+    }
+
+
+@app.get("/api/redemptions")
+async def list_redemptions(ecosystem_id: int = None, db: Session = Depends(get_db)):
+    q = db.query(Redemption)
+    if ecosystem_id is not None:
+        q = q.filter_by(ecosystem_id=ecosystem_id)
+    redemptions = q.order_by(Redemption.redemption_date.desc()).all()
+    return [_serialize_redemption(r) for r in redemptions]
+
+
+@app.post("/api/redemptions")
+async def create_redemption(data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    try:
+        r = Redemption(
+            ecosystem_id        = data['ecosystem_id'],
+            source_ecosystem_id = data.get('source_ecosystem_id') or None,
+            points_redeemed     = float(data['points_redeemed']),
+            points_transferred  = float(data['points_transferred']) if data.get('points_transferred') else None,
+            transfer_date       = _date.fromisoformat(data['transfer_date']) if data.get('transfer_date') else None,
+            redemption_date     = _date.fromisoformat(data['redemption_date']),
+            description         = data['description'],
+            cash_value_usd      = float(data['cash_value_usd']),
+            notes               = data.get('notes'),
+        )
+        db.add(r)
+        db.commit()
+        db.refresh(r)
+        return _serialize_redemption(r)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create redemption error: {e}\n{traceback.format_exc()}")
+
+
+@app.patch("/api/redemptions/{redemption_id}")
+async def update_redemption(redemption_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    r = db.query(Redemption).filter_by(id=redemption_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Redemption not found")
+    if 'ecosystem_id' in data:
+        r.ecosystem_id = data['ecosystem_id']
+    if 'source_ecosystem_id' in data:
+        r.source_ecosystem_id = data['source_ecosystem_id'] or None
+    for field in ('points_redeemed', 'points_transferred', 'cash_value_usd'):
+        if field in data:
+            setattr(r, field, float(data[field]) if data[field] is not None else None)
+    for field in ('transfer_date', 'redemption_date'):
+        if field in data:
+            setattr(r, field, _date.fromisoformat(data[field]) if data[field] else None)
+    for field in ('description', 'notes'):
+        if field in data:
+            setattr(r, field, data[field])
+    db.commit()
+    db.refresh(r)
+    return _serialize_redemption(r)
+
+
+@app.delete("/api/redemptions/{redemption_id}")
+async def delete_redemption(redemption_id: int, db: Session = Depends(get_db)):
+    r = db.query(Redemption).filter_by(id=redemption_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Redemption not found")
+    db.delete(r)
+    db.commit()
+    return {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
