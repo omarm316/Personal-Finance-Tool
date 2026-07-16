@@ -9135,17 +9135,20 @@ function DailyBalancesPage({toast,refreshKey}){
 
   const getRange=()=>{
     const n=new Date();
+    const fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     if(rangeMode==='month'){
       const y=n.getFullYear(),m=n.getMonth()+1;
       const s=`${y}-${String(m).padStart(2,'0')}-01`;
       const last=new Date(y,m,0).getDate();
       return{s,e:`${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
     }
-    if(rangeMode==='quarter'){
-      const y=n.getFullYear(),m=n.getMonth()+1;
-      const qs=Math.floor((m-1)/3)*3+1,qe=qs+2;
-      const last=new Date(y,qe,0).getDate();
-      return{s:`${y}-${String(qs).padStart(2,'0')}-01`,e:`${y}-${String(qe).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    if(rangeMode==='30d'){
+      const s=new Date(n);s.setDate(s.getDate()-29);
+      return{s:fmt(s),e:fmt(n)};
+    }
+    if(rangeMode==='90d'){
+      const s=new Date(n);s.setDate(s.getDate()-89);
+      return{s:fmt(s),e:fmt(n)};
     }
     return{s:customStart,e:customEnd};
   };
