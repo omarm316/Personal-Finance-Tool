@@ -1,11 +1,26 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-04-05
+> Last updated: 2026-07-16
 
 ---
 
 ## Current Focus
+
+### V2 Redesign — Premium Glassy Blue (v2.html, served at `/v2`)
+Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic blue theme, static mockup at `/mockup`). Now doing a page-by-page QA pass to operationalize it before it can replace `frontend.html`.
+
+- [x] Dashboard — fixed sidebar-overlap layout bug (orphaned CSS block, missing `@media (max-width: 480px)` wrapper)
+- [x] Transactions — fixed crash (`TxnRow` referenced undefined `t` instead of `txn`)
+- [x] Budgets — fixed crash (leftover reference to removed `error` state)
+- [x] Daily Balances (incl. Liquidity Forecast card) — verified clean
+- [x] Accounts, Net Worth, Cash Flow, Loans, GCB, Cards — verified clean
+- [x] Settings — fixed unstyled Preferences/Data Management tabs
+- [x] Systemic fix: added CSS for ~20 classes referenced in JSX but never defined in the stylesheet (`.modal*`, `.grid-*`, `.section-title/header/desc`, `.settings-*`, `.sel-drop`, etc.) — was breaking modals (rendered inline instead of as overlays) and leaving headers/labels unstyled across many pages
+
+**Next**: decide whether to promote `v2.html` → `frontend.html` (retire the old gold/dark theme), or keep both routes live for a while longer.
+
+**Known issue (backend, not v2-specific)**: page loads trigger a synchronous full Plaid sync across all connected banks; under concurrent load this backed up the DB connection pool badly enough that some requests took 90-100+ seconds. Worth profiling separately.
 
 ### Transactions Page Polish
 - [x] Multi-select dropdowns for type, category, account filters

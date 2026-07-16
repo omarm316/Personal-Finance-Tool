@@ -12,6 +12,7 @@
 | B1 | **Challenges: NOT NULL constraint errors** | `product_id`, `required_spend`, `reward_value` — migration deployed; verify no new columns surface |
 | B2 | **Challenges: "cannot load challenge" error** | `db.rollback()` fix deployed; verify challenge list loads cleanly |
 | B3 | **Txn page Expenses vs KPI mismatch** | User reported Expenses total on Transactions page doesn't match KPI card when filtering by month — needs investigation |
+| B4 | **Backend: slow requests under concurrent load** | Page loads trigger a synchronous full Plaid sync across all banks; DB connection pool backed up to 90-100s+ response times during v2.html QA pass. Needs profiling — likely pool size or sync-on-every-load pattern. |
 
 ---
 
@@ -54,6 +55,7 @@
 
 ## ✅ Recently Completed
 
+- **V2 redesign QA pass** — Fixed 3 crash-level bugs (Dashboard sidebar overlap, Transactions row crash, Budgets page crash) and a systemic CSS gap (~20 classes referenced in JSX but never styled — broke modals and left headers/settings rows unstyled across most pages). All 11 pages of `v2.html` now verified clean.
 - **Multi-select filters** — Type, Category, Account dropdowns on Transactions page now support multiple selections
 - **Account type capitalization** — IRA, HSA, FSA, CD, 401(k) display correctly everywhere
 - **Expense credit-netting** — `/stats` and `/budget/actuals` both net refunds in expense categories
