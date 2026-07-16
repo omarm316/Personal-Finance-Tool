@@ -5833,6 +5833,60 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     finally{setLoading(false);}
   },[ecoId,isCashBack]);
 
+  /* ── Redemptions ──────────────────────────────────────────────────────── */
+  const[ecosystems,setEcosystems]=useState([]);
+  useEffect(()=>{apiFetch('/ecosystems').then(setEcosystems).catch(()=>{});},[]);
+
+  const emptyRedemptionForm={source_ecosystem_id:'',points_redeemed:'',points_transferred:'',
+    transfer_date:'',redemption_date:'',description:'',cash_value_usd:'',notes:''};
+  const[showRedemptionModal,setShowRedemptionModal]=useState(false);
+  const[editingRedemptionId,setEditingRedemptionId]=useState(null);
+  const[redemptionForm,setRedemptionForm]=useState(emptyRedemptionForm);
+  const[redemptionSaving,setRedemptionSaving]=useState(false);
+
+  const openNewRedemption=()=>{setEditingRedemptionId(null);setRedemptionForm(emptyRedemptionForm);setShowRedemptionModal(true);};
+  const openEditRedemption=(r)=>{
+    setEditingRedemptionId(r.id);
+    setRedemptionForm({source_ecosystem_id:r.source_ecosystem_id||'',points_redeemed:r.points_redeemed,
+      points_transferred:r.points_transferred||'',transfer_date:r.transfer_date||'',
+      redemption_date:r.redemption_date,description:r.description,cash_value_usd:r.cash_value_usd,notes:r.notes||''});
+    setShowRedemptionModal(true);
+  };
+  const saveRedemption=async()=>{
+    if(!redemptionForm.description.trim()){toast('Description required','error');return;}
+    if(!redemptionForm.points_redeemed||!redemptionForm.cash_value_usd||!redemptionForm.redemption_date){
+      toast('Points redeemed, cash value, and redemption date are required','error');return;
+    }
+    setRedemptionSaving(true);
+    try{
+      const body={
+        ecosystem_id:Number(ecoId),
+        source_ecosystem_id:redemptionForm.source_ecosystem_id?Number(redemptionForm.source_ecosystem_id):null,
+        points_redeemed:parseFloat(redemptionForm.points_redeemed),
+        points_transferred:redemptionForm.points_transferred?parseFloat(redemptionForm.points_transferred):null,
+        transfer_date:redemptionForm.transfer_date||null,
+        redemption_date:redemptionForm.redemption_date,
+        description:redemptionForm.description,
+        cash_value_usd:parseFloat(redemptionForm.cash_value_usd),
+        notes:redemptionForm.notes||null,
+      };
+      if(editingRedemptionId) await apiFetch(`/redemptions/${editingRedemptionId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch('/redemptions',{method:'POST',body:JSON.stringify(body)});
+      setShowRedemptionModal(false);
+      load(period,year);
+      toast(editingRedemptionId?'Redemption updated':'Redemption added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setRedemptionSaving(false);}
+  };
+  const deleteRedemption=async(id)=>{
+    if(!window.confirm('Delete this redemption?'))return;
+    try{
+      await apiFetch(`/redemptions/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Redemption deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
   useEffect(()=>{load(period,year);},[period,year]);
 
   const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
@@ -5996,13 +6050,118 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           </div>}
 
           {/* Active challenges */}
-          {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
             <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Active Challenges</div>
             <div className="grid-auto-sm">
               {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
             </div>
           </div>}
+
+          {/* Redemptions */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Redemptions</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openNewRedemption}>+ Add Redemption</button>
+            </div>
+            {data.total_points_redeemed>0&&<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Realized cpp</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--gold)'}}>{data.realized_cpp.toFixed(2)}¢</div>
+                <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>vs. assumed {(data.your_cpp*100).toFixed(2)}¢</div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Points Redeemed</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--text-primary)'}}>{data.total_points_redeemed.toLocaleString()}</div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Cash Value Realized</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--text-primary)'}}>${data.total_cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+              </div>
+            </div>}
+            {data.redemptions.length===0?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No redemptions logged for {ecoName} yet.</div>:
+              <div>
+                {data.redemptions.map((r,i)=>(
+                  <div key={r.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:i<data.redemptions.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{r.description}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {r.points_redeemed.toLocaleString()} pts · ${r.cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} · {r.realized_cpp.toFixed(2)}¢/pt
+                        {r.source_ecosystem_name?` · transferred from ${r.source_ecosystem_name}`:''} · {new Date(r.redemption_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditRedemption(r)}>Edit</button>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteRedemption(r.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
         </>
+      )}
+
+      {showRedemptionModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:440}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingRedemptionId?'Edit Redemption':'Add Redemption'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowRedemptionModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12,maxHeight:'60vh',overflowY:'auto'}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Description</label>
+                <input className="search-input" value={redemptionForm.description} onChange={e=>setRedemptionForm(f=>({...f,description:e.target.value}))}
+                  placeholder="2 nights Conrad Maldives"/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Redeemed</label>
+                  <input className="search-input" type="number" value={redemptionForm.points_redeemed} onChange={e=>setRedemptionForm(f=>({...f,points_redeemed:e.target.value}))}
+                    placeholder="250000"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Cash Value Received ($)</label>
+                  <input className="search-input" type="number" value={redemptionForm.cash_value_usd} onChange={e=>setRedemptionForm(f=>({...f,cash_value_usd:e.target.value}))}
+                    placeholder="1800.00"/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transferred From <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <select className="filter-select" style={{width:'100%'}} value={redemptionForm.source_ecosystem_id} onChange={e=>setRedemptionForm(f=>({...f,source_ecosystem_id:e.target.value}))}>
+                  <option value="">— direct, no transfer —</option>
+                  {ecosystems.filter(e=>String(e.id)!==String(ecoId)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              {redemptionForm.source_ecosystem_id&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Transferred</label>
+                  <input className="search-input" type="number" value={redemptionForm.points_transferred} onChange={e=>setRedemptionForm(f=>({...f,points_transferred:e.target.value}))}
+                    placeholder="Only if different from points redeemed"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Date</label>
+                  <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.transfer_date} onChange={e=>setRedemptionForm(f=>({...f,transfer_date:e.target.value}))}/>
+                </div>
+              </div>}
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Redemption Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.redemption_date} onChange={e=>setRedemptionForm(f=>({...f,redemption_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={redemptionForm.notes} onChange={e=>setRedemptionForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowRedemptionModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveRedemption} disabled={redemptionSaving}>
+                {redemptionSaving?'Saving…':editingRedemptionId?'Save Changes':'Add Redemption'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
