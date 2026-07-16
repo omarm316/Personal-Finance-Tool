@@ -7,20 +7,27 @@
 
 ## Current Focus
 
-### V2 Redesign — Premium Glassy Blue (v2.html, served at `/v2`)
-Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic blue theme, static mockup at `/mockup`). Now doing a page-by-page QA pass to operationalize it before it can replace `frontend.html`.
+### V2 Redesign — Premium Glassy Blue (v2.html, served at `/v2`) — QA COMPLETE
+Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic blue theme, static mockup at `/mockup`). Completed a full page-by-page pass: visual QA first, then a second pass clicking every real feature on every page (filters, modals, inline edit, toggles, drill-downs) to verify functionality, not just appearance.
 
-- [x] Dashboard — fixed sidebar-overlap layout bug (orphaned CSS block, missing `@media (max-width: 480px)` wrapper)
-- [x] Transactions — fixed crash (`TxnRow` referenced undefined `t` instead of `txn`)
-- [x] Budgets — fixed crash (leftover reference to removed `error` state)
-- [x] Daily Balances (incl. Liquidity Forecast card) — verified clean
-- [x] Accounts, Net Worth, Cash Flow, Loans, GCB, Cards — verified clean
-- [x] Settings — fixed unstyled Preferences/Data Management tabs
-- [x] Systemic fix: added CSS for ~20 classes referenced in JSX but never defined in the stylesheet (`.modal*`, `.grid-*`, `.section-title/header/desc`, `.settings-*`, `.sel-drop`, etc.) — was breaking modals (rendered inline instead of as overlays) and leaving headers/labels unstyled across many pages
+**Visual/crash bugs fixed:**
+- Dashboard — sidebar-overlap layout bug (orphaned CSS block, missing `@media (max-width: 480px)` wrapper)
+- Transactions — `TxnRow` crash (undefined `t` instead of `txn`)
+- Budgets — crash from leftover reference to removed `error` state
+- Settings — unstyled Preferences/Data Management tabs
+- Systemic: ~20 CSS classes referenced in JSX but never defined (`.modal*`, `.grid-*`, `.section-title/header/desc`, `.settings-*`, `.sel-drop`) — was breaking modals (rendered inline instead of as overlays) and leaving headers/labels unstyled across most pages
+
+**Functional bugs fixed (found during the second pass):**
+- **`--blue-primary`/`--blue-vibrant` were self-referencing circular CSS variables** (`--blue-primary: var(--blue-primary)`), invalid per spec, resolved to transparent. Broke 56+16 direct usages app-wide (budget progress bars, chart lines, borders, badges) in both themes — only dark-mode buttons were spared by a separate hardcoded override. Single highest-impact fix of the whole pass.
+- Daily Balances 30d/90d range toggles sent no `start_date`/`end_date` at all (dead `'quarter'` branch never renamed to `'90d'`, no `'30d'` branch existed) — silently fell back to current-month data regardless of which toggle was selected.
+
+**All 11 pages verified working**: Dashboard, Transactions, Budgets, Daily Balances, Accounts, Net Worth, Cash Flow, Loans, GCB, Cards, Settings — including modals, inline edit, batch edit, drill-downs, and every toggle.
 
 **Next**: decide whether to promote `v2.html` → `frontend.html` (retire the old gold/dark theme), or keep both routes live for a while longer.
 
-**Known issue (backend, not v2-specific)**: page loads trigger a synchronous full Plaid sync across all connected banks; under concurrent load this backed up the DB connection pool badly enough that some requests took 90-100+ seconds. Worth profiling separately.
+**Known issues (backend, not v2-specific — logged as B4/B5 in BACKLOG.md):**
+- Page loads trigger a synchronous full Plaid sync across all connected banks; under concurrent load this backed up the DB connection pool badly enough that some requests took 90-100+ seconds.
+- `/api/cash-flow` returns all zeros for historical actuals (This Month / Last 30 Days) despite plenty of transaction activity — the forward-looking forecast (Next 30 Days) works fine, so it's specifically the actuals query/scoping that's off.
 
 ### Transactions Page Polish
 - [x] Multi-select dropdowns for type, category, account filters

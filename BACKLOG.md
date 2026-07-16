@@ -56,7 +56,7 @@
 
 ## ✅ Recently Completed
 
-- **V2 redesign QA pass** — Fixed 3 crash-level bugs (Dashboard sidebar overlap, Transactions row crash, Budgets page crash) and a systemic CSS gap (~20 classes referenced in JSX but never styled — broke modals and left headers/settings rows unstyled across most pages). All 11 pages of `v2.html` now verified clean.
+- **V2 redesign full QA pass** — Two passes across all 11 pages: visual (fixed 3 crashes + systemic ~20-class CSS gap breaking modals/headers) then functional (clicked every filter, modal, toggle, and drill-down). Found and fixed the circular `--blue-primary`/`--blue-vibrant` CSS variable bug (broke 72 usages app-wide) and the Daily Balances 30d/90d toggles silently ignoring their range. `v2.html` is now fully operational.
 - **Multi-select filters** — Type, Category, Account dropdowns on Transactions page now support multiple selections
 - **Account type capitalization** — IRA, HSA, FSA, CD, 401(k) display correctly everywhere
 - **Expense credit-netting** — `/stats` and `/budget/actuals` both net refunds in expense categories
