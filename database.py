@@ -168,6 +168,10 @@ class Transaction(Base):
     # Useful for pending transactions that already entered the DB and should be ignored.
     is_excluded = Column(Boolean, default=False, index=True)
 
+    # Manual override for the signed points-earn value (see compute_points_earn() in
+    # main.py) — sticks even if the auto-classification logic later changes.
+    points_earn_override = Column(Float, nullable=True)
+
     # Metadata
     year = Column(Integer, index=True)
     month = Column(Integer, index=True)
@@ -612,27 +616,70 @@ class ChallengeCategoryLink(Base):
 
 
 class Redemption(Base):
-    """Points redemption, optionally preceded by a transfer from another
-    ecosystem (e.g. Amex MR -> Hilton Honors, then redeemed for a stay).
-    Transfer partners aren't a separate entity — just another PointsEcosystem
-    row. Lets you compare realized cpp (cash_value_usd / points_redeemed)
-    against an ecosystem's assumed your_cpp."""
+    """Pure value capture for points actually redeemed — e.g. Hilton Honors
+    points spent on a hotel stay. Deliberately carries no transfer/source
+    info: once points land in an ecosystem they're fungible, so there's no
+    clean way to attribute redemption value back through a prior transfer.
+    See Transfer below for the (value-neutral) point-movement side. Lets you
+    compare realized cpp (cash_value_usd / points_redeemed) against an
+    ecosystem's assumed your_cpp."""
     __tablename__ = 'redemptions'
 
     id                 = Column(Integer, primary_key=True)
     ecosystem_id       = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
-    source_ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)
     points_redeemed    = Column(Float, nullable=False)
-    points_transferred = Column(Float, nullable=True)
-    transfer_date      = Column(Date, nullable=True)
     redemption_date    = Column(Date, nullable=False)
     description        = Column(String(300), nullable=False)
     cash_value_usd     = Column(Float, nullable=False)
     notes              = Column(Text, nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow)
 
-    ecosystem        = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
-    source_ecosystem = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
+    ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
+
+
+class TransferRatio(Base):
+    """Current (and historical) transfer ratio between an ecosystem pair,
+    e.g. Amex MR -> Hilton Honors = 2.0 (destination points per 1 source
+    point). Effective-dated: editing a ratio closes the old row's
+    effective_to and opens a new one rather than overwriting it, so past
+    Transfers (which snapshot their own base_ratio_used) stay accurate
+    regardless of later ratio changes. effective_to = NULL means "current"."""
+    __tablename__ = 'transfer_ratios'
+
+    id                        = Column(Integer, primary_key=True)
+    source_ecosystem_id      = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    destination_ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    base_ratio                = Column(Float, nullable=False)
+    effective_from            = Column(Date, nullable=False)
+    effective_to              = Column(Date, nullable=True)
+    created_at                = Column(DateTime, default=datetime.utcnow)
+
+    source_ecosystem      = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
+    destination_ecosystem = relationship('PointsEcosystem', foreign_keys=[destination_ecosystem_id])
+
+
+class Transfer(Base):
+    """A value-neutral point-movement event between two ecosystems (e.g.
+    100,000 Amex MR -> 140,000 Marriott Bonvoy with a 40% transfer bonus).
+    Self-contained/immutable: base_ratio_used and points_received are
+    snapshotted at creation time (typically defaulted from the current
+    TransferRatio for the pair, but editable per-transfer), so this row
+    never needs to be recomputed if TransferRatio changes later."""
+    __tablename__ = 'transfers'
+
+    id                        = Column(Integer, primary_key=True)
+    source_ecosystem_id      = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    destination_ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    points_sent               = Column(Float, nullable=False)
+    base_ratio_used           = Column(Float, nullable=False)
+    bonus_pct                 = Column(Float, nullable=True)  # e.g. 0.40 for a 40% promo bonus
+    points_received           = Column(Float, nullable=False)
+    transfer_date              = Column(Date, nullable=False)
+    notes                      = Column(Text, nullable=True)
+    created_at                  = Column(DateTime, default=datetime.utcnow)
+
+    source_ecosystem      = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
+    destination_ecosystem = relationship('PointsEcosystem', foreign_keys=[destination_ecosystem_id])
 
 
 # Legacy alias — kept for backward compatibility during migration
@@ -912,6 +959,7 @@ def run_migrations(engine):
             ('loan_id',           'INTEGER'),
             ('is_excluded',       'BOOLEAN DEFAULT FALSE'),
             ('content_hash',      'VARCHAR(20)'),
+            ('points_earn_override', 'FLOAT'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),

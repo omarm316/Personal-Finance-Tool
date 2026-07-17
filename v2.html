@@ -322,7 +322,7 @@ tr:hover td { background: var(--surface-hover); }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--border); }
 
 /* ── Grid layouts ── */
-.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .grid-auto-sm { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
@@ -893,6 +893,25 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
   const[ruleCreating,setRuleCreating]=useState(false);
   const[cm,setCm]=useState(null);
   const isLlmSource=txn.enrichment_source==='llm'||txn.enrichment_source==='override';
+  /* Points-earn manual override (see compute_points_earn in main.py) */
+  const[showPointsOverride,setShowPointsOverride]=useState(false);
+  const[pointsOverrideVal,setPointsOverrideVal]=useState(
+    txn.points_earn&&txn.points_earn.classification==='manual_override'?String(txn.points_earn.points_estimated):''
+  );
+  const[pointsOverrideSaving,setPointsOverrideSaving]=useState(false);
+  const savePointsOverride=async()=>{
+    if(pointsOverrideVal===''||isNaN(Number(pointsOverrideVal)))return;
+    setPointsOverrideSaving(true);
+    try{await onSave(txn.id,{points_earn_override:Number(pointsOverrideVal)});toast&&toast('Points override saved');setShowPointsOverride(false);}
+    catch(e){toast&&toast('Failed to save override: '+e.message,'error');}
+    finally{setPointsOverrideSaving(false);}
+  };
+  const resetPointsOverride=async()=>{
+    setPointsOverrideSaving(true);
+    try{await onSave(txn.id,{clear_points_earn_override:true});toast&&toast('Reset to auto-classification');setPointsOverrideVal('');setShowPointsOverride(false);}
+    catch(e){toast&&toast('Failed to reset: '+e.message,'error');}
+    finally{setPointsOverrideSaving(false);}
+  };
   const save=async()=>{
     const updates={category,action,needs_review:false};
     if(descClean!==(txn.description_clean||txn.description_display||txn.description_raw||''))updates.description_clean=descClean;
@@ -1135,39 +1154,66 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               <span style={{fontWeight:500}}>Manual override: </span><span>{txn.category_manual}</span>
             </div>
           )}
-          {/* Points earn */}
-          {txn.points_earn&&(
-            <div style={{background:'rgba(52,211,153,0.1)',border:'1px solid rgba(52,211,153,0.3)',borderRadius:10,padding:'12px 14px'}}>
-              <div style={{fontSize:11,fontWeight:500,color:'var(--green)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Points Earn</div>
+          {/* Points earn — color/label follow compute_points_earn()'s classification
+              rather than always reading as a positive "you earned this" box. */}
+          {txn.points_earn&&(()=>{
+            const cls=txn.points_earn.classification;
+            const isClawback=cls==='clawback';
+            const isOverride=cls==='manual_override';
+            const isNeutral=cls==='excluded';
+            const color=isClawback?'var(--red)':isOverride?'var(--amber)':isNeutral?'var(--text-muted)':'var(--green)';
+            const bg=isClawback?'rgba(248,113,113,0.1)':isOverride?'rgba(251,191,36,0.1)':isNeutral?'var(--elevated)':'rgba(52,211,153,0.1)';
+            const border=isClawback?'rgba(248,113,113,0.3)':isOverride?'rgba(251,191,36,0.3)':isNeutral?'var(--border)':'rgba(52,211,153,0.3)';
+            const label={
+              earn:'Points Earn', clawback:'Points Clawback',
+              excluded:'Excluded From Earn Calc', manual_override:'Manual Override',
+            }[cls]||'Points Earn';
+            return(
+            <div style={{background:bg,border:`1px solid ${border}`,borderRadius:10,padding:'12px 14px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:500,color,textTransform:'uppercase',letterSpacing:'0.05em'}}>{label}</div>
+                <button type="button" onClick={()=>setShowPointsOverride(!showPointsOverride)}
+                  style={{fontSize:11,color:'var(--text-muted)',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>
+                  {isOverride?'Edit override':'Adjust'}
+                </button>
+              </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                  {/* Category breadcrumb: show L2 → L1 if applicable, else just L1 */}
                   {txn.points_earn.points_category?(
                     <span style={{display:'flex',alignItems:'center',gap:4}}>
                       {txn.points_earn.points_category_l1&&(
                         <>
-                          <span style={{fontSize:12,color:'var(--green)',background:'rgba(52,211,153,0.15)',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category_l1}</span>
-                          <span style={{fontSize:11,color:'var(--green)'}}>›</span>
+                          <span style={{fontSize:12,color,background:bg,borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category_l1}</span>
+                          <span style={{fontSize:11,color}}>›</span>
                         </>
                       )}
-                      <span style={{fontSize:12,fontWeight:500,color:'var(--green)',background:'rgba(52,211,153,0.15)',borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category}</span>
+                      <span style={{fontSize:12,fontWeight:500,color,background:bg,borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category}</span>
                     </span>
                   ):(
-                    <span style={{fontSize:12,color:'var(--green)',fontStyle:'italic'}}>Base rate</span>
+                    <span style={{fontSize:12,color,fontStyle:'italic'}}>Base rate</span>
                   )}
-                  <span style={{fontSize:13,fontWeight:400,color:'var(--green)'}}>{txn.points_earn.earn_rate}x</span>
+                  {txn.points_earn.earn_rate!=null&&<span style={{fontSize:13,fontWeight:400,color}}>{txn.points_earn.earn_rate}x</span>}
                 </div>
                 <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:18,fontWeight:400,color:'var(--green)'}}>
+                  <div style={{fontSize:18,fontWeight:400,color}}>
                     {txn.points_earn.points_estimated.toLocaleString(undefined,{maximumFractionDigits:0})} pts
                   </div>
-                  <div style={{fontSize:11,color:'var(--green)'}}>
+                  <div style={{fontSize:11,color}}>
                     ≈ ${(txn.points_earn.points_estimated*txn.points_earn.cpp/100).toFixed(2)} value · {txn.points_earn.currency}
                   </div>
                 </div>
               </div>
+              {showPointsOverride&&(
+                <div style={{display:'flex',gap:8,alignItems:'center',marginTop:10,paddingTop:10,borderTop:`1px solid ${border}`}}>
+                  <input type="number" step="1" value={pointsOverrideVal} onChange={e=>setPointsOverrideVal(e.target.value)}
+                    placeholder="Points value" style={{width:110,padding:'6px 10px',fontSize:13,borderRadius:8,border:'1px solid var(--border-strong)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={pointsOverrideSaving} onClick={savePointsOverride}>Save</button>
+                  {isOverride&&<button type="button" className="btn btn-sm btn-ghost" disabled={pointsOverrideSaving} onClick={resetPointsOverride}>Reset to auto</button>}
+                </div>
+              )}
             </div>
-          )}
+            );
+          })()}
           {/* Flags */}
           {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -5837,8 +5883,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const[ecosystems,setEcosystems]=useState([]);
   useEffect(()=>{apiFetch('/ecosystems').then(setEcosystems).catch(()=>{});},[]);
 
-  const emptyRedemptionForm={source_ecosystem_id:'',points_redeemed:'',points_transferred:'',
-    transfer_date:'',redemption_date:'',description:'',cash_value_usd:'',notes:''};
+  const emptyRedemptionForm={points_redeemed:'',redemption_date:'',description:'',cash_value_usd:'',notes:''};
   const[showRedemptionModal,setShowRedemptionModal]=useState(false);
   const[editingRedemptionId,setEditingRedemptionId]=useState(null);
   const[redemptionForm,setRedemptionForm]=useState(emptyRedemptionForm);
@@ -5847,8 +5892,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const openNewRedemption=()=>{setEditingRedemptionId(null);setRedemptionForm(emptyRedemptionForm);setShowRedemptionModal(true);};
   const openEditRedemption=(r)=>{
     setEditingRedemptionId(r.id);
-    setRedemptionForm({source_ecosystem_id:r.source_ecosystem_id||'',points_redeemed:r.points_redeemed,
-      points_transferred:r.points_transferred||'',transfer_date:r.transfer_date||'',
+    setRedemptionForm({points_redeemed:r.points_redeemed,
       redemption_date:r.redemption_date,description:r.description,cash_value_usd:r.cash_value_usd,notes:r.notes||''});
     setShowRedemptionModal(true);
   };
@@ -5861,10 +5905,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     try{
       const body={
         ecosystem_id:Number(ecoId),
-        source_ecosystem_id:redemptionForm.source_ecosystem_id?Number(redemptionForm.source_ecosystem_id):null,
         points_redeemed:parseFloat(redemptionForm.points_redeemed),
-        points_transferred:redemptionForm.points_transferred?parseFloat(redemptionForm.points_transferred):null,
-        transfer_date:redemptionForm.transfer_date||null,
         redemption_date:redemptionForm.redemption_date,
         description:redemptionForm.description,
         cash_value_usd:parseFloat(redemptionForm.cash_value_usd),
@@ -5877,6 +5918,82 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
       toast(editingRedemptionId?'Redemption updated':'Redemption added');
     }catch(e){toast('Save failed: '+(e?.message||''),'error');}
     finally{setRedemptionSaving(false);}
+  };
+
+  /* ── Transfers (value-neutral point movement, separate from Redemptions) ── */
+  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:''};
+  const[showTransferModal,setShowTransferModal]=useState(false);
+  const[editingTransferId,setEditingTransferId]=useState(null);
+  const[transferForm,setTransferForm]=useState(emptyTransferForm);
+  const[transferSaving,setTransferSaving]=useState(false);
+  const[transferRatios,setTransferRatios]=useState([]);
+  useEffect(()=>{apiFetch('/transfer-ratios').then(setTransferRatios).catch(()=>{});},[]);
+
+  const currentRatioFor=(otherId,direction)=>{
+    const sourceId=direction==='out'?Number(ecoId):Number(otherId);
+    const destId=direction==='out'?Number(otherId):Number(ecoId);
+    return transferRatios.find(r=>r.source_ecosystem_id===sourceId&&r.destination_ecosystem_id===destId);
+  };
+  const openNewTransfer=(direction)=>{
+    setEditingTransferId(null);
+    setTransferForm({...emptyTransferForm,direction});
+    setShowTransferModal(true);
+  };
+  useEffect(()=>{
+    if(!transferForm.otherEcosystemId||editingTransferId)return;
+    const ratio=currentRatioFor(transferForm.otherEcosystemId,transferForm.direction);
+    if(ratio)setTransferForm(f=>({...f,base_ratio_used:ratio.base_ratio}));
+    // eslint-disable-next-line
+  },[transferForm.otherEcosystemId,transferForm.direction]);
+  const saveTransfer=async()=>{
+    if(!transferForm.otherEcosystemId||!transferForm.points_sent||!transferForm.base_ratio_used||!transferForm.transfer_date){
+      toast('Other ecosystem, points sent, ratio, and date are required','error');return;
+    }
+    setTransferSaving(true);
+    try{
+      const sourceId=transferForm.direction==='out'?Number(ecoId):Number(transferForm.otherEcosystemId);
+      const destId=transferForm.direction==='out'?Number(transferForm.otherEcosystemId):Number(ecoId);
+      const pointsSent=parseFloat(transferForm.points_sent);
+      const ratio=parseFloat(transferForm.base_ratio_used);
+      const bonusPct=transferForm.bonus_pct?parseFloat(transferForm.bonus_pct)/100:0;
+
+      // If this ratio is new or differs from what's on file for the pair,
+      // save it as the new standing ratio too — one step instead of a
+      // separate settings screen.
+      const existingRatio=currentRatioFor(transferForm.otherEcosystemId,transferForm.direction);
+      if(!existingRatio||existingRatio.base_ratio!==ratio){
+        await apiFetch('/transfer-ratios',{method:'POST',body:JSON.stringify({
+          source_ecosystem_id:sourceId,destination_ecosystem_id:destId,
+          base_ratio:ratio,effective_from:transferForm.transfer_date,
+        })});
+        apiFetch('/transfer-ratios').then(setTransferRatios).catch(()=>{});
+      }
+
+      const body={
+        source_ecosystem_id:sourceId,
+        destination_ecosystem_id:destId,
+        points_sent:pointsSent,
+        base_ratio_used:ratio,
+        bonus_pct:bonusPct||null,
+        points_received:pointsSent*ratio*(1+bonusPct),
+        transfer_date:transferForm.transfer_date,
+        notes:transferForm.notes||null,
+      };
+      if(editingTransferId) await apiFetch(`/transfers/${editingTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch('/transfers',{method:'POST',body:JSON.stringify(body)});
+      setShowTransferModal(false);
+      load(period,year);
+      toast(editingTransferId?'Transfer updated':'Transfer added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setTransferSaving(false);}
+  };
+  const deleteTransfer=async(id)=>{
+    if(!window.confirm('Delete this transfer?'))return;
+    try{
+      await apiFetch(`/transfers/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Transfer deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
   };
   const deleteRedemption=async(id)=>{
     if(!window.confirm('Delete this redemption?'))return;
@@ -5990,9 +6107,9 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           {/* Hero stat */}
           <div style={{textAlign:'center',padding:'28px 24px 32px',marginBottom:20,borderRadius:14,
             background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
-            <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--gold)',opacity:0.06}}/>
-            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:isCashBack?'var(--green)':'var(--gold)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
+            <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
+            <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
+            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:isCashBack?'var(--green)':'var(--blue-primary)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
               {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
             </div>
             <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
@@ -6010,7 +6127,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                   <span style={{fontSize:13,fontWeight:300,color:'var(--text-primary)',width:90,flexShrink:0}}>{cat.category||'Other'}</span>
                   <div style={{flex:1,height:6,borderRadius:3,background:'var(--elevated)',overflow:'hidden'}}>
                     <div style={{height:'100%',borderRadius:3,width:`${Math.round(cat.points/maxCatPts*100)}%`,
-                      background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.4s ease'}}/>
+                      background:'var(--accent-gradient)',transition:'width 0.4s ease'}}/>
                   </div>
                   <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)',width:60,textAlign:'right',flexShrink:0}}>{isCashBack?`$${(cat.points*0.01).toFixed(2)}`:cat.points.toLocaleString()}</span>
                   <span style={{fontSize:11,fontWeight:300,color:'var(--text-muted)',width:40,textAlign:'right',flexShrink:0}}>{cat.pct}%</span>
@@ -6041,7 +6158,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                       <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{c.account_name}</div>
                       {c.mask&&<div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>···{c.mask}</div>}
                     </div>
-                    <span style={{fontSize:14,fontWeight:300,color:isCashBack?'var(--green)':'var(--gold)',flexShrink:0}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
+                    <span style={{fontSize:14,fontWeight:300,color:isCashBack?'var(--green)':'var(--blue-primary)',flexShrink:0}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
                     <span style={{color:'var(--text-muted)',fontSize:14,marginLeft:4,opacity:0.4}}>›</span>
                   </div>
                 );
@@ -6066,7 +6183,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             {data.total_points_redeemed>0&&<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
               <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Realized cpp</div>
-                <div style={{fontSize:18,fontWeight:400,color:'var(--gold)'}}>{data.realized_cpp.toFixed(2)}¢</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--blue-primary)'}}>{data.realized_cpp.toFixed(2)}¢</div>
                 <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>vs. assumed {(data.your_cpp*100).toFixed(2)}¢</div>
               </div>
               <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
@@ -6087,12 +6204,51 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{r.description}</div>
                       <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
-                        {r.points_redeemed.toLocaleString()} pts · ${r.cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} · {r.realized_cpp.toFixed(2)}¢/pt
-                        {r.source_ecosystem_name?` · transferred from ${r.source_ecosystem_name}`:''} · {new Date(r.redemption_date).toLocaleDateString()}
+                        {r.points_redeemed.toLocaleString()} pts · ${r.cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} · {r.realized_cpp.toFixed(2)}¢/pt · {new Date(r.redemption_date).toLocaleDateString()}
                       </div>
                     </div>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditRedemption(r)}>Edit</button>
                     <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteRedemption(r.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
+
+          {/* Transfers — value-neutral point movement, kept separate from Redemptions */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Transfers</div>
+              <div style={{display:'flex',gap:8}}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openNewTransfer('out')}>+ Transfer out</button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={()=>openNewTransfer('in')}>+ Transfer in</button>
+              </div>
+            </div>
+            {(data.transfers_out.length===0&&data.transfers_in.length===0)?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No transfers logged for {ecoName} yet.</div>:
+              <div>
+                {data.transfers_out.map((t)=>(
+                  <div key={`out-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:'1px solid var(--border)'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>→ {t.destination_ecosystem_name}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteTransfer(t.id)}>Delete</button>
+                  </div>
+                ))}
+                {data.transfers_in.map((t)=>(
+                  <div key={`in-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:'1px solid var(--border)'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>← {t.source_ecosystem_name}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteTransfer(t.id)}>Delete</button>
                   </div>
                 ))}
               </div>
@@ -6127,24 +6283,6 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 </div>
               </div>
               <div>
-                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transferred From <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
-                <select className="filter-select" style={{width:'100%'}} value={redemptionForm.source_ecosystem_id} onChange={e=>setRedemptionForm(f=>({...f,source_ecosystem_id:e.target.value}))}>
-                  <option value="">— direct, no transfer —</option>
-                  {ecosystems.filter(e=>String(e.id)!==String(ecoId)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </div>
-              {redemptionForm.source_ecosystem_id&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div>
-                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Transferred</label>
-                  <input className="search-input" type="number" value={redemptionForm.points_transferred} onChange={e=>setRedemptionForm(f=>({...f,points_transferred:e.target.value}))}
-                    placeholder="Only if different from points redeemed"/>
-                </div>
-                <div>
-                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Date</label>
-                  <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.transfer_date} onChange={e=>setRedemptionForm(f=>({...f,transfer_date:e.target.value}))}/>
-                </div>
-              </div>}
-              <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Redemption Date</label>
                 <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.redemption_date} onChange={e=>setRedemptionForm(f=>({...f,redemption_date:e.target.value}))}/>
               </div>
@@ -6158,6 +6296,64 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               <button type="button" className="btn btn-ghost" onClick={()=>setShowRedemptionModal(false)}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={saveRedemption} disabled={redemptionSaving}>
                 {redemptionSaving?'Saving…':editingRedemptionId?'Save Changes':'Add Redemption'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTransferModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:440}}>
+            <div className="modal-header">
+              <div className="modal-title">{transferForm.direction==='out'?`Transfer out of ${ecoName}`:`Transfer into ${ecoName}`}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowTransferModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12,maxHeight:'60vh',overflowY:'auto'}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>{transferForm.direction==='out'?'Transfer to':'Transfer from'}</label>
+                <select className="filter-select" style={{width:'100%'}} value={transferForm.otherEcosystemId} onChange={e=>setTransferForm(f=>({...f,otherEcosystemId:e.target.value}))}>
+                  <option value="">— select —</option>
+                  {ecosystems.filter(e=>String(e.id)!==String(ecoId)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Sent</label>
+                  <input className="search-input" type="number" value={transferForm.points_sent} onChange={e=>setTransferForm(f=>({...f,points_sent:e.target.value}))}
+                    placeholder="100000"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Ratio (received per 1 sent)</label>
+                  <input className="search-input" type="number" step="0.01" value={transferForm.base_ratio_used} onChange={e=>setTransferForm(f=>({...f,base_ratio_used:e.target.value}))}
+                    placeholder="e.g. 2.0"/>
+                  <div style={{fontSize:10,color:'var(--text-muted)',marginTop:3}}>Pre-filled from the current ratio on file — override for this transfer if needed.</div>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Bonus % <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <input className="search-input" type="number" step="1" value={transferForm.bonus_pct} onChange={e=>setTransferForm(f=>({...f,bonus_pct:e.target.value}))}
+                  placeholder="e.g. 40 for a 40% promo bonus"/>
+              </div>
+              {transferForm.points_sent&&transferForm.base_ratio_used&&
+                <div style={{fontSize:12,color:'var(--text-secondary)',background:'var(--elevated)',borderRadius:8,padding:'8px 12px'}}>
+                  Points received: <b>{Math.round(parseFloat(transferForm.points_sent)*parseFloat(transferForm.base_ratio_used)*(1+(transferForm.bonus_pct?parseFloat(transferForm.bonus_pct)/100:0))).toLocaleString()}</b>
+                </div>
+              }
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={transferForm.transfer_date} onChange={e=>setTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={transferForm.notes} onChange={e=>setTransferForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowTransferModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveTransfer} disabled={transferSaving}>
+                {transferSaving?'Saving…':'Add Transfer'}
               </button>
             </div>
           </div>
@@ -6290,7 +6486,7 @@ function CardsPage({toast,refreshKey}){
   useEffect(()=>{load().then(()=>loadSuggestions());},[load,refreshKey]);
 
   // Legacy card management
-  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four||'',statement_close_day:card.statement_close_day||'',payment_due_day:card.payment_due_day||'',credit_limit:card.credit_limit||'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee||''});};
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??''});};
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
     try{
@@ -6562,7 +6758,7 @@ function CardsPage({toast,refreshKey}){
                             <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
                           </div>
                           <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--gold)'}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--blue-primary)'}}>{eco.points_earned.toLocaleString()}</div>
                             <div style={{fontSize:11,color:'var(--text-muted)',marginTop:4,fontWeight:300}}>{'≈ $'}{eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
                           <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>

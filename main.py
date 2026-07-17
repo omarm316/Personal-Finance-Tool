@@ -28,7 +28,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
-    Redemption,
+    Redemption, TransferRatio, Transfer,
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
@@ -398,6 +398,13 @@ _NON_EARNING_CATS: frozenset[str] = frozenset({
     'Bank Fees',
 })
 
+# Credit-card-payment description keywords — the categorization pipeline
+# doesn't consistently tag these action='Transfer' (some land as action=
+# 'Expense'/category 'Fees & Interest' instead), so compute_points_earn()
+# also checks description text directly rather than relying on action alone.
+# Same list used by the cash-flow calc's own CC-payment detection.
+_CC_PAYMENT_KW = ('CREDIT CRD', 'CREDIT CARD', 'AUTOPAY', 'CC PAYMENT', 'CARD PAYMENT')
+
 
 def calc_earn_rate(
     bonus_by_name: dict[str, float],
@@ -426,6 +433,65 @@ def calc_earn_rate(
     if parent and parent in bonus_by_name:
         return base_rate + bonus_by_name[parent]
     return base_rate
+
+
+def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map: dict) -> dict:
+    """
+    Signed points-earn for a single transaction — the one place every
+    earn-rate call site routes through. Deliberately simple, per Omer's
+    design (2026-07-16, replacing an earlier fuzzy-matching version — see
+    MARGIN-MORESHETH-INTEGRATION.md for why): sign + category rules only,
+    no purchase-matching, no auto-detected benefit credits.
+
+    1. Expense, negative amount (a normal purchase) → earn at the category rate.
+    2. Expense, positive amount (a credit) → same category rate, subtracted.
+    3. Category is a fee/interest type (_NON_EARNING_CATS) → 0.
+    4. It's a payment (by action or description) → 0.
+    5. Anything else that shouldn't move points — a genuine benefit credit,
+       an adjustment, a balance transfer, a cash advance, etc. — is the
+       user's call via the existing `is_excluded` toggle, checked first
+       below so it always wins.
+
+    Only `action == 'Expense'` transactions ever earn or lose points —
+    Income/Transfer/other action types are out of scope (rare on credit
+    cards, not worth handling here).
+
+    Returns {'points': float, 'classification': str, 'earn_rate': float|None}.
+    """
+    def _zero(cls):
+        return {'points': 0.0, 'classification': cls, 'earn_rate': None}
+
+    if t.points_earn_override is not None:
+        return {'points': t.points_earn_override, 'classification': 'manual_override', 'earn_rate': None}
+
+    if t.is_excluded:
+        return _zero('excluded')
+
+    if t.action != 'Expense':
+        return _zero('excluded')
+
+    # Payments aren't consistently tagged action='Transfer' by the
+    # categorization pipeline, so this also checks description text —
+    # the known-keyword list, plus the broader "PAYMENT"+"THANK"
+    # co-occurrence (issuer payment-confirmation descriptions vary by
+    # channel — "MOBILE PAYMENT - THANK YOU", "PAYMENT THANK YOU", "ONLINE
+    # PAYMENT, THANK YOU" — but consistently include both words).
+    _desc_upper = (t.description_raw or '').upper()
+    if (any(kw in _desc_upper for kw in _CC_PAYMENT_KW)
+            or ('PAYMENT' in _desc_upper and 'THANK' in _desc_upper)):
+        return _zero('excluded')
+
+    if t.points_category in _NON_EARNING_CATS:
+        return _zero('excluded')
+
+    if t.amount is None or t.amount == 0:
+        return _zero('excluded')
+
+    rate = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
+    if t.amount < 0:
+        return {'points': abs(t.amount) * rate, 'classification': 'earn', 'earn_rate': rate}
+    else:
+        return {'points': -(t.amount * rate), 'classification': 'clawback', 'earn_rate': rate}
 
 
 def calc_auto_top_category_points(db, account_id, product, start_date, end_date):
@@ -1144,6 +1210,11 @@ class TransactionUpdate(BaseModel):
     is_excluded: Optional[bool] = None
     points_category: Optional[str] = None
     description_clean: Optional[str] = None
+    # Manual override for the signed points-earn value (see compute_points_earn()).
+    # clear_points_earn_override resets to auto-classification; points_earn_override
+    # sets an explicit value. clear takes precedence if both are sent.
+    points_earn_override: Optional[float] = None
+    clear_points_earn_override: Optional[bool] = None
 
 
 class BatchTransactionUpdate(BaseModel):
@@ -3230,7 +3301,7 @@ def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
     transactions without N+1 queries.
 
     Returns:
-      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name)}
+      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp)}
                        where bonus_by_name = {category_name: additional_multiplier}
       cat_parent_map : {category_name: parent_key}  — for the L2→L1 waterfall
     """
@@ -3303,19 +3374,20 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
         categorizer=categorizer
     )
 
-    # Points earn — only computed for expenses where we know the card's product
+    # Points earn — computed via compute_points_earn() for any transaction where
+    # we know the card's product (not just Expense rows, so credits/clawbacks
+    # are visible too instead of silently omitted).
     points_earn = None
-    if (points_lookup is not None and cat_parent_map is not None
-            and t.action == 'Expense' and t.account_id in points_lookup):
+    if points_lookup is not None and cat_parent_map is not None and t.account_id in points_lookup:
         base, bonus_by_name, currency, eco_name, your_cpp = points_lookup[t.account_id]
-        rate   = calc_earn_rate(bonus_by_name, base, t.points_category, cat_parent_map)
+        result = compute_points_earn(t, base, bonus_by_name, cat_parent_map)
         parent = cat_parent_map.get(t.points_category) if t.points_category else None
-        pts    = round(abs(t.amount) * rate, 1)
         points_earn = {
             'points_category':    t.points_category,       # e.g. "Drugstore" or "United"
             'points_category_l1': parent,                  # e.g. None or "Airlines"
-            'earn_rate':          rate,                    # total multiplier, e.g. 3.0
-            'points_estimated':   pts,                     # e.g. 29.1
+            'earn_rate':          result['earn_rate'],      # total multiplier, e.g. 3.0 (None when N/A)
+            'points_estimated':   round(result['points'], 1),  # signed — negative for clawbacks
+            'classification':     result['classification'],
             'currency':           currency,                # e.g. "Ultimate Rewards"
             'eco_name':           eco_name,
             'cpp':                your_cpp,                # for value estimate in UI
@@ -3466,6 +3538,13 @@ async def update_transaction(
     if update.is_excluded is not None:
         t.is_excluded = update.is_excluded
         t.updated_at  = datetime.utcnow()
+
+    if update.clear_points_earn_override:
+        t.points_earn_override = None
+        t.updated_at = datetime.utcnow()
+    elif update.points_earn_override is not None:
+        t.points_earn_override = update.points_earn_override
+        t.updated_at = datetime.utcnow()
 
     if update.description_clean is not None:
         t.description_clean = update.description_clean
@@ -4745,245 +4824,6 @@ async def cards_earn_summary(
     }
 
 
-@app.get("/api/ecosystems/{eco_id}/earn-detail")
-async def ecosystem_earn_detail(
-    eco_id: int,
-    period: str = 'qtd',
-    year: int = None,
-    db: Session = Depends(get_db),
-):
-    """
-    Per-category earn breakdown for a single ecosystem (e.g. Chase UR).
-    Returned to power the Ecosystem Detail Page.
-    """
-    import calendar as _cal
-    from datetime import date as _date
-    from sqlalchemy import func as _func
-
-    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
-    if not eco:
-        raise HTTPException(status_code=404, detail="Ecosystem not found")
-
-    # Redemptions aren't period-scoped (like active_challenges below) — show
-    # the full history of what this currency has actually been worth when
-    # redeemed, not just what happened in the selected MTD/QTD/YTD window.
-    redemption_rows = (
-        db.query(Redemption)
-        .filter_by(ecosystem_id=eco_id)
-        .order_by(Redemption.redemption_date.desc())
-        .all()
-    )
-    redemptions_out = [_serialize_redemption(r) for r in redemption_rows]
-    total_points_redeemed = sum(r.points_redeemed for r in redemption_rows)
-    total_cash_value_usd = sum(r.cash_value_usd for r in redemption_rows)
-    realized_cpp = round((total_cash_value_usd / total_points_redeemed) * 100, 4) if total_points_redeemed else 0
-
-    today = _date.today()
-    if year is None:
-        year = today.year
-    is_current = (year == today.year)
-
-    if period == 'mtd':
-        start = _date(year, today.month, 1)
-        end   = today if is_current else _date(year, today.month,
-                    _cal.monthrange(year, today.month)[1])
-    elif period == 'qtd':
-        q0    = ((today.month - 1) // 3) * 3 + 1
-        start = _date(year, q0, 1)
-        end   = today if is_current else _date(year, q0 + 2,
-                    _cal.monthrange(year, q0 + 2)[1])
-    else:
-        start = _date(year, 1, 1)
-        end   = today if is_current else _date(year, 12, 31)
-
-    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
-    cat_parent_map = {c.name: c.parent_key for c in all_categories}
-
-    # Accounts in this ecosystem
-    products_cache: dict[int, tuple] = {}
-    card_by_acct: dict[int, Card] = {}
-    for c in db.query(Card).all():
-        if c.account_id and c.account_id not in card_by_acct:
-            card_by_acct[c.account_id] = c
-
-    credit_accounts = (
-        db.query(Account)
-        .filter(Account.is_active == True)
-        .filter(Account.account_type.ilike('%credit%'))
-        .all()
-    )
-    eco_accts = []
-    acct_info: dict[int, dict] = {}
-    for acct in credit_accounts:
-        card = card_by_acct.get(acct.id)
-        product = None
-        if acct.product_id:
-            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
-        if not product and card and card.product_id:
-            product = db.query(CardProduct).filter_by(id=card.product_id).first()
-
-        a_eco_id = None
-        if product and product.ecosystem_id:
-            a_eco_id = product.ecosystem_id
-        elif card and card.ecosystem_id:
-            a_eco_id = card.ecosystem_id
-
-        if a_eco_id != eco_id:
-            continue
-
-        base_rate = 1.0
-        bonus_by_name: dict[str, float] = {}
-        if product:
-            pid = product.id
-            if pid not in products_cache:
-                rates = db.query(CardProductReward).filter_by(product_id=pid).all()
-                _b = 1.0
-                _bb: dict[str, float] = {}
-                for r in rates:
-                    if r.is_base_rate:
-                        _b = r.multiplier
-                    elif r.points_category_id and r.points_category:
-                        _bb[r.points_category.name] = r.multiplier
-                products_cache[pid] = (_b, _bb)
-            base_rate, bonus_by_name = products_cache[product.id]
-
-        eco_accts.append(acct.id)
-        acct_info[acct.id] = {
-            'base_rate':     base_rate,
-            'bonus_by_name': bonus_by_name,
-            'account_name':  acct.account_name,
-            'mask':          acct.mask,
-            'card_name':     card.card_name if card else None,
-        }
-
-    if not eco_accts:
-        return {
-            'eco_id': eco_id, 'name': eco.name, 'currency_name': eco.currency_name,
-            'your_cpp': eco.your_cpp, 'period': period, 'year': year,
-            'start': start.isoformat(), 'end': end.isoformat(),
-            'total_points': 0, 'est_value': 0,
-            'by_category': [], 'by_card': [], 'active_challenges': [],
-            'redemptions': redemptions_out,
-            'total_points_redeemed': total_points_redeemed,
-            'total_cash_value_usd': total_cash_value_usd,
-            'realized_cpp': realized_cpp,
-        }
-
-    rows = (
-        db.query(
-            Transaction.account_id,
-            Transaction.points_category,
-            _func.sum(Transaction.amount).label('total'),
-        )
-        .filter(
-            Transaction.account_id.in_(eco_accts),
-            Transaction.date >= start,
-            Transaction.date <= end,
-            Transaction.action == 'Expense',
-            Transaction.amount < 0,
-            Transaction.is_excluded != True,
-        )
-        .group_by(Transaction.account_id, Transaction.points_category)
-        .all()
-    )
-
-    by_cat: dict[str, float] = {}
-    by_acct: dict[int, float] = {}
-    total_pts = 0.0
-    for acct_id, pts_cat, total in rows:
-        info = acct_info.get(acct_id)
-        if not info:
-            continue
-        amt  = abs(float(total or 0))
-        rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
-        pts  = amt * rate
-        total_pts += pts
-        cat_key = pts_cat or 'Other'
-        by_cat[cat_key]   = by_cat.get(cat_key, 0.0)   + pts
-        by_acct[acct_id]  = by_acct.get(acct_id, 0.0)  + pts
-
-    cpp   = float(eco.your_cpp)
-    total_pts_r = round(total_pts)
-
-    by_cat_out = sorted(
-        [{'category': k, 'points': round(v), 'pct': round(v / total_pts * 100, 1) if total_pts else 0}
-         for k, v in by_cat.items()],
-        key=lambda x: -x['points'],
-    )
-    by_card_out = sorted(
-        [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
-          'mask': acct_info[aid]['mask'], 'points': round(p)}
-         for aid, p in by_acct.items()],
-        key=lambda x: -x['points'],
-    )
-
-    # Active challenges for this ecosystem's cards
-    # Multi-card challenges are "exploded" into per-card entries so each
-    # card shows its own spend progress and threshold independently.
-    active_ch_out: list[dict] = []
-    try:
-        card_ids_in_eco = [
-            card_by_acct[aid].id for aid in eco_accts if aid in card_by_acct
-        ]
-        card_ids_set = set(card_ids_in_eco)
-        _today = datetime.utcnow().date()
-        _d_fn  = lambda v: v.date() if isinstance(v, datetime) else v
-        for ch in (db.query(SpendChallenge)
-                   .filter(SpendChallenge.is_active == True)
-                   .filter(or_(
-                       SpendChallenge.card_id.in_(card_ids_in_eco),
-                       SpendChallenge.id.in_(
-                           db.query(ChallengeCardLink.challenge_id)
-                           .filter(ChallengeCardLink.card_id.in_(card_ids_in_eco))
-                       )
-                   )).all()):
-            if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
-                continue
-            # Collect all card IDs involved: primary + linked
-            all_card_ids = [ch.card_id] + [lnk.card_id for lnk in ch.card_links]
-            # Only include cards that belong to this ecosystem
-            eco_card_ids = [cid for cid in all_card_ids if cid in card_ids_set]
-            if not eco_card_ids:
-                continue
-            for cid in eco_card_ids:
-                card_obj = db.query(Card).filter_by(id=cid).first()
-                if not card_obj:
-                    continue
-                # Per-card spend override so each card shows its own progress
-                spend_ov = (
-                    _challenge_spend_for_card(db, ch, card_obj.account_id)
-                    if card_obj.account_id else None
-                )
-                ser = _serialize_challenge(ch, eco=eco, spend_override=spend_ov)
-                ser['card_name']  = card_obj.card_name
-                ser['last_four']  = card_obj.last_four
-                ser['account_id'] = card_obj.account_id
-                active_ch_out.append(ser)
-    except Exception:
-        logger.exception('Unexpected error — rolling back')
-        db.rollback()
-
-    return {
-        'eco_id':        eco_id,
-        'name':          eco.name,
-        'currency_name': eco.currency_name,
-        'your_cpp':      cpp,
-        'period':        period,
-        'year':          year,
-        'start':         start.isoformat(),
-        'end':           end.isoformat(),
-        'total_points':  total_pts_r,
-        'est_value':     round(total_pts_r * cpp, 2),
-        'by_category':   by_cat_out,
-        'by_card':       by_card_out,
-        'active_challenges': active_ch_out,
-        'redemptions': redemptions_out,
-        'total_points_redeemed': total_points_redeemed,
-        'total_cash_value_usd': total_cash_value_usd,
-        'realized_cpp': realized_cpp,
-    }
-
-
 @app.get("/api/ecosystems/cash-back/earn-detail")
 async def cash_back_earn_detail(
     period: str = 'qtd',
@@ -4994,6 +4834,12 @@ async def cash_back_earn_detail(
     Aggregated earn detail for ALL cash-back ecosystems.
     Same shape as single-ecosystem detail but merges all is_cash_back=True ecosystems.
     Cash back amounts are in dollars (1 point = 1 cent → cpp fixed at 0.01).
+
+    Registered BEFORE /api/ecosystems/{eco_id}/earn-detail on purpose — FastAPI/
+    Starlette match routes in registration order, and {eco_id}:int structurally
+    matches any single path segment (including the literal string "cash-back")
+    before Pydantic's int validation runs, which fails with a 422 rather than
+    falling through to this route. Keep this route above the {eco_id} one.
     """
     import calendar as _cal
     from datetime import date as _date
@@ -5221,6 +5067,257 @@ async def cash_back_earn_detail(
     }
 
 
+@app.get("/api/ecosystems/{eco_id}/earn-detail")
+async def ecosystem_earn_detail(
+    eco_id: int,
+    period: str = 'qtd',
+    year: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Per-category earn breakdown for a single ecosystem (e.g. Chase UR).
+    Returned to power the Ecosystem Detail Page.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from sqlalchemy import func as _func
+
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+
+    # Redemptions aren't period-scoped (like active_challenges below) — show
+    # the full history of what this currency has actually been worth when
+    # redeemed, not just what happened in the selected MTD/QTD/YTD window.
+    redemption_rows = (
+        db.query(Redemption)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(Redemption.redemption_date.desc())
+        .all()
+    )
+    redemptions_out = [_serialize_redemption(r) for r in redemption_rows]
+    total_points_redeemed = sum(r.points_redeemed for r in redemption_rows)
+    total_cash_value_usd = sum(r.cash_value_usd for r in redemption_rows)
+    realized_cpp = round((total_cash_value_usd / total_points_redeemed) * 100, 4) if total_points_redeemed else 0
+
+    # Transfers are value-neutral, shown on both sides of the pair — also not
+    # period-scoped, same rationale as redemptions above.
+    transfers_out = [
+        _serialize_transfer(t)
+        for t in db.query(Transfer).filter_by(source_ecosystem_id=eco_id).order_by(Transfer.transfer_date.desc()).all()
+    ]
+    transfers_in = [
+        _serialize_transfer(t)
+        for t in db.query(Transfer).filter_by(destination_ecosystem_id=eco_id).order_by(Transfer.transfer_date.desc()).all()
+    ]
+
+    today = _date.today()
+    if year is None:
+        year = today.year
+    is_current = (year == today.year)
+
+    if period == 'mtd':
+        start = _date(year, today.month, 1)
+        end   = today if is_current else _date(year, today.month,
+                    _cal.monthrange(year, today.month)[1])
+    elif period == 'qtd':
+        q0    = ((today.month - 1) // 3) * 3 + 1
+        start = _date(year, q0, 1)
+        end   = today if is_current else _date(year, q0 + 2,
+                    _cal.monthrange(year, q0 + 2)[1])
+    else:
+        start = _date(year, 1, 1)
+        end   = today if is_current else _date(year, 12, 31)
+
+    all_categories = db.query(PointsCategory).filter_by(is_active=True).all()
+    cat_parent_map = {c.name: c.parent_key for c in all_categories}
+
+    # Accounts in this ecosystem
+    products_cache: dict[int, tuple] = {}
+    card_by_acct: dict[int, Card] = {}
+    for c in db.query(Card).all():
+        if c.account_id and c.account_id not in card_by_acct:
+            card_by_acct[c.account_id] = c
+
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .filter(Account.account_type.ilike('%credit%'))
+        .all()
+    )
+    eco_accts = []
+    acct_info: dict[int, dict] = {}
+    for acct in credit_accounts:
+        card = card_by_acct.get(acct.id)
+        product = None
+        if acct.product_id:
+            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+        if not product and card and card.product_id:
+            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+
+        a_eco_id = None
+        if product and product.ecosystem_id:
+            a_eco_id = product.ecosystem_id
+        elif card and card.ecosystem_id:
+            a_eco_id = card.ecosystem_id
+
+        if a_eco_id != eco_id:
+            continue
+
+        base_rate = 1.0
+        bonus_by_name: dict[str, float] = {}
+        if product:
+            pid = product.id
+            if pid not in products_cache:
+                rates = db.query(CardProductReward).filter_by(product_id=pid).all()
+                _b = 1.0
+                _bb: dict[str, float] = {}
+                for r in rates:
+                    if r.is_base_rate:
+                        _b = r.multiplier
+                    elif r.points_category_id and r.points_category:
+                        _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb)
+            base_rate, bonus_by_name = products_cache[product.id]
+
+        eco_accts.append(acct.id)
+        acct_info[acct.id] = {
+            'base_rate':     base_rate,
+            'bonus_by_name': bonus_by_name,
+            'account_name':  acct.account_name,
+            'mask':          acct.mask,
+            'card_name':     card.card_name if card else None,
+        }
+
+    if not eco_accts:
+        return {
+            'eco_id': eco_id, 'name': eco.name, 'currency_name': eco.currency_name,
+            'your_cpp': eco.your_cpp, 'period': period, 'year': year,
+            'start': start.isoformat(), 'end': end.isoformat(),
+            'total_points': 0, 'est_value': 0,
+            'by_category': [], 'by_card': [], 'active_challenges': [],
+            'redemptions': redemptions_out,
+            'total_points_redeemed': total_points_redeemed,
+            'total_cash_value_usd': total_cash_value_usd,
+            'realized_cpp': realized_cpp,
+            'transfers_out': transfers_out,
+            'transfers_in': transfers_in,
+        }
+
+    # Per-transaction classification via compute_points_earn() — a flat SQL
+    # SUM can't express the sign-flip on credits, so this fetches actual
+    # rows in the window and sums signed points in Python.
+    window_rows = (
+        db.query(Transaction)
+        .filter(
+            Transaction.account_id.in_(eco_accts),
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.is_excluded != True,
+        )
+        .all()
+    )
+
+    by_cat: dict[str, float] = {}
+    by_acct: dict[int, float] = {}
+    total_pts = 0.0
+    for t in window_rows:
+        if t.action != 'Expense':
+            continue
+        info = acct_info.get(t.account_id)
+        if not info:
+            continue
+        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map)
+        pts = result['points']
+        total_pts += pts
+        cat_key = t.points_category or 'Other'
+        by_cat[cat_key]        = by_cat.get(cat_key, 0.0)        + pts
+        by_acct[t.account_id]  = by_acct.get(t.account_id, 0.0)  + pts
+
+    cpp   = float(eco.your_cpp)
+    total_pts_r = round(total_pts)
+
+    by_cat_out = sorted(
+        [{'category': k, 'points': round(v), 'pct': round(v / total_pts * 100, 1) if total_pts else 0}
+         for k, v in by_cat.items()],
+        key=lambda x: -x['points'],
+    )
+    by_card_out = sorted(
+        [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
+          'mask': acct_info[aid]['mask'], 'points': round(p)}
+         for aid, p in by_acct.items()],
+        key=lambda x: -x['points'],
+    )
+
+    # Active challenges for this ecosystem's cards
+    # Multi-card challenges are "exploded" into per-card entries so each
+    # card shows its own spend progress and threshold independently.
+    active_ch_out: list[dict] = []
+    try:
+        card_ids_in_eco = [
+            card_by_acct[aid].id for aid in eco_accts if aid in card_by_acct
+        ]
+        card_ids_set = set(card_ids_in_eco)
+        _today = datetime.utcnow().date()
+        _d_fn  = lambda v: v.date() if isinstance(v, datetime) else v
+        for ch in (db.query(SpendChallenge)
+                   .filter(SpendChallenge.is_active == True)
+                   .filter(or_(
+                       SpendChallenge.card_id.in_(card_ids_in_eco),
+                       SpendChallenge.id.in_(
+                           db.query(ChallengeCardLink.challenge_id)
+                           .filter(ChallengeCardLink.card_id.in_(card_ids_in_eco))
+                       )
+                   )).all()):
+            if _d_fn(ch.end_date) < _today or _d_fn(ch.start_date) > _today:
+                continue
+            # Collect all card IDs involved: primary + linked
+            all_card_ids = [ch.card_id] + [lnk.card_id for lnk in ch.card_links]
+            # Only include cards that belong to this ecosystem
+            eco_card_ids = [cid for cid in all_card_ids if cid in card_ids_set]
+            if not eco_card_ids:
+                continue
+            for cid in eco_card_ids:
+                card_obj = db.query(Card).filter_by(id=cid).first()
+                if not card_obj:
+                    continue
+                # Per-card spend override so each card shows its own progress
+                spend_ov = (
+                    _challenge_spend_for_card(db, ch, card_obj.account_id)
+                    if card_obj.account_id else None
+                )
+                ser = _serialize_challenge(ch, eco=eco, spend_override=spend_ov)
+                ser['card_name']  = card_obj.card_name
+                ser['last_four']  = card_obj.last_four
+                ser['account_id'] = card_obj.account_id
+                active_ch_out.append(ser)
+    except Exception:
+        logger.exception('Unexpected error — rolling back')
+        db.rollback()
+
+    return {
+        'eco_id':        eco_id,
+        'name':          eco.name,
+        'currency_name': eco.currency_name,
+        'your_cpp':      cpp,
+        'period':        period,
+        'year':          year,
+        'start':         start.isoformat(),
+        'end':           end.isoformat(),
+        'total_points':  total_pts_r,
+        'est_value':     round(total_pts_r * cpp, 2),
+        'by_category':   by_cat_out,
+        'by_card':       by_card_out,
+        'active_challenges': active_ch_out,
+        'redemptions': redemptions_out,
+        'total_points_redeemed': total_points_redeemed,
+        'total_cash_value_usd': total_cash_value_usd,
+        'realized_cpp': realized_cpp,
+        'transfers_out': transfers_out,
+        'transfers_in': transfers_in,
+    }
+
+
 @app.get("/api/cards/swipe-advisor")
 async def swipe_advisor(category: Optional[str] = None, db: Session = Depends(get_db)):
     """
@@ -5367,11 +5464,7 @@ def _serialize_redemption(r: Redemption) -> dict:
         'id': r.id,
         'ecosystem_id': r.ecosystem_id,
         'ecosystem_name': r.ecosystem.name if r.ecosystem else None,
-        'source_ecosystem_id': r.source_ecosystem_id,
-        'source_ecosystem_name': r.source_ecosystem.name if r.source_ecosystem else None,
         'points_redeemed': r.points_redeemed,
-        'points_transferred': r.points_transferred,
-        'transfer_date': r.transfer_date.isoformat() if r.transfer_date else None,
         'redemption_date': r.redemption_date.isoformat(),
         'description': r.description,
         'cash_value_usd': r.cash_value_usd,
@@ -5394,15 +5487,12 @@ async def create_redemption(data: dict = Body(...), db: Session = Depends(get_db
     from datetime import date as _date
     try:
         r = Redemption(
-            ecosystem_id        = data['ecosystem_id'],
-            source_ecosystem_id = data.get('source_ecosystem_id') or None,
-            points_redeemed     = float(data['points_redeemed']),
-            points_transferred  = float(data['points_transferred']) if data.get('points_transferred') else None,
-            transfer_date       = _date.fromisoformat(data['transfer_date']) if data.get('transfer_date') else None,
-            redemption_date     = _date.fromisoformat(data['redemption_date']),
-            description         = data['description'],
-            cash_value_usd      = float(data['cash_value_usd']),
-            notes               = data.get('notes'),
+            ecosystem_id     = data['ecosystem_id'],
+            points_redeemed  = float(data['points_redeemed']),
+            redemption_date  = _date.fromisoformat(data['redemption_date']),
+            description      = data['description'],
+            cash_value_usd   = float(data['cash_value_usd']),
+            notes            = data.get('notes'),
         )
         db.add(r)
         db.commit()
@@ -5422,14 +5512,11 @@ async def update_redemption(redemption_id: int, data: dict = Body(...), db: Sess
         raise HTTPException(status_code=404, detail="Redemption not found")
     if 'ecosystem_id' in data:
         r.ecosystem_id = data['ecosystem_id']
-    if 'source_ecosystem_id' in data:
-        r.source_ecosystem_id = data['source_ecosystem_id'] or None
-    for field in ('points_redeemed', 'points_transferred', 'cash_value_usd'):
+    for field in ('points_redeemed', 'cash_value_usd'):
         if field in data:
             setattr(r, field, float(data[field]) if data[field] is not None else None)
-    for field in ('transfer_date', 'redemption_date'):
-        if field in data:
-            setattr(r, field, _date.fromisoformat(data[field]) if data[field] else None)
+    if 'redemption_date' in data:
+        r.redemption_date = _date.fromisoformat(data['redemption_date'])
     for field in ('description', 'notes'):
         if field in data:
             setattr(r, field, data[field])
@@ -5444,6 +5531,182 @@ async def delete_redemption(redemption_id: int, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail="Redemption not found")
     db.delete(r)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Transfer ratios — effective-dated base ratio per (source, destination)
+# ecosystem pair. Editing closes the old "current" row and opens a new one;
+# never overwrites history, since Transfers snapshot their own ratio anyway.
+# ---------------------------------------------------------------------------
+
+def _serialize_transfer_ratio(tr: TransferRatio) -> dict:
+    return {
+        'id': tr.id,
+        'source_ecosystem_id': tr.source_ecosystem_id,
+        'source_ecosystem_name': tr.source_ecosystem.name if tr.source_ecosystem else None,
+        'destination_ecosystem_id': tr.destination_ecosystem_id,
+        'destination_ecosystem_name': tr.destination_ecosystem.name if tr.destination_ecosystem else None,
+        'base_ratio': tr.base_ratio,
+        'effective_from': tr.effective_from.isoformat(),
+        'effective_to': tr.effective_to.isoformat() if tr.effective_to else None,
+    }
+
+
+@app.get("/api/transfer-ratios")
+async def list_transfer_ratios(current_only: bool = True, db: Session = Depends(get_db)):
+    q = db.query(TransferRatio)
+    if current_only:
+        q = q.filter(TransferRatio.effective_to.is_(None))
+    ratios = q.order_by(TransferRatio.source_ecosystem_id, TransferRatio.effective_from.desc()).all()
+    return [_serialize_transfer_ratio(tr) for tr in ratios]
+
+
+@app.post("/api/transfer-ratios")
+async def create_transfer_ratio(data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    try:
+        source_id = data['source_ecosystem_id']
+        dest_id = data['destination_ecosystem_id']
+        effective_from = _date.fromisoformat(data['effective_from']) if data.get('effective_from') else _date.today()
+
+        # Close out whatever was "current" for this pair — never overwrite history.
+        current = (
+            db.query(TransferRatio)
+            .filter_by(source_ecosystem_id=source_id, destination_ecosystem_id=dest_id, effective_to=None)
+            .first()
+        )
+        if current:
+            current.effective_to = effective_from
+
+        tr = TransferRatio(
+            source_ecosystem_id=source_id,
+            destination_ecosystem_id=dest_id,
+            base_ratio=float(data['base_ratio']),
+            effective_from=effective_from,
+        )
+        db.add(tr)
+        db.commit()
+        db.refresh(tr)
+        return _serialize_transfer_ratio(tr)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create transfer ratio error: {e}\n{traceback.format_exc()}")
+
+
+# ---------------------------------------------------------------------------
+# Transfers — value-neutral point movement between ecosystems. Self-
+# contained: base_ratio_used/points_received are snapshotted at creation,
+# not recomputed later, so a future TransferRatio edit never touches
+# historical Transfers.
+# ---------------------------------------------------------------------------
+
+def _serialize_transfer(t: Transfer) -> dict:
+    return {
+        'id': t.id,
+        'source_ecosystem_id': t.source_ecosystem_id,
+        'source_ecosystem_name': t.source_ecosystem.name if t.source_ecosystem else None,
+        'destination_ecosystem_id': t.destination_ecosystem_id,
+        'destination_ecosystem_name': t.destination_ecosystem.name if t.destination_ecosystem else None,
+        'points_sent': t.points_sent,
+        'base_ratio_used': t.base_ratio_used,
+        'bonus_pct': t.bonus_pct,
+        'points_received': t.points_received,
+        'transfer_date': t.transfer_date.isoformat(),
+        'notes': t.notes,
+    }
+
+
+@app.get("/api/transfers")
+async def list_transfers(ecosystem_id: int = None, db: Session = Depends(get_db)):
+    q = db.query(Transfer)
+    if ecosystem_id is not None:
+        q = q.filter(or_(Transfer.source_ecosystem_id == ecosystem_id, Transfer.destination_ecosystem_id == ecosystem_id))
+    transfers = q.order_by(Transfer.transfer_date.desc()).all()
+    return [_serialize_transfer(t) for t in transfers]
+
+
+@app.post("/api/transfers")
+async def create_transfer(data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    try:
+        source_id = data['source_ecosystem_id']
+        dest_id = data['destination_ecosystem_id']
+        points_sent = float(data['points_sent'])
+        bonus_pct = float(data['bonus_pct']) if data.get('bonus_pct') else None
+
+        base_ratio_used = data.get('base_ratio_used')
+        if base_ratio_used is None:
+            current = (
+                db.query(TransferRatio)
+                .filter_by(source_ecosystem_id=source_id, destination_ecosystem_id=dest_id, effective_to=None)
+                .first()
+            )
+            if not current:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No transfer ratio on file for this pair — set one via /api/transfer-ratios or pass base_ratio_used explicitly.",
+                )
+            base_ratio_used = current.base_ratio
+        base_ratio_used = float(base_ratio_used)
+
+        points_received = data.get('points_received')
+        if points_received is None:
+            points_received = points_sent * base_ratio_used * (1 + (bonus_pct or 0))
+        points_received = float(points_received)
+
+        t = Transfer(
+            source_ecosystem_id=source_id,
+            destination_ecosystem_id=dest_id,
+            points_sent=points_sent,
+            base_ratio_used=base_ratio_used,
+            bonus_pct=bonus_pct,
+            points_received=points_received,
+            transfer_date=_date.fromisoformat(data['transfer_date']),
+            notes=data.get('notes'),
+        )
+        db.add(t)
+        db.commit()
+        db.refresh(t)
+        return _serialize_transfer(t)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create transfer error: {e}\n{traceback.format_exc()}")
+
+
+@app.patch("/api/transfers/{transfer_id}")
+async def update_transfer(transfer_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    t = db.query(Transfer).filter_by(id=transfer_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    for field in ('source_ecosystem_id', 'destination_ecosystem_id'):
+        if field in data:
+            setattr(t, field, data[field])
+    for field in ('points_sent', 'base_ratio_used', 'bonus_pct', 'points_received'):
+        if field in data:
+            setattr(t, field, float(data[field]) if data[field] is not None else None)
+    if 'transfer_date' in data:
+        t.transfer_date = _date.fromisoformat(data['transfer_date'])
+    for field in ('notes',):
+        if field in data:
+            setattr(t, field, data[field])
+    db.commit()
+    db.refresh(t)
+    return _serialize_transfer(t)
+
+
+@app.delete("/api/transfers/{transfer_id}")
+async def delete_transfer(transfer_id: int, db: Session = Depends(get_db)):
+    t = db.query(Transfer).filter_by(id=transfer_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    db.delete(t)
     db.commit()
     return {"deleted": True}
 
@@ -6055,63 +6318,52 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     txns = db.query(Transaction).filter_by(account_id=account.id)\
         .filter(Transaction.is_excluded != True)\
         .order_by(Transaction.date.desc()).limit(30).all()
-    recent_txns = [{
-        'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
-        'description': t.description_clean or t.description_raw,
-        'amount': t.amount,
-        'category': t.category_manual or t.category_auto,
-        'points_category': t.points_category,
-        'action': t.action,
-        'earn_rate': (
-            calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
-            if t.action == 'Expense' and t.amount < 0
-               and t.points_category not in _NON_EARNING_CATS
-            else 0
-        ),
-    } for t in txns]
+    recent_txns = []
+    for t in txns:
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        recent_txns.append({
+            'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
+            'description': t.description_clean or t.description_raw,
+            'amount': t.amount,
+            'category': t.category_manual or t.category_auto,
+            'points_category': t.points_category,
+            'action': t.action,
+            'earn_rate': result['earn_rate'] or 0,
+            'points_earn': round(result['points'], 1),
+            'points_earn_classification': result['classification'],
+        })
 
-    # Spending grouped by points_category — uses the earn-rate waterfall.
-    # Expenses are stored as NEGATIVE amounts (Plaid sign is flipped on import),
-    # so we filter amount < 0 and take abs() for the displayed spend totals.
-    pts_cat_spend = (
-        db.query(
-            Transaction.points_category,
-            _func.sum(Transaction.amount),
-            _func.count(Transaction.id),
-        )
+    # Spending grouped by points_category — sums signed points-earn per
+    # category via compute_points_earn() (a flat SQL SUM can't express the
+    # sign-flip on credits, so this is a Python-side loop).
+    window_txns = (
+        db.query(Transaction)
         .filter(
             Transaction.account_id == account.id,
             Transaction.date >= lookback,
             Transaction.is_excluded != True,   # exclude soft-deleted (pending→posted dupes)
-            or_(
-                and_(
-                    Transaction.action == 'Expense',
-                    Transaction.amount < 0,
-                    or_(
-                        Transaction.points_category == None,
-                        ~Transaction.points_category.in_(_NON_EARNING_CATS),
-                    ),
-                ),
-                and_(
-                    Transaction.action == 'Income',
-                    Transaction.amount > 0,
-                    Transaction.points_category != None,
-                    ~Transaction.points_category.in_(_NON_EARNING_CATS),
-                ),
-            ),
         )
-        .group_by(Transaction.points_category)
         .all()
     )
-    for pts_cat_name, total, count in pts_cat_spend:
-        amt = round(max(0.0, -(float(total or 0))), 2)  # net: expenses negative, returns positive → net spend ≥ 0
-        rate = calc_earn_rate(bonus_by_name, base_rate, pts_cat_name, cat_parent_map)
-        pts = round(amt * rate, 0)
-        label = pts_cat_name or 'Other'
+    cat_agg: dict[str, dict] = {}
+    for t in window_txns:
+        if t.action != 'Expense':
+            continue
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        label = t.points_category or 'Other'
+        entry = cat_agg.setdefault(label, {'amount': 0.0, 'count': 0, 'points': 0.0})
+        entry['amount'] += -t.amount   # expenses negative, returns positive → net spend
+        entry['count'] += 1
+        entry['points'] += result['points']
+
+    for label, agg in cat_agg.items():
+        amt  = round(max(0.0, agg['amount']), 2)  # net spend ≥ 0 for display
+        rate = calc_earn_rate(bonus_by_name, base_rate, None if label == 'Other' else label, cat_parent_map)
+        pts  = round(agg['points'])
         spending_by_category.append({
             'category': label,
             'amount': amt,
-            'count': count,
+            'count': agg['count'],
             'earn_rate': rate,
             'points_earned': pts,
         })
@@ -6343,23 +6595,27 @@ async def account_transactions(
     else:
         filtered = all_period_txns
 
-    # Build summary across filtered set (expenses only)
+    # Build summary across filtered set — signed points-earn via
+    # compute_points_earn() (handles exclusions/clawbacks correctly; the old
+    # flat `amount<0` gate double-counted credits as spend-free but didn't
+    # subtract clawbacks, and ignored is_excluded/_NON_EARNING_CATS/Transfer).
     total_spend = 0.0
     total_pts   = 0.0
     by_csc: dict[str, dict] = {}
+    points_by_id: dict[int, dict] = {}
     for t in filtered:
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        points_by_id[t.id] = result
         if t.amount and t.amount < 0:
-            spend = abs(t.amount)
-            rate  = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
-            pts   = spend * (rate or 0)
-            total_spend += spend
-            total_pts   += pts
-            key = t.points_category or '__none__'
-            if key not in by_csc:
-                by_csc[key] = {'spend': 0.0, 'pts': 0.0, 'count': 0}
-            by_csc[key]['spend'] += spend
-            by_csc[key]['pts']   += pts
-            by_csc[key]['count'] += 1
+            total_spend += abs(t.amount)
+        total_pts += result['points']
+        key = t.points_category or '__none__'
+        if key not in by_csc:
+            by_csc[key] = {'spend': 0.0, 'pts': 0.0, 'count': 0}
+        if t.amount and t.amount < 0:
+            by_csc[key]['spend'] += abs(t.amount)
+        by_csc[key]['pts']   += result['points']
+        by_csc[key]['count'] += 1
 
     rows = [{
         'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
@@ -6369,7 +6625,9 @@ async def account_transactions(
         'category': t.category_manual or t.category_auto,
         'points_category': t.points_category,
         'action': t.action,
-        'earn_rate': calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map),
+        'earn_rate': points_by_id[t.id]['earn_rate'] or 0,
+        'points_earn': round(points_by_id[t.id]['points'], 1),
+        'points_earn_classification': points_by_id[t.id]['classification'],
     } for t in filtered[:200]]
 
     return {
@@ -9142,7 +9400,7 @@ async def get_cash_flow(
     ).all())
 
     # CC and Loan keywords for detection
-    _CC_KW = ('CREDIT CRD', 'CREDIT CARD', 'AUTOPAY', 'CC PAYMENT', 'CARD PAYMENT')
+    _CC_KW = _CC_PAYMENT_KW
     _LOAN_KW = ('LOAN', 'MORTGAGE', 'STUDENT', 'SLS SERVICING', 'FREEDOM MORTGAGE',
                 'LAKEVIEW', 'DOVENMUEHLE', 'ESCROW')
 
