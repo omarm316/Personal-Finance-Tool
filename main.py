@@ -7342,9 +7342,16 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
         matched_rule = categorizer.match_rule(t.description_raw, t.amount)
         if not matched_rule:
             continue  # Rule doesn't match — keep manual override intact
+        # apply_corrections=False: this branch's gate check only confirmed a RULE
+        # matches, so only a rule's own effect should be applied here. Letting the
+        # full categorize() (which also runs learn_from_corrections/_check_transfer_correction)
+        # decide was the root cause of a real regression — a single stale Transfer
+        # correction silently flipped every subsequent Best Buy purchase once this
+        # branch force-unlocked them, even though the gate only ever checked rules.
         action, category, confidence, display_desc = categorizer.categorize(
             t.description_raw, t.amount, t.merchant_name,
             account_type=(t.account.account_type if t.account else ''),
+            apply_corrections=False,
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
         llm_category = '' if action == 'Transfer' else category

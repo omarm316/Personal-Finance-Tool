@@ -1025,6 +1025,20 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button type="button" className="btn btn-sm btn-ghost" style={{padding:6}} onClick={()=>setShowTxnInfo(true)} title="Details"><Icon name="info" size={14}/></button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)}>{txn.is_split?'Splits':'Split'}</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 8px',fontSize:11,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
+              onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
+              title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',border:'1px solid rgba(59,130,246,0.2)'}}
+              onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
+              title="Create a rule from this transaction">Rule</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:excluded?'rgba(248,113,113,0.12)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
+              onClick={toggleExclude}
+              title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
+              {excluded?'↩':'⊘'}
+            </button>
             {locked && <button type="button" className="btn btn-sm btn-ghost" onClick={toggleLock} title="Unlock">🔓</button>}
           </div>
         }
@@ -4321,7 +4335,11 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
                   <td>{r.set_category&&<span className="badge badge-category" style={{fontSize:10}}>{r.set_category}</span>}</td>
                   <td style={{color:'var(--text-muted)',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.set_description}>{r.set_description||'—'}</td>
                   <td style={{fontSize:10,color:'var(--text-muted)',maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={r.notes}>{r.notes||''}</td>
-                  <td style={{fontSize:10,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{r.times_matched>0?`${r.times_matched}m ${r.times_accepted}a`:''}</td>
+                  <td style={{fontSize:10,whiteSpace:'nowrap'}} title={r.times_matched>0?`Matched ${r.times_matched}× — ${r.times_accepted} accepted, ${r.times_rejected} rejected`:''}>
+                    {r.times_matched>0&&<span style={{color:r.times_rejected>r.times_accepted?'var(--red)':'var(--text-muted)'}}>
+                      {r.times_matched}m {r.times_accepted}a {r.times_rejected}r{r.times_rejected>r.times_accepted?' ⚠':''}
+                    </span>}
+                  </td>
                   <td><div style={{display:'flex',gap:4}}>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={()=>startRuleEdit(r)} style={{fontSize:10,padding:'2px 6px'}}>Edit</button>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={()=>deleteRule(r.id)} style={{fontSize:10,padding:'2px 6px',color:'var(--red)'}}>×</button>

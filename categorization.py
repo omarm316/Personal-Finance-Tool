@@ -222,14 +222,20 @@ class CategorizationEngine:
 
         if description:
             # Require at least one meaningful word (>3 chars) to appear in both
-            # the new transaction description and a stored correction description.
-            # This prevents mislabelling genuine purchases when purchases and
-            # payments share the same merchant name but different descriptions.
-            desc_words = {w for w in description.upper().split() if len(w) > 3}
+            # the new transaction description and a stored correction description,
+            # EXCLUDING words that are part of the merchant name itself. Every
+            # transaction from a merchant contains the merchant name, so counting
+            # merchant-name overlap made this guard a no-op whenever the stored
+            # correction's description was just the merchant name (confirmed live:
+            # a single Best Buy correction with description "BEST BUY" blanket-matched
+            # every subsequent Best Buy purchase). Only overlap in the *non-merchant*
+            # words distinguishes a payment-like description from a genuine purchase.
+            merchant_words = {w for w in merchant.upper().split() if len(w) > 3}
+            desc_words = {w for w in description.upper().split() if len(w) > 3} - merchant_words
             matched = [
                 c for c in corrections
                 if c.description and (
-                    {w for w in c.description.upper().split() if len(w) > 3} & desc_words
+                    ({w for w in c.description.upper().split() if len(w) > 3} - merchant_words) & desc_words
                 )
             ]
             if not matched:
@@ -277,13 +283,21 @@ class CategorizationEngine:
         # Default based on sign
         return 'Income' if amount > 0 else 'Expense'
     
-    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None, account_type: str = '') -> Tuple[str, str, float, Optional[str]]:
+    def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None,
+                    account_type: str = '', apply_corrections: bool = True) -> Tuple[str, str, float, Optional[str]]:
         """
         Two-pass categorization:
         Pass 1 — Match raw description against action/description rules (Groups 1 & 2)
                  to get action + normalized description
         Pass 2 — Match normalized description against category rules (Group 3)
                  to get category
+
+        apply_corrections: when False, skips learn_from_corrections() and
+            _check_transfer_correction() entirely — only explicit CategorizationRule
+            matches are applied. Used by force-unlock reapply, where the caller has
+            already gated on "a rule now matches this row" and the result should
+            reflect only that rule, not a separately-triggered correction override
+            (see _reapply_rules in main.py).
 
         Returns: (action, category, confidence, display_description)
             display_description: polished description from a matching rule's
@@ -352,7 +366,7 @@ class CategorizationEngine:
                 break
 
         # ── Learning from past corrections ───────────────────────────────────
-        if not category:
+        if not category and apply_corrections:
             merchant = merchant_name or self.extract_merchant(description)
             learned = self.learn_from_corrections(merchant)
             if learned:
@@ -373,7 +387,7 @@ class CategorizationEngine:
         # Transfer (e.g. credit-card payments misidentified as purchases).
         # We apply the override AFTER rule processing so genuine purchases still
         # get their rule-based category while payments are promoted to Transfer.
-        if action != 'Transfer':
+        if action != 'Transfer' and apply_corrections:
             _merchant = merchant_name or self.extract_merchant(description)
             if _merchant:
                 _override = self._check_transfer_correction(_merchant, desc_clean)
