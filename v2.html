@@ -4681,6 +4681,9 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   // Inline Action-type editing state
   const[editingActionId,setEditingActionId]=useState(null);
   const[editingActionVal,setEditingActionVal]=useState('');
+  // Inline points-earn manual override state (see compute_points_earn in main.py)
+  const[editingPtsOverrideId,setEditingPtsOverrideId]=useState(null);
+  const[editingPtsOverrideVal,setEditingPtsOverrideVal]=useState('');
   const[excludingId,setExcludingId]=useState(null);   // txn id currently being toggled (disables the button mid-request)
   const[allCscs,setAllCscs]=useState([]);  // full list of categories for editing
   // Teach-merchant prompt (shown after inline CSC save when merchant_name is available)
@@ -4752,6 +4755,23 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
     }catch(e){toast('Failed to update: '+(e?.message||''),'error');}
     finally{setExcludingId(null);}
+  };
+  const savePtsOverride=async(txnId,val)=>{
+    if(val===''||isNaN(Number(val)))return;
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_earn_override:Number(val)})});
+      toast('Points override saved','success');
+      setEditingPtsOverrideId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+    }catch(e){toast('Failed to save override: '+(e?.message||''),'error');}
+  };
+  const resetPtsOverride=async(txnId)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({clear_points_earn_override:true})});
+      toast('Reset to auto-classification','success');
+      setEditingPtsOverrideId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+    }catch(e){toast('Failed to reset: '+(e?.message||''),'error');}
   };
   const teachMerchant=async(merchantName,csc)=>{
     setTeachLoading(true);
@@ -5864,7 +5884,27 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         </td>
                         <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(Math.abs(t.amount))}</td>
                         <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,color:ptsClass,whiteSpace:'nowrap'}}>
-                          {t.points_earn?`${t.points_earn>0?'':'−'}${Math.abs(t.points_earn).toLocaleString()}${t.earn_rate?` (${t.earn_rate}x)`:''}`:t.points_earn_classification==='excluded'?'excluded':'—'}
+                          {editingPtsOverrideId===t.id?(
+                            <div style={{display:'flex',gap:4,alignItems:'center',justifyContent:'flex-end'}}>
+                              <input type="number" step="1" autoFocus value={editingPtsOverrideVal}
+                                onChange={e=>setEditingPtsOverrideVal(e.target.value)}
+                                placeholder="Points" style={{width:70,fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+                              <button type="button" onClick={()=>savePtsOverride(t.id,editingPtsOverrideVal)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                              <button type="button" onClick={()=>setEditingPtsOverrideId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                              {t.points_earn_classification==='manual_override'&&
+                                <button type="button" onClick={()=>resetPtsOverride(t.id)}
+                                  style={{fontSize:10,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>Reset</button>}
+                            </div>
+                          ):(
+                            <span style={{cursor:'pointer'}}
+                              onClick={()=>{setEditingPtsOverrideId(t.id);setEditingPtsOverrideVal(t.points_earn_classification==='manual_override'?String(t.points_earn):'');}}
+                              title="Click to manually override this transaction's points">
+                              {t.points_earn?`${t.points_earn>0?'':'−'}${Math.abs(t.points_earn).toLocaleString()}${t.earn_rate?` (${t.earn_rate}x)`:''}`:t.points_earn_classification==='excluded'?'excluded':'—'}
+                              {' '}<span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </span>
+                          )}
                         </td>
                         <td style={{padding:'8px 10px',textAlign:'center'}}>
                           <button type="button" onClick={()=>toggleExcludeTxn(t)} disabled={excludingId===t.id}
