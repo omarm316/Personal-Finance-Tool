@@ -1946,7 +1946,9 @@ function TransactionsPage({categories,toast,refreshKey}){
   }
 
   const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
-  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
+  // Excluded transactions are always kept out of the totals (matches the Dashboard KPI's /api/stats,
+  // which filters is_excluded server-side) even when "Show excluded" is toggled on to review them.
+  const _budgetVisible=visible.filter(t=>!t.is_excluded&&!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
 
   const calcTxnContrib=(t,type)=>{
     if(t.is_split&&t.splits&&t.splits.length>0){
