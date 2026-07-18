@@ -33,11 +33,11 @@ from database import (
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
-    TransactionSplit, BudgetTarget, Loan, MerchantOverride,
+    TransactionSplit, BudgetTarget, Loan,
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
     SalaryPayment, SalaryAllocation, BalanceObservation, PlannedPurchase,
 )
-from llm_service import enrich_transaction, save_override, _call_groq, VALID_CATEGORIES
+from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel
 from plaid_integration import setup_plaid_from_env
 from plaid.exceptions import ApiException as PlaidApiException
@@ -10077,13 +10077,6 @@ class LLMEnrichRequest(BaseModel):
     overwrite_existing: bool = False # Re-process even if already enriched
 
 
-class MerchantOverrideRequest(BaseModel):
-    description_raw: str
-    merchant_name: str
-    description_clean: str
-    category: str
-
-
 @app.get("/api/llm/test-groq")
 async def test_groq():
     """Diagnostic: test Anthropic API key with one real Claude call. Shows raw error if any."""
@@ -10149,9 +10142,7 @@ def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
         for txn in txns:
             try:
                 enriched = enrich_transaction(
-                    transaction_id=txn.id,
                     description_raw=txn.description_raw,
-                    db_session=db,
                     api_key=api_key,
                 )
                 txn.merchant_name     = enriched["merchant_name"]
@@ -10273,57 +10264,6 @@ async def create_rule_from_transaction(
     return {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category, "action": action}
 
 
-@app.post("/api/llm/merchant-overrides")
-async def create_merchant_override(
-    req: MerchantOverrideRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Save a user-confirmed merchant → category override.
-    Call this when the user manually corrects a merchant/category so future
-    transactions from the same merchant resolve instantly without an LLM call.
-    """
-    if req.category not in [c.name for c in db.query(Category).all()]:
-        raise HTTPException(status_code=400, detail=f"Unknown category: {req.category}")
-
-    save_override(
-        description_raw=req.description_raw,
-        merchant_name=req.merchant_name,
-        description_clean=req.description_clean,
-        category=req.category,
-        db_session=db,
-    )
-    return {"status": "saved", "merchant_name": req.merchant_name, "category": req.category}
-
-
-@app.get("/api/llm/merchant-overrides")
-async def list_merchant_overrides(db: Session = Depends(get_db)):
-    """List all saved merchant overrides."""
-    overrides = db.query(MerchantOverride).order_by(MerchantOverride.merchant_name).all()
-    return [
-        {
-            "id": o.id,
-            "merchant_key": o.merchant_key,
-            "merchant_name": o.merchant_name,
-            "description_clean": o.description_clean,
-            "category": o.category,
-            "updated_at": o.updated_at.isoformat() if o.updated_at else None,
-        }
-        for o in overrides
-    ]
-
-
-@app.delete("/api/llm/merchant-overrides/{override_id}")
-async def delete_merchant_override(override_id: int, db: Session = Depends(get_db)):
-    """Delete a saved merchant override."""
-    override = db.query(MerchantOverride).filter_by(id=override_id).first()
-    if not override:
-        raise HTTPException(status_code=404, detail="Override not found")
-    db.delete(override)
-    db.commit()
-    return {"status": "deleted"}
-
-
 @app.post("/api/llm/enrich-single/{transaction_id}")
 async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
     """
@@ -10339,9 +10279,7 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
     enriched = enrich_transaction(
-        transaction_id=txn.id,
         description_raw=txn.description_raw,
-        db_session=db,
         api_key=api_key,
     )
 

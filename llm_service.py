@@ -2,10 +2,8 @@
 LLM-powered merchant enrichment service using Anthropic Claude API.
 
 Flow:
-1. Check merchant_overrides table first (user-confirmed mappings, no API call needed)
-2. If no override, call Claude Haiku to clean description + assign category
-3. Write results back to transaction
-4. When user overrides a category → save to merchant_overrides for future use
+1. Call Claude Haiku to clean description + assign category
+2. Write results back to transaction
 """
 
 import os
@@ -158,59 +156,20 @@ def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
 _call_groq = _call_llm
 
 
-def _normalize_merchant_key(raw_description: str) -> str:
-    """
-    Create a normalized lookup key from a raw description for override matching.
-    Strips noise so "STARBUCKS #1234" and "STARBUCKS #9999" both map to "STARBUCKS".
-    """
-    key = raw_description.upper().strip()
-    key = re.sub(r'\s*#\d+', '', key)           # #1234
-    key = re.sub(r'\s+\d{4,}', '', key)         # long numbers
-    key = re.sub(r'\s+PPD ID.*', '', key)        # PPD ID: ...
-    key = re.sub(r'\s+[A-Z]{2}\s*$', '', key)   # State abbreviations at end
-    key = re.sub(r'\s+', ' ', key).strip()
-    return key[:100]
-
-
 def enrich_transaction(
-    transaction_id: int,
     description_raw: str,
-    db_session,
     api_key: Optional[str] = None,
 ) -> dict:
     """
-    Enrich a single transaction with merchant name, clean description, and category.
-
-    Priority:
-    1. merchant_overrides table (user-confirmed, instant, no API call)
-    2. Claude Haiku API call
+    Enrich a single transaction with merchant name, clean description, and category
+    via a Claude Haiku API call.
 
     Returns dict with keys: merchant_name, description_clean, category, source
-    source is one of: 'override', 'llm', 'fallback'
+    source is one of: 'llm', 'fallback'
     """
-    from database import MerchantOverride
-
     if api_key is None:
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
-    lookup_key = _normalize_merchant_key(description_raw)
-
-    # ── Step 1: Check override table ─────────────────────────────────────────
-    override = db_session.query(MerchantOverride).filter_by(
-        merchant_key=lookup_key
-    ).first()
-
-    if override:
-        logger.info(f"Override hit for '{lookup_key}': {override.merchant_name} → {override.category}")
-        canonical_cat = _CATEGORY_REMAP.get(override.category, override.category)
-        return {
-            "merchant_name": override.merchant_name,
-            "description_clean": override.description_clean or override.merchant_name,
-            "category": canonical_cat,
-            "source": "override",
-        }
-
-    # ── Step 2: Call Claude ───────────────────────────────────────────────────
     if not api_key:
         logger.warning("No ANTHROPIC_API_KEY set — returning fallback")
         return _fallback(description_raw)
@@ -248,43 +207,3 @@ def _fallback(description_raw: str) -> dict:
         "category":          "Unclassified",
         "source":            "fallback",
     }
-
-
-def save_override(
-    description_raw: str,
-    merchant_name: str,
-    description_clean: str,
-    category: str,
-    db_session,
-) -> None:
-    """
-    Save a user-confirmed merchant → category mapping to the overrides table.
-    Called when a user manually corrects a category so future transactions
-    from the same merchant are resolved instantly without an LLM call.
-    """
-    from database import MerchantOverride
-
-    lookup_key = _normalize_merchant_key(description_raw)
-
-    existing = db_session.query(MerchantOverride).filter_by(
-        merchant_key=lookup_key
-    ).first()
-
-    if existing:
-        existing.merchant_name     = merchant_name
-        existing.description_clean = description_clean
-        existing.category          = category
-        from datetime import datetime
-        existing.updated_at = datetime.utcnow()
-        logger.info(f"Updated override for '{lookup_key}': {category}")
-    else:
-        override = MerchantOverride(
-            merchant_key      = lookup_key,
-            merchant_name     = merchant_name,
-            description_clean = description_clean,
-            category          = category,
-        )
-        db_session.add(override)
-        logger.info(f"Created override for '{lookup_key}': {category}")
-
-    db_session.commit()
