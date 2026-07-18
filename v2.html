@@ -292,6 +292,13 @@ tr:hover td { background: var(--surface-hover); }
 .badge-expense { background: rgba(239, 68, 68, 0.1); color: var(--red); }
 .badge-transfer { background: var(--border-strong); color: var(--text-secondary); }
 
+/* Transaction row states — excluded (no points/spend impact), locked, needing review, transfer */
+.row-excluded { opacity: 0.45; }
+.row-excluded td { text-decoration: line-through; }
+.row-locked { background: rgba(59, 130, 246, 0.03); }
+.row-review { background: rgba(251, 191, 36, 0.06); }
+.row-transfer { background: rgba(148, 163, 184, 0.05); }
+
 .amount-pos { color: var(--green); font-weight: 600; }
 .amount-neg { color: var(--red); font-weight: 600; }
 
@@ -1666,7 +1673,7 @@ function ImportModal({accounts,onClose,onImported,toast}){
                     <tr key={i} style={{borderTop:'1px solid var(--border)',opacity:r.duplicate?0.45:1}}>
                       <td style={{padding:'5px 8px',color:'var(--text-secondary)'}}>{r.date}</td>
                       <td style={{padding:'5px 8px',maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.description}</td>
-                      <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'DM Sans',color:r.amount<0?'var(--red)':'var(--green)'}}>{r.amount<0?'-':'+'}{fmt(Math.abs(r.amount))}</td>
+                      <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'Plus Jakarta Sans',color:r.amount<0?'var(--red)':'var(--green)'}}>{r.amount<0?'-':'+'}{fmt(Math.abs(r.amount))}</td>
                       <td style={{padding:'5px 8px',textAlign:'center'}}>
                         {r.duplicate
                           ?<span style={{fontSize:10,color:'var(--text-muted)',background:'var(--elevated)',borderRadius:4,padding:'2px 6px'}}>skip</span>
@@ -2014,7 +2021,7 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
                 <div style={{fontWeight:300,fontSize:13,color:'var(--text-primary)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                   {t.description_clean||t.description_display||t.description_raw}
                 </div>
-                <span style={{fontFamily:'DM Sans',fontWeight:300,fontSize:13,flexShrink:0,
+                <span style={{fontFamily:'Plus Jakarta Sans',fontWeight:300,fontSize:13,flexShrink:0,
                   color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
                   {t.amount<0?'–':'+'}{fmt(t.amount)}
                 </span>
@@ -2377,7 +2384,7 @@ function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
             );
           })}
           <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
-          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={400} fill="var(--text-primary)" fontFamily="DM Sans">{fmt(hd?hd.amount:total)}</text>
+          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={400} fill="var(--text-primary)" fontFamily="Plus Jakarta Sans">{fmt(hd?hd.amount:total)}</text>
           {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
         </svg>
         {/* Category list — hover syncs with donut */}
@@ -2396,8 +2403,8 @@ function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
                 onClick={()=>onCategoryClick&&onCategoryClick(cat)}>
                 <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
                 <span style={{flex:1,fontSize:12,fontWeight:isSel||isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
-                <span style={{fontFamily:'DM Sans',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
-                <span style={{fontFamily:'DM Sans',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
+                <span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
+                <span style={{fontFamily:'Plus Jakarta Sans',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
               </div>
             );
           })}
@@ -2558,7 +2565,7 @@ function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMon
             {isCredit&&<span style={{fontSize:11,fontWeight:500,color:'var(--green)',flexShrink:0}}>credit</span>}
           </div>
         </div>
-        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0,fontWeight:300,fontFamily:'DM Sans, sans-serif'}}>
+        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif'}}>
           {isCredit
             ?<span style={{color:'var(--green)',fontWeight:400}}>{fmtSigned(actual)}</span>
             :budget>0
@@ -4307,7 +4314,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
                   <td></td>
                   <td><div style={{display:'flex',gap:4}}><button type="button" className="btn btn-sm btn-success" onClick={()=>saveRuleEdit(r.id)} style={{fontSize:10,padding:'2px 6px'}}>Save</button><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setRuleEditing(null)} style={{fontSize:10,padding:'2px 6px'}}>×</button></div></td>
                 </tr>:<tr key={r.id}>
-                  <td style={{fontFamily:'DM Sans',color:'var(--text-muted)'}}>{r.priority}</td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{r.priority}</td>
                   <td style={{color:'var(--text-muted)'}}>{r.match_type}</td>
                   <td style={{fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.pattern}>{r.pattern}</td>
                   <td>{r.set_action&&<span className="badge badge-income" style={{fontSize:10}}>{r.set_action}</span>}</td>
@@ -4671,6 +4678,10 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   // Inline CSC editing state
   const[editingCscId,setEditingCscId]=useState(null);
   const[editingCscVal,setEditingCscVal]=useState('');
+  // Inline Action-type editing state
+  const[editingActionId,setEditingActionId]=useState(null);
+  const[editingActionVal,setEditingActionVal]=useState('');
+  const[excludingId,setExcludingId]=useState(null);   // txn id currently being toggled (disables the button mid-request)
   const[allCscs,setAllCscs]=useState([]);  // full list of categories for editing
   // Teach-merchant prompt (shown after inline CSC save when merchant_name is available)
   const[teachPrompt,setTeachPrompt]=useState(null);  // {merchantName, csc} | null
@@ -4725,6 +4736,22 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         setTeachPrompt({merchantName:txn.merchant_name,csc:newVal});
       }
     }catch(e){toast('Failed to save CSC: '+(e?.message||''),'error');}
+  };
+  const saveActionEdit=async(txnId,newVal)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({action:newVal})});
+      setEditingActionId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+    }catch(e){toast('Failed to save type: '+(e?.message||''),'error');}
+  };
+  const toggleExcludeTxn=async(txn)=>{
+    setExcludingId(txn.id);
+    try{
+      await apiFetch(`/transactions/${txn.id}`,{method:'PATCH',body:JSON.stringify({is_excluded:!txn.is_excluded})});
+      toast(txn.is_excluded?'Included — earns points again':'Excluded — no points, no SUB spend credit','success');
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+    }catch(e){toast('Failed to update: '+(e?.message||''),'error');}
+    finally{setExcludingId(null);}
   };
   const teachMerchant=async(merchantName,csc)=>{
     setTeachLoading(true);
@@ -4784,7 +4811,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       else if(sortCol==='description'){av=(a.description||'').toLowerCase();bv=(b.description||'').toLowerCase();}
       else if(sortCol==='amount'){av=Math.abs(a.amount||0);bv=Math.abs(b.amount||0);}
       else if(sortCol==='csc'){av=a.points_category||'';bv=b.points_category||'';}
-      else if(sortCol==='pts'){av=(a.earn_rate||0)*Math.abs(a.amount||0);bv=(b.earn_rate||0)*Math.abs(b.amount||0);}
+      else if(sortCol==='pts'){av=a.points_earn||0;bv=b.points_earn||0;}
       else return 0;
       if(av<bv)return sortDir==='asc'?-1:1;
       if(av>bv)return sortDir==='asc'?1:-1;
@@ -5248,7 +5275,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           <div style={{textAlign:'right'}}>
             {bal!=null&&<>
               <div style={{fontSize:11,opacity:0.7,textTransform:'uppercase',fontWeight:500}}>Current Balance</div>
-              <div style={{fontSize:32,fontWeight:400,fontFamily:'DM Sans',letterSpacing:'-1px'}}>{bal<0?'-':''}${Math.abs(bal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+              <div style={{fontSize:32,fontWeight:400,fontFamily:'Plus Jakarta Sans',letterSpacing:'-1px'}}>{bal<0?'-':''}${Math.abs(bal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
             </>}
           </div>
         </div>
@@ -5277,7 +5304,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         ].map((s,i)=>(
           <div key={i} className="card" style={{padding:'14px 16px',textAlign:'center'}}>
             <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>{s.label}</div>
-            <div style={{fontSize:20,fontWeight:400,fontFamily:'DM Sans',marginTop:4,color:s.color||'var(--text-primary)'}}>{s.value}</div>
+            <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:s.color||'var(--text-primary)'}}>{s.value}</div>
           </div>
         ))}
       </div>}
@@ -5294,13 +5321,13 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'var(--elevated)'}}>
             <span style={{fontSize:12,fontWeight:500,paddingLeft:4}}>All Purchases (Base)</span>
-            <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--blue)',fontFamily:'DM Sans'}}>{d.base_rate}x</span>
+            <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--blue)',fontFamily:'Plus Jakarta Sans'}}>{d.base_rate}x</span>
           </div>
           <div style={{maxHeight:320,overflowY:'auto'}}>
             {(d.earning_structure||[]).filter(e=>e.bonus>0).map((e,i)=>(
               <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
                 <span style={{fontSize:12,paddingLeft:4}}>{e.category}</span>
-                <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--green)',fontFamily:'DM Sans'}}>{e.total}x</span>
+                <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--green)',fontFamily:'Plus Jakarta Sans'}}>{e.total}x</span>
               </div>
             ))}
           </div>
@@ -5335,7 +5362,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                   <div key={i}>
                     <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}>
                       <span style={{fontWeight:500}}>{catLabel} <span style={{fontWeight:400,color:'var(--blue)'}}>{s.earn_rate}x</span></span>
-                      <span style={{fontFamily:'DM Sans',fontWeight:500,color:'var(--green)'}}>{pts.toLocaleString()} pts</span>
+                      <span style={{fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--green)'}}>{pts.toLocaleString()} pts</span>
                     </div>
                     <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
                       <div style={{height:'100%',width:`${(s.amount/maxSpend*100)}%`,background:'var(--blue)',borderRadius:3,transition:'width 0.4s ease'}}/>
@@ -5350,7 +5377,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             <div style={{fontSize:11,fontWeight:500,color:'var(--green)',textTransform:'uppercase'}}>
               Base {eco?.currency_name||'Points'} Earned · {spendPeriod.toUpperCase()}
             </div>
-            <div style={{fontSize:24,fontWeight:400,fontFamily:'DM Sans',color:'var(--green)',marginTop:4}}>
+            <div style={{fontSize:24,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)',marginTop:4}}>
               {Math.round(d.points_earned.total).toLocaleString()}
             </div>
           </div>}
@@ -5395,7 +5422,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                   </div>
                   <div style={{textAlign:'right',flexShrink:0,marginLeft:4}}>
                     {earned>0
-                      ?<div style={{fontFamily:'DM Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>+{earned.toLocaleString()}</div>
+                      ?<div style={{fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>+{earned.toLocaleString()}</div>
                       :<div style={{fontSize:11,color:'var(--text-muted)'}}>{locked?'Locked':'—'}</div>}
                     {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
                   </div>
@@ -5404,7 +5431,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
             })}
             {d.challenge_pts_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
               <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Challenge Bonus</div>
-              <div style={{fontSize:18,fontWeight:400,fontFamily:'DM Sans',color:'var(--violet)'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
+              <div style={{fontSize:18,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--violet)'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
             </div>}
           </div>}
         </div>
@@ -5457,7 +5484,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                           <span style={{fontWeight:500,fontSize:14}}>{b.benefit_name}</span>
-                          {b.amount>0&&<span style={{fontSize:13,fontFamily:'DM Sans',color:'var(--green)',fontWeight:400}}>${b.amount.toLocaleString()}</span>}
+                          {b.amount>0&&<span style={{fontSize:13,fontFamily:'Plus Jakarta Sans',color:'var(--green)',fontWeight:400}}>${b.amount.toLocaleString()}</span>}
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>{freqLabel}</span>
                           {b.trigger_category&&<span style={{fontSize:10,padding:'1px 6px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4}}>{b.trigger_category}</span>}
                         </div>
@@ -5574,7 +5601,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                   {ch.progress_target!=null&&<div style={{marginBottom:8}}>
                     <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
                       <span style={{color:'var(--text-muted)'}}>Progress</span>
-                      <span style={{fontWeight:500,fontFamily:'DM Sans'}}>${ch.current_spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
+                      <span style={{fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>${ch.current_spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
                     </div>
                     <div style={{height:7,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
                       <div style={{height:'100%',width:`${ch.progress_pct||0}%`,background:barColor,borderRadius:3,transition:'width 0.4s'}}/>
@@ -5594,7 +5621,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                     </span>}
                     <span>
                       <span style={{color:'var(--text-muted)'}}>Rate: </span>
-                      <span style={{fontFamily:'DM Sans'}}>{ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`:`${ch.bonus_amount}x per $`}{ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}</span>
+                      <span style={{fontFamily:'Plus Jakarta Sans'}}>{ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`:`${ch.bonus_amount}x per $`}{ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}</span>
                     </span>
                   </div>
                 </div>
@@ -5709,7 +5736,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                       {unclassified.map(u=>(
                         <tr key={u.merchant} style={{borderBottom:'1px solid var(--border)'}}>
                           <td style={{padding:'6px 8px',fontWeight:500}}>{u.merchant}</td>
-                          <td style={{padding:'6px 8px',textAlign:'right',fontFamily:'DM Sans',color:'var(--red)',fontWeight:500}}>{fmt(u.total_spend)}</td>
+                          <td style={{padding:'6px 8px',textAlign:'right',fontFamily:'Plus Jakarta Sans',color:'var(--red)',fontWeight:500}}>{fmt(u.total_spend)}</td>
                           <td style={{padding:'6px 8px',textAlign:'right',color:'var(--text-muted)'}}>{u.count}</td>
                           <td style={{padding:'6px 8px'}}>
                             {assigningMerchant===u.merchant?(
@@ -5770,8 +5797,10 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         {_th('date','Date')}
                         {_th('description','Description','left',{})}
                         {_th('csc','CSC')}
+                        <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Type</th>
                         {_th('amount','Amount','right')}
                         {_th('pts','Est. Pts','right')}
+                        <th style={{padding:'6px 10px 8px',textAlign:'center',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Exclude</th>
                       </tr>
                     );
                   })()}
@@ -5780,11 +5809,13 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                   {displayTxns.map(t=>{
                     const mm=t.date.slice(5,7).replace(/^0/,'');
                     const dd=t.date.slice(8,10).replace(/^0/,'');
-                    const pts=t.earn_rate&&t.amount?Math.round(Math.abs(t.amount)*t.earn_rate):null;
                     const isEditing=editingCscId===t.id;
+                    const isEditingAction=editingActionId===t.id;
+                    const ptsClass={earn:'var(--green)',clawback:'var(--red)',manual_override:'var(--amber)',excluded:'var(--text-muted)'}[t.points_earn_classification]||'var(--text-muted)';
                     return(
-                      <tr key={t.id} style={{borderBottom:'1px solid var(--border)',background:!t.points_category&&t.amount<0?'rgba(234,179,8,0.04)':''}}>
-                        <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'DM Sans',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
+                      <tr key={t.id} className={t.is_excluded?'row-excluded':''}
+                        style={{borderBottom:'1px solid var(--border)',background:!t.is_excluded&&!t.points_category&&t.amount<0?'rgba(234,179,8,0.04)':''}}>
+                        <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
                         <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
                         <td style={{padding:'8px 10px',minWidth:140}}>
                           {isEditing?(
@@ -5810,9 +5841,39 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                             </div>
                           )}
                         </td>
-                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:500,color:'var(--red)',whiteSpace:'nowrap'}}>{fmt(Math.abs(t.amount))}</td>
-                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'DM Sans',fontSize:12,color:pts?'#15803d':'var(--text-muted)',whiteSpace:'nowrap'}}>
-                          {pts?`${pts.toLocaleString()} (${t.earn_rate}x)`:'—'}
+                        <td style={{padding:'8px 10px',minWidth:110}}>
+                          {isEditingAction?(
+                            <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                              <select autoFocus value={editingActionVal}
+                                onChange={e=>setEditingActionVal(e.target.value)}
+                                style={{fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',maxWidth:120}}>
+                                {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+                              </select>
+                              <button type="button" onClick={()=>saveActionEdit(t.id,editingActionVal)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                              <button type="button" onClick={()=>setEditingActionId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                            </div>
+                          ):(
+                            <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                              onClick={()=>{setEditingActionId(t.id);setEditingActionVal(t.action||'Expense');}}>
+                              <span className={`badge badge-${t.action==='Income'?'income':t.action==='Transfer'?'transfer':'expense'}`}>{t.action}</span>
+                              <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(Math.abs(t.amount))}</td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,color:ptsClass,whiteSpace:'nowrap'}}>
+                          {t.points_earn?`${t.points_earn>0?'':'−'}${Math.abs(t.points_earn).toLocaleString()}${t.earn_rate?` (${t.earn_rate}x)`:''}`:t.points_earn_classification==='excluded'?'excluded':'—'}
+                        </td>
+                        <td style={{padding:'8px 10px',textAlign:'center'}}>
+                          <button type="button" onClick={()=>toggleExcludeTxn(t)} disabled={excludingId===t.id}
+                            title={t.is_excluded?'Include — resume earning points and SUB spend credit':'Exclude — zero points, no SUB spend credit'}
+                            style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid '+(t.is_excluded?'var(--green)':'var(--border)'),
+                              background:t.is_excluded?'rgba(52,211,153,0.1)':'none',color:t.is_excluded?'var(--green)':'var(--text-muted)',
+                              cursor:excludingId===t.id?'default':'pointer',opacity:excludingId===t.id?0.5:1,fontWeight:500}}>
+                            {excludingId===t.id?'…':t.is_excluded?'↩ Include':'⊘ Exclude'}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -5829,7 +5890,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         <div style={{display:'flex',alignItems:'flex-end',gap:6,height:120}}>
           {(()=>{const mx=Math.max(...d.monthly_spend.map(m=>m.amount),1);return d.monthly_spend.map((m,i)=>(
             <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
-              <span style={{fontSize:11,fontFamily:'DM Sans',color:'var(--text-muted)'}}>{fmt(m.amount)}</span>
+              <span style={{fontSize:11,fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{fmt(m.amount)}</span>
               <div style={{width:'100%',maxWidth:60,height:`${(m.amount/mx*80)}px`,background:'var(--blue)',borderRadius:'4px 4px 0 0',minHeight:4,transition:'height 0.4s ease'}}/>
               <span style={{fontSize:10,color:'var(--text-muted)'}}>{m.month.slice(5)}/{m.month.slice(2,4)}</span>
             </div>
@@ -6064,7 +6125,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
       {/* Back button */}
       <button type="button" onClick={onBack}
         style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--gold)',
-          cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'DM Sans, sans-serif',
+          cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'Plus Jakarta Sans, sans-serif',
           padding:0,transition:'opacity 0.2s'}}
         onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
         onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
@@ -6109,11 +6170,11 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
             <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
-            <div style={{fontSize:42,fontWeight:300,fontFamily:'DM Sans',color:isCashBack?'var(--green)':'var(--blue-primary)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
+            <div style={{fontSize:42,fontWeight:300,fontFamily:'Plus Jakarta Sans',color:isCashBack?'var(--green)':'var(--blue-primary)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
               {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
             </div>
             <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
-            {!isCashBack&&<div style={{fontSize:20,fontWeight:300,fontFamily:'DM Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
+            {!isCashBack&&<div style={{fontSize:20,fontWeight:300,fontFamily:'Plus Jakarta Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
               ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
             </div>}
           </div>
@@ -6394,7 +6455,7 @@ function ChallengeCard({ch}){
         {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)'}}>${ch.remaining_spend.toLocaleString(undefined,{maximumFractionDigits:0})} to go</div>}
       </>}
       {!isThreshold&&ch.bonus_type==='per_dollar'&&<div style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>
-        <span style={{fontWeight:400,fontFamily:'DM Sans',fontSize:16,color:'var(--gold)'}}>+{ch.bonus_amount}x</span>
+        <span style={{fontWeight:400,fontFamily:'Plus Jakarta Sans',fontSize:16,color:'var(--gold)'}}>+{ch.bonus_amount}x</span>
         {ch.spend_cap&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names?.join(', ')||'all spend'} · ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
       </div>}
     </div>
@@ -6558,11 +6619,11 @@ function CardsPage({toast,refreshKey}){
                       <div style={{fontSize:11,color:'var(--text-muted)'}}>{cat.best.issuer} · {cat.best.ecosystem}</div>
                     </div>
                     <div style={{textAlign:'center',minWidth:55}}>
-                      <div style={{fontSize:20,fontWeight:400,fontFamily:'DM Sans',color:'var(--green)'}}>{cat.best.earn_rate}x</div>
+                      <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)'}}>{cat.best.earn_rate}x</div>
                       <div style={{fontSize:10,color:'var(--text-muted)'}}>earn rate</div>
                     </div>
                     <div style={{textAlign:'center',minWidth:55}}>
-                      <div style={{fontSize:16,fontWeight:500,fontFamily:'DM Sans',color:'var(--blue)'}}>{cat.best.your_value}{'\u00A2'}</div>
+                      <div style={{fontSize:16,fontWeight:500,fontFamily:'Plus Jakarta Sans',color:'var(--blue)'}}>{cat.best.your_value}{'\u00A2'}</div>
                       <div style={{fontSize:10,color:'var(--text-muted)'}}>per $1</div>
                     </div>
                     {cat.runner_up&&<div style={{fontSize:11,color:'var(--text-muted)',textAlign:'right',minWidth:100,paddingLeft:8,borderLeft:'1px solid var(--border)'}}>
@@ -6620,7 +6681,7 @@ function CardsPage({toast,refreshKey}){
                     </td>
                     {editing===c.id?<>
                       <td style={{fontSize:12}}>{c.issuer}</td>
-                      <td><span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                      <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.statement_close_day} onChange={e=>setEditVals(v=>({...v,statement_close_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.payment_due_day} onChange={e=>setEditVals(v=>({...v,payment_due_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.credit_limit} onChange={e=>setEditVals(v=>({...v,credit_limit:e.target.value}))} style={{width:90,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
@@ -6637,11 +6698,11 @@ function CardsPage({toast,refreshKey}){
                       </div></td>
                     </>:<>
                       <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.issuer}</td>
-                      <td><span style={{fontFamily:'DM Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
-                      <td style={{textAlign:'center',fontSize:12,fontFamily:'DM Sans'}}>{c.statement_close_day||'--'}</td>
-                      <td style={{textAlign:'center',fontSize:12,fontFamily:'DM Sans'}}>{c.payment_due_day||'--'}</td>
-                      <td style={{textAlign:'right',fontSize:13,fontFamily:'DM Sans'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>--</span>}</td>
-                      <td style={{textAlign:'right',fontSize:13,fontFamily:'DM Sans',color:c.annual_fee?'var(--red)':'var(--text-muted)'}}>{c.annual_fee?`$${c.annual_fee}`:'$0'}</td>
+                      <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.statement_close_day||'--'}</td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.payment_due_day||'--'}</td>
+                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>--</span>}</td>
+                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans',color:c.annual_fee?'var(--red)':'var(--text-muted)'}}>{c.annual_fee?`$${c.annual_fee}`:'$0'}</td>
                       <td style={{fontSize:12}}>
                         {c.account_id
                           ?<span style={{display:'flex',alignItems:'center',gap:4}}>
@@ -6758,7 +6819,7 @@ function CardsPage({toast,refreshKey}){
                             <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{eco.currency_name} · {(eco.your_cpp*100).toFixed(1)}¢/pt</div>
                           </div>
                           <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--blue-primary)'}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{fontSize:26,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--blue-primary)'}}>{eco.points_earned.toLocaleString()}</div>
                             <div style={{fontSize:11,color:'var(--text-muted)',marginTop:4,fontWeight:300}}>{'≈ $'}{eco.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
                           <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
@@ -6781,7 +6842,7 @@ function CardsPage({toast,refreshKey}){
                         <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>Earned this period</div>
                       </div>
                       <div style={{textAlign:'right'}}>
-                        <div style={{fontSize:26,fontWeight:300,fontFamily:'DM Sans',lineHeight:1,letterSpacing:'-1px',color:'var(--green)'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                        <div style={{fontSize:26,fontWeight:300,fontFamily:'Plus Jakarta Sans',lineHeight:1,letterSpacing:'-1px',color:'var(--green)'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                       </div>
                       <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
                     </div>
@@ -7204,17 +7265,17 @@ function BudgetsPage({categories,toast,refreshKey}){
     if(isMob) return(
       <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
         <td style={{paddingLeft:10,fontSize:12.5,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 5px',color:'var(--text-secondary)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,padding:'6px 5px',color:'var(--text-secondary)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
       </tr>
     );
     return(
       <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
         <td style={{paddingLeft:12,fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:300,padding:'6px 8px',color:'var(--text-secondary)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
-        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'DM Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,padding:'6px 8px',color:'var(--text-secondary)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
       </tr>
     );
   };
@@ -7224,16 +7285,16 @@ function BudgetsPage({categories,toast,refreshKey}){
     if(isMob) return(
       <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
         <td style={{fontWeight:500,fontSize:13,paddingLeft:10,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
-        <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,padding:'6px 8px',color:(budgetNet-actualNet)>=0?'var(--green)':'var(--red)'}}>{((budgetNet-actualNet)>0?'+':'')+fmtRound(budgetNet-actualNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 8px',color:(budgetNet-actualNet)>=0?'var(--green)':'var(--red)'}}>{((budgetNet-actualNet)>0?'+':'')+fmtRound(budgetNet-actualNet)}</td>
       </tr>
     );
     return(
     <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
       <td style={{fontWeight:500,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
-      <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
-      <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
       <td className="hide-mobile"/>
     </tr>
   );
@@ -7451,7 +7512,7 @@ function BudgetsPage({categories,toast,refreshKey}){
                 <td key={m} style={{padding:'3px 3px',background:isCur?'var(--gold-soft)':'transparent',minWidth:82}}>
                   <input type="number" step="1" min="0" value={val}
                     onChange={e=>setCell(cat,m,e.target.value)}
-                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'DM Sans',fontWeight:300,
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:300,
                       background:isCur?'var(--gold-soft)':'var(--elevated)',color:'var(--text-primary)',
                       outline:isCur?'1px solid var(--gold)':undefined}}
                     placeholder={actual>0?String(Math.round(actual)):''}/>
@@ -7776,7 +7837,7 @@ function NetWorthPage({toast,refreshKey}){
                   <span style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{bucketName}</span>
                   <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>({bData.accounts.length})</span>
                 </div>
-                <span style={{fontFamily:'DM Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
+                <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
               </div>
               {/* Account rows */}
               {isExp&&bData.accounts.map(a=>{
@@ -7794,7 +7855,7 @@ function NetWorthPage({toast,refreshKey}){
                         <div style={{display:'flex',alignItems:'center',gap:6}}>
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>Balance $</span>
                           <input type="number" step="0.01" min="0" value={editBal} onChange={e=>setEditBal(e.target.value)}
-                            style={{width:110,border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',fontSize:12,fontFamily:'DM Sans',fontWeight:300,textAlign:'right',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
+                            style={{width:110,border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',fontSize:12,fontFamily:'Plus Jakarta Sans',fontWeight:300,textAlign:'right',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
                           <span style={{fontSize:11,color:'var(--text-muted)'}}>as of</span>
                           <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)}
                             style={{border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',fontSize:12,fontWeight:300,background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
@@ -7814,7 +7875,7 @@ function NetWorthPage({toast,refreshKey}){
                           </div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:10}}>
-                          <span style={{fontFamily:'DM Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
+                          <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
                           <button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>startEditAcct(a)}>Edit anchor</button>
                         </div>
                       </div>
@@ -7889,12 +7950,12 @@ function NetWorthPage({toast,refreshKey}){
             {[0,0.25,0.5,0.75,1].map((p,i)=>{
               const y=padC.t+(1-p)*cH;const val=yMin+yRng*p;
               return(<g key={i}><line x1={padC.l} y1={y} x2={W-padC.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
-                <text x={padC.l-6} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{val>=10000||val<=-10000?`${(val/1000).toFixed(0)}k`:val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text></g>);
+                <text x={padC.l-6} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontFamily="Plus Jakarta Sans">{val>=10000||val<=-10000?`${(val/1000).toFixed(0)}k`:val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text></g>);
             })}
             {tlData.map((d,i)=>{
               if(tlData.length>6&&i%2!==0&&i!==tlData.length-1)return null;
               const dt=new Date(d.date+'T12:00:00');
-              return<text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="DM Sans">{MO[dt.getMonth()]}</text>;
+              return<text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="Plus Jakarta Sans">{MO[dt.getMonth()]}</text>;
             })}
             <path d={areaD} fill="url(#nwAreaGrad)"/>
             <path d={pathD} fill="none" stroke="var(--gold)" strokeWidth={2} strokeLinecap="round"/>
@@ -7913,14 +7974,14 @@ function NetWorthPage({toast,refreshKey}){
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
           <div style={{padding:'14px 20px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Assets</span>
-            <span style={{fontFamily:'DM Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
+            <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
           </div>
           <BucketPanel bucketList={assetBuckets} isAsset={true}/>
         </div>
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
           <div style={{padding:'14px 20px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Liabilities</span>
-            <span style={{fontFamily:'DM Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
+            <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
           </div>
           <BucketPanel bucketList={liabBuckets} isAsset={false}/>
         </div>
@@ -8048,7 +8109,7 @@ function NetWorthPage({toast,refreshKey}){
                               <td style={{color:'var(--text-muted)',fontSize:12}}>{reconcileData.anchor_date||'—'}</td>
                               <td style={{fontSize:12,color:'var(--text-muted)',fontStyle:'italic'}}>⚓ Anchor — starting balance</td>
                               <td/>
-                              <td style={{textAlign:'right',fontFamily:'DM Sans',fontWeight:500}}>{fmtBal(reconcileData.anchor_balance)}</td>
+                              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:500}}>{fmtBal(reconcileData.anchor_balance)}</td>
                             </tr>
                             {/* Transactions oldest→newest */}
                             {reconcileData.transactions.map(t=>(
@@ -8067,7 +8128,7 @@ function NetWorthPage({toast,refreshKey}){
                                     {t.amount>0?'+':''}{fmt(Math.abs(t.amount))}
                                   </span>
                                 </td>
-                                <td style={{textAlign:'right',fontFamily:'DM Sans',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
+                                <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
                                   {t.is_excluded?'—':fmtBal(t.running_balance)}
                                 </td>
                               </tr>
@@ -8086,7 +8147,7 @@ function NetWorthPage({toast,refreshKey}){
                           <tr key={d.date}>
                             <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
                             <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
-                            <td><span style={{fontFamily:'DM Sans',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                            <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
                           </tr>
                         ))}</tbody>
                       </table>
@@ -8134,11 +8195,11 @@ function NetWorthPage({toast,refreshKey}){
 function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel}){
   const inp=(field,type='text',step)=>(
     <input type={type} step={step} value={editVals[field]??''} onChange={e=>setEditVals(v=>({...v,[field]:e.target.value}))}
-      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'DM Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
   );
   const sel=(field,opts)=>(
     <select value={editVals[field]??''} onChange={e=>setEditVals(v=>({...v,[field]:e.target.value}))}
-      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'DM Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)'}}>
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)'}}>
       {opts}
     </select>
   );
@@ -8181,10 +8242,10 @@ function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel
       </div>
       {pmt>0&&<div style={{background:'var(--elevated)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',marginBottom:8,fontSize:12,fontWeight:300,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
         <span style={{fontWeight:500,color:'var(--text-muted)'}}>Next payment preview:</span>
-        <span>Principal <b style={{fontFamily:'DM Sans'}}>${prevPrin.toLocaleString()}</b></span>
-        <span>Interest <b style={{fontFamily:'DM Sans',color:'var(--red)'}}>${prevInt.toLocaleString()}</b></span>
-        {tax>0&&<span>Prop Tax <b style={{fontFamily:'DM Sans'}}>${tax.toLocaleString()}</b></span>}
-        {ins>0&&<span>Insurance <b style={{fontFamily:'DM Sans'}}>${ins.toLocaleString()}</b></span>}
+        <span>Principal <b style={{fontFamily:'Plus Jakarta Sans'}}>${prevPrin.toLocaleString()}</b></span>
+        <span>Interest <b style={{fontFamily:'Plus Jakarta Sans',color:'var(--red)'}}>${prevInt.toLocaleString()}</b></span>
+        {tax>0&&<span>Prop Tax <b style={{fontFamily:'Plus Jakarta Sans'}}>${tax.toLocaleString()}</b></span>}
+        {ins>0&&<span>Insurance <b style={{fontFamily:'Plus Jakarta Sans'}}>${ins.toLocaleString()}</b></span>}
       </div>}
       <div style={{marginBottom:8}}>{lbl('Notes')}{inp('notes')}</div>
       <div style={{display:'flex',gap:8}}>
@@ -8324,10 +8385,10 @@ function LoansPage({toast,refreshKey}){
                 const principal=t.splits.find(s=>s.description==='Principal');
                 return(
                   <tr key={t.id}>
-                    <td style={{fontFamily:'DM Sans',fontSize:12}}>{t.date}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{t.date}</td>
                     <td style={{fontSize:12}}>{t.description}</td>
-                    <td style={{fontFamily:'DM Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
-                    <td style={{fontFamily:'DM Sans',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
                     <td><button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>doUnlink(t.id)}>Unlink</button></td>
                   </tr>
                 );
@@ -8338,7 +8399,7 @@ function LoansPage({toast,refreshKey}){
             {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
               <div key={lbl} style={{textAlign:'center'}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase'}}>{lbl}</div>
-                <div style={{fontSize:15,fontWeight:500,fontFamily:'DM Sans',color}}>{fmt(val)}</div>
+                <div style={{fontSize:15,fontWeight:500,fontFamily:'Plus Jakarta Sans',color}}>{fmt(val)}</div>
               </div>
             ))}
           </div>}
@@ -8351,9 +8412,9 @@ function LoansPage({toast,refreshKey}){
               <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th></th></tr></thead>
               <tbody>{candidates.map(t=>(
                 <tr key={t.id}>
-                  <td style={{fontFamily:'DM Sans',fontSize:12}}>{t.date}</td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{t.date}</td>
                   <td style={{fontSize:12}}>{t.description_clean||t.description_raw}</td>
-                  <td style={{fontFamily:'DM Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
                   <td><button type="button" className="btn btn-sm btn-primary" onClick={()=>doLink(t.id)} disabled={linking}>Link</button></td>
                 </tr>
               ))}</tbody>
@@ -8420,7 +8481,7 @@ function LoansPage({toast,refreshKey}){
               {/* Year markers */}
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:12,paddingLeft:140}}>
                 {Array.from({length:Math.min(maxYears+1,31)},(_,i)=>(
-                  <div key={i} style={{fontSize:10,color:'var(--text-muted)',fontFamily:'DM Sans',fontWeight:300,position:'relative'}}>
+                  <div key={i} style={{fontSize:10,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',fontWeight:300,position:'relative'}}>
                     {i===0?'Now':`${now.getFullYear()+i}`}
                   </div>
                 ))}
@@ -8465,10 +8526,10 @@ function LoansPage({toast,refreshKey}){
               <tr key={l.id}>
                 <td style={{fontWeight:500}}>{l.lender}</td>
                 <td><span className="badge badge-category" style={{fontSize:11}}>{toTitleCase(l.loan_type||'')}</span></td>
-                <td style={{fontFamily:'DM Sans',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(Math.abs(l.current_balance)):'—'}{l.balance_date&&<span style={{fontSize:10,color:'var(--text-muted)',display:'block'}}>as of {l.balance_date}</span>}</td>
-                <td style={{fontFamily:'DM Sans',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
+                <td style={{fontFamily:'Plus Jakarta Sans',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(Math.abs(l.current_balance)):'—'}{l.balance_date&&<span style={{fontSize:10,color:'var(--text-muted)',display:'block'}}>as of {l.balance_date}</span>}</td>
+                <td style={{fontFamily:'Plus Jakarta Sans',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
                 <td style={{fontSize:12}}>
-                  {l.next_split?<span style={{fontFamily:'DM Sans'}}>
+                  {l.next_split?<span style={{fontFamily:'Plus Jakarta Sans'}}>
                     {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)} / {fmt(l.next_split.property_tax||0)} / {fmt(l.next_split.insurance||0)}
                   </span>:<span style={{color:'var(--text-muted)'}}>—</span>}
                 </td>
@@ -8792,7 +8853,7 @@ function CashFlowPage({toast,refreshKey}){
     finally{setGenBusy(false);}
   };
 
-  const INP={border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:300,fontFamily:'DM Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'};
+  const INP={border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'};
 
   if(loading)return<SkeletonTable rows={6}/>;
 
@@ -8830,7 +8891,7 @@ function CashFlowPage({toast,refreshKey}){
         </div>
         <div className="card metric-card">
           <div className="metric-label">Next Pay Date</div>
-          <div className="metric-value" style={{fontSize:18,fontFamily:'DM Sans'}}>{nextPayEntry?nextPayEntry.payment_date:'—'}</div>
+          <div className="metric-value" style={{fontSize:18,fontFamily:'Plus Jakarta Sans'}}>{nextPayEntry?nextPayEntry.payment_date:'—'}</div>
           {nextPayEntry&&<div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>+{fmt(spTotal(nextPayEntry))} · {nextPayEntry.person}</span></div>}
         </div>
       </div>
@@ -8858,7 +8919,7 @@ function CashFlowPage({toast,refreshKey}){
                       <div title={`Expenses: ${fmt(m.expenses)}`} style={{width:'38%',maxWidth:28,height:expH,background:'var(--red)',borderRadius:'4px 4px 0 0',opacity:0.85,transition:'height 0.4s ease'}}/>
                     </div>
                     <div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,fontWeight:400}}>{m.label}</div>
-                    <div style={{fontSize:9,color:net>=0?'var(--green)':'var(--red)',fontWeight:500,fontFamily:'DM Sans'}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</div>
+                    <div style={{fontSize:9,color:net>=0?'var(--green)':'var(--red)',fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</div>
                   </div>
                 );
               })}
@@ -8900,7 +8961,7 @@ function CashFlowPage({toast,refreshKey}){
                 <div key={cat}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
                     <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
-                    <span style={{fontSize:12,fontWeight:400,fontFamily:'DM Sans',color:'var(--green)'}}>+{fmt(amt)}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)'}}>+{fmt(amt)}</span>
                   </div>
                   <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
                     <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--green)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
@@ -8910,7 +8971,7 @@ function CashFlowPage({toast,refreshKey}){
             })}
             <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
               <span style={{color:'var(--text-muted)'}}>Total</span>
-              <span style={{color:'var(--green)',fontFamily:'DM Sans'}}>+{fmt(breakdownData.totalIn)}</span>
+              <span style={{color:'var(--green)',fontFamily:'Plus Jakarta Sans'}}>+{fmt(breakdownData.totalIn)}</span>
             </div>
           </div>}
         </div>
@@ -8927,7 +8988,7 @@ function CashFlowPage({toast,refreshKey}){
                 <div key={cat}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
                     <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
-                    <span style={{fontSize:12,fontWeight:400,fontFamily:'DM Sans',color:'var(--red)'}}>{fmt(amt)}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--red)'}}>{fmt(amt)}</span>
                   </div>
                   <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
                     <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--red)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
@@ -8937,7 +8998,7 @@ function CashFlowPage({toast,refreshKey}){
             })}
             <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
               <span style={{color:'var(--text-muted)'}}>Total</span>
-              <span style={{color:'var(--red)',fontFamily:'DM Sans'}}>{fmt(breakdownData.totalOut)}</span>
+              <span style={{color:'var(--red)',fontFamily:'Plus Jakarta Sans'}}>{fmt(breakdownData.totalOut)}</span>
             </div>
           </div>}
         </div>
@@ -9144,14 +9205,14 @@ function CashFlowPage({toast,refreshKey}){
               return(
                 <tr key={sp.id} style={{opacity:isPast?0.5:1,background:isPast?'var(--elevated)':'transparent'}}>
                   <td style={{textAlign:'center'}}><input type="checkbox" checked={salSel.has(sp.id)} onChange={()=>toggleSalSel(sp.id)} style={{cursor:'pointer'}}/></td>
-                  <td style={{fontFamily:'DM Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{sp.payment_date}</td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{sp.payment_date}</td>
                   <td style={{fontWeight:300}}>{sp.description}</td>
                   <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:400,background:'rgba(52,211,153,0.12)',color:'var(--green)'}}>{sp.person}</span></td>
                   {salaryAccounts.map(a=>{
                     const amt=allocMap[a.id];
-                    return<td key={a.id} style={{textAlign:'right',fontFamily:'DM Sans',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>{amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>;
+                    return<td key={a.id} style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>{amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>;
                   })}
-                  <td style={{textAlign:'right',fontFamily:'DM Sans',fontWeight:400,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                   <td style={{textAlign:'center'}}>
                     <div style={{display:'flex',gap:4,justifyContent:'center'}}>
                       <button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
@@ -9197,9 +9258,9 @@ function CashFlowPage({toast,refreshKey}){
                 return(
                   <tr key={o.id} style={{opacity:isPast?0.5:1,background:isPast?'var(--elevated)':'transparent'}}>
                     <td style={{textAlign:'center'}}><input type="checkbox" checked={ovSel.has(o.id)} onChange={()=>toggleOvSel(o.id)} style={{cursor:'pointer'}}/></td>
-                    <td style={{fontFamily:'DM Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{o.flow_date}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{o.flow_date}</td>
                     <td style={{fontWeight:300}}>{o.description}</td>
-                    <td style={{textAlign:'right',fontFamily:'DM Sans',fontWeight:300,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                    <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:300,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
                       {isOut?'(':'+'}{isOut?'':'$'}{Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}{isOut?')':''}
                     </td>
                     <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
@@ -9218,9 +9279,9 @@ function CashFlowPage({toast,refreshKey}){
               const net=ovUpIn+ovUpOut;
               return(
                 <div style={{display:'flex',gap:28,padding:'10px 18px',borderTop:'1px solid var(--border)',background:'var(--elevated)',fontSize:12,fontWeight:300,color:'var(--text-muted)'}}>
-                  <span>Upcoming inflows: <span style={{color:'var(--green)',fontFamily:'DM Sans',fontWeight:400}}>+{fmt(ovUpIn)}</span></span>
-                  <span>Outflows: <span style={{color:'var(--red)',fontFamily:'DM Sans',fontWeight:400}}>({fmt(Math.abs(ovUpOut))})</span></span>
-                  <span>Net: <span style={{color:net>=0?'var(--gold)':'var(--red)',fontFamily:'DM Sans',fontWeight:400}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
+                  <span>Upcoming inflows: <span style={{color:'var(--green)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>+{fmt(ovUpIn)}</span></span>
+                  <span>Outflows: <span style={{color:'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>({fmt(Math.abs(ovUpOut))})</span></span>
+                  <span>Net: <span style={{color:net>=0?'var(--gold)':'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
                 </div>
               );
             })()}
@@ -9283,8 +9344,8 @@ function ReconciliationPanel({toast}){
                 {a.account_name}
                 <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtAcctType(a.account_type)}</div>
               </td>
-              <td style={{textAlign:'right',fontFamily:'DM Sans'}}>{a.latest?(a.latest.plaid_balance<0?'−':'')+fmt(a.latest.plaid_balance):'—'}</td>
-              <td style={{textAlign:'right',fontFamily:'DM Sans'}}>{a.latest?(a.latest.computed_balance<0?'−':'')+fmt(a.latest.computed_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans'}}>{a.latest?(a.latest.plaid_balance<0?'−':'')+fmt(a.latest.plaid_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans'}}>{a.latest?(a.latest.computed_balance<0?'−':'')+fmt(a.latest.computed_balance):'—'}</td>
               <td style={{textAlign:'right',fontWeight:500,color:driftColor(a.latest?.delta)}}>
                 {a.latest?driftBadge(a.latest.delta):'—'}
               </td>

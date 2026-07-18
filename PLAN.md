@@ -1,11 +1,29 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-16
+> Last updated: 2026-07-17
 
 ---
 
 ## Current Focus
+
+### Cards module — deep review in progress (Omer's main focus for the next few days)
+Going screen-by-screen through Cards/Ecosystems fixing behaviors, coordinated with the sibling MARGIN project (shared backend) via `~/Library/Mobile Documents/com~apple~CloudDocs/MARGIN-MORESHETH-INTEGRATION.md`.
+
+**Deployed 2026-07-17 (commit `3fb7f33`)**:
+- Redemption/Transfer/TransferRatio split (`database.py`, `main.py`) — Redemption is now pure value-capture; Transfer is a separate value-neutral point-movement model with effective-dated `TransferRatio`s per ecosystem pair.
+- Earn-logic correction: `compute_points_earn()` rewritten as a pure function (deterministic sign+category rules, `is_excluded` as the manual escape hatch), replacing 4 previously-inconsistent call sites. New `points_earn_override` column/PATCH fields for manual per-transaction correction.
+- Cash Back ecosystem drill-down 422 fixed (route-registration order).
+- `v2.html`: Redemptions form simplified, new Transfers UI, `TxnRow` classification-aware points display (earn/clawback/excluded/manual override) with inline adjust controls, Cards page `annual_fee` `??` fix.
+- **Deliberately not ported to `frontend.html`** (being retired) — verified the new backend response shape stays fully backward-compatible with the old committed `frontend.html`, so production (still served from `frontend.html` at `/`) is unaffected.
+
+**Outstanding**: benefit-credit `is_excluded` cleanup pass — review large-magnitude `clawback` transactions (e.g. "Platinum Hotel Credit") and manually exclude genuine benefit credits; correct-per-design but not correct-per-reality until excluded. See `MARGIN-MORESHETH-INTEGRATION.md` Known issues for detail.
+
+**Deployed 2026-07-17, round 2**:
+- Font consistency: 92 `fontFamily:'DM Sans'` references in `v2.html` pointed at a font that was never actually loaded (only `Outfit` and `Plus Jakarta Sans` are in the Google Fonts import) — silently fell back to whatever generic sans-serif the OS provides. Replaced all with `Plus Jakarta Sans`.
+- Cards module transaction table (`AccountCardDetailPage`'s "Transactions" section) gained inline Action-type editing (Expense/Transfer/Income/etc., same click-to-edit pattern as the existing CSC editor) and an Exclude/Include toggle wired to the existing `is_excluded` field (zeroes points + drops SUB spend credit — verified this was already the backend's behavior, just never exposed here).
+- Two bugs found and fixed en route: `/api/accounts/{id}/transactions` was hard-filtering out any `is_excluded` transaction (so excluding one made it vanish with no way to see/undo it — inconsistent with the main Transactions page, which dims but still shows them); and `row-excluded`/`row-locked`/`row-review`/`row-transfer` CSS classes were referenced throughout `v2.html` but never defined, so excluding a transaction gave zero visual feedback anywhere in the app. Also fixed the Cards table's points column, which computed a stale client-side estimate instead of reading the corrected `points_earn`/classification fields.
+- SUB finding (not changed, flagged for awareness): spend-challenge tracking only sums negative-amount transactions — a positive-amount credit, whether a genuine benefit credit or an actual return, never adds to *or subtracts from* SUB spend today. Benefit credits correctly don't touch SUB; an actual returned purchase still counts toward SUB forever. Not fixed — would need the purchase-matching logic that was deliberately removed for being unreliable.
 
 ### V2 Redesign — Premium Glassy Blue (v2.html, served at `/v2`) — QA COMPLETE
 Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic blue theme, static mockup at `/mockup`). Completed a full page-by-page pass: visual QA first, then a second pass clicking every real feature on every page (filters, modals, inline edit, toggles, drill-downs) to verify functionality, not just appearance.

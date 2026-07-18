@@ -56,6 +56,8 @@
 
 ## ✅ Recently Completed
 
+- **Cards module: font fix + txn table Action/Exclude controls (deployed 2026-07-17, round 2)** — Fixed 92 `DM Sans` references to a font that was never loaded (fell back to OS default), app-wide. Added inline Action-type editing and an Exclude/Include toggle to the Cards module's own transaction table. Found and fixed two related bugs: `/api/accounts/{id}/transactions` was hard-hiding excluded transactions instead of dimming them, and `row-excluded`/`row-locked`/etc. CSS classes were referenced but never defined anywhere in `v2.html`.
+- **Points/Transfers overhaul (deployed 2026-07-17, commit `3fb7f33`)** — Redemption/Transfer/TransferRatio split, `compute_points_earn()` rewritten as a deterministic pure function (fixes 4 previously-inconsistent earn-rate call sites), Cash Back drill-down 422 fixed, Transfers UI + classification-aware points display ported into `v2.html`. Coordinated with the sibling MARGIN project via `MARGIN-MORESHETH-INTEGRATION.md`. Outstanding: manual `is_excluded` cleanup pass on large clawback transactions (benefit credits).
 - **V2 redesign full QA pass** — Two passes across all 11 pages: visual (fixed 3 crashes + systemic ~20-class CSS gap breaking modals/headers) then functional (clicked every filter, modal, toggle, and drill-down). Found and fixed the circular `--blue-primary`/`--blue-vibrant` CSS variable bug (broke 72 usages app-wide) and the Daily Balances 30d/90d toggles silently ignoring their range. `v2.html` is now fully operational.
 - **Multi-select filters** — Type, Category, Account dropdowns on Transactions page now support multiple selections
 - **Account type capitalization** — IRA, HSA, FSA, CD, 401(k) display correctly everywhere

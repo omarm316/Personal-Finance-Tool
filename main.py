@@ -6556,9 +6556,11 @@ async def account_transactions(
             elif r.points_category:
                 bonus_by_name[r.points_category.name] = r.multiplier
 
+    # Note: deliberately does NOT filter out is_excluded transactions — matches
+    # /api/transactions' convention of returning them (dimmed client-side) so a
+    # user can see and un-exclude them, rather than making them disappear.
     q = db.query(Transaction).filter(
         Transaction.account_id == account_id,
-        Transaction.is_excluded != True,   # hide soft-deleted (pending→posted dupes)
     )
     if year and month:
         from datetime import date as _date
@@ -6606,13 +6608,15 @@ async def account_transactions(
     for t in filtered:
         result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
         points_by_id[t.id] = result
-        if t.amount and t.amount < 0:
+        # Excluded transactions (annual fees, etc.) don't count as spend either —
+        # matches the SUB/challenge spend calc's own is_excluded filter.
+        if t.amount and t.amount < 0 and not t.is_excluded:
             total_spend += abs(t.amount)
         total_pts += result['points']
         key = t.points_category or '__none__'
         if key not in by_csc:
             by_csc[key] = {'spend': 0.0, 'pts': 0.0, 'count': 0}
-        if t.amount and t.amount < 0:
+        if t.amount and t.amount < 0 and not t.is_excluded:
             by_csc[key]['spend'] += abs(t.amount)
         by_csc[key]['pts']   += result['points']
         by_csc[key]['count'] += 1
@@ -6625,6 +6629,7 @@ async def account_transactions(
         'category': t.category_manual or t.category_auto,
         'points_category': t.points_category,
         'action': t.action,
+        'is_excluded': bool(t.is_excluded),
         'earn_rate': points_by_id[t.id]['earn_rate'] or 0,
         'points_earn': round(points_by_id[t.id]['points'], 1),
         'points_earn_classification': points_by_id[t.id]['classification'],
