@@ -1403,6 +1403,8 @@ def seed_points_categories(session):
         ("EV Charging",            40, "Ground Transportation"),
         # ── L2: cable → Streaming ─────────────────────────────────────────
         ("Cable",                  41, "Streaming"),
+        # ── L1: person-to-person payments (never earn points, see _NON_EARNING_CATS) ──
+        ("P2P Payments",           42, None),
     ]
     for name, order, parent in cats:
         existing = session.query(PointsCategory).filter_by(name=name).first()

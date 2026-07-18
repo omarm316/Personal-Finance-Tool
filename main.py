@@ -4,6 +4,7 @@ Clean consolidated version — all features included
 """
 import asyncio
 import io
+import math
 import os
 
 # ── Load .env from iCloud Drive path ────────────────────────────────────────
@@ -396,6 +397,7 @@ _NON_EARNING_CATS: frozenset[str] = frozenset({
     'Interest Charge',
     'Finance Charges',
     'Bank Fees',
+    'P2P Payments',   # Venmo/Zelle/Cash App — no points, no SUB spend credit
 })
 
 # Credit-card-payment description keywords — the categorization pipeline
@@ -435,7 +437,7 @@ def calc_earn_rate(
     return base_rate
 
 
-def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map: dict) -> dict:
+def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map: dict, issuer: str = None) -> dict:
     """
     Signed points-earn for a single transaction — the one place every
     earn-rate call site routes through. Deliberately simple, per Omer's
@@ -455,6 +457,13 @@ def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map
     Only `action == 'Expense'` transactions ever earn or lose points —
     Income/Transfer/other action types are out of scope (rare on credit
     cards, not worth handling here).
+
+    Amex-issued cards round the dollar amount UP to the nearest whole
+    dollar before applying the multiplier (confirmed 2026-07-18 against a
+    real statement: $4.66 dining spend at 7x earned 35 points, not 32.6 —
+    Amex rounds to $5 first, then multiplies). Scoped to issuer == 'AMEX'
+    only since that's the only issuer this has been verified against —
+    other issuers keep the raw fractional-dollar calculation until confirmed.
 
     Returns {'points': float, 'classification': str, 'earn_rate': float|None}.
     """
@@ -488,10 +497,11 @@ def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map
         return _zero('excluded')
 
     rate = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
+    dollars = math.ceil(abs(t.amount)) if issuer == 'AMEX' else abs(t.amount)
     if t.amount < 0:
-        return {'points': abs(t.amount) * rate, 'classification': 'earn', 'earn_rate': rate}
+        return {'points': dollars * rate, 'classification': 'earn', 'earn_rate': rate}
     else:
-        return {'points': -(t.amount * rate), 'classification': 'clawback', 'earn_rate': rate}
+        return {'points': -(dollars * rate), 'classification': 'clawback', 'earn_rate': rate}
 
 
 def calc_auto_top_category_points(db, account_id, product, start_date, end_date):
@@ -3301,7 +3311,7 @@ def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
     transactions without N+1 queries.
 
     Returns:
-      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp)}
+      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp, issuer)}
                        where bonus_by_name = {category_name: additional_multiplier}
       cat_parent_map : {category_name: parent_key}  — for the L2→L1 waterfall
     """
@@ -3348,6 +3358,7 @@ def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
             eco.currency_name if eco else 'Points',
             eco.name if eco else None,
             eco.your_cpp if eco else 1.0,
+            card.issuer,
         )
 
     return points_lookup, cat_parent_map
@@ -3379,8 +3390,8 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
     # are visible too instead of silently omitted).
     points_earn = None
     if points_lookup is not None and cat_parent_map is not None and t.account_id in points_lookup:
-        base, bonus_by_name, currency, eco_name, your_cpp = points_lookup[t.account_id]
-        result = compute_points_earn(t, base, bonus_by_name, cat_parent_map)
+        base, bonus_by_name, currency, eco_name, your_cpp, issuer = points_lookup[t.account_id]
+        result = compute_points_earn(t, base, bonus_by_name, cat_parent_map, issuer)
         parent = cat_parent_map.get(t.points_category) if t.points_category else None
         points_earn = {
             'points_category':    t.points_category,       # e.g. "Drugstore" or "United"
@@ -4936,6 +4947,7 @@ async def cash_back_earn_detail(
             'account_name':  acct.account_name,
             'mask':          acct.mask,
             'card_name':     card.card_name if card else None,
+            'issuer':        card.issuer if card else None,
         }
 
     if not eco_accts:
@@ -5187,6 +5199,7 @@ async def ecosystem_earn_detail(
             'account_name':  acct.account_name,
             'mask':          acct.mask,
             'card_name':     card.card_name if card else None,
+            'issuer':        card.issuer if card else None,
         }
 
     if not eco_accts:
@@ -5227,7 +5240,7 @@ async def ecosystem_earn_detail(
         info = acct_info.get(t.account_id)
         if not info:
             continue
-        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map)
+        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])
         pts = result['points']
         total_pts += pts
         cat_key = t.points_category or 'Other'
@@ -6320,7 +6333,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         .order_by(Transaction.date.desc()).limit(30).all()
     recent_txns = []
     for t in txns:
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
         recent_txns.append({
             'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
             'description': t.description_clean or t.description_raw,
@@ -6349,7 +6362,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     for t in window_txns:
         if t.action != 'Expense':
             continue
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
         label = t.points_category or 'Other'
         entry = cat_agg.setdefault(label, {'amount': 0.0, 'count': 0, 'points': 0.0})
         entry['amount'] += -t.amount   # expenses negative, returns positive → net spend
@@ -6606,7 +6619,7 @@ async def account_transactions(
     by_csc: dict[str, dict] = {}
     points_by_id: dict[int, dict] = {}
     for t in filtered:
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map)
+        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
         points_by_id[t.id] = result
         # Excluded transactions (annual fees, etc.) don't count as spend either —
         # matches the SUB/challenge spend calc's own is_excluded filter.

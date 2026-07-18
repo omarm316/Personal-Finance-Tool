@@ -1,7 +1,7 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-17
+> Last updated: 2026-07-18
 
 ---
 
@@ -24,6 +24,12 @@ Going screen-by-screen through Cards/Ecosystems fixing behaviors, coordinated wi
 - Cards module transaction table (`AccountCardDetailPage`'s "Transactions" section) gained inline Action-type editing (Expense/Transfer/Income/etc., same click-to-edit pattern as the existing CSC editor) and an Exclude/Include toggle wired to the existing `is_excluded` field (zeroes points + drops SUB spend credit — verified this was already the backend's behavior, just never exposed here).
 - Two bugs found and fixed en route: `/api/accounts/{id}/transactions` was hard-filtering out any `is_excluded` transaction (so excluding one made it vanish with no way to see/undo it — inconsistent with the main Transactions page, which dims but still shows them); and `row-excluded`/`row-locked`/`row-review`/`row-transfer` CSS classes were referenced throughout `v2.html` but never defined, so excluding a transaction gave zero visual feedback anywhere in the app. Also fixed the Cards table's points column, which computed a stale client-side estimate instead of reading the corrected `points_earn`/classification fields.
 - SUB finding (not changed, flagged for awareness): spend-challenge tracking only sums negative-amount transactions — a positive-amount credit, whether a genuine benefit credit or an actual return, never adds to *or subtracts from* SUB spend today. Benefit credits correctly don't touch SUB; an actual returned purchase still counts toward SUB forever. Not fixed — would need the purchase-matching logic that was deliberately removed for being unreliable.
+
+**Deployed 2026-07-18, round 3 — points-earn accuracy fixes**:
+- New "P2P Payments" CSC, added to `_NON_EARNING_CATS` (zero points + zero SUB spend credit, same mechanism as fees/interest). Venmo auto-tags via a new `CategorizationRule` (pattern="VENMO", `notes="points:P2P Payments"`) and all 56 existing Venmo transactions were backfilled. Zelle needed no fix — already `action='Transfer'`, already fully excluded.
+- **Found and fixed a real regression caused mid-session**: creating that Venmo rule triggered the app's documented `_reapply_rules(force_unlock=True)` behavior, which exposed a pre-existing dormant bug — a single 2026-03-04 correction (txn 6045, Best Buy, Expense→Transfer) had been "learned" and was blanket-overriding every Best Buy transaction to Transfer, because the learning system's own anti-over-generalization safeguard (word-overlap between the correction's description and the new transaction's) degenerates to a no-op when the only shared word is the merchant name itself. 8 real Best Buy purchases got flipped; reverted all 8 back to `Expense`, verified points restored. **The underlying over-generalization bug in `_check_transfer_correction()` (categorization.py) is still unfixed** — worth a dedicated look, since any merchant with exactly one Transfer-correction and a generic description is at risk, not just Best Buy.
+- **Amex per-dollar rounding**: `compute_points_earn()` now rounds the dollar amount UP to the nearest whole dollar before multiplying by the rate, but *only* for `Card.issuer == 'AMEX'` (confirmed against a real statement: $4.66 dining spend × 7x earned 35 pts, not 32.6 — Amex rounds to $5 first). Explicitly scoped to Amex only, pending confirmation for other issuers — `Card.issuer` already exists to extend this later if needed.
+- Also flagged, not fixed: a stray auto-created rule mistags some Venmo transactions as budget category "Healthcare" (5 rejections, 0 acceptances in its history — worth cleaning up).
 
 ### V2 Redesign — Premium Glassy Blue (v2.html, served at `/v2`) — QA COMPLETE
 Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic blue theme, static mockup at `/mockup`). Completed a full page-by-page pass: visual QA first, then a second pass clicking every real feature on every page (filters, modals, inline edit, toggles, drill-downs) to verify functionality, not just appearance.
