@@ -62,12 +62,14 @@ Gemini CLI built a full parallel redesign in `v2.html` (light/dark glassmorphic 
 ### Transactions Page Polish
 - [x] Multi-select dropdowns for type, category, account filters
 - [x] Account type capitalization fix (IRA, HSA, FSA, CD, 401(k))
-- [ ] Investigate: Transactions page Expenses total vs Dashboard KPI mismatch when filtering by month
+- [x] **B3 fixed (2026-07-18)**: Transactions page Expenses total vs Dashboard KPI mismatch. Verified with a script replicating the frontend's exact aggregation logic against `/api/stats` for every month of live data — under default filter settings the two already matched exactly (to the cent) in all cases; no split-transaction, category, or date-range divergence was found. The one real, reproducible gap: toggling "Show excluded" pulled `is_excluded` rows back into the footer's `_budgetVisible` sum even though the checkbox's own tooltip says excluded transactions stay "hidden from totals" — confirmed a $550 swing for July from two benefit-credit transactions. Fixed in `frontend.html`'s `TransactionsPage` by always excluding `is_excluded` from `_budgetVisible` regardless of the toggle (`git 2d0cd07`). If a mismatch is ever reported again, it won't be this — check whether the report involves the "Show excluded" or "Show CC payment credits" toggles, or a custom (non-calendar-month) date range compared against the Dashboard's calendar-month KPI.
 
 ### Expense Credit-Netting Alignment
 - [x] `/budget/actuals` — Income in expense-type categories nets against expenses
 - [x] `/stats` — Same logic applied with `Category.category_type` filter
 - [ ] Verify: user confirms KPI card now matches Budget vs. Actual
+
+**Session closed here (2026-07-18) — Transactions page session.** Found this session started with uncommitted, uncommitted-looking work already sitting in `frontend.html` (323 lines) plus `PLANS/SESSION_REFINE_MOBILE_KPI.md` claiming a KPI fix, mobile scroll/pull-to-refresh polish, and a `main.py` date-inclusivity fix were already done. None of that was true — `main.py` had zero uncommitted changes, and the actual diff was unrelated Redemptions/Transfers CRUD UI for the Cards `EcosystemDetailPage` (traced to a `Gemini_Convo.md` transcript in the repo root; that plan doc appears to be stale/aspirational from an unrelated session and doesn't reflect real code). Committed the Redemptions/Transfers UI separately (`git 28243fc`, verified end-to-end in-browser) before doing the actual B3 investigation and fix (`git 2d0cd07`, see above). **Still untracked in the repo root and not cleaned up**: `Gemini_Convo.md`, `PLANS/SESSION_REFINE_MOBILE_KPI.md`, `mockup.html`, `mockups/*.html`, and an empty `finance_automation.db` (0 bytes, not the real DB — that's `finance.db`, already gitignored). Worth a cleanup pass or an explicit decision on what to do with them; didn't touch them without asking since it wasn't clear if they're in-progress work.
 
 ---
 
