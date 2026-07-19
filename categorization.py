@@ -144,112 +144,6 @@ class CategorizationEngine:
 
         return None
     
-    def learn_from_corrections(self, merchant: str) -> Optional[Dict]:
-        """
-        Check if user has corrected similar transactions before
-        Returns most common correction for this merchant
-        """
-        if not merchant:
-            return None
-
-        # Find recent corrections for this merchant
-        corrections = self.db.query(UserCorrection)\
-            .filter(UserCorrection.merchant_name.ilike(f"%{merchant}%"))\
-            .order_by(UserCorrection.created_at.desc())\
-            .limit(10)\
-            .all()
-
-        if not corrections:
-            return None
-
-        # Count most common category assignment
-        category_counts = {}
-        action_counts = {}
-
-        for correction in corrections:
-            cat = correction.new_category
-            action = correction.new_action
-
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-            if action:
-                action_counts[action] = action_counts.get(action, 0) + 1
-
-        # Return most common if we have confidence
-        if category_counts:
-            most_common_cat = max(category_counts, key=category_counts.get)
-            count = category_counts[most_common_cat]
-
-            if count >= 2:  # Need at least 2 corrections to trust it
-                return {
-                    'category': most_common_cat,
-                    'action': max(action_counts, key=action_counts.get) if action_counts else None,
-                    'confidence': min(count / 5.0, 0.95),  # Cap at 0.95
-                    'source': 'user_learning'
-                }
-
-        return None
-
-    def _check_transfer_correction(self, merchant: str, description: str = None) -> Optional[Dict]:
-        """
-        Check whether the user has previously corrected transactions for this
-        merchant to action='Transfer' (e.g., credit-card payments that were
-        misclassified as purchases).
-
-        This is intentionally separate from learn_from_corrections() because:
-        - It applies EVEN WHEN a category rule matched (overriding the rule action)
-        - Its threshold is 1 correction, not 2 — Transfer is a high-conviction signal
-        - It uses description word-overlap to avoid mislabelling genuine purchases
-          that share the same merchant name as payments
-
-        Returns a confidence dict if a matching Transfer correction is found,
-        otherwise None.
-        """
-        if not merchant:
-            return None
-
-        corrections = (
-            self.db.query(UserCorrection)
-            .filter(
-                UserCorrection.merchant_name.ilike(f"%{merchant}%"),
-                UserCorrection.new_action == 'Transfer',
-            )
-            .order_by(UserCorrection.created_at.desc())
-            .limit(10)
-            .all()
-        )
-        if not corrections:
-            return None
-
-        if description:
-            # Require at least one meaningful word (>3 chars) to appear in both
-            # the new transaction description and a stored correction description,
-            # EXCLUDING words that are part of the merchant name itself. Every
-            # transaction from a merchant contains the merchant name, so counting
-            # merchant-name overlap made this guard a no-op whenever the stored
-            # correction's description was just the merchant name (confirmed live:
-            # a single Best Buy correction with description "BEST BUY" blanket-matched
-            # every subsequent Best Buy purchase). Only overlap in the *non-merchant*
-            # words distinguishes a payment-like description from a genuine purchase.
-            merchant_words = {w for w in merchant.upper().split() if len(w) > 3}
-            desc_words = {w for w in description.upper().split() if len(w) > 3} - merchant_words
-            matched = [
-                c for c in corrections
-                if c.description and (
-                    ({w for w in c.description.upper().split() if len(w) > 3} - merchant_words) & desc_words
-                )
-            ]
-            if not matched:
-                return None
-            count = len(matched)
-        else:
-            count = len(corrections)
-
-        return {
-            'action': 'Transfer',
-            'confidence': min(0.70 + count * 0.10, 0.95),
-            'source': 'user_correction_transfer',
-        }
-    
     def determine_action(self, amount: float, description: str, account_type: str = '') -> str:
         """
         Determine transaction action (Income, Expense, Transfer).
@@ -284,20 +178,13 @@ class CategorizationEngine:
         return 'Income' if amount > 0 else 'Expense'
     
     def categorize(self, description: str, amount: float, merchant_name: Optional[str] = None,
-                    account_type: str = '', apply_corrections: bool = True) -> Tuple[str, str, float, Optional[str]]:
+                    account_type: str = '') -> Tuple[str, str, float, Optional[str]]:
         """
         Two-pass categorization:
         Pass 1 — Match raw description against action/description rules (Groups 1 & 2)
                  to get action + normalized description
         Pass 2 — Match normalized description against category rules (Group 3)
                  to get category
-
-        apply_corrections: when False, skips learn_from_corrections() and
-            _check_transfer_correction() entirely — only explicit CategorizationRule
-            matches are applied. Used by force-unlock reapply, where the caller has
-            already gated on "a rule now matches this row" and the result should
-            reflect only that rule, not a separately-triggered correction override
-            (see _reapply_rules in main.py).
 
         Returns: (action, category, confidence, display_description)
             display_description: polished description from a matching rule's
@@ -365,36 +252,9 @@ class CategorizationEngine:
                 category = rule.set_category
                 break
 
-        # ── Learning from past corrections ───────────────────────────────────
-        if not category and apply_corrections:
-            merchant = merchant_name or self.extract_merchant(description)
-            learned = self.learn_from_corrections(merchant)
-            if learned:
-                return (
-                    action or self.determine_action(amount, description),
-                    learned['category'],
-                    learned['confidence'],
-                    display_description,
-                )
-
         action   = action or self.determine_action(amount, description, account_type)
         category = category or 'Unclassified'
         confidence = 0.85 if category != 'Unclassified' else 0.3
-
-        # ── Action override from user corrections ─────────────────────────────
-        # Even when a category rule matched (e.g. Best Buy → Electronics), the
-        # user may have previously corrected this merchant's transactions to
-        # Transfer (e.g. credit-card payments misidentified as purchases).
-        # We apply the override AFTER rule processing so genuine purchases still
-        # get their rule-based category while payments are promoted to Transfer.
-        if action != 'Transfer' and apply_corrections:
-            _merchant = merchant_name or self.extract_merchant(description)
-            if _merchant:
-                _override = self._check_transfer_correction(_merchant, desc_clean)
-                if _override:
-                    action     = 'Transfer'
-                    category   = ''
-                    confidence = _override['confidence']
 
         return action, category, confidence, display_description
     

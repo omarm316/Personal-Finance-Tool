@@ -1832,17 +1832,6 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 account_type=account.account_type or '',
             )
 
-            # If action=Transfer was determined via a user-correction override
-            # (not a built-in rule), lock the new transaction immediately so
-            # future recategorisation runs and /apply-rules don't revert it.
-            _correction_locked = False
-            if action == 'Transfer':
-                _m = txn_data.get('merchant_name') or categorizer.extract_merchant(txn_data['description_raw'])
-                if _m and categorizer._check_transfer_correction(
-                    _m, categorizer.clean_description(txn_data['description_raw'])
-                ):
-                    _correction_locked = True
-
             # Apply GCB auto-tag and points category from rule notes
             desc_upper = txn_data['description_raw'].upper()
             gcb_auto   = False
@@ -1936,7 +1925,6 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 card_id=linked_card_id,
                 gcb_tagged=gcb_auto,
                 points_category=points_cat,
-                is_locked=_correction_locked,
                 content_hash=_assign_content_hash(db, account.id, txn_date, amount, txn_data['description_raw']),
                 year=txn_date.year,
                 month=txn_date.month,
@@ -7342,16 +7330,9 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
         matched_rule = categorizer.match_rule(t.description_raw, t.amount)
         if not matched_rule:
             continue  # Rule doesn't match — keep manual override intact
-        # apply_corrections=False: this branch's gate check only confirmed a RULE
-        # matches, so only a rule's own effect should be applied here. Letting the
-        # full categorize() (which also runs learn_from_corrections/_check_transfer_correction)
-        # decide was the root cause of a real regression — a single stale Transfer
-        # correction silently flipped every subsequent Best Buy purchase once this
-        # branch force-unlocked them, even though the gate only ever checked rules.
         action, category, confidence, display_desc = categorizer.categorize(
             t.description_raw, t.amount, t.merchant_name,
             account_type=(t.account.account_type if t.account else ''),
-            apply_corrections=False,
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
         llm_category = '' if action == 'Transfer' else category
