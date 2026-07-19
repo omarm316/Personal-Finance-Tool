@@ -38,7 +38,7 @@ from database import (
     SalaryPayment, SalaryAllocation, BalanceObservation, PlannedPurchase,
 )
 from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
-from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review
+from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review, find_overlapping_rules
 from plaid_integration import setup_plaid_from_env
 from plaid.exceptions import ApiException as PlaidApiException
 import logging
@@ -7396,13 +7396,23 @@ async def clean_all_descriptions(db: Session = Depends(get_db)):
 @app.post("/api/rules")
 async def create_rule(data: dict, db: Session = Depends(get_db)):
     """Create a new categorization rule."""
+    pattern = data.get('pattern', '')
+    set_category = data.get('set_category')
+    set_action = data.get('set_action')
+
+    # Non-blocking: warn if this pattern overlaps an existing active rule
+    # that disagrees on category/action, so contradictory rules (e.g. the
+    # multiple conflicting Venmo rules found in BACKLOG.md B7/B8) don't
+    # accumulate silently.
+    conflicts = find_overlapping_rules(db, pattern, set_category, set_action)
+
     rule = CategorizationRule(
         priority=data.get('priority', 100),
         priority_order=data.get('priority_order', 0),
         match_type=data.get('match_type', 'contains'),
-        pattern=data.get('pattern', ''),
-        set_action=data.get('set_action'),
-        set_category=data.get('set_category'),
+        pattern=pattern,
+        set_action=set_action,
+        set_category=set_category,
         set_description=data.get('set_description'),
         clean_description=data.get('clean_description'),
         notes=data.get('notes'),
@@ -7414,7 +7424,14 @@ async def create_rule(data: dict, db: Session = Depends(get_db)):
     # force_unlock=True: if the new rule matches a previously-locked transaction,
     # clear the manual override so the rule takes over for all history.
     reapplied = _reapply_rules(db, force_unlock=True)
-    return {'id': rule.id, 'message': 'Rule created', 'reapplied': reapplied}
+    response = {'id': rule.id, 'message': 'Rule created', 'reapplied': reapplied}
+    if conflicts:
+        response['warning'] = (
+            f"Pattern overlaps {len(conflicts)} existing rule(s) with a different category/action: "
+            + ", ".join(f"#{c['rule_id']} '{c['pattern']}' -> {c['set_category'] or c['set_action']}" for c in conflicts)
+        )
+        response['conflicts'] = conflicts
+    return response
 
 
 @app.patch("/api/rules/{rule_id}")
@@ -10217,6 +10234,10 @@ async def create_rule_from_transaction(
     if existing:
         return {"status": "exists", "rule_id": existing.id, "message": f"Rule for '{pattern}' already exists"}
 
+    # Non-blocking: warn if this pattern overlaps an existing active rule
+    # that disagrees on category/action.
+    conflicts = find_overlapping_rules(db, pattern, category, action)
+
     rule = CategorizationRule(
         priority=200,           # Below Excel rules (100) so manual rules override them
         priority_order=0,
@@ -10231,7 +10252,14 @@ async def create_rule_from_transaction(
     db.add(rule)
     db.commit()
     db.refresh(rule)
-    return {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category, "action": action}
+    response = {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category, "action": action}
+    if conflicts:
+        response['warning'] = (
+            f"Pattern overlaps {len(conflicts)} existing rule(s) with a different category/action: "
+            + ", ".join(f"#{c['rule_id']} '{c['pattern']}' -> {c['set_category'] or c['set_action']}" for c in conflicts)
+        )
+        response['conflicts'] = conflicts
+    return response
 
 
 @app.post("/api/llm/enrich-single/{transaction_id}")

@@ -28,6 +28,55 @@ def compute_needs_review(action: str, category: str, confidence: float, source: 
     return confidence < 0.85 or category == 'Unclassified'
 
 
+def find_overlapping_rules(
+    db: Session,
+    pattern: str,
+    set_category: Optional[str] = None,
+    set_action: Optional[str] = None,
+    exclude_rule_id: Optional[int] = None,
+) -> List[Dict]:
+    """
+    Find active rules whose pattern overlaps the given pattern (substring
+    either direction, case-insensitive) but disagree on set_category or
+    set_action. Non-blocking — used to warn at rule-creation time, and as a
+    one-time read-only audit against all existing rules.
+
+    Overlap alone isn't a problem (a specific pattern intentionally nested
+    inside a more general one, both agreeing on the outcome, is normal and
+    is exactly what priority ordering is for) — only a *disagreement* on
+    outcome for an overlapping pattern is worth surfacing, since that's what
+    produces contradictory or unpredictable classification for anyone
+    matching both patterns.
+    """
+    pattern_upper = (pattern or '').upper().strip()
+    if not pattern_upper:
+        return []
+
+    candidates = db.query(CategorizationRule).filter(CategorizationRule.is_active == True).all()
+    conflicts = []
+    for r in candidates:
+        if exclude_rule_id and r.id == exclude_rule_id:
+            continue
+        r_pattern = (r.pattern or '').upper().strip()
+        if not r_pattern:
+            continue
+        if not (pattern_upper in r_pattern or r_pattern in pattern_upper):
+            continue
+
+        disagrees = (
+            (set_category and r.set_category and set_category != r.set_category) or
+            (set_action and r.set_action and set_action != r.set_action)
+        )
+        if disagrees:
+            conflicts.append({
+                'rule_id': r.id,
+                'pattern': r.pattern,
+                'set_category': r.set_category,
+                'set_action': r.set_action,
+            })
+    return conflicts
+
+
 class CategorizationEngine:
     """
     Rule-based categorization engine:
