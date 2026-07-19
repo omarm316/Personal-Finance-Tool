@@ -20,7 +20,7 @@ import hashlib
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime
 
 from database import (
@@ -7261,7 +7261,9 @@ async def list_rules(
     } for r in rules]
 
 
-def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
+def _reapply_rules(db: Session, force_unlock: bool = False,
+                    pattern: Optional[Union[str, List[str]]] = None,
+                    dry_run: bool = False) -> dict:
     """
     Re-run the categorization engine on transactions.
 
@@ -7273,25 +7275,56 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
         Clears category_manual and is_locked so the rule takes over,
         exactly as if the rule had been in place from the start.
 
+    pattern: when given (a string, or a list of strings), scopes BOTH
+        branches to transactions whose description_raw OR description_clean
+        contains at least one of the given substrings (case-insensitive),
+        instead of a full-table scan. Used when a single rule was just
+        created/edited — there's no reason to re-examine every transaction
+        in the database for a change that can only possibly affect rows
+        matching the new/changed pattern (pass both old and new pattern as a
+        list on update, so rows affected by either are reconsidered).
+        Checking both raw and clean descriptions (not raw alone) matters
+        because clean_description() can make text contiguous in the cleaned
+        form that wasn't contiguous in the original raw text.
+
+    dry_run: when True, computes and reports what would change without
+        writing anything (no attribute mutation, no db.commit()). Use this to
+        validate scoping/behavior before trusting it, or as a general safety
+        net given there's no separate test database.
+
     Returns {'updated': N, 'total': M, 'unlocked': K}.
     """
     categorizer = CategorizationEngine(db)
+    patterns = [pattern] if isinstance(pattern, str) else (pattern or [])
+    patterns = [p for p in patterns if p]
+
+    def _scope(query):
+        if not patterns:
+            return query
+        clauses = [
+            (Transaction.description_raw.ilike(f"%{p}%")) | (Transaction.description_clean.ilike(f"%{p}%"))
+            for p in patterns
+        ]
+        combined = clauses[0]
+        for c in clauses[1:]:
+            combined = combined | c
+        return query.filter(combined)
 
     # Always process unlocked, non-manual transactions
-    txns = db.query(Transaction).filter(
+    txns = _scope(db.query(Transaction).filter(
         Transaction.is_locked == False,
         Transaction.category_manual == None,
-    ).all()
+    )).all()
 
     # In force mode also check system-locked transactions (transfer corrections) for new
     # rule matches.  Transactions where the user explicitly set category_manual are always
     # respected — a new rule never clobbers a conscious user edit.
     locked_txns = []
     if force_unlock:
-        locked_txns = db.query(Transaction).filter(
+        locked_txns = _scope(db.query(Transaction).filter(
             Transaction.is_locked == True,
             Transaction.category_manual == None,   # system-locked only, not user-manual edits
-        ).all()
+        )).all()
 
     updated = 0
     unlocked = 0
@@ -7308,12 +7341,13 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
                 t.category_auto != llm_category or
                 t.action != action or
                 t.enrichment_source != source):
-            t.description_clean = desc_clean
-            t.category_auto     = llm_category
-            t.action            = action
-            t.category_confidence = confidence
-            t.enrichment_source   = source
             updated += 1
+            if not dry_run:
+                t.description_clean = desc_clean
+                t.category_auto     = llm_category
+                t.action            = action
+                t.category_confidence = confidence
+                t.enrichment_source   = source
 
     for t in locked_txns:
         matched_rule = categorizer.match_rule(t.description_raw, t.amount)
@@ -7325,25 +7359,37 @@ def _reapply_rules(db: Session, force_unlock: bool = False) -> dict:
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
         llm_category = '' if action == 'Transfer' else category
-        # Clear the manual override so the rule governs this transaction going forward
-        t.category_manual   = None
-        t.is_locked         = False
-        t.description_clean = desc_clean
-        t.category_auto     = llm_category
-        t.action            = action
-        t.category_confidence = confidence
-        t.enrichment_source   = 'rule'
         unlocked += 1
         updated += 1
+        if not dry_run:
+            # Clear the manual override so the rule governs this transaction going forward
+            t.category_manual   = None
+            t.is_locked         = False
+            t.description_clean = desc_clean
+            t.category_auto     = llm_category
+            t.action            = action
+            t.category_confidence = confidence
+            t.enrichment_source   = 'rule'
 
-    db.commit()
+    if dry_run:
+        db.rollback()
+    else:
+        db.commit()
     return {'updated': updated, 'total': len(txns) + len(locked_txns), 'unlocked': unlocked}
 
 
 @app.post("/api/rules/reapply")
-async def reapply_rules(db: Session = Depends(get_db)):
-    """Re-apply all active rules to every non-locked, non-manually-edited transaction."""
-    return _reapply_rules(db)
+async def reapply_rules(
+    pattern: Optional[str] = None,
+    dry_run: bool = False,
+    db: Session = Depends(get_db),
+):
+    """
+    Re-apply all active rules to every non-locked, non-manually-edited transaction.
+    Pass `pattern` to scope to matching transactions only, and/or `dry_run=true`
+    to see what would change without writing anything.
+    """
+    return _reapply_rules(db, pattern=pattern, dry_run=dry_run)
 
 
 @app.post("/api/rules/clean-descriptions")
@@ -7423,7 +7469,12 @@ async def create_rule(data: dict, db: Session = Depends(get_db)):
     db.refresh(rule)
     # force_unlock=True: if the new rule matches a previously-locked transaction,
     # clear the manual override so the rule takes over for all history.
-    reapplied = _reapply_rules(db, force_unlock=True)
+    # Scoped to this rule's own pattern — no reason to rescan the whole table
+    # for a change that can only affect matching rows. contains_any/contains_all
+    # patterns are semicolon-joined sub-patterns, not a literal substring, so
+    # those fall back to an unscoped (correct, just slower) reapply.
+    scope_pattern = rule.pattern if rule.match_type in ('contains', 'equals', 'starts_with', 'regex') else None
+    reapplied = _reapply_rules(db, force_unlock=True, pattern=scope_pattern)
     response = {'id': rule.id, 'message': 'Rule created', 'reapplied': reapplied}
     if conflicts:
         response['warning'] = (
@@ -7440,6 +7491,7 @@ async def update_rule(rule_id: int, data: dict, db: Session = Depends(get_db)):
     rule = db.query(CategorizationRule).filter_by(id=rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
+    old_pattern = rule.pattern
     allowed = ['priority', 'priority_order', 'match_type', 'pattern',
                'set_action', 'set_category', 'set_description', 'clean_description',
                'notes', 'is_active']
@@ -7448,7 +7500,15 @@ async def update_rule(rule_id: int, data: dict, db: Session = Depends(get_db)):
             setattr(rule, k, v)
     rule.updated_at = datetime.utcnow()
     db.commit()
-    reapplied = _reapply_rules(db)
+    # Scope to whichever pattern(s) could plausibly be affected — both the old
+    # and new pattern, since a transaction that matched under the old pattern
+    # may no longer, and one that didn't may now. Falls back to an unscoped
+    # (correct, just slower) reapply for compound match types, same reasoning
+    # as create_rule.
+    scope_patterns = None
+    if rule.match_type in ('contains', 'equals', 'starts_with', 'regex'):
+        scope_patterns = list({old_pattern, rule.pattern} - {None, ''})
+    reapplied = _reapply_rules(db, pattern=scope_patterns)
     return {'message': 'Rule updated', 'reapplied': reapplied}
 
 
@@ -10252,7 +10312,16 @@ async def create_rule_from_transaction(
     db.add(rule)
     db.commit()
     db.refresh(rule)
-    response = {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category, "action": action}
+    # This is the review UI's actual rule-creation path (the "Save as auto-
+    # categorization rule" checkbox and the inline-edit "Create rule?" prompt
+    # both call this endpoint) — without a reapply here, closing a review by
+    # creating a rule only benefited *future* transactions; other backlog
+    # transactions matching the same merchant sat unresolved until someone
+    # separately ran a full reapply. Scoped to this rule's own pattern, same
+    # reasoning as create_rule.
+    reapplied = _reapply_rules(db, force_unlock=True, pattern=pattern)
+    response = {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category,
+                "action": action, "reapplied": reapplied}
     if conflicts:
         response['warning'] = (
             f"Pattern overlaps {len(conflicts)} existing rule(s) with a different category/action: "
