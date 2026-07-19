@@ -89,11 +89,25 @@ class CategorizationEngine:
         self._load_rules()
 
     def _load_rules(self):
-        """Load active rules from database, sorted by priority"""
-        self.rules = self.db.query(CategorizationRule)\
+        """
+        Load active rules from database, sorted deterministically by
+        (priority, priority_order, -len(pattern)). priority_order already
+        existed in the schema for exactly this "manual tiebreak within a
+        priority tier" purpose but was never read by the matching logic —
+        51 active rules currently share priority=100 with no secondary sort
+        key at all, so ties were resolved by whatever order Postgres
+        happened to return, not a defined order. The pattern-length term is
+        a final tiebreak among rules that also share the same priority_order
+        (longer pattern first) — note this only breaks ties between rules at
+        the *same* priority; it does not reorder rules with different
+        priority numbers (that needs an explicit priority change, see
+        BACKLOG.md B9).
+        """
+        rules = self.db.query(CategorizationRule)\
             .filter_by(is_active=True)\
-            .order_by(CategorizationRule.priority)\
             .all()
+        rules.sort(key=lambda r: (r.priority, r.priority_order or 0, -len(r.pattern or '')))
+        self.rules = rules
     
     def clean_description(self, raw_description: str) -> str:
         """
@@ -254,6 +268,11 @@ class CategorizationEngine:
         Pass 2 — Match normalized description against category rules (Group 3)
                  to get category
 
+        Transfer transactions never carry a category — folded in here so
+        every caller gets this for free instead of each one independently
+        applying `'' if action == 'Transfer' else category` after the call
+        (that snippet used to be duplicated at 7 call sites in main.py).
+
         Returns: (action, category, confidence, display_description)
             display_description: polished description from a matching rule's
                                  set_description field, or None if no rule matched.
@@ -262,11 +281,19 @@ class CategorizationEngine:
         desc_raw   = description.upper()  # Raw upper for broad matching
 
         # ── Pass 1: action + description normalization ───────────────────────
+        # First-match-wins for BOTH fields, consistently — previously action
+        # was first-match-wins but display_description/normalized_desc kept
+        # getting overwritten by every subsequent matching rule (last-match-
+        # wins), an accidental inconsistency within the same loop, not a
+        # deliberate design.
         action = None
         normalized_desc = desc_clean
         display_description = None  # polished name from rules
 
         for rule in self.rules:
+            if action and display_description:
+                break  # both fields resolved — no need to keep scanning
+
             if rule.set_category and not rule.set_action and not rule.set_description:
                 continue  # Skip pure category rules in pass 1
 
@@ -292,7 +319,7 @@ class CategorizationEngine:
             if matched:
                 if rule.set_action and not action:
                     action = rule.set_action
-                if rule.set_description:
+                if rule.set_description and not display_description:
                     normalized_desc = rule.set_description.upper()
                     display_description = rule.set_description  # keep original casing
 
@@ -323,6 +350,12 @@ class CategorizationEngine:
         action   = action or self.determine_action(amount, description, account_type)
         category = category or 'Unclassified'
         confidence = 0.85 if category != 'Unclassified' else 0.3
+
+        # Transfers are routing/payment mechanics, not a spend/income category —
+        # every caller independently enforced this before by clearing the
+        # category after the call; centralized here instead.
+        if action == 'Transfer':
+            category = ''
 
         return action, category, confidence, display_description
     

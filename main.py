@@ -1885,7 +1885,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             llm_source = None
             llm_description_clean = display_desc or categorizer.clean_description(txn_data['description_raw'])
             llm_merchant = txn_data.get('merchant_name')
-            llm_category = '' if action == 'Transfer' else category
+            # categorize() already clears category to '' for action=='Transfer';
+            # the Plaid-PFC fallback above only ever fires when category was
+            # 'Unclassified', which a Transfer's '' never is — so category is
+            # already correct here without re-checking action.
+            llm_category = category
 
             # Skip LLM during background sync — each Claude call is 1-3s synchronous HTTP,
             # so 100 transactions × 2s = 3+ minutes, which kills the Gunicorn worker.
@@ -6768,7 +6772,7 @@ async def upload_rules(file: UploadFile = File(...), db: Session = Depends(get_d
                 account_type=(t.account.account_type if t.account else ''),
             )
             t.action              = action
-            t.category_auto       = '' if action == 'Transfer' else category
+            t.category_auto       = category  # categorize() already clears this for Transfer
             t.category_confidence = confidence
             t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
             t.needs_review        = compute_needs_review(action, category, confidence)
@@ -7155,7 +7159,7 @@ async def import_transactions(
             description_clean    = description_clean,
             merchant_name        = merchant_name,
             action               = action,
-            category_auto        = '' if action == 'Transfer' else category,
+            category_auto        = category,  # categorize() already clears this for Transfer
             category_manual      = None,
             category_confidence  = confidence,
             needs_review         = needs_review_flag,
@@ -7193,7 +7197,7 @@ async def recategorize_all(db: Session = Depends(get_db)):
             account_type=(t.account.account_type if t.account else ''),
         )
         t.action              = action
-        t.category_auto       = '' if action == 'Transfer' else category
+        t.category_auto       = category  # categorize() already clears this for Transfer
         t.category_confidence = confidence
         t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
         t.needs_review        = compute_needs_review(action, category, confidence)
@@ -7219,7 +7223,7 @@ async def fix_transaction_signs(db: Session = Depends(get_db)):
                 account_type=(t.account.account_type if t.account else ''),
             )
             t.action              = action
-            t.category_auto       = '' if action == 'Transfer' else category
+            t.category_auto       = category  # categorize() already clears this for Transfer
             t.category_confidence = confidence
             t.needs_review        = compute_needs_review(action, category, confidence)
             fixed += 1
@@ -7335,7 +7339,7 @@ def _reapply_rules(db: Session, force_unlock: bool = False,
             account_type=(t.account.account_type if t.account else ''),
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
-        llm_category = '' if action == 'Transfer' else category
+        llm_category = category  # categorize() already clears this for Transfer
         source = 'rule' if confidence >= 0.85 else 'fallback'
         if (t.description_clean != desc_clean or
                 t.category_auto != llm_category or
@@ -7358,7 +7362,7 @@ def _reapply_rules(db: Session, force_unlock: bool = False,
             account_type=(t.account.account_type if t.account else ''),
         )
         desc_clean = display_desc or categorizer.clean_description(t.description_raw)
-        llm_category = '' if action == 'Transfer' else category
+        llm_category = category  # categorize() already clears this for Transfer
         unlocked += 1
         updated += 1
         if not dry_run:
