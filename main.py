@@ -38,7 +38,7 @@ from database import (
     SalaryPayment, SalaryAllocation, BalanceObservation, PlannedPurchase,
 )
 from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
-from categorization import CategorizationEngine, load_rules_from_excel
+from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review
 from plaid_integration import setup_plaid_from_env
 from plaid.exceptions import ApiException as PlaidApiException
 import logging
@@ -1902,12 +1902,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             else:
                 final_source = 'fallback'
 
-            if action == 'Transfer':
-                needs_review_flag = False
-            elif final_source in ('llm', 'fallback', 'override'):
-                needs_review_flag = True
-            else:
-                needs_review_flag = confidence < 0.85
+            needs_review_flag = compute_needs_review(action, category, confidence, final_source)
 
             db.add(Transaction(
                 plaid_transaction_id=txn_data['plaid_transaction_id'],
@@ -6776,7 +6771,7 @@ async def upload_rules(file: UploadFile = File(...), db: Session = Depends(get_d
             t.category_auto       = '' if action == 'Transfer' else category
             t.category_confidence = confidence
             t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
-            t.needs_review        = False if action == 'Transfer' else (confidence < 0.8 or category == 'Unclassified')
+            t.needs_review        = compute_needs_review(action, category, confidence)
             t.enrichment_source   = 'rule' if confidence >= 0.85 else t.enrichment_source
         db.commit()
 
@@ -7142,13 +7137,7 @@ async def import_transactions(
         else:
             final_source = 'fallback'
 
-        # needs_review logic
-        if action == 'Transfer':
-            needs_review_flag = False
-        elif final_source in ('llm', 'fallback'):
-            needs_review_flag = True
-        else:
-            needs_review_flag = confidence < 0.85 or category == 'Unclassified'
+        needs_review_flag = compute_needs_review(action, category, confidence, final_source)
 
         linked_card_id = account.card.id if account.card else None
 
@@ -7207,7 +7196,7 @@ async def recategorize_all(db: Session = Depends(get_db)):
         t.category_auto       = '' if action == 'Transfer' else category
         t.category_confidence = confidence
         t.description_clean   = display_desc or cat_engine.clean_description(t.description_raw)
-        t.needs_review        = False if action == 'Transfer' else (confidence < 0.8 or category == 'Unclassified')
+        t.needs_review        = compute_needs_review(action, category, confidence)
     db.commit()
     return {"message": f"Re-categorized {len(transactions)} transactions"}
 
@@ -7232,7 +7221,7 @@ async def fix_transaction_signs(db: Session = Depends(get_db)):
             t.action              = action
             t.category_auto       = '' if action == 'Transfer' else category
             t.category_confidence = confidence
-            t.needs_review        = False if action == 'Transfer' else confidence < 0.8
+            t.needs_review        = compute_needs_review(action, category, confidence)
             fixed += 1
     db.commit()
     return {"fixed": fixed, "total": len(transactions)}

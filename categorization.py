@@ -1,5 +1,5 @@
 """
-Categorization engine - hybrid rule-based and ML approach
+Categorization engine - rule-based matching against CategorizationRule.
 """
 import re
 from typing import Tuple, Optional, List, Dict
@@ -8,18 +8,37 @@ from database import CategorizationRule, UserCorrection, Transaction
 from datetime import datetime
 
 
+def compute_needs_review(action: str, category: str, confidence: float, source: Optional[str] = None) -> bool:
+    """
+    Single source of truth for whether a transaction needs human review.
+
+    Transfers are never flagged — they're routing/payment mechanics, not a
+    categorization call. A source of 'llm'/'fallback'/'override' always needs
+    a look, since it wasn't resolved by an explicit rule. Otherwise, review
+    whenever confidence is below the rule-match threshold (0.85) or the
+    category is still Unclassified — the two are correlated by construction
+    in categorize() (Unclassified always carries confidence 0.3), but both
+    are checked explicitly for defensiveness against future callers that
+    might not preserve that correlation.
+    """
+    if action == 'Transfer':
+        return False
+    if source in ('llm', 'fallback', 'override'):
+        return True
+    return confidence < 0.85 or category == 'Unclassified'
+
+
 class CategorizationEngine:
     """
-    Hybrid categorization engine that:
-    1. Uses rule-based matching (from your Rules sheet)
-    2. Learns from user corrections over time
-    3. Assigns confidence scores
+    Rule-based categorization engine:
+    1. Matches transaction descriptions against active CategorizationRules
+    2. Assigns confidence scores
     """
-    
+
     def __init__(self, db_session: Session):
         self.db = db_session
         self._load_rules()
-    
+
     def _load_rules(self):
         """Load active rules from database, sorted by priority"""
         self.rules = self.db.query(CategorizationRule)\
