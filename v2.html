@@ -4709,7 +4709,7 @@ class CardDetailErrorBoundary extends React.Component{
   }
 }
 
-function AccountCardDetailPage({accountId,onBack,toast}){
+function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[d,setD]=useState(null);
   const[loading,setLoading]=useState(true);
   const[spendPeriod,setSpendPeriod]=useState('qtd');
@@ -4972,6 +4972,39 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     setChallengeFilterName(ch.name);
     txnSectionRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
   };
+  // Same as filterTxnsToChallenge, but for a challenge clicked from the
+  // Portfolio page (before this component has its own `challenges` list
+  // loaded) — the Portfolio-level challenge object already carries
+  // start_date/end_date/name, so this applies on mount without waiting.
+  useEffect(()=>{
+    if(initialChallengeFilter?.start&&initialChallengeFilter?.end){
+      setTxnView('custom');
+      setCustomStart(initialChallengeFilter.start);
+      setCustomEnd(initialChallengeFilter.end);
+      setChallengeFilterName(initialChallengeFilter.name||null);
+    }
+    // eslint-disable-next-line
+  },[]);
+  // txnSectionRef isn't attached to the DOM yet during the initial
+  // loading-skeleton render (see `if(loading)return<SkeletonTable.../>`
+  // below), so the scroll-into-view has to wait for that to clear —
+  // can't just do it in the mount effect above. initialScrollDone guards
+  // against re-scrolling on later loading flips (e.g. changing spendPeriod).
+  const initialScrollDone=useRef(false);
+  useEffect(()=>{
+    if(!loading&&initialChallengeFilter?.start&&!initialScrollDone.current){
+      initialScrollDone.current=true;
+      // loadChallenges/loadBenefits/loadTxns all fire around this same
+      // loading→false transition and reflow the page shortly after (unlike
+      // filterTxnsToChallenge's same-page click above, which has no
+      // competing loads) — that concurrent reflow was starving a 'smooth'
+      // scrollIntoView's animation frames, leaving it stuck a few px in.
+      // 'auto' (instant) sidesteps that; deferred one tick so the ref's
+      // position reflects the post-reflow layout, not a stale one.
+      setTimeout(()=>{txnSectionRef.current?.scrollIntoView({behavior:'auto',block:'start'});},150);
+    }
+    // eslint-disable-next-line
+  },[loading]);
   const load=async(p,silent)=>{
     if(silent){setSpendRefreshing(true);}else{setLoading(true);}
     try{setD(await apiFetch(`/accounts/${accountId}/card-detail?period=${p||spendPeriod}`));}
@@ -6706,11 +6739,12 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   );
 }
 
-function ChallengeCard({ch}){
+function ChallengeCard({ch,onClick}){
   const progress=ch.progress_pct||0;
   const isThreshold=ch.spend_threshold&&!ch.bonus_unlocked;
   return(
-    <div className="card" style={{padding:'16px 18px'}}>
+    <div className="card" style={{padding:'16px 18px',cursor:onClick?'pointer':'default'}} onClick={onClick}
+      title={onClick?"View this card's transactions for this challenge's date range":undefined}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:13,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</div>
@@ -6750,6 +6784,7 @@ function CardsPage({toast,refreshKey}){
   const[products,setProducts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[selectedAccount,setSelectedAccount]=useState(null);
+  const[pendingChallengeFilter,setPendingChallengeFilter]=useState(null); // {start,end,name} — set when navigating in via a challenge card
   const[selectedEcosystem,setSelectedEcosystem]=useState(null); // {id,name}
   const[suggestions,setSuggestions]=useState([]);
   const[linking,setLinking]=useState({});
@@ -6841,7 +6876,8 @@ function CardsPage({toast,refreshKey}){
   const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
 
   // Account detail takes highest priority
-  if(selectedAccount)return<CardDetailErrorBoundary onBack={()=>setSelectedAccount(null)}><AccountCardDetailPage accountId={selectedAccount} onBack={()=>setSelectedAccount(null)} toast={toast}/></CardDetailErrorBoundary>;
+  const closeAccountDetail=()=>{setSelectedAccount(null);setPendingChallengeFilter(null);};
+  if(selectedAccount)return<CardDetailErrorBoundary onBack={closeAccountDetail}><AccountCardDetailPage accountId={selectedAccount} onBack={closeAccountDetail} toast={toast} initialChallengeFilter={pendingChallengeFilter}/></CardDetailErrorBoundary>;
 
   // Ecosystem detail page
   if(selectedEcosystem)return(
@@ -6849,9 +6885,17 @@ function CardsPage({toast,refreshKey}){
       ecoId={selectedEcosystem.id} ecoName={selectedEcosystem.name}
       initPeriod={earnPeriod} initYear={earnYear}
       onBack={()=>setSelectedEcosystem(null)}
-      onSelectAccount={(id)=>setSelectedAccount(id)}
+      onSelectAccount={(id)=>{setPendingChallengeFilter(null);setSelectedAccount(id);}}
       toast={toast}/>
   );
+
+  // Open a card's detail page pre-filtered to one of its challenges — used by
+  // ChallengeCard clicks on the Portfolio page.
+  const openChallenge=(ch)=>{
+    if(!ch.account_id)return;
+    setPendingChallengeFilter({start:(ch.start_date||'').slice(0,10),end:(ch.end_date||'').slice(0,10),name:ch.name});
+    setSelectedAccount(ch.account_id);
+  };
 
   // Find linked product info for each account
   const getProductForAccount=(acctId)=>{
@@ -7161,7 +7205,7 @@ function CardsPage({toast,refreshKey}){
                           };
                           const bg=cardGrads[cardKey]||'linear-gradient(135deg,#374151,#1f2937)';
                           return(
-                            <div key={acct.id} onClick={()=>setSelectedAccount(acct.id)}
+                            <div key={acct.id} onClick={()=>{setPendingChallengeFilter(null);setSelectedAccount(acct.id);}}
                               style={{width:180,height:114,borderRadius:12,background:bg,padding:'14px 16px',
                                 flexShrink:0,cursor:'pointer',position:'relative',overflow:'hidden',
                                 boxShadow:'0 4px 12px rgba(0,0,0,0.3)',transition:'transform 0.2s ease',
@@ -7188,7 +7232,7 @@ function CardsPage({toast,refreshKey}){
                     <div>
                       <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
                       <div className="grid-auto-sm" style={{gap:10}}>
-                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
+                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch} onClick={()=>openChallenge(ch)}/>)}
                       </div>
                     </div>
                   )}
