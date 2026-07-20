@@ -5863,9 +5863,9 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
             card_id         = data['card_id'],
             name            = data['name'],
             challenge_type  = data['challenge_type'],
-            start_date      = _date.fromisoformat(data['start_date']),
-            end_date        = _date.fromisoformat(data['end_date']),
-            activation_date = _date.fromisoformat(data['activation_date']) if data.get('activation_date') else None,
+            start_date      = _date.fromisoformat(data['start_date'][:10]),
+            end_date        = _date.fromisoformat(data['end_date'][:10]),
+            activation_date = _date.fromisoformat(data['activation_date'][:10]) if data.get('activation_date') else None,
             bonus_type      = data['bonus_type'],
             bonus_amount    = float(data['bonus_amount']),
             spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
@@ -5919,9 +5919,12 @@ async def update_challenge(challenge_id: int, data: dict = Body(...), db: Sessio
         c.spender_filter = data['spender_filter'] or None
     for field in ('start_date', 'end_date'):
         if field in data:
-            setattr(c, field, _date.fromisoformat(data[field]))
+            # [:10] — tolerate a full ISO datetime string (some legacy rows have
+            # start_date/end_date stored with a "T00:00:00" suffix, which
+            # date.fromisoformat() can't parse directly), not just plain YYYY-MM-DD.
+            setattr(c, field, _date.fromisoformat(data[field][:10]))
     if 'activation_date' in data:
-        c.activation_date = _date.fromisoformat(data['activation_date']) if data['activation_date'] else None
+        c.activation_date = _date.fromisoformat(data['activation_date'][:10]) if data['activation_date'] else None
     # Update junction tables if provided
     if 'additional_card_ids' in data or 'category_names' in data:
         _sync_challenge_links(
