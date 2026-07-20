@@ -4537,7 +4537,6 @@ async def cards_earn_summary(
     """
     import calendar as _cal
     from datetime import date as _date
-    from sqlalchemy import func as _func
 
     today = _date.today()
     if year is None:
@@ -4631,40 +4630,23 @@ async def cards_earn_summary(
             'mask':          acct.mask,
             'has_auto_top':  has_auto_top,
             'product':       product,
+            'issuer':        card.issuer if card else None,
         }
 
-    # ── single aggregate query ───────────────────────────────────────────────
-    rows = (
-        db.query(
-            Transaction.account_id,
-            Transaction.points_category,
-            _func.sum(Transaction.amount).label('total'),
-        )
+    # ── per-transaction points via compute_points_earn() ────────────────────
+    # Matches /api/ecosystems/{id}/earn-detail's approach — a flat SQL SUM
+    # can't express compute_points_earn()'s sign/rounding/override rules
+    # (Amex per-dollar rounding, points_earn_override, payment-description
+    # detection), which caused this endpoint's Portfolio-tile totals to
+    # silently diverge from the ecosystem drill-down page.
+    window_rows = (
+        db.query(Transaction)
         .filter(
             Transaction.account_id.in_(acct_ids),
             Transaction.date >= start,
             Transaction.date <= end,
             Transaction.is_excluded != True,
-            or_(
-                # Purchases: expenses stored as negative amounts, exclude fee categories
-                and_(
-                    Transaction.action == 'Expense',
-                    Transaction.amount < 0,
-                    or_(
-                        Transaction.points_category == None,
-                        ~Transaction.points_category.in_(_NON_EARNING_CATS),
-                    ),
-                ),
-                # Returns: income with a spending points_category reduces points
-                and_(
-                    Transaction.action == 'Income',
-                    Transaction.amount > 0,
-                    Transaction.points_category != None,
-                    ~Transaction.points_category.in_(_NON_EARNING_CATS),
-                ),
-            ),
         )
-        .group_by(Transaction.account_id, Transaction.points_category)
         .all()
     )
 
@@ -4673,17 +4655,19 @@ async def cards_earn_summary(
     cash_back_total = 0.0
     cash_back_by_acct: dict[int, float] = {}
 
-    for acct_id, pts_cat, total in rows:
-        info = acct_info.get(acct_id)
+    for t in window_rows:
+        info = acct_info.get(t.account_id)
         if not info:
             continue
         # auto_top_category accounts are handled separately below
         if info.get('has_auto_top'):
             continue
-        amt  = max(0.0, -(float(total or 0)))   # net: expenses negative, returns positive → net spend ≥ 0
-        rate = calc_earn_rate(info['bonus_by_name'], info['base_rate'], pts_cat, cat_parent_map)
-        pts  = amt * rate
+        if t.action != 'Expense':
+            continue
+        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info.get('issuer'))
+        pts = result['points']
         eco_id = info['eco_id']
+        acct_id = t.account_id
 
         if info['is_cash_back']:
             cash_back_total += pts
@@ -4694,7 +4678,7 @@ async def cards_earn_summary(
             eco_totals[eco_id]['points'] += pts
             eco_totals[eco_id]['by_acct'][acct_id] = \
                 eco_totals[eco_id]['by_acct'].get(acct_id, 0.0) + pts
-            cat_key = pts_cat or 'Other'
+            cat_key = t.points_category or 'Other'
             eco_totals[eco_id]['by_cat'][cat_key] = \
                 eco_totals[eco_id]['by_cat'].get(cat_key, 0.0) + pts
 
