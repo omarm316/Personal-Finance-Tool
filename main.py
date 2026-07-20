@@ -5930,6 +5930,20 @@ def _current_cycle(frequency: str) -> str:
     return str(now.year)
 
 
+def _cycles_for_year(frequency: str, year: int) -> list[str]:
+    """All cycle keys for a given year at this benefit's reset_frequency.
+    Only meaningful for sub-annual frequencies — used to build the multi-period
+    usage grid for 'periodic' benefits (e.g. 12 boxes for a monthly credit).
+    """
+    if frequency == 'monthly':
+        return [f"{year}-{m:02d}" for m in range(1, 13)]
+    if frequency == 'quarterly':
+        return [f"{year}-Q{q}" for q in range(1, 5)]
+    if frequency == 'semi-annual':
+        return [f"{year}-H1", f"{year}-H2"]
+    return [str(year)]
+
+
 def _serialize_benefit(b: CardBenefit, usage: BenefitUsage | None) -> dict:
     amt_used = round(usage.amount_used if usage else 0.0, 2)
     pct      = round(amt_used / b.amount * 100, 1) if b.amount else 0.0
@@ -5941,6 +5955,7 @@ def _serialize_benefit(b: CardBenefit, usage: BenefitUsage | None) -> dict:
         'reset_frequency':  b.reset_frequency or 'annual',
         'trigger_category': b.trigger_category,
         'notes':            b.notes,
+        'tracking_type':    b.tracking_type or 'periodic',
         'cycle':            _current_cycle(b.reset_frequency or 'annual'),
         'amount_used':      amt_used,
         'confirmed':        usage.confirmed if usage else False,
@@ -5952,7 +5967,14 @@ def _serialize_benefit(b: CardBenefit, usage: BenefitUsage | None) -> dict:
 
 @app.get("/api/cards/{card_id}/benefits")
 async def get_card_benefits(card_id: int, db: Session = Depends(get_db)):
-    """All benefits for the product linked to this card, with current-cycle usage."""
+    """All benefits for the product linked to this card, with current-cycle usage.
+
+    'periodic' benefits with a sub-annual reset_frequency (monthly/quarterly/
+    semi-annual) also get a `cycles` array — every period in the current year
+    with its used/unused state — so the frontend can render a checkbox grid
+    instead of a single current-cycle progress bar. 'by_use' benefits and
+    annual/calendar_year ones get no `cycles` (single-instance treatment).
+    """
     card = db.query(Card).filter_by(id=card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -5964,11 +5986,30 @@ async def get_card_benefits(card_id: int, db: Session = Depends(get_db)):
                   .all())
     result = []
     for b in benefits:
-        cycle = _current_cycle(b.reset_frequency or 'annual')
+        frequency = b.reset_frequency or 'annual'
+        cycle = _current_cycle(frequency)
         usage = db.query(BenefitUsage).filter_by(
             benefit_id=b.id, card_id=card_id, cycle=cycle
         ).first()
-        result.append(_serialize_benefit(b, usage))
+        ser = _serialize_benefit(b, usage)
+        if (b.tracking_type or 'periodic') == 'periodic' and frequency in ('monthly', 'quarterly', 'semi-annual'):
+            from datetime import date as _date
+            year = _date.today().year
+            cycles = _cycles_for_year(frequency, year)
+            usages_by_cycle = {
+                u.cycle: u for u in db.query(BenefitUsage).filter(
+                    BenefitUsage.benefit_id == b.id,
+                    BenefitUsage.card_id == card_id,
+                    BenefitUsage.cycle.in_(cycles),
+                ).all()
+            }
+            ser['cycles'] = [{
+                'cycle': c,
+                'used': bool(usages_by_cycle.get(c) and usages_by_cycle[c].amount_used > 0),
+                'amount_used': usages_by_cycle[c].amount_used if usages_by_cycle.get(c) else 0,
+                'usage_id': usages_by_cycle[c].id if usages_by_cycle.get(c) else None,
+            } for c in cycles]
+        result.append(ser)
     return result
 
 
@@ -5984,6 +6025,7 @@ async def create_benefit(product_id: int, body: dict, db: Session = Depends(get_
         reset_frequency=body.get('reset_frequency') or 'annual',
         trigger_category=body.get('trigger_category') or None,
         notes=body.get('notes') or None,
+        tracking_type=body.get('tracking_type') or 'periodic',
     )
     if not b.benefit_name:
         raise HTTPException(status_code=400, detail="benefit_name is required")
@@ -6008,6 +6050,8 @@ async def update_benefit(benefit_id: int, body: dict, db: Session = Depends(get_
         b.trigger_category = body['trigger_category'] or None
     if 'notes' in body:
         b.notes = body['notes'] or None
+    if 'tracking_type' in body:
+        b.tracking_type = body['tracking_type'] or 'periodic'
     db.commit()
     cycle = _current_cycle(b.reset_frequency or 'annual')
     usage = db.query(BenefitUsage).filter_by(benefit_id=b.id, cycle=cycle).first()
@@ -6502,12 +6546,17 @@ async def account_transactions(
     year: int = None,
     month: int = None,
     quarter: int = None,
+    start_date: str = None,
+    end_date: str = None,
     action: str = None,
     csc: str = None,
     db: Session = Depends(get_db),
 ):
     """Filtered transaction list for an account.
 
+    - start_date + end_date → arbitrary custom range (ISO 'YYYY-MM-DD'), takes
+      precedence over year/month/quarter — e.g. to isolate spend for a spend
+      challenge window that doesn't align to a calendar month/quarter
     - year + month          → calendar month
     - year + quarter (1-4)  → calendar quarter (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
     - year only             → full calendar year
@@ -6546,7 +6595,13 @@ async def account_transactions(
     q = db.query(Transaction).filter(
         Transaction.account_id == account_id,
     )
-    if year and month:
+    if start_date and end_date:
+        from datetime import date as _date
+        q = q.filter(
+            Transaction.date >= _date.fromisoformat(start_date),
+            Transaction.date <= _date.fromisoformat(end_date),
+        )
+    elif year and month:
         from datetime import date as _date
         import calendar as _cal
         first_day = _date(year, month, 1)

@@ -1,7 +1,7 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-19
+> Last updated: 2026-07-20
 
 ---
 
@@ -9,6 +9,8 @@
 
 ### Cards module — deep review in progress (Omer's main focus for the next few days)
 Going screen-by-screen through Cards/Ecosystems fixing behaviors, coordinated with the sibling MARGIN project (shared backend) via `~/Library/Mobile Documents/com~apple~CloudDocs/MARGIN-MORESHETH-INTEGRATION.md`.
+
+**Session 2026-07-20 — Cards → card level (`AccountCardDetailPage`), Bonvoy Brilliant ···1000 as the example**: Full writeup in BACKLOG.md's Recently Completed. Short version: a reported "delete benefit fails" bug turned out to be a symptom of `seed_card_products()` destructively re-creating all `CardBenefit` rows (and cascade-deleting their usage history) on every server restart — fixed with an upsert-by-name. Added a `tracking_type` field (`periodic`/`by_use`) to distinguish real use-it-or-lose-it credits from by-use/non-expiring ones (Global Entry, per-stay credits), a multi-period checkbox usage tracker for sub-annual periodic benefits, a Custom date-range filter for the card's Transactions table, and click-a-challenge-to-auto-filter-transactions-to-its-range. All verified live against the dev server (which — reminder — points at real production Postgres, no separate test DB; verification favored read-only checks and reversible actions, e.g. the one benefit actually deleted during testing was a seed-defined one that self-heals on restart). Found but explicitly not fixed, logged as B12: the Benefits & Credits summary line's "remaining" figure mixes annual and current-period basis.
 
 **Session 2026-07-19 — Cards → Portfolio sub-page**: Started from "I'm missing Amex Blue Business Plus 1008" — traced it to account 135 never being linked to any `CardProduct`/ecosystem (the correct catalog product existed, but the auto-suggestion banner proposed the wrong one — logged as B9-adjacent bug B10). Linked it via the existing `link-product` endpoint. That surfaced a bigger issue while verifying: `/api/cards/earn-summary` (Portfolio tile totals) and `/api/ecosystems/{id}/earn-detail` (drill-down totals) disagreed on point totals for the same account/period — `earn-summary` had never been migrated to `compute_points_earn()` after that function became the single source of truth in the 2026-07-17/18 sessions below. Fixed `earn-summary` to compute per-transaction via `compute_points_earn()`, matching `earn-detail` exactly (verified across all 9 ecosystems). Full detail in BACKLOG.md's Recently Completed section. Found but explicitly did not fix: `earn-detail` itself has no `auto_top_category` handling (B11) — a pre-existing, separate gap in the *other* direction, out of scope for today's fix.
 

@@ -522,6 +522,7 @@ class CardBenefit(Base):
     reset_frequency = Column(String(20), default='annual')     # "annual", "semi-annual", "monthly", "calendar_year"
     trigger_category = Column(String(100), nullable=True)      # Spending category that triggers the credit (if any)
     notes = Column(Text, nullable=True)
+    tracking_type = Column(String(20), default='periodic')     # "periodic" (usage tracker) or "by_use" (no cadence)
 
     product = relationship("CardProduct", back_populates="benefits")
     usage = relationship("BenefitUsage", back_populates="benefit", cascade="all, delete-orphan")
@@ -1012,6 +1013,7 @@ def run_migrations(engine):
         'card_benefits': [
             ('trigger_category', 'VARCHAR(100)'),
             ('notes',            'TEXT'),
+            ('tracking_type',    'VARCHAR(20)'),  # no default — NULL means "needs classifying", see backfill below
         ],
         'benefit_usage': [
             ('card_id',    'INTEGER'),
@@ -1053,6 +1055,34 @@ def _run_migrations_sqlite(engine, required_columns):
             if bt_cols and 'year' not in bt_cols:
                 conn.execute('DROP TABLE IF EXISTS budget_targets')
                 print('  Migration: dropped old budget_targets table (will be recreated)')
+        except Exception:
+            pass
+        # One-time classification of card_benefits.tracking_type ('periodic' vs
+        # 'by_use') for rows that predate the column — see _run_migrations_pg for
+        # the rationale. IS NULL guard makes it safe to run every startup.
+        try:
+            cursor = conn.execute('PRAGMA table_info(card_benefits)')
+            cb_cols = {row[1] for row in cursor.fetchall()}
+            if 'tracking_type' in cb_cols:
+                conn.execute("""
+                    UPDATE card_benefits SET tracking_type = 'by_use'
+                    WHERE tracking_type IS NULL
+                      AND (
+                        reset_frequency LIKE 'every_4%'
+                        OR reset_frequency LIKE 'every_5%'
+                        OR benefit_name LIKE '%per qualifying%'
+                        OR benefit_name LIKE '%per claim%'
+                        OR benefit_name LIKE '%per use%'
+                        OR benefit_name LIKE '%per stay%'
+                        OR benefit_name LIKE '%per night%'
+                        OR benefit_name LIKE '%every 4%'
+                        OR benefit_name LIKE '%every 5%'
+                      )
+                """)
+                conn.execute(
+                    "UPDATE card_benefits SET tracking_type = 'periodic' WHERE tracking_type IS NULL"
+                )
+                print('  Migration: classified card_benefits.tracking_type')
         except Exception:
             pass
         # Normalize account_type to Title Case
@@ -1153,6 +1183,39 @@ def _run_migrations_pg(engine, required_columns):
                 ))
                 if result.rowcount:
                     print(f'  Migration: backfilled institution_id on {result.rowcount} account(s)')
+        # One-time classification of card_benefits.tracking_type ('periodic' vs
+        # 'by_use') for rows that predate the column. IS NULL guard makes this
+        # safe to run every startup without clobbering later explicit choices
+        # (heuristic-assigned or user-edited via the UI).
+        # NOTE: uses `conn` (not `insp`, which reflects via its own connection
+        # and won't see this same transaction's uncommitted ALTER TABLE) —
+        # just attempt it and swallow the error if the column truly isn't there.
+        if insp.has_table('card_benefits'):
+            try:
+                result = conn.execute(text("""
+                    UPDATE card_benefits SET tracking_type = 'by_use'
+                    WHERE tracking_type IS NULL
+                      AND (
+                        reset_frequency ILIKE 'every_4%'
+                        OR reset_frequency ILIKE 'every_5%'
+                        OR benefit_name ILIKE '%per qualifying%'
+                        OR benefit_name ILIKE '%per claim%'
+                        OR benefit_name ILIKE '%per use%'
+                        OR benefit_name ILIKE '%per stay%'
+                        OR benefit_name ILIKE '%per night%'
+                        OR benefit_name ILIKE '%every 4%'
+                        OR benefit_name ILIKE '%every 5%'
+                      )
+                """))
+                if result.rowcount:
+                    print(f'  Migration: classified {result.rowcount} card_benefit(s) as by_use')
+                result = conn.execute(text(
+                    "UPDATE card_benefits SET tracking_type = 'periodic' WHERE tracking_type IS NULL"
+                ))
+                if result.rowcount:
+                    print(f'  Migration: classified {result.rowcount} card_benefit(s) as periodic')
+            except Exception:
+                pass
         # Normalize account_type to Title Case
         if insp.has_table('accounts'):
             type_map = [
@@ -1459,6 +1522,29 @@ def seed_points_ecosystems(session):
             if abs(float(existing.your_cpp or 0) - old_cons) < 0.001:
                 existing.your_cpp = cons_cpp
     session.commit()
+
+
+_BY_USE_NAME_MARKERS = (
+    'per qualifying', 'per claim', 'per use', 'per stay', 'per night',
+    'every 4', 'every 5',
+)
+
+
+def _infer_tracking_type(benefit_name: str, reset_frequency: str) -> str:
+    """Classify a benefit as 'periodic' (use-it-or-lose-it each cycle — gets the
+    checkbox/counter usage tracker) or 'by_use' (Global Entry every-4-yrs credit,
+    per-stay/per-claim credits — doesn't expire on a cadence, no tracker/alerts).
+
+    Some benefits are stored with a misleading reset_frequency (e.g. a "every 4 yrs"
+    Global Entry credit tagged 'annual' in the seed data below) — the name-based
+    markers catch those cases the frequency field alone would miss.
+    """
+    if (reset_frequency or '').lower() in ('every_4.5_years', 'every_4_years', 'every_5_years'):
+        return 'by_use'
+    name_lower = (benefit_name or '').lower()
+    if any(marker in name_lower for marker in _BY_USE_NAME_MARKERS):
+        return 'by_use'
+    return 'periodic'
 
 
 def seed_card_products(session):
@@ -1837,20 +1923,35 @@ def seed_card_products(session):
                 ))
 
         # Refresh benefits only if the seed defines any (preserves manually-added ones
-        # when benefits list is empty — use explicit None sentinel if you want to clear)
+        # when benefits list is empty — use explicit None sentinel if you want to clear).
+        # Upsert-by-name rather than delete-and-recreate: this function runs on every
+        # startup, and CardBenefit.id is referenced by BenefitUsage (cascade-deletes on
+        # remove) and by the frontend — deleting-and-recreating wiped usage history and
+        # handed out new ids every restart.
         if benefits:
-            session.query(CardBenefit).filter_by(product_id=product.id).delete()
+            existing_by_name = {
+                b.benefit_name: b for b in
+                session.query(CardBenefit).filter_by(product_id=product.id).all()
+            }
             for ben_tuple in benefits:
                 ben_name, amount, frequency, trigger = ben_tuple[:4]
                 ben_notes = ben_tuple[4] if len(ben_tuple) > 4 else None
-                session.add(CardBenefit(
-                    product_id=product.id,
-                    benefit_name=ben_name,
-                    amount=amount,
-                    reset_frequency=frequency,
-                    trigger_category=trigger,
-                    notes=ben_notes,
-                ))
+                existing = existing_by_name.get(ben_name)
+                if existing:
+                    existing.amount = amount
+                    existing.reset_frequency = frequency
+                    existing.trigger_category = trigger
+                    existing.notes = ben_notes
+                else:
+                    session.add(CardBenefit(
+                        product_id=product.id,
+                        benefit_name=ben_name,
+                        amount=amount,
+                        reset_frequency=frequency,
+                        trigger_category=trigger,
+                        notes=ben_notes,
+                        tracking_type=_infer_tracking_type(ben_name, frequency),
+                    ))
 
     session.commit()
     print(f"Card products seeded: {session.query(CardProduct).count()} products in catalog")
