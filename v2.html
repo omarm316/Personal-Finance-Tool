@@ -767,6 +767,51 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption}){
   );
 }
 
+// Type-to-filter combobox: pick an existing option, or type a new value and
+// click "+ Add" to create it on the fly. Ported from MARGIN's SearchCreateSelect.tsx
+// (frontend/src/components/SearchCreateSelect.tsx) — same interaction, restyled
+// inline to match this file's convention instead of MARGIN's separate CSS classes.
+function SearchCreateSelect({value,onChange,options,placeholder,emptyLabel,autoFocus}){
+  const[query,setQuery]=useState(value||'');
+  const[open,setOpen]=useState(false);
+  const rootRef=useRef(null);
+  useEffect(()=>{setQuery(value||'');},[value]);
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{
+      if(rootRef.current&&!rootRef.current.contains(e.target)){setOpen(false);setQuery(value||'');}
+    };
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open,value]);
+  const filtered=query.trim()
+    ?options.filter(o=>o.toLowerCase().includes(query.trim().toLowerCase()))
+    :options;
+  const select=o=>{onChange(o);setQuery(o);setOpen(false);};
+  const optStyle={padding:'6px 10px',cursor:'pointer',fontSize:12.5};
+  return(
+    <div ref={rootRef} style={{position:'relative'}}>
+      <input autoFocus={autoFocus} value={query} placeholder={placeholder||'Search or add…'}
+        onChange={e=>{setQuery(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)}
+        style={{fontSize:12.5,padding:'5px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:'100%',boxSizing:'border-box'}}/>
+      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:160,maxHeight:200,overflowY:'auto',
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 4px 16px rgba(0,0,0,0.2)',zIndex:80,padding:'4px 0'}}>
+        {!query.trim()&&emptyLabel&&
+          <div style={{...optStyle,color:'var(--text-muted)'}} onClick={()=>{onChange('');setQuery('');setOpen(false);}}>{emptyLabel}</div>}
+        {filtered.length>0
+          ?filtered.map(o=>(
+            <div key={o} style={optStyle} onClick={()=>select(o)}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--elevated)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>{o}</div>
+          ))
+          :query.trim()
+            ?<div style={{...optStyle,color:'var(--blue-primary)',fontWeight:600}} onClick={()=>select(query.trim())}>+ Add "{query.trim()}"</div>
+            :<div style={{...optStyle,color:'var(--text-muted)',fontStyle:'italic',cursor:'default'}}>No matches</div>}
+      </div>}
+    </div>
+  );
+}
+
 function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   const[category,setCategory]=useState(txn.category_final||'');
   const[action,setAction]=useState(txn.action||'Expense');
@@ -4707,6 +4752,12 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   const[editingPtsOverrideVal,setEditingPtsOverrideVal]=useState('');
   const[excludingId,setExcludingId]=useState(null);   // txn id currently being toggled (disables the button mid-request)
   const[allCscs,setAllCscs]=useState([]);  // full list of categories for editing
+  // Inline Spender editing + bulk-select/tag state (who made the purchase —
+  // manual only, Plaid gives no cardholder signal on shared/employee-card accounts)
+  const[spenders,setSpenders]=useState([]);
+  const[editingSpenderId,setEditingSpenderId]=useState(null);
+  const[selectedTxnIds,setSelectedTxnIds]=useState(()=>new Set());
+  const[bulkTagging,setBulkTagging]=useState(false);
   // Teach-merchant prompt (shown after inline CSC save when merchant_name is available)
   const[teachPrompt,setTeachPrompt]=useState(null);  // {merchantName, csc} | null
   const[teachLoading,setTeachLoading]=useState(false);
@@ -4751,6 +4802,34 @@ function AccountCardDetailPage({accountId,onBack,toast}){
   useEffect(()=>{
     apiFetch('/points-categories').then(r=>{setAllCscs((r||[]).filter(c=>c.is_active));}).catch(()=>{});
   },[]);
+  // Fetch known spender names once for the tagging combobox
+  const loadSpenders=()=>{apiFetch('/transactions/spenders').then(setSpenders).catch(()=>{});};
+  useEffect(()=>{loadSpenders();},[]);
+  const saveSpenderEdit=async(txnId,newVal)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({spender:newVal||''})});
+      setEditingSpenderId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadSpenders();
+    }catch(e){toast('Failed to save spender: '+(e?.message||''),'error');}
+  };
+  const toggleTxnSelected=(id)=>{
+    setSelectedTxnIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  };
+  const bulkTagSpender=async(val)=>{
+    if(!val||selectedTxnIds.size===0)return;
+    setBulkTagging(true);
+    try{
+      await apiFetch('/transactions/batch-update',{method:'POST',body:JSON.stringify({
+        ids:[...selectedTxnIds], updates:{spender:val},
+      })});
+      toast(`Tagged ${selectedTxnIds.size} transaction${selectedTxnIds.size!==1?'s':''} as ${val}`,'success');
+      setSelectedTxnIds(new Set());
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadSpenders();
+    }catch(e){toast('Bulk tag failed: '+(e?.message||''),'error');}
+    finally{setBulkTagging(false);}
+  };
   const saveCscEdit=async(txnId,newVal)=>{
     try{
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_category:newVal||null})});
@@ -5004,7 +5083,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     if(d?.card?.id){loadChallenges(d.card.id);loadBenefits(d.card.id);}
   },[d?.card?.id]);
   // Transactions filter — reload when year/month/quarter/view/cscFilter changes
-  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd);},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd]);
+  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd);setSelectedTxnIds(new Set());},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd]);
   // Load grouped unclassified merchants when filter='__none__'
   useEffect(()=>{if(cscFilter==='__none__')loadUnclassified();},[accountId,cscFilter]);
 
@@ -5049,7 +5128,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
     card_id:c?.id||'',name:'',challenge_type:'sub',
     start_date:'',end_date:'',activation_date:'',
     bonus_type:'flat',bonus_amount:'',
-    spend_cap:'',spend_threshold:'',
+    spend_cap:'',spend_threshold:'',spender_filter:'',
     category_names:[],additional_card_ids:[],
     is_active:true,notes:'',
   });
@@ -5059,7 +5138,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       card_id:ch.card_id,name:ch.name,challenge_type:ch.challenge_type,
       start_date:ch.start_date,end_date:ch.end_date,activation_date:ch.activation_date||'',
       bonus_type:ch.bonus_type,bonus_amount:ch.bonus_amount,
-      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',
+      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',spender_filter:ch.spender_filter||'',
       category_names:ch.category_names||[],additional_card_ids:ch.additional_card_ids||[],
       is_active:ch.is_active,notes:ch.notes||'',
     });
@@ -5073,7 +5152,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
       end_date:tmpl.end_date||`${yr}-12-31`,
       activation_date:'',
       bonus_type:tmpl.bonus_type,bonus_amount:tmpl.bonus_amount,
-      spend_cap:tmpl.spend_cap||'',spend_threshold:tmpl.spend_threshold||'',
+      spend_cap:tmpl.spend_cap||'',spend_threshold:tmpl.spend_threshold||'',spender_filter:'',
       category_names:tmpl.category_names||[],additional_card_ids:[],
       is_active:true,notes:tmpl.notes||'',
     });
@@ -5093,6 +5172,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
         bonus_type:v.bonus_type,bonus_amount:parseFloat(v.bonus_amount),
         spend_cap:v.spend_cap?parseFloat(v.spend_cap):null,
         spend_threshold:v.spend_threshold?parseFloat(v.spend_threshold):null,
+        spender_filter:v.spender_filter||null,
         category_names:v.category_names||[],
         additional_card_ids:(v.additional_card_ids||[]).map(Number),
         is_active:v.is_active,notes:v.notes||null,
@@ -5233,6 +5313,14 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                 ))}
               </div>
             </div>}
+            <div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spender Filter <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional — for shared/employee-card accounts</span></label>
+              <SearchCreateSelect value={v.spender_filter||''} options={spenders} placeholder="Anyone (no filter)"
+                emptyLabel="Anyone (no filter)" onChange={val=>setV('spender_filter',val)}/>
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                {v.spender_filter?`Only counts spend tagged "${v.spender_filter}" toward this challenge's threshold.`:'Counts spend from anyone on the linked card(s) — the default.'}
+              </div>
+            </div>
             <div>
               <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Notes</label>
               <input value={v.notes} onChange={e=>setV('notes',e.target.value)}
@@ -5694,6 +5782,7 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         <span style={{fontSize:14,fontWeight:400}}>{ch.name}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:barColor+'22',color:statusColor,fontWeight:500,textTransform:'uppercase'}}>{ch.status}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--border)',color:'var(--text-muted)'}}>{ch.challenge_type.replace(/_/g,' ')}</span>
+                        {ch.spender_filter&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--violet-soft)',color:'var(--violet)',fontWeight:500}}>{ch.spender_filter} only</span>}
                         {ch.category_names&&ch.category_names.length>0&&<span style={{fontSize:11,color:'var(--text-muted)'}}>&#183; {ch.category_names.join(', ')}</span>}
                       </div>
                       <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
@@ -5903,6 +5992,21 @@ function AccountCardDetailPage({accountId,onBack,toast}){
           :txns.length===0
             ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions for this period.</div>
             :<div style={{overflowX:'auto'}}>
+              {selectedTxnIds.size>0&&(
+                <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',marginBottom:8,background:'var(--violet-soft)',borderRadius:8,flexWrap:'wrap'}}>
+                  <span style={{fontSize:12,color:'var(--violet)',fontWeight:500}}>{selectedTxnIds.size} selected</span>
+                  <span style={{fontSize:12,color:'var(--text-muted)'}}>Tag as:</span>
+                  <div style={{width:160}}>
+                    <SearchCreateSelect value='' options={spenders} placeholder="Who spent this?"
+                      onChange={v=>bulkTagSpender(v)}/>
+                  </div>
+                  {bulkTagging&&<span style={{fontSize:12,color:'var(--text-muted)'}}>Saving…</span>}
+                  <button type="button" onClick={()=>setSelectedTxnIds(new Set())}
+                    style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer',marginLeft:'auto'}}>
+                    Clear selection
+                  </button>
+                </div>
+              )}
               {displayTxns.length===0&&<div style={{padding:'10px 0 6px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No matches for "{descFilter}".</div>}
               <table style={{width:'100%',borderCollapse:'collapse'}}>
                 <thead>
@@ -5919,11 +6023,17 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                         </th>
                       );
                     };
+                    const allSelected=displayTxns.length>0&&displayTxns.every(t=>selectedTxnIds.has(t.id));
                     return(
                       <tr style={{borderBottom:'2px solid var(--border)'}}>
+                        <th style={{padding:'6px 6px 8px',textAlign:'center'}}>
+                          <input type="checkbox" checked={allSelected}
+                            onChange={()=>setSelectedTxnIds(allSelected?new Set():new Set(displayTxns.map(t=>t.id)))}/>
+                        </th>
                         {_th('date','Date')}
                         {_th('description','Description','left',{})}
                         {_th('csc','CSC')}
+                        <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Spender</th>
                         <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Type</th>
                         {_th('amount','Amount','right')}
                         {_th('pts','Est. Pts','right')}
@@ -5939,9 +6049,13 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                     const isEditing=editingCscId===t.id;
                     const isEditingAction=editingActionId===t.id;
                     const ptsClass={earn:'var(--green)',clawback:'var(--red)',manual_override:'var(--amber)',excluded:'var(--text-muted)'}[t.points_earn_classification]||'var(--text-muted)';
+                    const isEditingSpender=editingSpenderId===t.id;
                     return(
                       <tr key={t.id} className={t.is_excluded?'row-excluded':''}
                         style={{borderBottom:'1px solid var(--border)',background:!t.is_excluded&&!t.points_category&&t.amount<0?'rgba(234,179,8,0.04)':''}}>
+                        <td style={{padding:'8px 6px',textAlign:'center'}}>
+                          <input type="checkbox" checked={selectedTxnIds.has(t.id)} onChange={()=>toggleTxnSelected(t.id)}/>
+                        </td>
                         <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
                         <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
                         <td style={{padding:'8px 10px',minWidth:140}}>
@@ -5964,6 +6078,27 @@ function AccountCardDetailPage({accountId,onBack,toast}){
                               {t.points_category
                                 ?<span style={{fontSize:11,padding:'2px 7px',background:'rgba(52,211,153,0.15)',color:'var(--green)',borderRadius:4,whiteSpace:'nowrap'}}>{t.points_category}</span>
                                 :<span style={{fontSize:11,padding:'2px 7px',background:'rgba(251,191,36,0.12)',color:'var(--amber)',borderRadius:4,whiteSpace:'nowrap',fontStyle:'italic'}}>⚠ unset</span>}
+                              <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',minWidth:110}}>
+                          {isEditingSpender?(
+                            <div style={{display:'flex',gap:4,alignItems:'flex-start',minWidth:120}}>
+                              <div style={{flex:1}}>
+                                <SearchCreateSelect autoFocus value={t.spender||''} options={spenders}
+                                  placeholder="Who spent this?" emptyLabel="— unset —"
+                                  onChange={v=>saveSpenderEdit(t.id,v)}/>
+                              </div>
+                              <button type="button" onClick={()=>setEditingSpenderId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                            </div>
+                          ):(
+                            <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                              onClick={()=>setEditingSpenderId(t.id)}>
+                              {t.spender
+                                ?<span style={{fontSize:11,padding:'2px 7px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4,whiteSpace:'nowrap'}}>{t.spender}</span>
+                                :<span style={{fontSize:11,color:'var(--text-muted)',fontStyle:'italic'}}>— unset —</span>}
                               <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
                             </div>
                           )}

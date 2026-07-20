@@ -458,12 +458,15 @@ def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map
     Income/Transfer/other action types are out of scope (rare on credit
     cards, not worth handling here).
 
-    Amex-issued cards round the dollar amount UP to the nearest whole
-    dollar before applying the multiplier (confirmed 2026-07-18 against a
-    real statement: $4.66 dining spend at 7x earned 35 points, not 32.6 —
-    Amex rounds to $5 first, then multiplies). Scoped to issuer == 'AMEX'
-    only since that's the only issuer this has been verified against —
-    other issuers keep the raw fractional-dollar calculation until confirmed.
+    Amex-issued cards round the dollar amount to the NEAREST whole dollar
+    (standard rounding, not always up) before applying the multiplier —
+    confirmed 2026-07-18 against a real statement ($4.66 dining spend at 7x
+    earned 35 points, i.e. rounded to $5) and corrected 2026-07-20 after
+    that example turned out to round the same way under ceil() or round()
+    ($4.66 rounds to $5 either way — not actually a distinguishing case).
+    Scoped to issuer == 'AMEX' only since that's the only issuer this has
+    been verified against — other issuers keep the raw fractional-dollar
+    calculation until confirmed.
 
     Returns {'points': float, 'classification': str, 'earn_rate': float|None}.
     """
@@ -497,7 +500,9 @@ def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map
         return _zero('excluded')
 
     rate = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
-    dollars = math.ceil(abs(t.amount)) if issuer == 'AMEX' else abs(t.amount)
+    # math.floor(x + 0.5) rather than round() — round() uses banker's rounding
+    # (round-half-to-even), which would silently round some .50 amounts down.
+    dollars = math.floor(abs(t.amount) + 0.5) if issuer == 'AMEX' else abs(t.amount)
     if t.amount < 0:
         return {'points': dollars * rate, 'classification': 'earn', 'earn_rate': rate}
     else:
@@ -651,6 +656,12 @@ def _recalc_challenge(db, challenge):
         valid_cats = list(set(cat_names + children))
         q = q.filter(Transaction.points_category.in_(valid_cats))
 
+    # Spender filter — for shared/employee-card accounts where a challenge's
+    # terms require spend from one specific person (e.g. an authorized-user
+    # SUB). NULL/blank means "anyone's spend counts" (the pre-existing behavior).
+    if challenge.spender_filter:
+        q = q.filter(Transaction.spender == challenge.spender_filter)
+
     raw = q.scalar() or 0
     current_spend = float(abs(raw))   # negate to get positive spend total
     challenge.current_spend = current_spend
@@ -715,6 +726,9 @@ def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
                     .filter(PointsCategory.parent_key.in_(cat_names)).all()]
         valid_cats = list(set(cat_names + children))
         q = q.filter(Transaction.points_category.in_(valid_cats))
+
+    if challenge.spender_filter:
+        q = q.filter(Transaction.spender == challenge.spender_filter)
 
     return float(abs(q.scalar() or 0))
 
@@ -787,6 +801,7 @@ def _serialize_challenge(c, eco=None, spend_override: float = None):
         'bonus_amount': c.bonus_amount,
         'spend_cap': c.spend_cap,
         'spend_threshold': c.spend_threshold,
+        'spender_filter': c.spender_filter,
         'category_names': category_names,
         'additional_card_ids': additional_card_ids,
         'current_spend': round(current_spend, 2),
@@ -1197,6 +1212,7 @@ class TransactionResponse(BaseModel):
     is_split: bool = False
     is_excluded: bool = False
     points_category: Optional[str] = None
+    spender: Optional[str] = None
     # Points earn summary — None when card/product is unknown or txn isn't an expense
     points_earn: Optional[dict] = None
     account_name: str
@@ -1225,6 +1241,8 @@ class TransactionUpdate(BaseModel):
     # sets an explicit value. clear takes precedence if both are sent.
     points_earn_override: Optional[float] = None
     clear_points_earn_override: Optional[bool] = None
+    # Free-text "who spent this" tag — manual only, see Transaction.spender.
+    spender: Optional[str] = None
 
 
 class BatchTransactionUpdate(BaseModel):
@@ -3414,6 +3432,7 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,
+        "spender":         t.spender,
         "points_earn":     points_earn,
         "enrichment_source": t.enrichment_source,
         "import_source": t.import_source or ('plaid' if t.plaid_transaction_id else None),
@@ -3469,6 +3488,27 @@ async def get_transactions(
     account_ids = list({t.account_id for t in txns})
     points_lookup, cat_parent_map = _build_points_lookup(db, account_ids)
     return [_serialize_txn(t, splits_map, categorizer, points_lookup, cat_parent_map) for t in txns]
+
+
+@app.get("/api/transactions/spenders")
+async def get_transaction_spenders(db: Session = Depends(get_db)):
+    """Distinct Transaction.spender values in use, unioned with a baseline
+    {"Omer", "Daniella"} so the tagging combobox always offers those two even
+    before anything's been tagged yet.
+
+    Registered ahead of /api/transactions/{transaction_id} deliberately —
+    FastAPI matches routes by registration order, not by whether the path
+    param's type conversion succeeds, so a literal-segment route defined
+    after an int-typed dynamic route 422s instead of falling through (same
+    class of bug as the pre-existing Cash Back ecosystem 422, see
+    MARGIN-MORESHETH-INTEGRATION.md).
+    """
+    existing = {
+        row[0] for row in db.query(Transaction.spender)
+        .filter(Transaction.spender.isnot(None), Transaction.spender != '')
+        .distinct().all()
+    }
+    return sorted(existing | {'Omer', 'Daniella'})
 
 
 # ---------------------------------------------------------------------------
@@ -3548,6 +3588,10 @@ async def update_transaction(
         t.description_clean = update.description_clean
         t.updated_at = datetime.utcnow()
 
+    if update.spender is not None:
+        t.spender = update.spender or None
+        t.updated_at = datetime.utcnow()
+
     db.commit()
     return {"message": "Transaction updated"}
 
@@ -3602,6 +3646,10 @@ async def batch_update_transactions(
         if update.is_gcb is not None:
             t.is_gcb = update.is_gcb
             t.gcb_tagged = update.is_gcb
+
+        if update.spender is not None:
+            t.spender = update.spender or None
+            t.updated_at = datetime.utcnow()
 
         updated += 1
 
@@ -5822,6 +5870,7 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
             bonus_amount    = float(data['bonus_amount']),
             spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
             spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
+            spender_filter  = data.get('spender_filter') or None,
             is_active       = data.get('is_active', True),
             notes           = data.get('notes'),
         )
@@ -5866,6 +5915,8 @@ async def update_challenge(challenge_id: int, data: dict = Body(...), db: Sessio
     for field in ('bonus_amount', 'spend_cap', 'spend_threshold'):
         if field in data:
             setattr(c, field, float(data[field]) if data[field] is not None else None)
+    if 'spender_filter' in data:
+        c.spender_filter = data['spender_filter'] or None
     for field in ('start_date', 'end_date'):
         if field in data:
             setattr(c, field, _date.fromisoformat(data[field]))
@@ -6667,6 +6718,7 @@ async def account_transactions(
         'amount': t.amount,
         'category': t.category_manual or t.category_auto,
         'points_category': t.points_category,
+        'spender': t.spender,
         'action': t.action,
         'is_excluded': bool(t.is_excluded),
         'earn_rate': points_by_id[t.id]['earn_rate'] or 0,

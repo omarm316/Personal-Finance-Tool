@@ -172,6 +172,11 @@ class Transaction(Base):
     # main.py) — sticks even if the auto-classification logic later changes.
     points_earn_override = Column(Float, nullable=True)
 
+    # Free-text tag for who made this purchase (e.g. "Omer", "Daniella") — manual only,
+    # Plaid gives no cardholder-level signal on shared/authorized-user accounts.
+    # Lets a SpendChallenge.spender_filter scope its spend calc to one person's purchases.
+    spender = Column(String(100), nullable=True)
+
     # Metadata
     year = Column(Integer, index=True)
     month = Column(Integer, index=True)
@@ -581,6 +586,7 @@ class SpendChallenge(Base):
     # Conditions
     spend_cap       = Column(Float, nullable=True)   # max eligible spend (rate_cap, category_rate_cap)
     spend_threshold = Column(Float, nullable=True)   # min spend to unlock (threshold_bonus, sub, annual_threshold)
+    spender_filter  = Column(String(100), nullable=True)  # match Transaction.spender; NULL = anyone's spend counts
 
     # Cached progress — recalculated from transactions on demand
     current_spend   = Column(Float, default=0)
@@ -942,6 +948,7 @@ def run_migrations(engine):
             ('is_excluded',       'BOOLEAN DEFAULT FALSE'),
             ('content_hash',      'VARCHAR(20)'),
             ('points_earn_override', 'FLOAT'),
+            ('spender',           'VARCHAR(100)'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),
@@ -1001,6 +1008,7 @@ def run_migrations(engine):
             ('bonus_amount',     'FLOAT DEFAULT 0'),
             ('spend_cap',        'FLOAT'),
             ('spend_threshold',  'FLOAT'),
+            ('spender_filter',   'VARCHAR(100)'),
             ('current_spend',    'FLOAT DEFAULT 0'),
             ('bonus_unlocked',   'BOOLEAN DEFAULT FALSE'),
             ('is_active',        'BOOLEAN DEFAULT TRUE'),
