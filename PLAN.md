@@ -1,11 +1,14 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-20
+> Last updated: 2026-07-21
 
 ---
 
 ## Current Focus
+
+### v2.html promoted to production root (2026-07-21)
+Omer opened the app from his phone's home-screen PWA icon and got the old gold/dark `frontend.html` design ("why is this still the old design? I hate it") — root cause: the PWA manifest's `start_url` is `"/"`, and `"/"` was still serving `frontend.html` the whole time every fix this week landed in `v2.html` only (reachable at `/v2`). Confirmed via manifest.json, then per Omer's explicit choice ("promote v2.html to /", recommended over just repointing the manifest) changed both `"/"` and `/plaid/oauth-return` to serve `v2.html`. `frontend.html` is no longer reachable from any route — kept in the repo, not deleted, in case anything's still needed from it. Also did a final sweep removing the remaining "assign a dollar value to points" displays Omer flagged as unwanted "across all pages" (only the ecosystem drill-down page actually had any left — the "≈ $X.XX" hero subtitle, the "X¢/pt" ecosystem-name subtitle, and the "vs. assumed X¢" redemption comparison). Deliberately left alone: Cash Back's own dollar figures (native amounts, not points-derived estimates) and Redemption/Transfer records' actual `cash_value_usd`/`realized_cpp` (real money received in a completed redemption — a fact, not an assumption).
 
 ### Dashboard — Spending Trend chart + Budget Performance bars fixed (2026-07-20, v2.html only)
 Two real data-viz bugs found and fixed in `v2.html`'s `DashboardPage`, confirmed live at `/v2` against real production data:
