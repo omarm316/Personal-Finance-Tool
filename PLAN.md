@@ -7,6 +7,17 @@
 
 ## Current Focus
 
+### Dashboard — Spending Trend chart + Budget Performance bars fixed (2026-07-20, v2.html only)
+Two real data-viz bugs found and fixed in `v2.html`'s `DashboardPage`, confirmed live at `/v2` against real production data:
+- **Spending Trend line chart**: was using Catmull-Rom smoothing over 6 monthly points, which overshoots past the actual values (visible as a "bulge" between months that doesn't correspond to real data). Replaced with monotone cubic (Fritsch-Carlson) interpolation, which stays smooth but is mathematically constrained to never rise/fall past its two neighboring points. Also added always-on direct value labels per point (swapped for the hover tooltip only when that point is actively hovered) — with only 6 points, reading exact values shouldn't require hovering each dot.
+- **Budget Performance table** (`BudgetAndSpendingCard`'s `RowEl`): bar width was `Math.min(actual/budget*100, 100)` — capped at each row's own budget, so *any* category ≥100% of budget rendered as an identical, fully-filled bar (confirmed live: Travel at 458% over and Total at 108% over were visually indistinguishable), and categories with **no budget set at all** got the same alarm-red treatment as ones blown 4-5x over. Fixed by scaling every bar to one shared scale across all visible categories (`scaleMax`, computed from the max actual/budget in view) and rendering the budget threshold as a tick mark instead of the value the bar is normalized against. Added a distinct neutral/muted "no budget set" state (previously indistinguishable from "over budget") and a small legend explaining the four states. Verified against real data — Travel ($2,292, 458% over) and Groceries ($3,724, 310% over) are now visibly different bar lengths, and $0-budget categories (Electronics, Fees & Interest, For Others, Other) render as muted gray with a "no budget" label instead of false-alarm red.
+
+Design direction was worked out first as two published Artifact mockups (before/after comparisons) — an initial pass mistakenly targeted `frontend.html`'s v1 gold/dark theme, corrected after Omer flagged that v2 is the target for all pages going forward; the second mockup and the actual implementation both use v2's real tokens (glass `.card`, blue palette, Outfit/Plus Jakarta Sans), verified against the live `/v2` render before building.
+
+**Not ported to `frontend.html`** — v1 has the identical two bugs (same `smoothPath`/Catmull-Rom, same capped-bar `RowEl` in `BudgetAndSpendingCard`), but since v2 is the going-forward target, this session only touched `v2.html`. If v1 stays live for a while longer, the same fix would need porting separately.
+
+**Found but not fixed, logged for later**: `v2.html` references `var(--violet)`/`var(--violet-soft)`/`var(--violet-border)` in a few places (e.g. the challenge-bonus panel around line 5587) but never defines these as actual CSS custom properties — they silently resolve to nothing. Didn't reach for violet in the new "no budget set" state because of this; used a neutral gray instead. Spawned as a separate flagged task, not fixed this session.
+
 ### Cards module — deep review in progress (Omer's main focus for the next few days)
 Going screen-by-screen through Cards/Ecosystems fixing behaviors, coordinated with the sibling MARGIN project (shared backend) via `~/Library/Mobile Documents/com~apple~CloudDocs/MARGIN-MORESHETH-INTEGRATION.md`.
 

@@ -2685,6 +2685,10 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
 
   const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
   const totalActual=rows.reduce((s,r)=>s+r.actual,0);
+  // Shared scale so every bar's length is comparable — budget becomes a tick
+  // on this scale instead of the value each row is normalized against, so a
+  // category 459% over budget no longer looks identical to one 8% over.
+  const scaleMax=Math.max(1,totalActual,totalBudget,...rows.map(r=>Math.max(r.actual,r.budget)))*1.15;
 
   const handleSort=col=>{
     if(sortBy===col)setSortDir(d=>d==='desc'?'asc':'desc');
@@ -2719,8 +2723,14 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
     const hasActual=actual>0;
     const showBar=!isCredit&&(hasBudget||hasActual);
     const pct=hasBudget?actual/budget:(hasActual?1:0);
-    const over=pct>=1;
-    const barPct=Math.min(pct*100,100);
+    const over=hasBudget&&pct>=1;
+    const near=hasBudget&&!over&&pct>=0.8;
+    const noBudget=!hasBudget&&hasActual;
+    const barColor=noBudget?'var(--text-muted)':over?'var(--red)':near?'var(--amber)':'var(--blue-primary)';
+    // Bar length is relative to the shared scale, not this row's own budget —
+    // so length stays comparable across rows even past 100% of budget.
+    const barPct=showBar?Math.min((actual/scaleMax)*100,100):0;
+    const tickPct=hasBudget?Math.min((budget/scaleMax)*100,100):null;
     const pctLabel=hasBudget?`${Math.round(pct*100)}%`:null;
     const isActive=!isTotal&&activeCat===cat;
     const clickable=!isTotal&&onCatClick;
@@ -2736,11 +2746,13 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
           {isTotal?'Total':cat}
         </span>
         {showBar?(
-          <div style={{position:'relative',height:8,borderRadius:4,overflow:'hidden',
+          <div style={{position:'relative',height:8,borderRadius:4,overflow:'visible',
             background:'var(--border)', flex: 1}}>
             {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
-              background:over?'var(--red)':'var(--blue-primary)',
+              background:barColor,opacity:noBudget?0.45:(over?0.55:0.9),
               borderRadius:4,transition:'width 0.4s ease'}}/>}
+            {tickPct!==null&&<div style={{position:'absolute',left:`${tickPct}%`,top:-3,bottom:-3,width:2,
+              borderRadius:1,background:'var(--text-secondary)'}}/>}
           </div>
         ):(
           <span style={{fontSize:12,color:'var(--green)',fontWeight:600,letterSpacing:'0.3px'}}>INCOME</span>
@@ -2750,7 +2762,8 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
             color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
             {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
           </span>
-          {pctLabel && <span style={{fontSize:10, color:'var(--text-muted)', fontWeight:600}}>{pctLabel}</span>}
+          {pctLabel && <span style={{fontSize:10, color:over?'var(--red)':near?'var(--amber)':'var(--text-muted)', fontWeight:600}}>{pctLabel}</span>}
+          {noBudget && <span style={{fontSize:10, color:'var(--text-muted)', fontWeight:600}}>no budget</span>}
         </div>
         <span style={{textAlign:'right',fontSize:13,fontWeight:isTotal?600:400,
           color:'var(--text-secondary)'}}>
@@ -2795,6 +2808,13 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
       {sortedRows.length===0
         ?<div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'40px 0'}}>No activity found for this period.</div>
         :sortedRows.map(({cat,budget,actual})=><RowEl key={cat} cat={cat} budget={budget} actual={actual}/>)}
+      {sortedRows.length>0&&<div style={{display:'flex',gap:16,flexWrap:'wrap',padding:'12px 24px 16px',fontSize:10.5,color:'var(--text-muted)'}}>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--blue-primary)',display:'inline-block'}}/>Under budget</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--amber)',display:'inline-block'}}/>Near limit</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--red)',display:'inline-block'}}/>Over budget</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--text-muted)',display:'inline-block'}}/>No budget set</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:2,height:9,borderRadius:1,background:'var(--text-secondary)',display:'inline-block'}}/>Budget line</span>
+      </div>}
     </div>
   );
 }
@@ -3095,23 +3115,34 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
           pad.l+(i/(spendData.length-1))*cW,
           pad.t+cH-(d.amount/yMax)*cH
         ]);
-        /* Catmull-Rom smooth path */
+        /* Monotone cubic (Fritsch-Carlson) — smooth like Catmull-Rom, but the
+           tangent limiter keeps the curve from overshooting past whichever
+           neighboring point is higher/lower, so it never implies a spike or
+           dip the underlying monthly totals don't have. */
         const smoothPath=(points)=>{
-          if(points.length<2)return'';
-          let d=`M${points[0][0]},${points[0][1]}`;
-          for(let i=0;i<points.length-1;i++){
-            const p0=points[Math.max(i-1,0)];
-            const p1=points[i];
-            const p2=points[i+1];
-            const p3=points[Math.min(i+2,points.length-1)];
-            const t=0.3;
-            const cp1x=p1[0]+(p2[0]-p0[0])*t;
-            const cp1y=p1[1]+(p2[1]-p0[1])*t;
-            const cp2x=p2[0]-(p3[0]-p1[0])*t;
-            const cp2y=p2[1]-(p3[1]-p1[1])*t;
-            d+=` C${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+          const n=points.length;
+          if(n<2)return'';
+          if(n===2)return`M${points[0][0]},${points[0][1]} L${points[1][0]},${points[1][1]}`;
+          const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+          const d=[];for(let i=0;i<n-1;i++)d.push((ys[i+1]-ys[i])/(xs[i+1]-xs[i]));
+          const m=new Array(n);
+          m[0]=d[0];m[n-1]=d[n-2];
+          for(let i=1;i<n-1;i++)m[i]=(d[i-1]*d[i]<=0)?0:(d[i-1]+d[i])/2;
+          for(let i=0;i<n-1;i++){
+            if(d[i]===0){m[i]=0;m[i+1]=0;}
+            else{
+              const a=m[i]/d[i],b=m[i+1]/d[i],h=Math.hypot(a,b);
+              if(h>3){const t=3/h;m[i]=t*a*d[i];m[i+1]=t*b*d[i];}
+            }
           }
-          return d;
+          let path=`M${xs[0]},${ys[0]}`;
+          for(let i=0;i<n-1;i++){
+            const dx=(xs[i+1]-xs[i])/3;
+            const cp1x=xs[i]+dx,cp1y=ys[i]+m[i]*dx;
+            const cp2x=xs[i+1]-dx,cp2y=ys[i+1]-m[i+1]*dx;
+            path+=` C${cp1x},${cp1y} ${cp2x},${cp2y} ${xs[i+1]},${ys[i+1]}`;
+          }
+          return path;
         };
         const pathD=smoothPath(pts);
         const areaD=pts.length>=2?pathD+` L${pts[pts.length-1][0]},${pad.t+cH} L${pts[0][0]},${pad.t+cH} Z`:'';
@@ -3172,12 +3203,20 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
                       onMouseEnter={()=>setSpendHoverIdx(i)} onMouseLeave={()=>setSpendHoverIdx(null)}
                       onClick={()=>setSpendHoverIdx(spendHoverIdx===i?null:i)} />
                     <circle cx={p[0]} cy={p[1]} r={spendHoverIdx===i?6:4} fill="var(--blue-vibrant)" style={{pointerEvents:'none',transition:'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'}} />
-                    {spendHoverIdx===i&&<>
-                      <rect x={p[0]-40} y={p[1]-26} width={80} height={20} rx={10} fill="var(--blue-primary)" style={{pointerEvents:'none'}} />
-                      <text x={p[0]} y={p[1]-13} textAnchor="middle" fontSize={10} fill="white" fontWeight={700} style={{pointerEvents:'none'}}>
-                        {fmt(spendData[i].amount)}
+                    {spendHoverIdx===i?(
+                      <>
+                        <rect x={p[0]-40} y={p[1]-26} width={80} height={20} rx={10} fill="var(--blue-primary)" style={{pointerEvents:'none'}} />
+                        <text x={p[0]} y={p[1]-13} textAnchor="middle" fontSize={10} fill="white" fontWeight={700} style={{pointerEvents:'none'}}>
+                          {fmt(spendData[i].amount)}
+                        </text>
+                      </>
+                    ):(
+                      /* Direct-label every point — with only 6 points, reading exact
+                         values shouldn't require finding and hovering each dot. */
+                      <text x={p[0]} y={p[1]<pad.t+20?p[1]+16:p[1]-10} textAnchor="middle" fontSize={9.5} fill="var(--text-secondary)" fontWeight={600} style={{pointerEvents:'none'}}>
+                        {spendData[i].amount>=1000?`${(spendData[i].amount/1000).toFixed(1)}k`:`${Math.round(spendData[i].amount)}`}
                       </text>
-                    </>}
+                    )}
                   </g>
                 ))}
               </svg>
@@ -6255,6 +6294,32 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     finally{setLoading(false);}
   },[ecoId,isCashBack]);
 
+  /* ── Balance snapshot — manual "I checked and I have X points today" ──── */
+  const emptyBalanceForm={balance:'',snapshot_date:'',notes:''};
+  const[showBalanceModal,setShowBalanceModal]=useState(false);
+  const[balanceForm,setBalanceForm]=useState(emptyBalanceForm);
+  const[balanceSaving,setBalanceSaving]=useState(false);
+  const openBalanceModal=()=>{
+    const today=new Date().toISOString().slice(0,10);
+    setBalanceForm({balance:data?.current_balance??'',snapshot_date:today,notes:''});
+    setShowBalanceModal(true);
+  };
+  const saveBalanceSnapshot=async()=>{
+    if(balanceForm.balance===''||!balanceForm.snapshot_date){toast('Balance and date are required','error');return;}
+    setBalanceSaving(true);
+    try{
+      await apiFetch(`/ecosystems/${ecoId}/balance-snapshots`,{method:'POST',body:JSON.stringify({
+        balance:parseFloat(balanceForm.balance),
+        snapshot_date:balanceForm.snapshot_date,
+        notes:balanceForm.notes||null,
+      })});
+      setShowBalanceModal(false);
+      load(period,year);
+      toast('Balance updated');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setBalanceSaving(false);}
+  };
+
   /* ── Redemptions ──────────────────────────────────────────────────────── */
   const[ecosystems,setEcosystems]=useState([]);
   useEffect(()=>{apiFetch('/ecosystems').then(setEcosystems).catch(()=>{});},[]);
@@ -6500,8 +6565,14 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               right now," separate from "how many did I earn this period." */}
           {!isCashBack&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',
             background:'var(--gold-soft)',border:'1px solid var(--border)',borderRadius:12,marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Current Balance</div>
-            <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--gold)'}}>{data.current_balance.toLocaleString()} pts</div>
+            <div>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Current Balance</div>
+              {data.balance_as_of&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>as of {data.balance_as_of}</div>}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:14}}>
+              <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--gold)'}}>{data.current_balance.toLocaleString()} pts</div>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={openBalanceModal}>Update</button>
+            </div>
           </div>}
 
           {/* Points by category */}
@@ -6740,6 +6811,43 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               <button type="button" className="btn btn-ghost" onClick={()=>setShowTransferModal(false)}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={saveTransfer} disabled={transferSaving}>
                 {transferSaving?'Saving…':'Add Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBalanceModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">Update Balance — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowBalanceModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                Enter the balance shown in your {ecoName} account right now. Everything before this date is
+                assumed folded into this number — future earn/redeem/transfer activity is added on top of it.
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Balance</label>
+                <input className="search-input" type="number" value={balanceForm.balance} onChange={e=>setBalanceForm(f=>({...f,balance:e.target.value}))}
+                  placeholder="40320"/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>As of</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={balanceForm.snapshot_date} onChange={e=>setBalanceForm(f=>({...f,snapshot_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={balanceForm.notes} onChange={e=>setBalanceForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowBalanceModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveBalanceSnapshot} disabled={balanceSaving}>
+                {balanceSaving?'Saving…':'Save Balance'}
               </button>
             </div>
           </div>
