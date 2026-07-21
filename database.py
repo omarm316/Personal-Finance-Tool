@@ -689,6 +689,26 @@ class Transfer(Base):
     destination_ecosystem = relationship('PointsEcosystem', foreign_keys=[destination_ecosystem_id])
 
 
+class PointsBalanceSnapshot(Base):
+    """Manual balance checkpoint for an ecosystem — 'I logged into my Amex
+    account and it says 40,320 points as of today.' Corrects for drift
+    between the computed running balance (all-time earned minus
+    redeemed/transferred) and reality — unlogged promo bonuses, benefit
+    credits, redemptions made outside this app, etc. The most recent
+    snapshot becomes the baseline for current_balance; activity before its
+    date is ignored (assumed already folded into the snapshotted value)."""
+    __tablename__ = 'points_balance_snapshots'
+
+    id            = Column(Integer, primary_key=True)
+    ecosystem_id  = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    balance       = Column(Float, nullable=False)
+    snapshot_date = Column(Date, nullable=False)
+    notes         = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+    ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
+
+
 # Legacy alias — kept for backward compatibility during migration
 CardEarningRate = CardProductReward
 

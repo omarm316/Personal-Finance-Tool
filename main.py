@@ -29,7 +29,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
-    Redemption, TransferRatio, Transfer,
+    Redemption, TransferRatio, Transfer, PointsBalanceSnapshot,
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
@@ -5225,33 +5225,57 @@ async def ecosystem_earn_detail(
             'issuer':        card.issuer if card else None,
         }
 
-    # Current balance — all-time earned minus what's actually left this
-    # ecosystem (redeemed or transferred out), plus what's come in via
-    # transfer (bonus already included in points_received). Deliberately
-    # NOT period-scoped, unlike total_points below (which only reflects the
-    # selected MTD/QTD/YTD window) — this is "how many points do I actually
-    # have right now," not "how many did I earn this quarter."
-    all_time_earned = 0.0
+    # Current balance — a manual PointsBalanceSnapshot (if any exists) is the
+    # baseline, since it corrects for drift the computed math below can't
+    # see (unlogged promo bonuses, benefit credits, redemptions made outside
+    # this app, etc.). Only activity AFTER the snapshot's date is added on
+    # top; everything before it is assumed already folded into the
+    # snapshotted value. With no snapshot, falls back to all-time-earned
+    # minus all-time redeemed/transferred, same as before this feature.
+    # Deliberately NOT period-scoped like total_points below (which only
+    # reflects the selected MTD/QTD/YTD window) — this is "how many points
+    # do I actually have right now," not "how many did I earn this quarter."
+    latest_snapshot = (
+        db.query(PointsBalanceSnapshot)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PointsBalanceSnapshot.snapshot_date.desc())
+        .first()
+    )
+    baseline = latest_snapshot.balance if latest_snapshot else 0.0
+    baseline_date = latest_snapshot.snapshot_date if latest_snapshot else None
+
+    earned_since = 0.0
     if eco_accts:
-        all_time_rows = (
-            db.query(Transaction)
-            .filter(
-                Transaction.account_id.in_(eco_accts),
-                Transaction.is_excluded != True,
-            )
-            .all()
+        earn_q = db.query(Transaction).filter(
+            Transaction.account_id.in_(eco_accts),
+            Transaction.is_excluded != True,
         )
-        for t in all_time_rows:
+        if baseline_date:
+            earn_q = earn_q.filter(Transaction.date > baseline_date)
+        for t in earn_q.all():
             if t.action != 'Expense':
                 continue
             info = acct_info.get(t.account_id)
             if not info:
                 continue
-            all_time_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
-    current_balance = round(
-        all_time_earned - total_points_redeemed
-        - total_points_transferred_out + total_points_transferred_in
-    )
+            earned_since += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
+
+    if baseline_date:
+        redeemed_since = sum(r.points_redeemed for r in redemption_rows if r.redemption_date > baseline_date)
+        transferred_out_since = sum(
+            t['points_sent'] for t in transfers_out
+            if _date.fromisoformat(t['transfer_date']) > baseline_date
+        )
+        transferred_in_since = sum(
+            t['points_received'] for t in transfers_in
+            if _date.fromisoformat(t['transfer_date']) > baseline_date
+        )
+    else:
+        redeemed_since = total_points_redeemed
+        transferred_out_since = total_points_transferred_out
+        transferred_in_since = total_points_transferred_in
+
+    current_balance = round(baseline + earned_since - redeemed_since - transferred_out_since + transferred_in_since)
 
     if not eco_accts:
         return {
@@ -5260,6 +5284,7 @@ async def ecosystem_earn_detail(
             'start': start.isoformat(), 'end': end.isoformat(),
             'total_points': 0, 'est_value': 0,
             'current_balance': current_balance,
+            'balance_as_of': baseline_date.isoformat() if baseline_date else None,
             'by_category': [], 'by_card': [], 'active_challenges': [],
             'redemptions': redemptions_out,
             'total_points_redeemed': total_points_redeemed,
@@ -5372,6 +5397,7 @@ async def ecosystem_earn_detail(
         'total_points':  total_pts_r,
         'est_value':     round(total_pts_r * cpp, 2),
         'current_balance': current_balance,
+        'balance_as_of': baseline_date.isoformat() if baseline_date else None,
         'by_category':   by_cat_out,
         'by_card':       by_card_out,
         'active_challenges': active_ch_out,
@@ -5597,6 +5623,68 @@ async def delete_redemption(redemption_id: int, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail="Redemption not found")
     db.delete(r)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Points balance snapshots — manual "I checked and I have X points as of
+# today" checkpoints. The most recent one (by snapshot_date) becomes the
+# baseline current_balance is computed forward from in
+# ecosystem_earn_detail, instead of always summing from account-opening.
+# ---------------------------------------------------------------------------
+
+def _serialize_balance_snapshot(s: PointsBalanceSnapshot) -> dict:
+    return {
+        'id': s.id,
+        'ecosystem_id': s.ecosystem_id,
+        'ecosystem_name': s.ecosystem.name if s.ecosystem else None,
+        'balance': s.balance,
+        'snapshot_date': s.snapshot_date.isoformat(),
+        'notes': s.notes,
+    }
+
+
+@app.get("/api/ecosystems/{eco_id}/balance-snapshots")
+async def list_balance_snapshots(eco_id: int, db: Session = Depends(get_db)):
+    snaps = (
+        db.query(PointsBalanceSnapshot)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PointsBalanceSnapshot.snapshot_date.desc())
+        .all()
+    )
+    return [_serialize_balance_snapshot(s) for s in snaps]
+
+
+@app.post("/api/ecosystems/{eco_id}/balance-snapshots")
+async def create_balance_snapshot(eco_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+    try:
+        s = PointsBalanceSnapshot(
+            ecosystem_id  = eco_id,
+            balance       = float(data['balance']),
+            snapshot_date = _date.fromisoformat(data['snapshot_date']),
+            notes         = data.get('notes'),
+        )
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+        return _serialize_balance_snapshot(s)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create balance snapshot error: {e}\n{traceback.format_exc()}")
+
+
+@app.delete("/api/balance-snapshots/{snapshot_id}")
+async def delete_balance_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+    s = db.query(PointsBalanceSnapshot).filter_by(id=snapshot_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    db.delete(s)
     db.commit()
     return {"deleted": True}
 
