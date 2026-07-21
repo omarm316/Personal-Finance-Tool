@@ -1420,8 +1420,12 @@ async def startup_event():
 
 @app.get("/")
 async def serve_frontend():
+    # v2.html (formerly the "/v2" sandbox) is now the one production
+    # frontend — promoted 2026-07-21 at Omer's direction ("stop landing me
+    # on the old design"). frontend.html (the old gold/dark theme) is no
+    # longer served anywhere; kept in the repo for now, not deleted.
     here = os.path.dirname(os.path.abspath(__file__))
-    return FileResponse(os.path.join(here, "frontend.html"), media_type="text/html")
+    return FileResponse(os.path.join(here, "v2.html"), media_type="text/html")
 
 # Service worker — must be served from root scope for PWA
 @app.get("/sw.js")
@@ -1433,7 +1437,7 @@ async def serve_service_worker():
 @app.get("/plaid/oauth-return")
 async def plaid_oauth_return():
     here = os.path.dirname(os.path.abspath(__file__))
-    return FileResponse(os.path.join(here, "frontend.html"), media_type="text/html")
+    return FileResponse(os.path.join(here, "v2.html"), media_type="text/html")
 
 # ---------------------------------------------------------------------------
 # Plaid: link token

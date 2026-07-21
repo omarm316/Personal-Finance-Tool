@@ -6520,7 +6520,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           </div>
           <div>
             <div style={{fontSize:20,fontWeight:400,color:'var(--text-primary)',letterSpacing:'-0.3px'}}>{ecoName}</div>
-            {data&&!isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name} · {(data.your_cpp*100).toFixed(1)}¢/pt</div>}
+            {data&&!isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name}</div>}
             {data&&isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>All cash-back cards</div>}
           </div>
         </div>
@@ -6554,9 +6554,6 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
             </div>
             <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
-            {!isCashBack&&<div style={{fontSize:20,fontWeight:300,fontFamily:'Plus Jakarta Sans',color:'var(--text-primary)',marginTop:8,position:'relative'}}>
-              ≈ ${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-            </div>}
           </div>
 
           {/* Current balance — all-time earned minus redeemed/transferred out
@@ -6641,7 +6638,6 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Realized cpp</div>
                 <div style={{fontSize:18,fontWeight:400,color:'var(--blue-primary)'}}>{data.realized_cpp.toFixed(2)}¢</div>
-                <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>vs. assumed {(data.your_cpp*100).toFixed(2)}¢</div>
               </div>
               <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Points Redeemed</div>
