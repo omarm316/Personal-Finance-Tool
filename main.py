@@ -5141,6 +5141,10 @@ async def ecosystem_earn_detail(
         _serialize_transfer(t)
         for t in db.query(Transfer).filter_by(destination_ecosystem_id=eco_id).order_by(Transfer.transfer_date.desc()).all()
     ]
+    total_points_transferred_out = sum(t['points_sent'] for t in transfers_out)
+    # points_received already bakes in bonus_pct (snapshotted at transfer time —
+    # see Transfer model), so no separate bonus term is needed here.
+    total_points_transferred_in  = sum(t['points_received'] for t in transfers_in)
 
     today = _date.today()
     if year is None:
@@ -5221,12 +5225,41 @@ async def ecosystem_earn_detail(
             'issuer':        card.issuer if card else None,
         }
 
+    # Current balance — all-time earned minus what's actually left this
+    # ecosystem (redeemed or transferred out), plus what's come in via
+    # transfer (bonus already included in points_received). Deliberately
+    # NOT period-scoped, unlike total_points below (which only reflects the
+    # selected MTD/QTD/YTD window) — this is "how many points do I actually
+    # have right now," not "how many did I earn this quarter."
+    all_time_earned = 0.0
+    if eco_accts:
+        all_time_rows = (
+            db.query(Transaction)
+            .filter(
+                Transaction.account_id.in_(eco_accts),
+                Transaction.is_excluded != True,
+            )
+            .all()
+        )
+        for t in all_time_rows:
+            if t.action != 'Expense':
+                continue
+            info = acct_info.get(t.account_id)
+            if not info:
+                continue
+            all_time_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
+    current_balance = round(
+        all_time_earned - total_points_redeemed
+        - total_points_transferred_out + total_points_transferred_in
+    )
+
     if not eco_accts:
         return {
             'eco_id': eco_id, 'name': eco.name, 'currency_name': eco.currency_name,
             'your_cpp': eco.your_cpp, 'period': period, 'year': year,
             'start': start.isoformat(), 'end': end.isoformat(),
             'total_points': 0, 'est_value': 0,
+            'current_balance': current_balance,
             'by_category': [], 'by_card': [], 'active_challenges': [],
             'redemptions': redemptions_out,
             'total_points_redeemed': total_points_redeemed,
@@ -5338,6 +5371,7 @@ async def ecosystem_earn_detail(
         'end':           end.isoformat(),
         'total_points':  total_pts_r,
         'est_value':     round(total_pts_r * cpp, 2),
+        'current_balance': current_balance,
         'by_category':   by_cat_out,
         'by_card':       by_card_out,
         'active_challenges': active_ch_out,

@@ -6494,6 +6494,16 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             </div>}
           </div>
 
+          {/* Current balance — all-time earned minus redeemed/transferred out
+              plus transferred in (bonus included), NOT period-scoped like the
+              hero stat above. Answers "how many points do I actually have
+              right now," separate from "how many did I earn this period." */}
+          {!isCashBack&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',
+            background:'var(--gold-soft)',border:'1px solid var(--border)',borderRadius:12,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Current Balance</div>
+            <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--gold)'}}>{data.current_balance.toLocaleString()} pts</div>
+          </div>}
+
           {/* Points by category */}
           {data.by_category.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
             <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>{isCashBack?'Cash Back by Category':'Points by Category'}</div>
