@@ -29,7 +29,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
-    Redemption, TransferRatio, Transfer, PointsBalanceSnapshot,
+    Redemption, TransferRatio, Transfer, PointsBalanceSnapshot, PointsAdjustment,
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
@@ -5201,6 +5201,17 @@ async def ecosystem_earn_detail(
     # see Transfer model), so no separate bonus term is needed here.
     total_points_transferred_in  = sum(t['points_received'] for t in transfers_in)
 
+    # Manual +/- corrections — also all-time, same rationale as redemptions/
+    # transfers above (this is ledger history, not a period-scoped stat).
+    adjustment_rows = (
+        db.query(PointsAdjustment)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PointsAdjustment.adjustment_date.desc())
+        .all()
+    )
+    adjustments_out = [_serialize_adjustment(a) for a in adjustment_rows]
+    total_points_adjusted = sum(a.points_delta for a in adjustment_rows)
+
     today = _date.today()
     if year is None:
         year = today.year
@@ -5325,12 +5336,24 @@ async def ecosystem_earn_detail(
             t['points_received'] for t in transfers_in
             if _date.fromisoformat(t['transfer_date']) > baseline_date
         )
+        adjusted_since = sum(a.points_delta for a in adjustment_rows if a.adjustment_date > baseline_date)
     else:
         redeemed_since = total_points_redeemed
         transferred_out_since = total_points_transferred_out
         transferred_in_since = total_points_transferred_in
+        adjusted_since = total_points_adjusted
 
-    current_balance = round(baseline + earned_since - redeemed_since - transferred_out_since + transferred_in_since)
+    current_balance = round(
+        baseline + earned_since - redeemed_since - transferred_out_since + transferred_in_since + adjusted_since
+    )
+    balance_breakdown = {
+        'starting_balance': round(baseline, 2),
+        'earned_since_baseline': round(earned_since, 2),
+        'redeemed_since_baseline': round(redeemed_since, 2),
+        'transferred_out_since_baseline': round(transferred_out_since, 2),
+        'transferred_in_since_baseline': round(transferred_in_since, 2),
+        'adjusted_since_baseline': round(adjusted_since, 2),
+    }
 
     if not eco_accts:
         return {
@@ -5340,6 +5363,7 @@ async def ecosystem_earn_detail(
             'total_points': 0, 'est_value': 0,
             'current_balance': current_balance,
             'balance_as_of': baseline_date.isoformat() if baseline_date else None,
+            'balance_breakdown': balance_breakdown,
             'by_category': [], 'by_card': [], 'active_challenges': [],
             'redemptions': redemptions_out,
             'total_points_redeemed': total_points_redeemed,
@@ -5347,6 +5371,8 @@ async def ecosystem_earn_detail(
             'realized_cpp': realized_cpp,
             'transfers_out': transfers_out,
             'transfers_in': transfers_in,
+            'adjustments': adjustments_out,
+            'total_points_adjusted': round(total_points_adjusted, 2),
         }
 
     # Per-transaction classification via compute_points_earn() — a flat SQL
@@ -5453,6 +5479,7 @@ async def ecosystem_earn_detail(
         'est_value':     round(total_pts_r * cpp, 2),
         'current_balance': current_balance,
         'balance_as_of': baseline_date.isoformat() if baseline_date else None,
+        'balance_breakdown': balance_breakdown,
         'by_category':   by_cat_out,
         'by_card':       by_card_out,
         'active_challenges': active_ch_out,
@@ -5462,6 +5489,8 @@ async def ecosystem_earn_detail(
         'realized_cpp': realized_cpp,
         'transfers_out': transfers_out,
         'transfers_in': transfers_in,
+        'adjustments': adjustments_out,
+        'total_points_adjusted': round(total_points_adjusted, 2),
     }
 
 
@@ -5734,12 +5763,110 @@ async def create_balance_snapshot(eco_id: int, data: dict = Body(...), db: Sessi
         raise HTTPException(status_code=500, detail=f"create balance snapshot error: {e}\n{traceback.format_exc()}")
 
 
+@app.patch("/api/balance-snapshots/{snapshot_id}")
+async def update_balance_snapshot(snapshot_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    s = db.query(PointsBalanceSnapshot).filter_by(id=snapshot_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    if 'balance' in data:
+        s.balance = float(data['balance'])
+    if 'snapshot_date' in data:
+        s.snapshot_date = _date.fromisoformat(data['snapshot_date'])
+    if 'notes' in data:
+        s.notes = data['notes']
+    db.commit()
+    db.refresh(s)
+    return _serialize_balance_snapshot(s)
+
+
 @app.delete("/api/balance-snapshots/{snapshot_id}")
 async def delete_balance_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
     s = db.query(PointsBalanceSnapshot).filter_by(id=snapshot_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Snapshot not found")
     db.delete(s)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Points adjustments — manual, dated +/- corrections to an ecosystem's
+# running balance. See PointsAdjustment in database.py for how this differs
+# from a PointsBalanceSnapshot (a delta from its date forward, not a reset).
+# ---------------------------------------------------------------------------
+
+def _serialize_adjustment(a: PointsAdjustment) -> dict:
+    return {
+        'id': a.id,
+        'ecosystem_id': a.ecosystem_id,
+        'ecosystem_name': a.ecosystem.name if a.ecosystem else None,
+        'points_delta': a.points_delta,
+        'adjustment_date': a.adjustment_date.isoformat(),
+        'description': a.description,
+        'notes': a.notes,
+    }
+
+
+@app.get("/api/ecosystems/{eco_id}/points-adjustments")
+async def list_points_adjustments(eco_id: int, db: Session = Depends(get_db)):
+    adjustments = (
+        db.query(PointsAdjustment)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PointsAdjustment.adjustment_date.desc())
+        .all()
+    )
+    return [_serialize_adjustment(a) for a in adjustments]
+
+
+@app.post("/api/ecosystems/{eco_id}/points-adjustments")
+async def create_points_adjustment(eco_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+    try:
+        a = PointsAdjustment(
+            ecosystem_id    = eco_id,
+            points_delta    = float(data['points_delta']),
+            adjustment_date = _date.fromisoformat(data['adjustment_date']),
+            description     = data['description'],
+            notes           = data.get('notes'),
+        )
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        return _serialize_adjustment(a)
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create points adjustment error: {e}\n{traceback.format_exc()}")
+
+
+@app.patch("/api/points-adjustments/{adjustment_id}")
+async def update_points_adjustment(adjustment_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    a = db.query(PointsAdjustment).filter_by(id=adjustment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    if 'points_delta' in data:
+        a.points_delta = float(data['points_delta'])
+    if 'adjustment_date' in data:
+        a.adjustment_date = _date.fromisoformat(data['adjustment_date'])
+    for field in ('description', 'notes'):
+        if field in data:
+            setattr(a, field, data[field])
+    db.commit()
+    db.refresh(a)
+    return _serialize_adjustment(a)
+
+
+@app.delete("/api/points-adjustments/{adjustment_id}")
+async def delete_points_adjustment(adjustment_id: int, db: Session = Depends(get_db)):
+    a = db.query(PointsAdjustment).filter_by(id=adjustment_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    db.delete(a)
     db.commit()
     return {"deleted": True}
 

@@ -7,6 +7,14 @@
 
 ## Current Focus
 
+### Points ledger: starting balance, adjustments, full breakdown (2026-07-24, Ecosystems)
+Omer wanted to fully reconcile an ecosystem's points balance without hunting down small diffs transaction-by-transaction: an editable starting balance (with its date), and a manual +/- adjustment for drift not worth tracing. Both build on infrastructure already in place from the 2026-07-20 balance-snapshot feature (`PointsBalanceSnapshot`, most-recent-wins baseline in `ecosystem_earn_detail()`).
+- **Starting Balance = the earliest snapshot** — no new concept, just full CRUD (added the missing `PATCH`) and a real list UI. The most-recent-snapshot-anchors-the-baseline logic is untouched; "Starting Balance" (earliest) and "the current anchor" (most recent) are just two labels over the same chronological list. Any snapshot after the earliest shows as a "Correction," same list-with-Edit/Delete pattern as Redemptions.
+- **New `PointsAdjustment` model** — a dated, signed +/- delta with a description, full CRUD, mirrors `Redemption` exactly. Unlike a snapshot (resets the baseline, erases what came before), an adjustment nudges the running total from its date forward without touching history.
+- **`ecosystem_earn_detail()` now returns a `balance_breakdown`** (`starting_balance`, `earned_since_baseline`, `redeemed_since_baseline`, `transferred_out/in_since_baseline`, `adjusted_since_baseline`) instead of just the final `current_balance` — these were already computed as locals, just never exposed. The "Current Balance" widget became a full **Balance Ledger** card showing the whole chain, so a discrepancy is visible at a glance.
+- Verified live against Hilton Honors: set a $50,000 starting balance (2025-01-01) → current balance correctly became $144,219; added a real $-230 adjustment via the UI → balance moved to exactly $143,989; edited/deleted both, confirmed round-trip back to the original $94,219 baseline (all test data, cleaned up after — this ecosystem's real starting balance wasn't actually known, unlike the two real challenge fixes from the prior session).
+- Small gap found and fixed during verification: the Starting Balance row only had Edit, no way to remove it back to "unset" — added a Remove button matching the Corrections list's existing Edit/Delete pattern.
+
 ### Challenges: statement-credit rewards + repeatable thresholds + txn-table UX fixes (2026-07-21, Cards module)
 Four items from Omer, all on the Cards → Spend Challenges area:
 1. **"Retention Offer 2026" (Hilton Aspire) is a $325 statement credit, not points.** New `bonus_type='statement_credit'` (bonus_amount is dollars, not points) — set on this real challenge.

@@ -6326,30 +6326,62 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     finally{setLoading(false);}
   },[ecoId,isCashBack]);
 
-  /* ── Balance snapshot — manual "I checked and I have X points today" ──── */
+  /* ── Balance snapshots — "Starting Balance" is the earliest one (editable,
+       with its date); any later ones are "Corrections". The most recent one
+       is still what current_balance anchors off of server-side (unchanged) —
+       these are just two different labels over the same list, chronologically. */
   const emptyBalanceForm={balance:'',snapshot_date:'',notes:''};
   const[showBalanceModal,setShowBalanceModal]=useState(false);
+  const[editingSnapshotId,setEditingSnapshotId]=useState(null);
   const[balanceForm,setBalanceForm]=useState(emptyBalanceForm);
   const[balanceSaving,setBalanceSaving]=useState(false);
-  const openBalanceModal=()=>{
-    const today=new Date().toISOString().slice(0,10);
-    setBalanceForm({balance:data?.current_balance??'',snapshot_date:today,notes:''});
+  const[snapshots,setSnapshots]=useState([]);
+  const loadSnapshots=()=>{
+    if(isCashBack)return;
+    apiFetch(`/ecosystems/${ecoId}/balance-snapshots`).then(setSnapshots).catch(()=>{});
+  };
+  useEffect(()=>{loadSnapshots();},[ecoId]);
+  // snapshots come back sorted newest-first (server-side order_by desc) — the
+  // oldest (last in this array) is the Starting Balance; everything else is a Correction.
+  const startingBalanceSnap=snapshots.length?snapshots[snapshots.length-1]:null;
+  const correctionSnaps=snapshots.length>1?snapshots.slice(0,-1):[];
+  const openBalanceModal=(snap)=>{
+    if(snap){
+      setEditingSnapshotId(snap.id);
+      setBalanceForm({balance:snap.balance,snapshot_date:snap.snapshot_date,notes:snap.notes||''});
+    }else{
+      const today=new Date().toISOString().slice(0,10);
+      setEditingSnapshotId(null);
+      setBalanceForm({balance:data?.current_balance??'',snapshot_date:today,notes:''});
+    }
     setShowBalanceModal(true);
   };
   const saveBalanceSnapshot=async()=>{
     if(balanceForm.balance===''||!balanceForm.snapshot_date){toast('Balance and date are required','error');return;}
     setBalanceSaving(true);
     try{
-      await apiFetch(`/ecosystems/${ecoId}/balance-snapshots`,{method:'POST',body:JSON.stringify({
+      const body={
         balance:parseFloat(balanceForm.balance),
         snapshot_date:balanceForm.snapshot_date,
         notes:balanceForm.notes||null,
-      })});
+      };
+      if(editingSnapshotId) await apiFetch(`/balance-snapshots/${editingSnapshotId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/balance-snapshots`,{method:'POST',body:JSON.stringify(body)});
       setShowBalanceModal(false);
       load(period,year);
-      toast('Balance updated');
+      loadSnapshots();
+      toast(editingSnapshotId?'Balance entry updated':'Balance updated');
     }catch(e){toast('Save failed: '+(e?.message||''),'error');}
     finally{setBalanceSaving(false);}
+  };
+  const deleteBalanceSnapshot=async(id)=>{
+    if(!window.confirm('Delete this balance entry?'))return;
+    try{
+      await apiFetch(`/balance-snapshots/${id}`,{method:'DELETE'});
+      load(period,year);
+      loadSnapshots();
+      toast('Deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
   };
 
   /* ── Redemptions ──────────────────────────────────────────────────────── */
@@ -6477,6 +6509,47 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
   };
 
+  /* ── Adjustments — manual, dated +/- corrections for small unexplained
+       drift, without erasing/resetting history the way a balance snapshot does ── */
+  const emptyAdjustmentForm={points_delta:'',adjustment_date:'',description:'',notes:''};
+  const[showAdjustmentModal,setShowAdjustmentModal]=useState(false);
+  const[editingAdjustmentId,setEditingAdjustmentId]=useState(null);
+  const[adjustmentForm,setAdjustmentForm]=useState(emptyAdjustmentForm);
+  const[adjustmentSaving,setAdjustmentSaving]=useState(false);
+  const openNewAdjustment=()=>{setEditingAdjustmentId(null);setAdjustmentForm(emptyAdjustmentForm);setShowAdjustmentModal(true);};
+  const openEditAdjustment=(a)=>{
+    setEditingAdjustmentId(a.id);
+    setAdjustmentForm({points_delta:a.points_delta,adjustment_date:a.adjustment_date,description:a.description,notes:a.notes||''});
+    setShowAdjustmentModal(true);
+  };
+  const saveAdjustment=async()=>{
+    if(!adjustmentForm.description.trim()){toast('Description required','error');return;}
+    if(adjustmentForm.points_delta===''||!adjustmentForm.adjustment_date){toast('Amount and date are required','error');return;}
+    setAdjustmentSaving(true);
+    try{
+      const body={
+        points_delta:parseFloat(adjustmentForm.points_delta),
+        adjustment_date:adjustmentForm.adjustment_date,
+        description:adjustmentForm.description,
+        notes:adjustmentForm.notes||null,
+      };
+      if(editingAdjustmentId) await apiFetch(`/points-adjustments/${editingAdjustmentId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/points-adjustments`,{method:'POST',body:JSON.stringify(body)});
+      setShowAdjustmentModal(false);
+      load(period,year);
+      toast(editingAdjustmentId?'Adjustment updated':'Adjustment added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setAdjustmentSaving(false);}
+  };
+  const deleteAdjustment=async(id)=>{
+    if(!window.confirm('Delete this adjustment?'))return;
+    try{
+      await apiFetch(`/points-adjustments/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Adjustment deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
   useEffect(()=>{load(period,year);},[period,year]);
 
   const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
@@ -6588,20 +6661,71 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
           </div>
 
-          {/* Current balance — all-time earned minus redeemed/transferred out
-              plus transferred in (bonus included), NOT period-scoped like the
-              hero stat above. Answers "how many points do I actually have
-              right now," separate from "how many did I earn this period." */}
-          {!isCashBack&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',
-            background:'var(--gold-soft)',border:'1px solid var(--border)',borderRadius:12,marginBottom:16}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Current Balance</div>
-              {data.balance_as_of&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>as of {data.balance_as_of}</div>}
+          {/* Balance Ledger — Starting Balance (earliest snapshot) through
+              Earned/Redeemed/Transferred/Adjusted to Current Balance, plus
+              any later "Correction" snapshots. Answers "how many points do I
+              actually have right now" AND "why," so a diff is easy to spot
+              instead of hidden inside one final number. */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>Balance Ledger</div>
+
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:400}}>Starting Balance</div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>
+                  {startingBalanceSnap?`as of ${startingBalanceSnap.snapshot_date}`:'Not set — defaults to 0'}
+                </div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{fontSize:14,fontFamily:'Plus Jakarta Sans',color:'var(--text-primary)'}}>{(startingBalanceSnap?.balance??0).toLocaleString()} pts</div>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={()=>openBalanceModal(startingBalanceSnap)}>{startingBalanceSnap?'Edit':'Set'}</button>
+                {startingBalanceSnap&&<button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(startingBalanceSnap.id)}>Remove</button>}
+              </div>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:14}}>
+
+            {data.balance_breakdown&&<div style={{padding:'10px 0',borderBottom:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:5}}>
+              {[
+                ['+ Earned',data.balance_breakdown.earned_since_baseline,'var(--green)'],
+                ['− Redeemed',-data.balance_breakdown.redeemed_since_baseline,'var(--red)'],
+                ['− Transferred Out',-data.balance_breakdown.transferred_out_since_baseline,'var(--red)'],
+                ['+ Transferred In',data.balance_breakdown.transferred_in_since_baseline,'var(--green)'],
+              ].map(([label,val,color])=>(
+                <div key={label} style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
+                  <span style={{color:'var(--text-muted)'}}>{label}</span>
+                  <span style={{fontFamily:'Plus Jakarta Sans',color}}>{val.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                </div>
+              ))}
+              {data.balance_breakdown.adjusted_since_baseline!==0&&
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
+                  <span style={{color:'var(--text-muted)'}}>{data.balance_breakdown.adjusted_since_baseline>0?'+ Adjusted':'− Adjusted'}</span>
+                  <span style={{fontFamily:'Plus Jakarta Sans',color:data.balance_breakdown.adjusted_since_baseline>0?'var(--green)':'var(--red)'}}>
+                    {data.balance_breakdown.adjusted_since_baseline.toLocaleString(undefined,{maximumFractionDigits:0})}
+                  </span>
+                </div>}
+            </div>}
+
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0 0'}}>
+              <div style={{fontSize:13,fontWeight:500}}>Current Balance{data.balance_as_of&&<span style={{fontSize:10,color:'var(--text-muted)',fontWeight:400,marginLeft:6}}>as of {data.balance_as_of}</span>}</div>
               <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--gold)'}}>{data.current_balance.toLocaleString()} pts</div>
-              <button type="button" className="btn btn-sm btn-ghost" onClick={openBalanceModal}>Update</button>
             </div>
+
+            {correctionSnaps.length>0&&<div style={{marginTop:16,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:8}}>Balance Corrections</div>
+              {correctionSnaps.map(s=>(
+                <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
+                  <div style={{flex:1,minWidth:0,fontSize:12}}>
+                    {s.balance.toLocaleString()} pts as of {s.snapshot_date}
+                    {s.notes&&<span style={{color:'var(--text-muted)'}}> — {s.notes}</span>}
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(s)}>Edit</button>
+                  <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(s.id)}>Delete</button>
+                </div>
+              ))}
+            </div>}
+
+            {startingBalanceSnap&&<div style={{marginTop:12}}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(null)}>+ Add Correction</button>
+            </div>}
           </div>}
 
           {/* Points by category */}
@@ -6739,6 +6863,38 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               </div>
             }
           </div>}
+
+          {/* Adjustments — manual +/- corrections, separate from Redemptions/
+              Transfers (which represent real events) and from a balance
+              snapshot (which resets the baseline). For small drift you don't
+              want to spend time tracing to a specific cause. */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Adjustments</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openNewAdjustment}>+ Add Adjustment</button>
+            </div>
+            {data.adjustments.length===0?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No adjustments logged for {ecoName} yet.</div>:
+              <div>
+                {data.adjustments.map((a,i)=>(
+                  <div key={a.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:i<data.adjustments.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{a.description}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {new Date(a.adjustment_date).toLocaleDateString()}{a.notes?` · ${a.notes}`:''}
+                      </div>
+                    </div>
+                    <div style={{fontSize:14,fontFamily:'Plus Jakarta Sans',color:a.points_delta>=0?'var(--green)':'var(--red)'}}>
+                      {a.points_delta>=0?'+':''}{a.points_delta.toLocaleString()}
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditAdjustment(a)}>Edit</button>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteAdjustment(a.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
         </>
       )}
 
@@ -6849,13 +7005,13 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         <div className="modal-overlay">
           <div className="modal-content" style={{maxWidth:400}}>
             <div className="modal-header">
-              <div className="modal-title">Update Balance — {ecoName}</div>
+              <div className="modal-title">{editingSnapshotId?'Edit':startingBalanceSnap?'Add Correction':'Set Starting Balance'} — {ecoName}</div>
               <button type="button" className="modal-close" onClick={()=>setShowBalanceModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
               <div style={{fontSize:12,color:'var(--text-muted)'}}>
-                Enter the balance shown in your {ecoName} account right now. Everything before this date is
-                assumed folded into this number — future earn/redeem/transfer activity is added on top of it.
+                Enter the balance shown in your {ecoName} account as of the date below. Everything before this date is
+                assumed folded into this number — earn/redeem/transfer/adjustment activity after it is added on top.
               </div>
               <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Balance</label>
@@ -6875,7 +7031,51 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             <div className="modal-footer">
               <button type="button" className="btn btn-ghost" onClick={()=>setShowBalanceModal(false)}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={saveBalanceSnapshot} disabled={balanceSaving}>
-                {balanceSaving?'Saving…':'Save Balance'}
+                {balanceSaving?'Saving…':editingSnapshotId?'Save Changes':'Save Balance'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdjustmentModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingAdjustmentId?'Edit Adjustment':'Add Adjustment'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowAdjustmentModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                A manual +/- nudge to the running balance — for small drift you don't want to spend time tracing
+                to a specific transaction, transfer, or redemption. Positive adds points, negative removes them.
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Description</label>
+                <input className="search-input" value={adjustmentForm.description} onChange={e=>setAdjustmentForm(f=>({...f,description:e.target.value}))}
+                  placeholder="Unexplained drift vs. Amex app"/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points (+/-)</label>
+                  <input className="search-input" type="number" value={adjustmentForm.points_delta} onChange={e=>setAdjustmentForm(f=>({...f,points_delta:e.target.value}))}
+                    placeholder="-230"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Date</label>
+                  <input className="date-input" type="date" style={{width:'100%'}} value={adjustmentForm.adjustment_date} onChange={e=>setAdjustmentForm(f=>({...f,adjustment_date:e.target.value}))}/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={adjustmentForm.notes} onChange={e=>setAdjustmentForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowAdjustmentModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveAdjustment} disabled={adjustmentSaving}>
+                {adjustmentSaving?'Saving…':editingAdjustmentId?'Save Changes':'Add Adjustment'}
               </button>
             </div>
           </div>

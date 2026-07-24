@@ -710,6 +710,28 @@ class PointsBalanceSnapshot(Base):
     ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
 
 
+class PointsAdjustment(Base):
+    """Manual, dated +/- correction to an ecosystem's running point balance —
+    for small discrepancies not worth tracing to a specific cause (a missed
+    transaction, a double-counted transfer, a promo bonus this app has no
+    other record of). Unlike a PointsBalanceSnapshot (which resets the
+    baseline to an absolute value and makes everything before its date moot),
+    an Adjustment is a delta that flows into the running total alongside
+    earn/redeem/transfer from its own date forward — it doesn't erase
+    history, just nudges the total by a known amount."""
+    __tablename__ = 'points_adjustments'
+
+    id              = Column(Integer, primary_key=True)
+    ecosystem_id    = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    points_delta    = Column(Float, nullable=False)   # signed — positive or negative
+    adjustment_date = Column(Date, nullable=False)
+    description     = Column(String(300), nullable=False)
+    notes           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
+
+
 # Legacy alias — kept for backward compatibility during migration
 CardEarningRate = CardProductReward
 
