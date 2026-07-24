@@ -585,6 +585,91 @@ def calc_auto_top_category_points(db, account_id, product, start_date, end_date)
     return round(total_points, 1)
 
 
+def _challenge_progress(c, current_spend: float) -> dict:
+    """Single source of truth for a challenge's payout + progress, given its
+    (already-computed) cumulative eligible spend for the window. Pure function,
+    no DB access — used identically whether current_spend comes from the cached
+    aggregate column or a per-card spend_override, so the two never drift.
+
+    bonus_type shapes:
+      'per_dollar'                              — scales with spend, capped by spend_cap.
+      'flat' / 'statement_credit' / 'benefit'    — fixed payout once unlocked; the
+                                                     latter two are semantically not
+                                                     points (dollars / a non-numeric
+                                                     reward like a free-night cert) but
+                                                     numerically identical to 'flat'
+                                                     here — only the frontend label
+                                                     differs (see bonus_currency in
+                                                     _serialize_challenge). Previously
+                                                     'benefit' fell through to the
+                                                     per_dollar branch below by accident
+                                                     (e.g. a "1 free night cert" challenge
+                                                     reporting bonus_pts_earned as
+                                                     1 x current_spend) — fixed here.
+
+    Repeatable challenges (c.max_occurrences > 1, requires spend_threshold): the
+    threshold can be hit more than once — bonus_pts scales by how many times, and
+    the progress bar reflects the *current lap* (spend since the last occurrence),
+    not raw cumulative spend, so it never shows past 100%.
+    """
+    threshold = c.spend_threshold
+    cap = c.spend_cap
+    max_occ = c.max_occurrences or 1
+    repeatable = bool(threshold and max_occ > 1)
+    occurrences = None
+
+    if c.bonus_type == 'per_dollar':
+        eligible = current_spend
+        if cap:
+            eligible = min(eligible, cap)
+        bonus_unlocked = eligible > 0
+        bonus_pts = round(eligible * float(c.bonus_amount or 0), 1) if bonus_unlocked else 0.0
+    elif repeatable:
+        occurrences = min(max_occ, int(current_spend // threshold))
+        bonus_unlocked = occurrences > 0
+        bonus_pts = occurrences * float(c.bonus_amount or 0)
+    else:
+        bonus_unlocked = threshold is None or current_spend >= float(threshold or 0)
+        bonus_pts = float(c.bonus_amount or 0) if bonus_unlocked else 0.0
+
+    # lap_spend is what the Progress bar's numerator should show — for a
+    # repeatable challenge that's spend since the last occurrence, not the raw
+    # cumulative total (which would read as "spent more than the goal").
+    lap_spend = current_spend
+    if repeatable and occurrences < max_occ:
+        progress_target = threshold
+        lap_spend = current_spend - occurrences * threshold
+        progress_pct = min(100, round(lap_spend / threshold * 100, 1))
+        remaining = round(threshold - lap_spend, 2) if lap_spend < threshold else None
+    elif repeatable:
+        # All occurrences earned — show the final lap as complete, not overflowing.
+        progress_target = threshold
+        lap_spend = threshold
+        progress_pct = 100
+        remaining = None
+    elif cap:
+        progress_target = cap
+        progress_pct = min(100, round(current_spend / cap * 100, 1))
+        remaining = round(cap - current_spend, 2) if current_spend < cap else None
+    elif threshold:
+        progress_target = threshold
+        progress_pct = min(100, round(current_spend / threshold * 100, 1))
+        remaining = round(threshold - current_spend, 2) if current_spend < threshold else None
+    else:
+        progress_target = progress_pct = remaining = None
+
+    return {
+        'bonus_pts': bonus_pts,
+        'bonus_unlocked': bonus_unlocked,
+        'occurrences_earned': occurrences,
+        'max_occurrences': max_occ if repeatable else None,
+        'progress_target': progress_target,
+        'progress_pct': progress_pct,
+        'remaining_spend': remaining,
+        'lap_spend': round(lap_spend, 2),
+    }
+
+
 def _recalc_challenge(db, challenge):
     """
     Recompute current_spend and bonus_unlocked for a SpendChallenge from
@@ -665,25 +750,10 @@ def _recalc_challenge(db, challenge):
     raw = q.scalar() or 0
     current_spend = float(abs(raw))   # negate to get positive spend total
     challenge.current_spend = current_spend
-    challenge.bonus_unlocked = (
-        challenge.spend_threshold is None or current_spend >= challenge.spend_threshold
-    )
+    # Cosmetic/consistency only — _serialize_challenge always recomputes fresh
+    # via _challenge_progress(), nothing reads this cached column for display.
+    challenge.bonus_unlocked = _challenge_progress(challenge, current_spend)['bonus_unlocked']
     return challenge
-
-
-def _challenge_bonus_pts(challenge) -> float:
-    """Bonus points earned so far based on cached current_spend."""
-    bonus_unlocked = bool(challenge.bonus_unlocked or False)
-    current_spend  = float(challenge.current_spend  or 0)
-    if challenge.bonus_type == 'flat':
-        return float(challenge.bonus_amount or 0) if bonus_unlocked else 0.0
-    # per_dollar
-    if not bonus_unlocked:
-        return 0.0
-    eligible = current_spend
-    if challenge.spend_cap:
-        eligible = min(eligible, challenge.spend_cap)
-    return round(eligible * float(challenge.bonus_amount or 0), 1)
 
 
 def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
@@ -742,37 +812,14 @@ def _serialize_challenge(c, eco=None, spend_override: float = None):
                     card sees its own spend rather than the aggregate across
                     all linked cards.
     """
-    if spend_override is not None:
-        current_spend  = float(spend_override)
-        bonus_unlocked = (
-            c.spend_threshold is None
-            or current_spend >= float(c.spend_threshold or 0)
-        )
-        if c.bonus_type == 'flat':
-            bonus_pts = float(c.bonus_amount or 0) if bonus_unlocked else 0.0
-        else:  # per_dollar
-            eligible = current_spend
-            if c.spend_cap:
-                eligible = min(eligible, float(c.spend_cap))
-            bonus_pts = round(eligible * float(c.bonus_amount or 0), 1)
-    else:
-        # Guard against NULL values left by failed recalc on old rows
-        current_spend  = float(c.current_spend  or 0)
-        bonus_unlocked = bool(c.bonus_unlocked  or False)
-        bonus_pts = _challenge_bonus_pts(c)
-    # Progress toward cap or threshold
-    if c.spend_cap:
-        progress_target = c.spend_cap
-        progress_pct = min(100, round(current_spend / c.spend_cap * 100, 1))
-    elif c.spend_threshold:
-        progress_target = c.spend_threshold
-        progress_pct = min(100, round(current_spend / c.spend_threshold * 100, 1))
-    else:
-        progress_target = None
-        progress_pct = None
-    remaining = None
-    if progress_target and current_spend < progress_target:
-        remaining = round(progress_target - current_spend, 2)
+    # Guard against NULL values left by failed recalc on old rows
+    current_spend = float(spend_override) if spend_override is not None else float(c.current_spend or 0)
+    prog = _challenge_progress(c, current_spend)
+    bonus_unlocked  = prog['bonus_unlocked']
+    bonus_pts       = prog['bonus_pts']
+    progress_target = prog['progress_target']
+    progress_pct    = prog['progress_pct']
+    remaining       = prog['remaining_spend']
 
     _cd = lambda v: v.date() if isinstance(v, datetime) else v
     today = datetime.utcnow().date()
@@ -799,12 +846,16 @@ def _serialize_challenge(c, eco=None, spend_override: float = None):
         'activation_date': c.activation_date.isoformat() if c.activation_date else None,
         'bonus_type': c.bonus_type,
         'bonus_amount': c.bonus_amount,
+        'bonus_currency': 'usd' if c.bonus_type == 'statement_credit' else ('benefit' if c.bonus_type == 'benefit' else 'points'),
         'spend_cap': c.spend_cap,
         'spend_threshold': c.spend_threshold,
         'spender_filter': c.spender_filter,
+        'max_occurrences': prog['max_occurrences'],
+        'occurrences_earned': prog['occurrences_earned'],
         'category_names': category_names,
         'additional_card_ids': additional_card_ids,
         'current_spend': round(current_spend, 2),
+        'lap_spend': prog['lap_spend'],
         'bonus_unlocked': bonus_unlocked,
         'bonus_pts_earned': bonus_pts,
         'progress_pct': progress_pct,
@@ -5997,6 +6048,7 @@ async def create_challenge(data: dict = Body(...), db: Session = Depends(get_db)
             spend_cap       = float(data['spend_cap']) if data.get('spend_cap') else None,
             spend_threshold = float(data['spend_threshold']) if data.get('spend_threshold') else None,
             spender_filter  = data.get('spender_filter') or None,
+            max_occurrences = int(data['max_occurrences']) if data.get('max_occurrences') else None,
             is_active       = data.get('is_active', True),
             notes           = data.get('notes'),
         )
@@ -6043,6 +6095,8 @@ async def update_challenge(challenge_id: int, data: dict = Body(...), db: Sessio
             setattr(c, field, float(data[field]) if data[field] is not None else None)
     if 'spender_filter' in data:
         c.spender_filter = data['spender_filter'] or None
+    if 'max_occurrences' in data:
+        c.max_occurrences = int(data['max_occurrences']) if data['max_occurrences'] else None
     for field in ('start_date', 'end_date'):
         if field in data:
             # [:10] — tolerate a full ISO datetime string (some legacy rows have
@@ -6622,7 +6676,8 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     # (for threshold challenges, only count if threshold met).
     # Wrapped in try/except so a missing table (first deploy) never breaks card detail.
     challenge_points = []
-    challenge_pts_total = 0.0
+    challenge_pts_total = 0.0     # points-currency challenges only ('flat'/'per_dollar')
+    challenge_credit_total = 0.0  # 'statement_credit' challenges only — real dollars, kept separate
     if card:
         try:
             # Include challenges where this card is the primary card
@@ -6651,17 +6706,8 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
                 # Use per-card spend so linked cards show their own spend,
                 # not the multi-card aggregate stored in ch.current_spend.
                 per_spend = _challenge_spend_for_card(db, ch, account.id)
-                per_unlocked = (
-                    ch.spend_threshold is None
-                    or per_spend >= float(ch.spend_threshold or 0)
-                )
-                if ch.bonus_type == 'flat':
-                    bp = float(ch.bonus_amount or 0) if per_unlocked else 0.0
-                else:
-                    eligible = per_spend
-                    if ch.spend_cap:
-                        eligible = min(eligible, float(ch.spend_cap))
-                    bp = round(eligible * float(ch.bonus_amount or 0), 1)
+                prog = _challenge_progress(ch, per_spend)
+                bp = prog['bonus_pts']
 
                 challenge_points.append({
                     'id': ch.id,
@@ -6669,19 +6715,26 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
                     'bonus_pts': round(bp, 0),
                     'bonus_amount': ch.bonus_amount,
                     'bonus_type': ch.bonus_type,
+                    'bonus_currency': 'usd' if ch.bonus_type == 'statement_credit' else ('benefit' if ch.bonus_type == 'benefit' else 'points'),
                     'category_names': [lnk.category_name for lnk in ch.category_links],
                     'spend_cap': ch.spend_cap,
+                    'spend_threshold': ch.spend_threshold,
                     'current_spend': round(per_spend, 2),   # per-card, not aggregate
-                    'progress_pct': min(100, round(
-                        per_spend / float(ch.spend_cap) * 100, 1
-                    )) if ch.spend_cap else None,
-                    'threshold_met': per_unlocked,
+                    'lap_spend': prog['lap_spend'],
+                    'progress_pct': prog['progress_pct'],
+                    'occurrences_earned': prog['occurrences_earned'],
+                    'max_occurrences': prog['max_occurrences'],
+                    'threshold_met': prog['bonus_unlocked'],
                 })
-                challenge_pts_total += bp
+                if ch.bonus_type == 'statement_credit':
+                    challenge_credit_total += bp
+                elif ch.bonus_type != 'benefit':
+                    challenge_pts_total += bp
         except Exception:
             # challenge tables may not exist yet on first deploy — degrade gracefully
             challenge_points = []
             challenge_pts_total = 0.0
+            challenge_credit_total = 0.0
             db.rollback()
 
     return {
@@ -6715,6 +6768,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         'points_earned': points_earned,
         'challenge_points': challenge_points,
         'challenge_pts_total': round(challenge_pts_total, 0),
+        'challenge_credit_total': round(challenge_credit_total, 2),
         'monthly_spend': monthly_spend,
         'recent_transactions': recent_txns,
     }

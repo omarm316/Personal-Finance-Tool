@@ -587,6 +587,7 @@ class SpendChallenge(Base):
     spend_cap       = Column(Float, nullable=True)   # max eligible spend (rate_cap, category_rate_cap)
     spend_threshold = Column(Float, nullable=True)   # min spend to unlock (threshold_bonus, sub, annual_threshold)
     spender_filter  = Column(String(100), nullable=True)  # match Transaction.spender; NULL = anyone's spend counts
+    max_occurrences = Column(Integer, nullable=True)  # NULL/1 = single-shot; >1 = threshold repeats up to N times, resetting each time
 
     # Cached progress — recalculated from transactions on demand
     current_spend   = Column(Float, default=0)
@@ -1029,6 +1030,7 @@ def run_migrations(engine):
             ('spend_cap',        'FLOAT'),
             ('spend_threshold',  'FLOAT'),
             ('spender_filter',   'VARCHAR(100)'),
+            ('max_occurrences',  'INTEGER'),
             ('current_spend',    'FLOAT DEFAULT 0'),
             ('bonus_unlocked',   'BOOLEAN DEFAULT FALSE'),
             ('is_active',        'BOOLEAN DEFAULT TRUE'),

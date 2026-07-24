@@ -4818,8 +4818,11 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[benefitSaving,setBenefitSaving]=useState(false);
   const[togglingCycle,setTogglingCycle]=useState(null);   // benefit id currently mid-toggle (disables its grid)
   const txnSectionRef=useRef(null);   // Transactions card — scrolled into view when a challenge sets the custom filter
-  const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd)=>{
-    setTxnsLoading(true);
+  const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd,silent)=>{
+    // silent=true skips the loading flag — used for post-edit refreshes so the
+    // table doesn't unmount to a spinner and cause the page to jump; the full
+    // loading state stays for real period/filter changes (initial load feel).
+    if(!silent)setTxnsLoading(true);
     try{
       const y=yr??txnYear; const m=mo??txnMonth; const v=view||txnView; const q=qtr??txnQuarter;
       const c=csc!==undefined?csc:cscFilter;
@@ -4835,7 +4838,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       setTxnSummary(r.summary||null);
       setAvailCscs(r.available_cscs||[]);
     }catch(e){}
-    finally{setTxnsLoading(false);}
+    finally{if(!silent)setTxnsLoading(false);}
   };
   // Fetch full CSC list once for inline editing dropdown
   useEffect(()=>{
@@ -4848,7 +4851,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     try{
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({spender:newVal||''})});
       setEditingSpenderId(null);
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
       loadSpenders();
     }catch(e){toast('Failed to save spender: '+(e?.message||''),'error');}
   };
@@ -4864,7 +4867,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       })});
       toast(`Tagged ${selectedTxnIds.size} transaction${selectedTxnIds.size!==1?'s':''} as ${val}`,'success');
       setSelectedTxnIds(new Set());
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
       loadSpenders();
     }catch(e){toast('Bulk tag failed: '+(e?.message||''),'error');}
     finally{setBulkTagging(false);}
@@ -4876,7 +4879,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       const txn=txns.find(t=>t.id===txnId);
       setEditingCscId(null);
       // Silently reload txns so earn_rate updates to reflect the new CSC
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
       // Offer to teach this merchant for all past + future transactions
       if(newVal&&txn?.merchant_name){
         setTeachPrompt({merchantName:txn.merchant_name,csc:newVal});
@@ -4887,7 +4890,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     try{
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({action:newVal})});
       setEditingActionId(null);
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
     }catch(e){toast('Failed to save type: '+(e?.message||''),'error');}
   };
   const toggleExcludeTxn=async(txn)=>{
@@ -4895,7 +4898,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     try{
       await apiFetch(`/transactions/${txn.id}`,{method:'PATCH',body:JSON.stringify({is_excluded:!txn.is_excluded})});
       toast(txn.is_excluded?'Included — earns points again':'Excluded — no points, no SUB spend credit','success');
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
     }catch(e){toast('Failed to update: '+(e?.message||''),'error');}
     finally{setExcludingId(null);}
   };
@@ -4905,7 +4908,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_earn_override:Number(val)})});
       toast('Points override saved','success');
       setEditingPtsOverrideId(null);
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
     }catch(e){toast('Failed to save override: '+(e?.message||''),'error');}
   };
   const resetPtsOverride=async(txnId)=>{
@@ -4913,7 +4916,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({clear_points_earn_override:true})});
       toast('Reset to auto-classification','success');
       setEditingPtsOverrideId(null);
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
     }catch(e){toast('Failed to reset: '+(e?.message||''),'error');}
   };
   const teachMerchant=async(merchantName,csc)=>{
@@ -4927,7 +4930,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       toast(`✓ Saved — ${r.transactions_updated} past transaction${r.transactions_updated!==1?'s':''} updated`,'success');
       setTeachPrompt(null);
       // Reload txns so backfilled rows reflect the change
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
       if(cscFilter==='__none__') loadUnclassified();
     }catch(e){toast('Failed: '+(e?.message||''),'error');}
     finally{setTeachLoading(false);}
@@ -4951,7 +4954,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       setAssigningMerchant(null);
       setAssignCscVal('');
       loadUnclassified();
-      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
     }catch(e){toast('Failed: '+(e?.message||''),'error');}
     finally{setAssignLoading(false);}
   };
@@ -5200,7 +5203,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     card_id:c?.id||'',name:'',challenge_type:'sub',
     start_date:'',end_date:'',activation_date:'',
     bonus_type:'flat',bonus_amount:'',
-    spend_cap:'',spend_threshold:'',spender_filter:'',
+    spend_cap:'',spend_threshold:'',spender_filter:'',max_occurrences:'',
     category_names:[],additional_card_ids:[],
     is_active:true,notes:'',
   });
@@ -5210,7 +5213,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       card_id:ch.card_id,name:ch.name,challenge_type:ch.challenge_type,
       start_date:ch.start_date,end_date:ch.end_date,activation_date:ch.activation_date||'',
       bonus_type:ch.bonus_type,bonus_amount:ch.bonus_amount,
-      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',spender_filter:ch.spender_filter||'',
+      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',spender_filter:ch.spender_filter||'',max_occurrences:ch.max_occurrences||'',
       category_names:ch.category_names||[],additional_card_ids:ch.additional_card_ids||[],
       is_active:ch.is_active,notes:ch.notes||'',
     });
@@ -5224,7 +5227,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       end_date:tmpl.end_date||`${yr}-12-31`,
       activation_date:'',
       bonus_type:tmpl.bonus_type,bonus_amount:tmpl.bonus_amount,
-      spend_cap:tmpl.spend_cap||'',spend_threshold:tmpl.spend_threshold||'',spender_filter:'',
+      spend_cap:tmpl.spend_cap||'',spend_threshold:tmpl.spend_threshold||'',spender_filter:'',max_occurrences:'',
       category_names:tmpl.category_names||[],additional_card_ids:[],
       is_active:true,notes:tmpl.notes||'',
     });
@@ -5245,6 +5248,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
         spend_cap:v.spend_cap?parseFloat(v.spend_cap):null,
         spend_threshold:v.spend_threshold?parseFloat(v.spend_threshold):null,
         spender_filter:v.spender_filter||null,
+        max_occurrences:v.max_occurrences?parseInt(v.max_occurrences,10):null,
         category_names:v.category_names||[],
         additional_card_ids:(v.additional_card_ids||[]).map(Number),
         is_active:v.is_active,notes:v.notes||null,
@@ -5334,15 +5338,16 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                   style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
                   <option value="flat">Flat (total points)</option>
                   <option value="per_dollar">Per Dollar (pts/$)</option>
+                  <option value="statement_credit">Statement Credit ($)</option>
                   <option value="benefit">Benefit (free night, status, etc.)</option>
                 </select>
               </div>
               <div style={{flex:1}}>
                 <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>
-                  {v.bonus_type==='flat'?'Bonus Points *':v.bonus_type==='benefit'?'# of Rewards *':'Pts per Dollar *'}
+                  {v.bonus_type==='flat'?'Bonus Points *':v.bonus_type==='statement_credit'?'Credit Amount ($) *':v.bonus_type==='benefit'?'# of Rewards *':'Pts per Dollar *'}
                 </label>
                 <input type="number" step="any" value={v.bonus_amount} onChange={e=>setV('bonus_amount',e.target.value)}
-                  placeholder={v.bonus_type==='flat'?'e.g. 60000':v.bonus_type==='benefit'?'e.g. 1':'e.g. 5'}
+                  placeholder={v.bonus_type==='flat'?'e.g. 60000':v.bonus_type==='statement_credit'?'e.g. 325':v.bonus_type==='benefit'?'e.g. 1':'e.g. 5'}
                   style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
               </div>
             </div>
@@ -5352,11 +5357,19 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                 placeholder="e.g. 1500"
                 style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
             </div>}
-            {showThreshold&&<div>
-              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spend Threshold ($)</label>
-              <input type="number" step="any" value={v.spend_threshold} onChange={e=>setV('spend_threshold',e.target.value)}
-                placeholder="e.g. 4000"
-                style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+            {showThreshold&&<div style={{display:'flex',gap:12}}>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spend Threshold ($)</label>
+                <input type="number" step="any" value={v.spend_threshold} onChange={e=>setV('spend_threshold',e.target.value)}
+                  placeholder="e.g. 4000"
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Repeat Up To <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <input type="number" step="1" min="1" value={v.max_occurrences} onChange={e=>setV('max_occurrences',e.target.value)}
+                  placeholder="e.g. 3 times"
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
             </div>}
             {showCategory&&<div>
               <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:6}}>Limit to Categories <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional — leave blank to count all spend)</span></label>
@@ -5629,7 +5642,9 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
             </div>
             {d.challenge_points.map(ch=>{
               const earned=Math.round(ch.bonus_pts);
-              const locked=ch.bonus_type==='flat'&&!ch.threshold_met;
+              const locked=['flat','statement_credit','benefit'].includes(ch.bonus_type)&&!ch.threshold_met;
+              const isUsd=ch.bonus_currency==='usd';
+              const isBenefit=ch.bonus_currency==='benefit';
               const handleDeleteChallenge=async(e)=>{
                 e.stopPropagation();
                 if(!window.confirm(`Delete challenge "${ch.name}"?`)) return;
@@ -5656,16 +5671,19 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                       {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
                     </div>}
                     {ch.spend_threshold&&!ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
-                      ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_threshold.toLocaleString()} threshold
+                      ${(ch.lap_spend??ch.current_spend??0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_threshold.toLocaleString()} threshold
                       {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
                     </div>}
                     {locked&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>Threshold not yet met</div>}
                   </div>
                   <div style={{textAlign:'right',flexShrink:0,marginLeft:4}}>
-                    {earned>0
-                      ?<div style={{fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>+{earned.toLocaleString()}</div>
-                      :<div style={{fontSize:11,color:'var(--text-muted)'}}>{locked?'Locked':'—'}</div>}
+                    {isBenefit
+                      ?<div style={{fontSize:11,color:ch.threshold_met?'var(--violet)':'var(--text-muted)'}}>{ch.threshold_met?'Unlocked!':locked?'Locked':'—'}</div>
+                      :earned>0
+                        ?<div style={{fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>{isUsd?'+$':'+'}{earned.toLocaleString()}</div>
+                        :<div style={{fontSize:11,color:'var(--text-muted)'}}>{locked?'Locked':'—'}</div>}
                     {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
+                    {ch.max_occurrences&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>{ch.occurrences_earned||0} of {ch.max_occurrences}</div>}
                   </div>
                 </div>
               );
@@ -5673,6 +5691,10 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
             {d.challenge_pts_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
               <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Challenge Bonus</div>
               <div style={{fontSize:18,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--violet)'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
+            </div>}
+            {d.challenge_credit_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
+              <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Statement Credits</div>
+              <div style={{fontSize:18,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--violet)'}}>${d.challenge_credit_total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
             </div>}
           </div>}
         </div>
@@ -5854,6 +5876,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                         <span style={{fontSize:14,fontWeight:400}}>{ch.name}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:barColor+'22',color:statusColor,fontWeight:500,textTransform:'uppercase'}}>{ch.status}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--border)',color:'var(--text-muted)'}}>{ch.challenge_type.replace(/_/g,' ')}</span>
+                        {ch.max_occurrences&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--gold-soft)',color:'var(--gold)',fontWeight:500}}>{ch.occurrences_earned||0} of {ch.max_occurrences} earned</span>}
                         {ch.spender_filter&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--violet-soft)',color:'var(--violet)',fontWeight:500}}>{ch.spender_filter} only</span>}
                         {ch.category_names&&ch.category_names.length>0&&<span style={{fontSize:11,color:'var(--text-muted)'}}>&#183; {ch.category_names.join(', ')}</span>}
                       </div>
@@ -5870,19 +5893,21 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                   </div>
                   {ch.progress_target!=null&&<div style={{marginBottom:8}}>
                     <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
-                      <span style={{color:'var(--text-muted)'}}>Progress</span>
-                      <span style={{fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>${ch.current_spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
+                      <span style={{color:'var(--text-muted)'}}>Progress{ch.max_occurrences?` (lap ${Math.min((ch.occurrences_earned||0)+1,ch.max_occurrences)} of ${ch.max_occurrences})`:''}</span>
+                      <span style={{fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>${(ch.lap_spend??ch.current_spend).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
                     </div>
                     <div style={{height:7,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
                       <div style={{height:'100%',width:`${ch.progress_pct||0}%`,background:barColor,borderRadius:3,transition:'width 0.4s'}}/>
                     </div>
-                    {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>${ch.remaining_spend.toLocaleString()} more to {ch.spend_cap?'hit cap':'unlock'}</div>}
+                    {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>${ch.remaining_spend.toLocaleString()} more to {ch.spend_cap?'hit cap':ch.max_occurrences?'unlock next':'unlock'}</div>}
                   </div>}
                   <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
                     <span>
                       <span style={{color:'var(--text-muted)'}}>Bonus: </span>
                       <span style={{fontWeight:400,color:ch.bonus_pts_earned>0?'#059669':'var(--text-muted)'}}>
-                        {ch.bonus_pts_earned>0?`${ch.bonus_pts_earned.toLocaleString()} ${ch.currency||'pts'}`:ch.status==='unlocked'?'Unlocked!':'Not yet earned'}
+                        {ch.bonus_currency==='benefit'
+                          ?(ch.bonus_unlocked?'Unlocked!':ch.status==='unlocked'?'Unlocked!':'Not yet earned')
+                          :ch.bonus_pts_earned>0?`${ch.bonus_currency==='usd'?'$':''}${ch.bonus_pts_earned.toLocaleString()}${ch.bonus_currency==='usd'?'':' '+(ch.currency||'pts')}`:ch.status==='unlocked'?'Unlocked!':'Not yet earned'}
                       </span>
                     </span>
                     {estVal&&parseFloat(estVal)>0&&<span>
@@ -5891,7 +5916,14 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                     </span>}
                     <span>
                       <span style={{color:'var(--text-muted)'}}>Rate: </span>
-                      <span style={{fontFamily:'Plus Jakarta Sans'}}>{ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`:`${ch.bonus_amount}x per $`}{ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}</span>
+                      <span style={{fontFamily:'Plus Jakarta Sans'}}>
+                        {ch.bonus_type==='statement_credit'?`$${ch.bonus_amount?.toLocaleString()} credit flat`
+                          :ch.bonus_type==='benefit'?`${ch.bonus_amount?.toLocaleString()} reward${ch.bonus_amount===1?'':'s'}`
+                          :ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`
+                          :`${ch.bonus_amount}x per $`}
+                        {ch.max_occurrences?`, up to ${ch.max_occurrences}x`:''}
+                        {ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}
+                      </span>
                     </span>
                   </div>
                 </div>
@@ -6855,7 +6887,9 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
 
 function ChallengeCard({ch,onClick}){
   const progress=ch.progress_pct||0;
-  const isThreshold=ch.spend_threshold&&!ch.bonus_unlocked;
+  // Repeatable challenges stay "isThreshold" (still show the lap progress bar)
+  // even once the first occurrence is unlocked, as long as more can still be earned.
+  const isThreshold=ch.spend_threshold&&(!ch.bonus_unlocked||(ch.max_occurrences&&(ch.occurrences_earned||0)<ch.max_occurrences));
   return(
     <div className="card" style={{padding:'16px 18px',cursor:onClick?'pointer':'default'}} onClick={onClick}
       title={onClick?"View this card's transactions for this challenge's date range":undefined}>
@@ -6876,8 +6910,8 @@ function ChallengeCard({ch,onClick}){
       </div>
       {isThreshold&&<>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text-muted)',marginBottom:4}}>
-          <span>${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} spent</span>
-          <span>${(ch.spend_threshold).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
+          <span>${(ch.lap_spend??ch.current_spend??0).toLocaleString(undefined,{maximumFractionDigits:0})} spent{ch.max_occurrences?` (${ch.occurrences_earned||0}/${ch.max_occurrences})`:''}</span>
+          <span>${(ch.progress_target??ch.spend_threshold).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
         </div>
         <div style={{height:5,borderRadius:5,background:'var(--elevated)',overflow:'hidden',marginBottom:6}}>
           <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.5s ease'}}/>
