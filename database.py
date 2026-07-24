@@ -640,6 +640,10 @@ class Redemption(Base):
     description        = Column(String(300), nullable=False)
     cash_value_usd     = Column(Float, nullable=False)
     notes              = Column(Text, nullable=True)
+    # Whose points these were — nullable/blank means "shared pool, not
+    # attributed to either person" (legacy rows, or a household-level
+    # redemption neither person's balance alone should absorb).
+    person             = Column(String(100), nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow)
 
     ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
@@ -684,6 +688,10 @@ class Transfer(Base):
     points_received           = Column(Float, nullable=False)
     transfer_date              = Column(Date, nullable=False)
     notes                      = Column(Text, nullable=True)
+    # Whose points these were on both sides — a currency-to-currency
+    # transfer is still one person's points moving, not points changing
+    # ownership. Nullable/blank = shared pool (legacy rows).
+    person                     = Column(String(100), nullable=True)
     created_at                  = Column(DateTime, default=datetime.utcnow)
 
     source_ecosystem      = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
@@ -705,6 +713,10 @@ class PointsBalanceSnapshot(Base):
     balance       = Column(Float, nullable=False)
     snapshot_date = Column(Date, nullable=False)
     notes         = Column(Text, nullable=True)
+    # Whose balance this is — nullable/blank means "shared/household,"
+    # not attributed to one person. Each person gets their own snapshot
+    # history so "starting balance" can be set per-person.
+    person        = Column(String(100), nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
@@ -727,7 +739,33 @@ class PointsAdjustment(Base):
     adjustment_date = Column(Date, nullable=False)
     description     = Column(String(300), nullable=False)
     notes           = Column(Text, nullable=True)
+    # Whose balance this nudges — nullable/blank means shared/unattributed.
+    person          = Column(String(100), nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
+
+    ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
+
+
+class PersonPointsTransfer(Base):
+    """A same-currency, same-ecosystem points transfer between two people
+    (e.g. Omer sends 20,000 Chase UR points to Daniella) — distinct from
+    Transfer above, which moves points between two different currencies for
+    one person. No ratio/bonus here since it's the same points, just
+    changing whose balance they count against; nets to zero on the
+    ecosystem's combined total but shifts each person's own sub-balance.
+    Only meaningful for programs that actually allow person-to-person point
+    transfers — that's a judgment call made when logging one, not something
+    this app tries to enforce."""
+    __tablename__ = 'person_points_transfers'
+
+    id            = Column(Integer, primary_key=True)
+    ecosystem_id  = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=False, index=True)
+    from_person   = Column(String(100), nullable=False)
+    to_person     = Column(String(100), nullable=False)
+    points        = Column(Float, nullable=False)
+    transfer_date = Column(Date, nullable=False)
+    notes         = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
 
     ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
 
@@ -1072,6 +1110,18 @@ def run_migrations(engine):
             ('confirmed',  'BOOLEAN DEFAULT FALSE'),
             ('notes',      'TEXT'),
             ('updated_at', 'TIMESTAMP DEFAULT NOW()'),
+        ],
+        'redemptions': [
+            ('person', 'VARCHAR(100)'),
+        ],
+        'transfers': [
+            ('person', 'VARCHAR(100)'),
+        ],
+        'points_balance_snapshots': [
+            ('person', 'VARCHAR(100)'),
+        ],
+        'points_adjustments': [
+            ('person', 'VARCHAR(100)'),
         ],
     }
 

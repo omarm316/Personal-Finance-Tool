@@ -6330,7 +6330,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
        with its date); any later ones are "Corrections". The most recent one
        is still what current_balance anchors off of server-side (unchanged) —
        these are just two different labels over the same list, chronologically. */
-  const emptyBalanceForm={balance:'',snapshot_date:'',notes:''};
+  const emptyBalanceForm={balance:'',snapshot_date:'',notes:'',person:''};
   const[showBalanceModal,setShowBalanceModal]=useState(false);
   const[editingSnapshotId,setEditingSnapshotId]=useState(null);
   const[balanceForm,setBalanceForm]=useState(emptyBalanceForm);
@@ -6341,18 +6341,38 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     apiFetch(`/ecosystems/${ecoId}/balance-snapshots`).then(setSnapshots).catch(()=>{});
   };
   useEffect(()=>{loadSnapshots();},[ecoId]);
-  // snapshots come back sorted newest-first (server-side order_by desc) — the
-  // oldest (last in this array) is the Starting Balance; everything else is a Correction.
-  const startingBalanceSnap=snapshots.length?snapshots[snapshots.length-1]:null;
-  const correctionSnaps=snapshots.length>1?snapshots.slice(0,-1):[];
-  const openBalanceModal=(snap)=>{
+  // People known for this ecosystem — Omer/Daniella baseline plus anyone
+  // else already tagged somewhere in this ecosystem's ledger (server-computed
+  // so it's the single source of truth for who has a bucket at all).
+  const people=useMemo(()=>data?.known_people||['Omer','Daniella'],[data]);
+  // Snapshots grouped by person (untagged/'' folds into 'Shared') — within
+  // each group, sorted newest-first by the server, so the oldest (last in
+  // the group) is that person's Starting Balance and the rest are Corrections.
+  const snapsByPerson=useMemo(()=>{
+    const groups={};
+    for(const s of snapshots){
+      const key=s.person||'Shared';
+      (groups[key]=groups[key]||[]).push(s);
+    }
+    return groups;
+  },[snapshots]);
+  const startingSnapFor=person=>{
+    const list=snapsByPerson[person]||[];
+    return list.length?list[list.length-1]:null;
+  };
+  const correctionSnapsFor=person=>{
+    const list=snapsByPerson[person]||[];
+    return list.length>1?list.slice(0,-1):[];
+  };
+  const openBalanceModal=(snap,forPerson)=>{
     if(snap){
       setEditingSnapshotId(snap.id);
-      setBalanceForm({balance:snap.balance,snapshot_date:snap.snapshot_date,notes:snap.notes||''});
+      setBalanceForm({balance:snap.balance,snapshot_date:snap.snapshot_date,notes:snap.notes||'',person:snap.person||''});
     }else{
       const today=new Date().toISOString().slice(0,10);
       setEditingSnapshotId(null);
-      setBalanceForm({balance:data?.current_balance??'',snapshot_date:today,notes:''});
+      const bucket=forPerson&&forPerson!=='Shared'?data?.balance_by_person?.[forPerson]:null;
+      setBalanceForm({balance:bucket?.current_balance??'',snapshot_date:today,notes:'',person:forPerson&&forPerson!=='Shared'?forPerson:''});
     }
     setShowBalanceModal(true);
   };
@@ -6364,6 +6384,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         balance:parseFloat(balanceForm.balance),
         snapshot_date:balanceForm.snapshot_date,
         notes:balanceForm.notes||null,
+        person:balanceForm.person||null,
       };
       if(editingSnapshotId) await apiFetch(`/balance-snapshots/${editingSnapshotId}`,{method:'PATCH',body:JSON.stringify(body)});
       else await apiFetch(`/ecosystems/${ecoId}/balance-snapshots`,{method:'POST',body:JSON.stringify(body)});
@@ -6388,7 +6409,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const[ecosystems,setEcosystems]=useState([]);
   useEffect(()=>{apiFetch('/ecosystems').then(setEcosystems).catch(()=>{});},[]);
 
-  const emptyRedemptionForm={points_redeemed:'',redemption_date:'',description:'',cash_value_usd:'',notes:''};
+  const emptyRedemptionForm={points_redeemed:'',redemption_date:'',description:'',cash_value_usd:'',notes:'',person:''};
   const[showRedemptionModal,setShowRedemptionModal]=useState(false);
   const[editingRedemptionId,setEditingRedemptionId]=useState(null);
   const[redemptionForm,setRedemptionForm]=useState(emptyRedemptionForm);
@@ -6398,7 +6419,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const openEditRedemption=(r)=>{
     setEditingRedemptionId(r.id);
     setRedemptionForm({points_redeemed:r.points_redeemed,
-      redemption_date:r.redemption_date,description:r.description,cash_value_usd:r.cash_value_usd,notes:r.notes||''});
+      redemption_date:r.redemption_date,description:r.description,cash_value_usd:r.cash_value_usd,notes:r.notes||'',person:r.person||''});
     setShowRedemptionModal(true);
   };
   const saveRedemption=async()=>{
@@ -6413,6 +6434,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         points_redeemed:parseFloat(redemptionForm.points_redeemed),
         redemption_date:redemptionForm.redemption_date,
         description:redemptionForm.description,
+        person:redemptionForm.person||null,
         cash_value_usd:parseFloat(redemptionForm.cash_value_usd),
         notes:redemptionForm.notes||null,
       };
@@ -6426,7 +6448,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   };
 
   /* ── Transfers (value-neutral point movement, separate from Redemptions) ── */
-  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:''};
+  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:'',person:''};
   const[showTransferModal,setShowTransferModal]=useState(false);
   const[editingTransferId,setEditingTransferId]=useState(null);
   const[transferForm,setTransferForm]=useState(emptyTransferForm);
@@ -6483,6 +6505,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         points_received:pointsSent*ratio*(1+bonusPct),
         transfer_date:transferForm.transfer_date,
         notes:transferForm.notes||null,
+        person:transferForm.person||null,
       };
       if(editingTransferId) await apiFetch(`/transfers/${editingTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
       else await apiFetch('/transfers',{method:'POST',body:JSON.stringify(body)});
@@ -6511,7 +6534,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
 
   /* ── Adjustments — manual, dated +/- corrections for small unexplained
        drift, without erasing/resetting history the way a balance snapshot does ── */
-  const emptyAdjustmentForm={points_delta:'',adjustment_date:'',description:'',notes:''};
+  const emptyAdjustmentForm={points_delta:'',adjustment_date:'',description:'',notes:'',person:''};
   const[showAdjustmentModal,setShowAdjustmentModal]=useState(false);
   const[editingAdjustmentId,setEditingAdjustmentId]=useState(null);
   const[adjustmentForm,setAdjustmentForm]=useState(emptyAdjustmentForm);
@@ -6519,7 +6542,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   const openNewAdjustment=()=>{setEditingAdjustmentId(null);setAdjustmentForm(emptyAdjustmentForm);setShowAdjustmentModal(true);};
   const openEditAdjustment=(a)=>{
     setEditingAdjustmentId(a.id);
-    setAdjustmentForm({points_delta:a.points_delta,adjustment_date:a.adjustment_date,description:a.description,notes:a.notes||''});
+    setAdjustmentForm({points_delta:a.points_delta,adjustment_date:a.adjustment_date,description:a.description,notes:a.notes||'',person:a.person||''});
     setShowAdjustmentModal(true);
   };
   const saveAdjustment=async()=>{
@@ -6532,6 +6555,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         adjustment_date:adjustmentForm.adjustment_date,
         description:adjustmentForm.description,
         notes:adjustmentForm.notes||null,
+        person:adjustmentForm.person||null,
       };
       if(editingAdjustmentId) await apiFetch(`/points-adjustments/${editingAdjustmentId}`,{method:'PATCH',body:JSON.stringify(body)});
       else await apiFetch(`/ecosystems/${ecoId}/points-adjustments`,{method:'POST',body:JSON.stringify(body)});
@@ -6547,6 +6571,57 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
       await apiFetch(`/points-adjustments/${id}`,{method:'DELETE'});
       load(period,year);
       toast('Adjustment deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
+  /* ── Person-to-person transfers — same currency, same ecosystem, just
+       moving which of our two buckets the points count against (e.g. Omer
+       sends 20,000 Chase UR to Daniella). Distinct from the cross-currency
+       Transfer above. ── */
+  const emptyPersonTransferForm={from_person:'',to_person:'',points:'',transfer_date:'',notes:''};
+  const[showPersonTransferModal,setShowPersonTransferModal]=useState(false);
+  const[editingPersonTransferId,setEditingPersonTransferId]=useState(null);
+  const[personTransferForm,setPersonTransferForm]=useState(emptyPersonTransferForm);
+  const[personTransferSaving,setPersonTransferSaving]=useState(false);
+  const openNewPersonTransfer=()=>{
+    setEditingPersonTransferId(null);
+    const today=new Date().toISOString().slice(0,10);
+    setPersonTransferForm({...emptyPersonTransferForm,transfer_date:today,
+      from_person:people[0]||'',to_person:people[1]||''});
+    setShowPersonTransferModal(true);
+  };
+  const openEditPersonTransfer=(pt)=>{
+    setEditingPersonTransferId(pt.id);
+    setPersonTransferForm({from_person:pt.from_person,to_person:pt.to_person,points:pt.points,transfer_date:pt.transfer_date,notes:pt.notes||''});
+    setShowPersonTransferModal(true);
+  };
+  const savePersonTransfer=async()=>{
+    if(!personTransferForm.from_person||!personTransferForm.to_person){toast('Both people are required','error');return;}
+    if(personTransferForm.from_person===personTransferForm.to_person){toast('From and To must be different people','error');return;}
+    if(!personTransferForm.points||!personTransferForm.transfer_date){toast('Points and date are required','error');return;}
+    setPersonTransferSaving(true);
+    try{
+      const body={
+        from_person:personTransferForm.from_person,
+        to_person:personTransferForm.to_person,
+        points:parseFloat(personTransferForm.points),
+        transfer_date:personTransferForm.transfer_date,
+        notes:personTransferForm.notes||null,
+      };
+      if(editingPersonTransferId) await apiFetch(`/person-transfers/${editingPersonTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/person-transfers`,{method:'POST',body:JSON.stringify(body)});
+      setShowPersonTransferModal(false);
+      load(period,year);
+      toast(editingPersonTransferId?'Transfer updated':'Transfer added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setPersonTransferSaving(false);}
+  };
+  const deletePersonTransfer=async(id)=>{
+    if(!window.confirm('Delete this transfer?'))return;
+    try{
+      await apiFetch(`/person-transfers/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Transfer deleted');
     }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
   };
 
@@ -6661,70 +6736,129 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
             <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
           </div>
 
-          {/* Balance Ledger — Starting Balance (earliest snapshot) through
-              Earned/Redeemed/Transferred/Adjusted to Current Balance, plus
-              any later "Correction" snapshots. Answers "how many points do I
-              actually have right now" AND "why," so a diff is easy to spot
-              instead of hidden inside one final number. */}
-          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>Balance Ledger</div>
-
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:400}}>Starting Balance</div>
-                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>
-                  {startingBalanceSnap?`as of ${startingBalanceSnap.snapshot_date}`:'Not set — defaults to 0'}
-                </div>
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <div style={{fontSize:14,fontFamily:'Plus Jakarta Sans',color:'var(--text-primary)'}}>{(startingBalanceSnap?.balance??0).toLocaleString()} pts</div>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={()=>openBalanceModal(startingBalanceSnap)}>{startingBalanceSnap?'Edit':'Set'}</button>
-                {startingBalanceSnap&&<button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(startingBalanceSnap.id)}>Remove</button>}
-              </div>
+          {/* Balance Ledger — per-person (Omer/Daniella/Shared) balance
+              tracking with a combined Total column. Each person's own
+              earliest snapshot is their Starting Balance; Earned/Redeemed/
+              Transferred/Adjusted/Sent-Received layer on top to their
+              Current Balance. Answers "how many points does each of us
+              actually have right now" AND "why," not just one combined
+              number — a "Sent to other"/"Received from other" pair nets to
+              zero in the Total column since it never creates or destroys
+              points, just moves them between our two buckets. */}
+          {!isCashBack&&data.balance_by_person&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Balance Ledger</div>
+              {people.length>1&&<button type="button" className="btn btn-ghost btn-sm" onClick={openNewPersonTransfer}>+ Transfer between us</button>}
             </div>
 
-            {data.balance_breakdown&&<div style={{padding:'10px 0',borderBottom:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:5}}>
-              {[
-                ['+ Earned',data.balance_breakdown.earned_since_baseline,'var(--green)'],
-                ['− Redeemed',-data.balance_breakdown.redeemed_since_baseline,'var(--red)'],
-                ['− Transferred Out',-data.balance_breakdown.transferred_out_since_baseline,'var(--red)'],
-                ['+ Transferred In',data.balance_breakdown.transferred_in_since_baseline,'var(--green)'],
-              ].map(([label,val,color])=>(
-                <div key={label} style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
-                  <span style={{color:'var(--text-muted)'}}>{label}</span>
-                  <span style={{fontFamily:'Plus Jakarta Sans',color}}>{val.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+            {(()=>{
+              const b=data.balance_by_person;
+              const cols=[...people];
+              if(b.Shared&&!cols.includes('Shared'))cols.push('Shared');
+              const fmt=v=>Math.round(v||0).toLocaleString(undefined,{maximumFractionDigits:0});
+              const rows=[
+                {label:'+ Earned',get:p=>b[p].earned_since_baseline,color:'var(--green)'},
+                {label:'− Redeemed',get:p=>-b[p].redeemed_since_baseline,color:'var(--red)'},
+                {label:'− Transferred Out',get:p=>-b[p].transferred_out_since_baseline,color:'var(--red)'},
+                {label:'+ Transferred In',get:p=>b[p].transferred_in_since_baseline,color:'var(--green)'},
+              ];
+              if(cols.some(p=>b[p].adjusted_since_baseline!==0))
+                rows.push({label:'± Adjusted',get:p=>b[p].adjusted_since_baseline,color:null});
+              if(cols.some(p=>(b[p].person_transfer_out_since_baseline||0)!==0||(b[p].person_transfer_in_since_baseline||0)!==0)){
+                rows.push({label:'− Sent to other',get:p=>-(b[p].person_transfer_out_since_baseline||0),color:'var(--red)'});
+                rows.push({label:'+ Received from other',get:p=>(b[p].person_transfer_in_since_baseline||0),color:'var(--green)'});
+              }
+              const totalFor=fn=>cols.reduce((s,p)=>s+fn(p),0);
+              return(
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+                    <thead>
+                      <tr>
+                        <th style={{textAlign:'left',padding:'0 8px 8px 0'}}></th>
+                        {cols.map(p=><th key={p} style={{textAlign:'right',padding:'0 8px 8px',color:'var(--text-secondary)',fontWeight:500,minWidth:92,whiteSpace:'nowrap'}}>{p}</th>)}
+                        <th style={{textAlign:'right',padding:'0 0 8px 8px',color:'var(--text-primary)',fontWeight:600,minWidth:92,whiteSpace:'nowrap'}}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{padding:'8px 8px 8px 0',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)',fontWeight:400}}>Starting Balance</td>
+                        {cols.map(p=>(
+                          <td key={p} style={{textAlign:'right',padding:'8px',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)'}}>
+                            <div style={{fontFamily:'Plus Jakarta Sans'}}>{fmt(b[p].starting_balance)}</div>
+                            <div style={{fontSize:10,color:'var(--text-muted)'}}>{b[p].balance_as_of?`as of ${b[p].balance_as_of}`:'not set'}</div>
+                          </td>
+                        ))}
+                        <td style={{textAlign:'right',padding:'8px 0 8px 8px',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:600}}>{fmt(totalFor(p=>b[p].starting_balance))}</td>
+                      </tr>
+                      {rows.map(r=>(
+                        <tr key={r.label}>
+                          <td style={{padding:'5px 8px 5px 0',color:'var(--text-muted)'}}>{r.label}</td>
+                          {cols.map(p=>{
+                            const v=r.get(p);
+                            const color=r.color||(v>=0?'var(--green)':'var(--red)');
+                            return <td key={p} style={{textAlign:'right',padding:'5px 8px',fontFamily:'Plus Jakarta Sans',color}}>{fmt(v)}</td>;
+                          })}
+                          <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{fmt(totalFor(r.get))}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={{padding:'10px 8px 0 0',borderTop:'1px solid var(--border)',fontWeight:500}}>Current Balance</td>
+                        {cols.map(p=>(
+                          <td key={p} style={{textAlign:'right',padding:'10px 8px 0',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--gold)'}}>{fmt(b[p].current_balance)}</td>
+                        ))}
+                        <td style={{textAlign:'right',padding:'10px 0 0 8px',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:700,color:'var(--gold)',fontSize:14}}>{fmt(totalFor(p=>b[p].current_balance))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-              ))}
-              {data.balance_breakdown.adjusted_since_baseline!==0&&
-                <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
-                  <span style={{color:'var(--text-muted)'}}>{data.balance_breakdown.adjusted_since_baseline>0?'+ Adjusted':'− Adjusted'}</span>
-                  <span style={{fontFamily:'Plus Jakarta Sans',color:data.balance_breakdown.adjusted_since_baseline>0?'var(--green)':'var(--red)'}}>
-                    {data.balance_breakdown.adjusted_since_baseline.toLocaleString(undefined,{maximumFractionDigits:0})}
-                  </span>
-                </div>}
-            </div>}
+              );
+            })()}
 
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0 0'}}>
-              <div style={{fontSize:13,fontWeight:500}}>Current Balance{data.balance_as_of&&<span style={{fontSize:10,color:'var(--text-muted)',fontWeight:400,marginLeft:6}}>as of {data.balance_as_of}</span>}</div>
-              <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--gold)'}}>{data.current_balance.toLocaleString()} pts</div>
-            </div>
-
-            {correctionSnaps.length>0&&<div style={{marginTop:16,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:8}}>Balance Corrections</div>
-              {correctionSnaps.map(s=>(
-                <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
-                  <div style={{flex:1,minWidth:0,fontSize:12}}>
-                    {s.balance.toLocaleString()} pts as of {s.snapshot_date}
-                    {s.notes&&<span style={{color:'var(--text-muted)'}}> — {s.notes}</span>}
+            {/* Per-person balance management — set/edit each person's own
+                starting balance and later corrections independently. */}
+            <div style={{marginTop:18,paddingTop:14,borderTop:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:14}}>
+              {[...people,...(data.balance_by_person.Shared?['Shared']:[])].map(person=>{
+                const startSnap=startingSnapFor(person);
+                const corrections=correctionSnapsFor(person);
+                return(
+                  <div key={person}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:6}}>
+                      <div style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)'}}>{person}</div>
+                      <div style={{display:'flex',gap:8}}>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(startSnap,person)}>{startSnap?'Edit Starting Balance':'Set Starting Balance'}</button>
+                        {startSnap&&<button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(startSnap.id)}>Remove</button>}
+                      </div>
+                    </div>
+                    {corrections.length>0&&<div style={{marginTop:6,paddingLeft:4}}>
+                      {corrections.map(s=>(
+                        <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',fontSize:12}}>
+                          <div style={{flex:1,minWidth:0,color:'var(--text-muted)'}}>
+                            Correction: {s.balance.toLocaleString()} pts as of {s.snapshot_date}{s.notes?` — ${s.notes}`:''}
+                          </div>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(s,person)}>Edit</button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(s.id)}>Delete</button>
+                        </div>
+                      ))}
+                    </div>}
+                    {startSnap&&<button type="button" className="btn btn-ghost btn-sm" style={{marginTop:4}} onClick={()=>openBalanceModal(null,person)}>+ Add Correction</button>}
                   </div>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(s)}>Edit</button>
-                  <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(s.id)}>Delete</button>
+                );
+              })}
+            </div>
+
+            {/* Person-to-person transfer history */}
+            {data.person_transfers&&data.person_transfers.length>0&&<div style={{marginTop:18,paddingTop:14,borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:8}}>Transfers Between Us</div>
+              {data.person_transfers.map(pt=>(
+                <div key={pt.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
+                  <div style={{flex:1,minWidth:0,fontSize:12}}>
+                    {pt.from_person} → {pt.to_person}: {pt.points.toLocaleString()} pts · {new Date(pt.transfer_date).toLocaleDateString()}
+                    {pt.notes&&<span style={{color:'var(--text-muted)'}}> — {pt.notes}</span>}
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditPersonTransfer(pt)}>Edit</button>
+                  <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deletePersonTransfer(pt.id)}>Delete</button>
                 </div>
               ))}
-            </div>}
-
-            {startingBalanceSnap&&<div style={{marginTop:12}}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(null)}>+ Add Correction</button>
             </div>}
           </div>}
 
@@ -6928,6 +7062,11 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.redemption_date} onChange={e=>setRedemptionForm(f=>({...f,redemption_date:e.target.value}))}/>
               </div>
               <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={redemptionForm.person} options={people} placeholder="Shared / unattributed"
+                  emptyLabel="Shared / unattributed" onChange={v=>setRedemptionForm(f=>({...f,person:v}))}/>
+              </div>
+              <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
                 <textarea className="search-input" value={redemptionForm.notes} onChange={e=>setRedemptionForm(f=>({...f,notes:e.target.value}))}
                   rows={2} style={{resize:'vertical'}}/>
@@ -6986,6 +7125,11 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 <input className="date-input" type="date" style={{width:'100%'}} value={transferForm.transfer_date} onChange={e=>setTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
               </div>
               <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={transferForm.person} options={people} placeholder="Shared / unattributed"
+                  emptyLabel="Shared / unattributed" onChange={v=>setTransferForm(f=>({...f,person:v}))}/>
+              </div>
+              <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
                 <textarea className="search-input" value={transferForm.notes} onChange={e=>setTransferForm(f=>({...f,notes:e.target.value}))}
                   rows={2} style={{resize:'vertical'}}/>
@@ -7005,13 +7149,18 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         <div className="modal-overlay">
           <div className="modal-content" style={{maxWidth:400}}>
             <div className="modal-header">
-              <div className="modal-title">{editingSnapshotId?'Edit':startingBalanceSnap?'Add Correction':'Set Starting Balance'} — {ecoName}</div>
+              <div className="modal-title">{editingSnapshotId?'Edit':balanceForm.person?`Set Starting Balance — ${balanceForm.person}`:'Set Starting Balance'} — {ecoName}</div>
               <button type="button" className="modal-close" onClick={()=>setShowBalanceModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
               <div style={{fontSize:12,color:'var(--text-muted)'}}>
                 Enter the balance shown in your {ecoName} account as of the date below. Everything before this date is
                 assumed folded into this number — earn/redeem/transfer/adjustment activity after it is added on top.
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose balance <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={balanceForm.person} options={people} placeholder="Shared / unattributed"
+                  emptyLabel="Shared / unattributed" onChange={v=>setBalanceForm(f=>({...f,person:v}))}/>
               </div>
               <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Balance</label>
@@ -7067,6 +7216,11 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 </div>
               </div>
               <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={adjustmentForm.person} options={people} placeholder="Shared / unattributed"
+                  emptyLabel="Shared / unattributed" onChange={v=>setAdjustmentForm(f=>({...f,person:v}))}/>
+              </div>
+              <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
                 <textarea className="search-input" value={adjustmentForm.notes} onChange={e=>setAdjustmentForm(f=>({...f,notes:e.target.value}))}
                   rows={2} style={{resize:'vertical'}}/>
@@ -7076,6 +7230,55 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               <button type="button" className="btn btn-ghost" onClick={()=>setShowAdjustmentModal(false)}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={saveAdjustment} disabled={adjustmentSaving}>
                 {adjustmentSaving?'Saving…':editingAdjustmentId?'Save Changes':'Add Adjustment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPersonTransferModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingPersonTransferId?'Edit Transfer Between Us':'Transfer Between Us'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowPersonTransferModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                Moves points from one person's {ecoName} balance to the other's — no ratio or bonus, since it's the
+                same currency. Whether {ecoName} actually allows this between accounts is on you to confirm.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>From</label>
+                  <SearchCreateSelect value={personTransferForm.from_person} options={people} placeholder="Who's sending"
+                    onChange={v=>setPersonTransferForm(f=>({...f,from_person:v}))}/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>To</label>
+                  <SearchCreateSelect value={personTransferForm.to_person} options={people} placeholder="Who's receiving"
+                    onChange={v=>setPersonTransferForm(f=>({...f,to_person:v}))}/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points</label>
+                <input className="search-input" type="number" value={personTransferForm.points} onChange={e=>setPersonTransferForm(f=>({...f,points:e.target.value}))}
+                  placeholder="20000"/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={personTransferForm.transfer_date} onChange={e=>setPersonTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={personTransferForm.notes} onChange={e=>setPersonTransferForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowPersonTransferModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={savePersonTransfer} disabled={personTransferSaving}>
+                {personTransferSaving?'Saving…':editingPersonTransferId?'Save Changes':'Add Transfer'}
               </button>
             </div>
           </div>

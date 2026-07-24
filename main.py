@@ -29,7 +29,7 @@ from database import (
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
-    Redemption, TransferRatio, Transfer, PointsBalanceSnapshot, PointsAdjustment,
+    Redemption, TransferRatio, Transfer, PointsBalanceSnapshot, PointsAdjustment, PersonPointsTransfer,
     CHALLENGE_TEMPLATES,
     seed_points_categories, seed_points_ecosystems, seed_card_products,
     import_cards_from_excel, import_points_from_excel,
@@ -5212,6 +5212,43 @@ async def ecosystem_earn_detail(
     adjustments_out = [_serialize_adjustment(a) for a in adjustment_rows]
     total_points_adjusted = sum(a.points_delta for a in adjustment_rows)
 
+    # Person-to-person transfers within this one ecosystem (e.g. Omer sends
+    # 20,000 Chase UR to Daniella) — distinct from Transfer above, which
+    # moves points between two different currencies for one person. Also
+    # all-time/not period-scoped, same rationale as the ledger rows above.
+    person_transfer_rows = (
+        db.query(PersonPointsTransfer)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PersonPointsTransfer.transfer_date.desc())
+        .all()
+    )
+    person_transfers_out = [_serialize_person_transfer(pt) for pt in person_transfer_rows]
+
+    # Known people for this ecosystem's per-person split — same baseline as
+    # /api/transactions/spenders, plus any name actually used anywhere in
+    # this ecosystem's ledger so a third person's tag is never silently
+    # dropped into "Shared."
+    known_people = {'Omer', 'Daniella'}
+    for s in db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id).all():
+        if s.person:
+            known_people.add(s.person)
+    for a in adjustment_rows:
+        if a.person:
+            known_people.add(a.person)
+    for r in redemption_rows:
+        if r.person:
+            known_people.add(r.person)
+    for t in transfers_out:
+        if t.get('person'):
+            known_people.add(t['person'])
+    for t in transfers_in:
+        if t.get('person'):
+            known_people.add(t['person'])
+    for pt in person_transfer_rows:
+        known_people.add(pt.from_person)
+        known_people.add(pt.to_person)
+    known_people = sorted(known_people)
+
     today = _date.today()
     if year is None:
         year = today.year
@@ -5291,61 +5328,128 @@ async def ecosystem_earn_detail(
             'issuer':        card.issuer if card else None,
         }
 
-    # Current balance — a manual PointsBalanceSnapshot (if any exists) is the
-    # baseline, since it corrects for drift the computed math below can't
-    # see (unlogged promo bonuses, benefit credits, redemptions made outside
-    # this app, etc.). Only activity AFTER the snapshot's date is added on
-    # top; everything before it is assumed already folded into the
-    # snapshotted value. With no snapshot, falls back to all-time-earned
-    # minus all-time redeemed/transferred, same as before this feature.
-    # Deliberately NOT period-scoped like total_points below (which only
-    # reflects the selected MTD/QTD/YTD window) — this is "how many points
-    # do I actually have right now," not "how many did I earn this quarter."
-    latest_snapshot = (
-        db.query(PointsBalanceSnapshot)
-        .filter_by(ecosystem_id=eco_id)
-        .order_by(PointsBalanceSnapshot.snapshot_date.desc())
-        .first()
-    )
-    baseline = latest_snapshot.balance if latest_snapshot else 0.0
-    baseline_date = latest_snapshot.snapshot_date if latest_snapshot else None
+    # Current balance, split per-person (Omer / Daniella / "Shared" for
+    # untagged legacy data) with a combined Total. A manual
+    # PointsBalanceSnapshot (if any exists FOR THAT BUCKET) is its baseline —
+    # corrects for drift the computed math can't see (unlogged promo
+    # bonuses, benefit credits, redemptions made outside this app, etc.).
+    # Only activity after the snapshot's date is added on top; everything
+    # before it is assumed already folded into the snapshotted value. Each
+    # bucket can have its own baseline date (Omer might set his balance
+    # today, Daniella's might still be unset) — there is deliberately no
+    # single shared "as of" date at the Total level. Deliberately NOT
+    # period-scoped like total_points below (which only reflects the
+    # selected MTD/QTD/YTD window) — this is "how many points do we
+    # actually have right now," not "how many did we earn this quarter."
+    def _bucket_matches(row_person, bucket):
+        if bucket is None:  # "Shared" — untagged/legacy rows
+            return not row_person
+        return row_person == bucket
 
-    earned_since = 0.0
-    if eco_accts:
-        earn_q = db.query(Transaction).filter(
-            Transaction.account_id.in_(eco_accts),
-            Transaction.is_excluded != True,
+    def _compute_balance_bucket(bucket):
+        snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
+        if bucket is None:
+            snap_q = snap_q.filter(or_(PointsBalanceSnapshot.person.is_(None), PointsBalanceSnapshot.person == ''))
+        else:
+            snap_q = snap_q.filter(PointsBalanceSnapshot.person == bucket)
+        latest = snap_q.order_by(PointsBalanceSnapshot.snapshot_date.desc()).first()
+        b_baseline = latest.balance if latest else 0.0
+        b_baseline_date = latest.snapshot_date if latest else None
+
+        b_earned = 0.0
+        if eco_accts:
+            earn_q = db.query(Transaction).filter(
+                Transaction.account_id.in_(eco_accts),
+                Transaction.is_excluded != True,
+            )
+            if bucket is None:
+                earn_q = earn_q.filter(or_(Transaction.spender.is_(None), Transaction.spender == ''))
+            else:
+                earn_q = earn_q.filter(Transaction.spender == bucket)
+            if b_baseline_date:
+                earn_q = earn_q.filter(Transaction.date > b_baseline_date)
+            for t in earn_q.all():
+                if t.action != 'Expense':
+                    continue
+                info = acct_info.get(t.account_id)
+                if not info:
+                    continue
+                b_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
+
+        b_redeemed = sum(
+            r.points_redeemed for r in redemption_rows
+            if _bucket_matches(r.person, bucket) and (not b_baseline_date or r.redemption_date > b_baseline_date)
         )
-        if baseline_date:
-            earn_q = earn_q.filter(Transaction.date > baseline_date)
-        for t in earn_q.all():
-            if t.action != 'Expense':
-                continue
-            info = acct_info.get(t.account_id)
-            if not info:
-                continue
-            earned_since += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
-
-    if baseline_date:
-        redeemed_since = sum(r.points_redeemed for r in redemption_rows if r.redemption_date > baseline_date)
-        transferred_out_since = sum(
+        b_transferred_out = sum(
             t['points_sent'] for t in transfers_out
-            if _date.fromisoformat(t['transfer_date']) > baseline_date
+            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
         )
-        transferred_in_since = sum(
+        b_transferred_in = sum(
             t['points_received'] for t in transfers_in
-            if _date.fromisoformat(t['transfer_date']) > baseline_date
+            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
         )
-        adjusted_since = sum(a.points_delta for a in adjustment_rows if a.adjustment_date > baseline_date)
-    else:
-        redeemed_since = total_points_redeemed
-        transferred_out_since = total_points_transferred_out
-        transferred_in_since = total_points_transferred_in
-        adjusted_since = total_points_adjusted
+        b_adjusted = sum(
+            a.points_delta for a in adjustment_rows
+            if _bucket_matches(a.person, bucket) and (not b_baseline_date or a.adjustment_date > b_baseline_date)
+        )
+        # Person-to-person transfers only ever move between two named
+        # people — "Shared" can't send or receive one.
+        b_person_out = 0.0
+        b_person_in = 0.0
+        if bucket is not None:
+            b_person_out = sum(
+                pt.points for pt in person_transfer_rows
+                if pt.from_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
+            )
+            b_person_in = sum(
+                pt.points for pt in person_transfer_rows
+                if pt.to_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
+            )
 
-    current_balance = round(
-        baseline + earned_since - redeemed_since - transferred_out_since + transferred_in_since + adjusted_since
-    )
+        b_current = round(
+            b_baseline + b_earned - b_redeemed - b_transferred_out + b_transferred_in
+            + b_adjusted - b_person_out + b_person_in
+        )
+        return {
+            'starting_balance': round(b_baseline, 2),
+            'earned_since_baseline': round(b_earned, 2),
+            'redeemed_since_baseline': round(b_redeemed, 2),
+            'transferred_out_since_baseline': round(b_transferred_out, 2),
+            'transferred_in_since_baseline': round(b_transferred_in, 2),
+            'adjusted_since_baseline': round(b_adjusted, 2),
+            'person_transfer_out_since_baseline': round(b_person_out, 2),
+            'person_transfer_in_since_baseline': round(b_person_in, 2),
+            'current_balance': b_current,
+            'balance_as_of': b_baseline_date.isoformat() if b_baseline_date else None,
+        }
+
+    balance_by_person = {person: _compute_balance_bucket(person) for person in known_people}
+    shared_bucket = _compute_balance_bucket(None)
+    # Only surface "Shared" if it actually holds something — otherwise every
+    # ecosystem would show a pointless all-zero third row forever.
+    if any(shared_bucket[f] for f in (
+        'starting_balance', 'earned_since_baseline', 'redeemed_since_baseline',
+        'transferred_out_since_baseline', 'transferred_in_since_baseline',
+        'adjusted_since_baseline', 'current_balance',
+    )):
+        balance_by_person['Shared'] = shared_bucket
+
+    def _total_field(field):
+        return round(sum(b[field] for b in balance_by_person.values()), 2)
+
+    baseline = _total_field('starting_balance')
+    earned_since = _total_field('earned_since_baseline')
+    redeemed_since = _total_field('redeemed_since_baseline')
+    transferred_out_since = _total_field('transferred_out_since_baseline')
+    transferred_in_since = _total_field('transferred_in_since_baseline')
+    adjusted_since = _total_field('adjusted_since_baseline')
+    current_balance = round(sum(b['current_balance'] for b in balance_by_person.values()))
+    # No single shared "as of" date makes sense once buckets can each have
+    # their own — surface the most recent one that exists as a summary
+    # label (None if not a single bucket has a snapshot yet).
+    _bucket_dates = [b['balance_as_of'] for b in balance_by_person.values() if b['balance_as_of']]
+    baseline_date = max((_date.fromisoformat(d) for d in _bucket_dates), default=None)
+
     balance_breakdown = {
         'starting_balance': round(baseline, 2),
         'earned_since_baseline': round(earned_since, 2),
@@ -5364,6 +5468,9 @@ async def ecosystem_earn_detail(
             'current_balance': current_balance,
             'balance_as_of': baseline_date.isoformat() if baseline_date else None,
             'balance_breakdown': balance_breakdown,
+            'balance_by_person': balance_by_person,
+            'known_people': known_people,
+            'person_transfers': person_transfers_out,
             'by_category': [], 'by_card': [], 'active_challenges': [],
             'redemptions': redemptions_out,
             'total_points_redeemed': total_points_redeemed,
@@ -5480,6 +5587,9 @@ async def ecosystem_earn_detail(
         'current_balance': current_balance,
         'balance_as_of': baseline_date.isoformat() if baseline_date else None,
         'balance_breakdown': balance_breakdown,
+        'balance_by_person': balance_by_person,
+        'known_people': known_people,
+        'person_transfers': person_transfers_out,
         'by_category':   by_cat_out,
         'by_card':       by_card_out,
         'active_challenges': active_ch_out,
@@ -5646,6 +5756,7 @@ def _serialize_redemption(r: Redemption) -> dict:
         'cash_value_usd': r.cash_value_usd,
         'realized_cpp': realized_cpp,
         'notes': r.notes,
+        'person': r.person,
     }
 
 
@@ -5669,6 +5780,7 @@ async def create_redemption(data: dict = Body(...), db: Session = Depends(get_db
             description      = data['description'],
             cash_value_usd   = float(data['cash_value_usd']),
             notes            = data.get('notes'),
+            person           = data.get('person') or None,
         )
         db.add(r)
         db.commit()
@@ -5693,9 +5805,11 @@ async def update_redemption(redemption_id: int, data: dict = Body(...), db: Sess
             setattr(r, field, float(data[field]) if data[field] is not None else None)
     if 'redemption_date' in data:
         r.redemption_date = _date.fromisoformat(data['redemption_date'])
-    for field in ('description', 'notes'):
+    if 'description' in data:
+        r.description = data['description']
+    for field in ('notes', 'person'):
         if field in data:
-            setattr(r, field, data[field])
+            setattr(r, field, data[field] or None)
     db.commit()
     db.refresh(r)
     return _serialize_redemption(r)
@@ -5726,6 +5840,7 @@ def _serialize_balance_snapshot(s: PointsBalanceSnapshot) -> dict:
         'balance': s.balance,
         'snapshot_date': s.snapshot_date.isoformat(),
         'notes': s.notes,
+        'person': s.person,
     }
 
 
@@ -5752,6 +5867,7 @@ async def create_balance_snapshot(eco_id: int, data: dict = Body(...), db: Sessi
             balance       = float(data['balance']),
             snapshot_date = _date.fromisoformat(data['snapshot_date']),
             notes         = data.get('notes'),
+            person        = data.get('person') or None,
         )
         db.add(s)
         db.commit()
@@ -5775,6 +5891,8 @@ async def update_balance_snapshot(snapshot_id: int, data: dict = Body(...), db: 
         s.snapshot_date = _date.fromisoformat(data['snapshot_date'])
     if 'notes' in data:
         s.notes = data['notes']
+    if 'person' in data:
+        s.person = data['person'] or None
     db.commit()
     db.refresh(s)
     return _serialize_balance_snapshot(s)
@@ -5805,6 +5923,7 @@ def _serialize_adjustment(a: PointsAdjustment) -> dict:
         'adjustment_date': a.adjustment_date.isoformat(),
         'description': a.description,
         'notes': a.notes,
+        'person': a.person,
     }
 
 
@@ -5832,6 +5951,7 @@ async def create_points_adjustment(eco_id: int, data: dict = Body(...), db: Sess
             adjustment_date = _date.fromisoformat(data['adjustment_date']),
             description     = data['description'],
             notes           = data.get('notes'),
+            person          = data.get('person') or None,
         )
         db.add(a)
         db.commit()
@@ -5853,9 +5973,11 @@ async def update_points_adjustment(adjustment_id: int, data: dict = Body(...), d
         a.points_delta = float(data['points_delta'])
     if 'adjustment_date' in data:
         a.adjustment_date = _date.fromisoformat(data['adjustment_date'])
-    for field in ('description', 'notes'):
+    if 'description' in data:
+        a.description = data['description']
+    for field in ('notes', 'person'):
         if field in data:
-            setattr(a, field, data[field])
+            setattr(a, field, data[field] or None)
     db.commit()
     db.refresh(a)
     return _serialize_adjustment(a)
@@ -5952,6 +6074,7 @@ def _serialize_transfer(t: Transfer) -> dict:
         'points_received': t.points_received,
         'transfer_date': t.transfer_date.isoformat(),
         'notes': t.notes,
+        'person': t.person,
     }
 
 
@@ -6002,6 +6125,7 @@ async def create_transfer(data: dict = Body(...), db: Session = Depends(get_db))
             points_received=points_received,
             transfer_date=_date.fromisoformat(data['transfer_date']),
             notes=data.get('notes'),
+            person=data.get('person') or None,
         )
         db.add(t)
         db.commit()
@@ -6029,9 +6153,9 @@ async def update_transfer(transfer_id: int, data: dict = Body(...), db: Session 
             setattr(t, field, float(data[field]) if data[field] is not None else None)
     if 'transfer_date' in data:
         t.transfer_date = _date.fromisoformat(data['transfer_date'])
-    for field in ('notes',):
+    for field in ('notes', 'person'):
         if field in data:
-            setattr(t, field, data[field])
+            setattr(t, field, data[field] or None)
     db.commit()
     db.refresh(t)
     return _serialize_transfer(t)
@@ -6043,6 +6167,100 @@ async def delete_transfer(transfer_id: int, db: Session = Depends(get_db)):
     if not t:
         raise HTTPException(status_code=404, detail="Transfer not found")
     db.delete(t)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Person-to-person points transfers — same currency, same ecosystem, just
+# changing whose balance the points count against (e.g. Omer sends 20,000
+# Chase UR points to Daniella). Distinct from Transfer above, which moves
+# points between two different currencies for one person. No ratio/bonus:
+# it's the same points. Whether a program actually allows this is a
+# judgment call made when logging one, not something enforced here.
+# ---------------------------------------------------------------------------
+
+def _serialize_person_transfer(pt: PersonPointsTransfer) -> dict:
+    return {
+        'id': pt.id,
+        'ecosystem_id': pt.ecosystem_id,
+        'ecosystem_name': pt.ecosystem.name if pt.ecosystem else None,
+        'from_person': pt.from_person,
+        'to_person': pt.to_person,
+        'points': pt.points,
+        'transfer_date': pt.transfer_date.isoformat(),
+        'notes': pt.notes,
+    }
+
+
+@app.get("/api/ecosystems/{eco_id}/person-transfers")
+async def list_person_transfers(eco_id: int, db: Session = Depends(get_db)):
+    rows = (
+        db.query(PersonPointsTransfer)
+        .filter_by(ecosystem_id=eco_id)
+        .order_by(PersonPointsTransfer.transfer_date.desc())
+        .all()
+    )
+    return [_serialize_person_transfer(pt) for pt in rows]
+
+
+@app.post("/api/ecosystems/{eco_id}/person-transfers")
+async def create_person_transfer(eco_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
+    if not eco:
+        raise HTTPException(status_code=404, detail="Ecosystem not found")
+    if not data.get('from_person') or not data.get('to_person'):
+        raise HTTPException(status_code=400, detail="from_person and to_person are required")
+    if data['from_person'] == data['to_person']:
+        raise HTTPException(status_code=400, detail="from_person and to_person must be different people")
+    try:
+        pt = PersonPointsTransfer(
+            ecosystem_id  = eco_id,
+            from_person   = data['from_person'],
+            to_person     = data['to_person'],
+            points        = float(data['points']),
+            transfer_date = _date.fromisoformat(data['transfer_date']),
+            notes         = data.get('notes'),
+        )
+        db.add(pt)
+        db.commit()
+        db.refresh(pt)
+        return _serialize_person_transfer(pt)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"create person transfer error: {e}\n{traceback.format_exc()}")
+
+
+@app.patch("/api/person-transfers/{transfer_id}")
+async def update_person_transfer(transfer_id: int, data: dict = Body(...), db: Session = Depends(get_db)):
+    from datetime import date as _date
+    pt = db.query(PersonPointsTransfer).filter_by(id=transfer_id).first()
+    if not pt:
+        raise HTTPException(status_code=404, detail="Person transfer not found")
+    for field in ('from_person', 'to_person'):
+        if field in data:
+            setattr(pt, field, data[field])
+    if 'points' in data:
+        pt.points = float(data['points'])
+    if 'transfer_date' in data:
+        pt.transfer_date = _date.fromisoformat(data['transfer_date'])
+    if 'notes' in data:
+        pt.notes = data['notes']
+    db.commit()
+    db.refresh(pt)
+    return _serialize_person_transfer(pt)
+
+
+@app.delete("/api/person-transfers/{transfer_id}")
+async def delete_person_transfer(transfer_id: int, db: Session = Depends(get_db)):
+    pt = db.query(PersonPointsTransfer).filter_by(id=transfer_id).first()
+    if not pt:
+        raise HTTPException(status_code=404, detail="Person transfer not found")
+    db.delete(pt)
     db.commit()
     return {"deleted": True}
 
