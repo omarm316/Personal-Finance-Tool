@@ -7531,16 +7531,36 @@ function CardsPage({toast,refreshKey}){
 
   return(
     <div>
-      {/* Tab switcher */}
-      <div style={{display:'flex',gap:24,marginBottom:24,borderBottom:'1px solid var(--border)',paddingBottom:0}}>
-        {[{id:'accounts',label:'Portfolio'},{id:'swipe',label:'Swipe Advisor'},{id:'cards',label:'Card Management'}].map(t=>(
-          <button type="button" key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
-            style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,letterSpacing:'0.2px',
-              background:'transparent',color:tab===t.id?'var(--gold)':'var(--text-muted)',
-              transition:'all 0.15s',marginBottom:'-1px'}}>
-            {t.label}
-          </button>
-        ))}
+      {/* Tab switcher — the MTD/QTD/YTD + year range selector lives inline
+          here (only relevant to the Portfolio tab) instead of its own row
+          below, to save vertical space. */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',flexWrap:'wrap',gap:12,marginBottom:24,borderBottom:'1px solid var(--border)',paddingBottom:0}}>
+        <div style={{display:'flex',gap:24}}>
+          {[{id:'accounts',label:'Portfolio'},{id:'swipe',label:'Swipe Advisor'},{id:'cards',label:'Card Management'}].map(t=>(
+            <button type="button" key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
+              style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,letterSpacing:'0.2px',
+                background:'transparent',color:tab===t.id?'var(--gold)':'var(--text-muted)',
+                transition:'all 0.15s',marginBottom:'-1px'}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {tab==='accounts'&&<div style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+          <div style={{display:'flex',gap:16}}>
+            {['mtd','qtd','ytd'].map(p=>(
+              <button type="button" key={p} onClick={()=>setEarnPeriod(p)}
+                style={{padding:'4px 0',border:'none',borderBottom:earnPeriod===p?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:earnPeriod===p?500:400,letterSpacing:'0.5px',
+                  background:'transparent',color:earnPeriod===p?'var(--gold)':'var(--text-muted)',
+                  transition:'all 0.15s',textTransform:'uppercase'}}>
+                {p}
+              </button>
+            ))}
+          </div>
+          <select value={earnYear} onChange={e=>setEarnYear(Number(e.target.value))}
+            style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
+            {earnYears.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>}
       </div>
 
       {tab==='swipe'?(
@@ -7666,30 +7686,8 @@ function CardsPage({toast,refreshKey}){
       ):(
         /* ACCOUNTS — Portfolio Overview */
         <div>
-          {/* ── Period selector ── */}
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:28,flexWrap:'wrap',gap:12}}>
-            <div>
-              <h2 style={{fontSize:20,fontWeight:400,margin:0,letterSpacing:'-0.3px'}}>Portfolio</h2>
-              {earnData&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:3,fontWeight:300}}>{earnData.start} — {earnData.end}</div>}
-            </div>
-            <div style={{display:'flex',gap:8,alignItems:'center'}}>
-              <div style={{display:'flex',gap:16}}>
-                {['mtd','qtd','ytd'].map(p=>(
-                  <button type="button" key={p} onClick={()=>setEarnPeriod(p)}
-                    style={{padding:'4px 0',border:'none',borderBottom:earnPeriod===p?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:earnPeriod===p?500:400,letterSpacing:'0.5px',
-                      background:'transparent',color:earnPeriod===p?'var(--gold)':'var(--text-muted)',
-                      transition:'all 0.15s',textTransform:'uppercase'}}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-              <select value={earnYear} onChange={e=>setEarnYear(Number(e.target.value))}
-                style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
-                {earnYears.map(y=><option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-          </div>
-
+          {/* Heading + period selector moved into the tab-switcher row above
+              (2026-07-24) to save vertical space — no longer duplicated here. */}
           {/* ── Ecosystem cards + challenges ── */}
           {earnLoading
             ?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>
