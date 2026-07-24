@@ -6669,15 +6669,25 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     return null;
   },[ecoName]);
 
+  // Keys must match CardProduct.product_key exactly (e.g. 'chase_freedom_flex',
+  // not 'freedom_flex') — a naming mismatch here silently drops both the
+  // gradient AND the /static/cards/{key}.png lookup below to the default
+  // gray fallback. Found and fixed 2026-07-24 while wiring in new card art:
+  // most of these were short/unprefixed and never actually matched anything.
   const cardGrads={
-    freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',sapphire_preferred:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
-    freedom:'linear-gradient(135deg,#0369a1,#0ea5e9)',amex_gold:'linear-gradient(135deg,#b45309,#f59e0b)',
-    blue_business_plus:'linear-gradient(135deg,#1e40af,#60a5fa)',hilton_aspire:'linear-gradient(135deg,#5b21b6,#a78bfa)',
+    chase_freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',chase_sapphire_preferred:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
+    chase_sapphire_reserve:'linear-gradient(135deg,#0f172a,#1e3a5f)',chase_freedom_unlimited:'linear-gradient(135deg,#0ea5e9,#0369a1)',
+    chase_freedom:'linear-gradient(135deg,#0369a1,#0ea5e9)',amex_gold:'linear-gradient(135deg,#b45309,#f59e0b)',
+    amex_platinum:'linear-gradient(135deg,#78716c,#d6d3d1)',amex_blue_business_plus:'linear-gradient(135deg,#1e40af,#60a5fa)',
+    hilton_aspire:'linear-gradient(135deg,#5b21b6,#a78bfa)',
     united_quest:'linear-gradient(135deg,#374151,#9ca3af)',united_explorer:'linear-gradient(135deg,#1f2937,#6b7280)',
     delta_gold:'linear-gradient(135deg,#92400e,#d97706)',citi_custom_cash:'linear-gradient(135deg,#155e75,#06b6d4)',
-    bonvoy_brilliant:'linear-gradient(135deg,#7f1d1d,#dc2626)',bonvoy_boundless:'linear-gradient(135deg,#78350f,#d97706)',
-    world_of_hyatt:'linear-gradient(135deg,#9f1239,#f43e5c)',us_bank_cash_plus:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
-    atmos_ascent:'linear-gradient(135deg,#065f46,#34d399)',
+    citi_double_cash:'linear-gradient(135deg,#0e7490,#22d3ee)',citi_strata:'linear-gradient(135deg,#164e63,#0891b2)',
+    citi_strata_premier:'linear-gradient(135deg,#0c4a6e,#0284c7)',citi_strata_elite:'linear-gradient(135deg,#1e1b4b,#4c1d95)',
+    marriott_bonvoy_brilliant:'linear-gradient(135deg,#7f1d1d,#dc2626)',marriott_bonvoy_boundless:'linear-gradient(135deg,#78350f,#d97706)',
+    hyatt_personal:'linear-gradient(135deg,#9f1239,#f43e5c)',us_bank_cash_plus:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
+    atmos_ascent:'linear-gradient(135deg,#065f46,#34d399)',capital_one_venture:'linear-gradient(135deg,#991b1b,#dc2626)',
+    capital_one_venture_x:'linear-gradient(135deg,#450a0a,#7f1d1d)',
   };
 
   return(
@@ -7763,20 +7773,32 @@ function CardsPage({toast,refreshKey}){
                           const prod=getProductForAccount(acct.id);
                           const cardKey=prod?.product_key;
                           const imgSrc=cardKey?`/static/cards/${cardKey}.png`:null;
+                          // Same key-naming fix as EcosystemDetailPage's cardGrads above —
+                          // must match CardProduct.product_key exactly (e.g.
+                          // 'chase_freedom_flex', not 'freedom_flex').
                           const cardGrads={
-                            freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',
-                            freedom:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            chase_freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',
+                            chase_freedom:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            chase_freedom_unlimited:'linear-gradient(135deg,#0369a1,#0c4a6e)',
+                            chase_sapphire_preferred:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            chase_sapphire_reserve:'linear-gradient(135deg,#0f172a,#020617)',
                             hilton_aspire:'linear-gradient(135deg,#4c1d95,#2e1065)',
                             united_quest:'linear-gradient(135deg,#374151,#111827)',
                             united_explorer:'linear-gradient(135deg,#1e3a5f,#0f172a)',
                             delta_gold:'linear-gradient(135deg,#1e3a5f,#0f172a)',
-                            bonvoy_boundless:'linear-gradient(135deg,#78350f,#451a03)',
-                            world_of_hyatt:'linear-gradient(135deg,#7f1d1d,#450a0a)',
+                            marriott_bonvoy_boundless:'linear-gradient(135deg,#78350f,#451a03)',
+                            hyatt_personal:'linear-gradient(135deg,#7f1d1d,#450a0a)',
                             citi_custom_cash:'linear-gradient(135deg,#155e75,#0c4a5e)',
+                            citi_double_cash:'linear-gradient(135deg,#0e7490,#164e63)',
+                            citi_strata:'linear-gradient(135deg,#164e63,#0c4a5e)',
+                            citi_strata_premier:'linear-gradient(135deg,#0c4a6e,#082f49)',
+                            citi_strata_elite:'linear-gradient(135deg,#1e1b4b,#312e81)',
                             us_bank_cash_plus:'linear-gradient(135deg,#6b21a8,#4c1d95)',
-                            blue_business_plus:'linear-gradient(135deg,#1e40af,#1e3a5f)',
-                            sapphire_preferred:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            amex_blue_business_plus:'linear-gradient(135deg,#1e40af,#1e3a5f)',
                             amex_gold:'linear-gradient(135deg,#b8860b,#8b6914)',
+                            amex_platinum:'linear-gradient(135deg,#57534e,#292524)',
+                            capital_one_venture:'linear-gradient(135deg,#991b1b,#450a0a)',
+                            capital_one_venture_x:'linear-gradient(135deg,#450a0a,#1c0a0a)',
                           };
                           const bg=cardGrads[cardKey]||'linear-gradient(135deg,#374151,#1f2937)';
                           return(

@@ -1794,6 +1794,37 @@ def seed_card_products(session):
         ("citi_premier", "Citi Premier", "Citi ThankYou", "not_held", 95, [],
          {"_base": 1, "Dining": 2, "Groceries": 2, "Airlines": 2, "Gas Stations": 2, "Hotels": 2}),
 
+        # Citi's 2025 Strata family — Strata (no-fee, replaced Rewards+), Strata
+        # Premier (replaced the old Citi Premier above — kept as a separate
+        # catalog entry rather than renamed, since both may need to be tracked),
+        # Strata Elite (new top-tier card). Earn rates below only cover the
+        # steady-state/direct-purchase rates; Citi-Travel-portal-boosted rates
+        # (Elite: 12x hotels/rental cars, 6x air; Strata: quarterly self-select
+        # 3x category) aren't modeled since there's no "Citi Travel" booking-
+        # channel category yet (unlike Chase's "Chase Travel") — same gap noted
+        # in the benefit description instead of a fabricated earn-rate override.
+        ("citi_strata", "Citi Strata Card", "Citi ThankYou", "not_held", 0, [
+            ("Quarterly Self-Select 3x Category", 0, "quarterly", None,
+             "Choose one bonus category each quarter (in addition to Groceries/Gas/Transit/Dining below) — not modeled as an automatic earn-rate override."),
+        ], {"_base": 1, "Groceries": 2, "Gas Stations": 2, "Transit": 2, "Dining": 1}),
+
+        ("citi_strata_premier", "Citi Strata Premier", "Citi ThankYou", "not_held", 95, [
+            ("$100 Hotel Credit", 100, "annual", "Hotels",
+             "One hotel stay of $500+ (excl. taxes/fees) per calendar year, booked via the Citi Travel portal."),
+        ], {"_base": 1, "Dining": 2, "Groceries": 2, "Airlines": 2, "Gas Stations": 2, "Hotels": 2}),
+
+        ("citi_strata_elite", "Citi Strata Elite", "Citi ThankYou", "not_held", 595, [
+            ("$300 Hotel Credit", 300, "annual", "Hotels",
+             "Stay of 2+ nights booked via the Citi Travel portal, once per calendar year."),
+            ("Splurge Credit", 0, "annual", None, "Annual statement credit for select retail/dining/entertainment purchases."),
+            ("Global Entry/TSA PreCheck Credit", 0, "every_4.5_years", None, None),
+            ("Priority Pass Lounge Access", 0, "annual", None, None),
+        ], {
+            # Restaurants (incl. delivery): 3x steady-state, 6x during "CitiNights"
+            # (Fri/Sat 6pm-6am ET) — the time-conditional doubling isn't modeled.
+            "_base": 1.5, "Dining": 1.5,
+        }),
+
         ("best_buy_card", "Best Buy Credit Card", "Best Buy Rewards", "active", 0, [],
          {"_base": 1, "Dining": 1, "Food Delivery": 1, "Groceries": 1, "Gas Stations": 2, "Best Buy": 4}),
 
