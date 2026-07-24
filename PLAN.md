@@ -1,7 +1,17 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-21
+> Last updated: 2026-07-24
+
+---
+
+## Session 2026-07-24 — Real logos on the Portfolio ecosystem tiles
+
+Omer dropped a folder of vector-quality ecosystem logos at `assets/logos_color/` (light/dark theme variants) and asked for a more visual Portfolio page. Found a real bug first: every file had a checkerboard "transparency" pattern baked into actual pixels (mode was `RGB`, no alpha at all — a known AI-image-gen export artifact) — wrote a color/luminance-keyed fix (auto-detects light vs. dark background per file) and processed all 16 real logos into `static/ecosystem-logos/`. Iterated the tile design as a mockup first (`mockups/portfolio_grid_preview.html`, grew into a full-page mockup with Cash Back/Your Cards/Active Challenges for context) — landed on large logos (96px in production) on a *neutral* dark tile with a subtle brand-color glow, after testing showed logos carrying their own brand color (Chase, Amex) clash badly on a same-hue colored gradient tile. Wired into the real Portfolio tile in `v2.html`, replacing the old small monochrome-silhouette badge.
+
+Two bugs found and fixed while verifying against live data: (1) missing/wrong-theme logos (Atmos Rewards has no asset at all; Chase only has a dark variant) were falling back to the *wrong* variant instead of a text label, which made Chase's white-on-transparent mark invisible on the light theme — fixed to fall back to a text label whenever no correctly-contrasting variant exists, except Amex (its one variant has its own solid-color backdrop and reads fine on either theme). (2) The logo picker read `document.documentElement`'s `data-theme` attribute inline at render time, but toggling theme mutates that attribute directly via CSS (no React re-render triggered) — so tiles kept showing stale-theme logos after a toggle. Fixed with real state + a `MutationObserver`; verified live toggling flips every logo correctly both directions without a reload.
+
+Left as-is: `assets/logos_color/`'s two stray "ChatGPT Image..." files (draft/duplicate Amex generations, not committed) and `capital one venture one` / other non-covered ecosystems (no logo, text fallback). Naming normalized (`AA_t_dark.png` → `aa_t_dark.png` for consistency with the lowercase convention everywhere else).
 
 ---
 
