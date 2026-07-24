@@ -7714,7 +7714,8 @@ function CardsPage({toast,refreshKey}){
               // version reads fine on either theme), so this falls back to
               // whichever exists rather than requiring both.
               const logoVariants={hilton:['dark','light'],amex:['light'],citi:['dark','light'],chase:['dark','light'],
-                bonvoy:['dark','light'],delta:['dark','light'],hyatt:['dark','light'],united:['dark','light'],aa:['dark','light']};
+                bonvoy:['dark','light'],delta:['dark','light'],hyatt:['dark','light'],united:['dark','light'],aa:['dark','light'],
+                atmos:['dark','light']};
               // Marks with their own solid-color backdrop (e.g. Amex's filled
               // blue box) read fine against either theme, so it's safe to
               // reuse their only variant on the "wrong" theme. Bare line-art
@@ -7733,6 +7734,7 @@ function CardsPage({toast,refreshKey}){
                 if(n.includes('hyatt'))return'hyatt';
                 if(n.includes('united')||n.includes('mileageplus'))return'united';
                 if(n.includes('aadvantage'))return'aa';
+                if(n.includes('atmos'))return'atmos';
                 return null;
               };
               const ecoLogo=(name)=>{
