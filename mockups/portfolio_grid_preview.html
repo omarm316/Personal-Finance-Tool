@@ -2,76 +2,221 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<title>Portfolio grid mockup</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<title>Portfolio full-page mockup v5</title>
 <style>
 :root{--bg:#0c0c10;--surface:#16161c;--elevated:#22222c;--border:rgba(255,255,255,0.06);--border-strong:rgba(255,255,255,0.1);
---text-primary:#e8e8ed;--text-secondary:#a0a0b0;--text-muted:#707080;--gold:#d4a44a;--gold-soft:rgba(212,164,74,0.12);--card-bg:#16161c;}
+--text-primary:#e8e8ed;--text-secondary:#a0a0b0;--text-muted:#707080;--gold:#d4a44a;--gold-soft:rgba(212,164,74,0.12);--card-bg:#16161c;--green:#34d399;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text-primary);font-family:'DM Sans',sans-serif;padding:40px;}
-h2{font-size:20px;font-weight:400;margin-bottom:4px;letter-spacing:-0.3px;}
-.sub{font-size:11px;color:var(--text-muted);margin-bottom:24px;font-weight:300;}
+body{background:var(--bg);color:var(--text-primary);font-family:-apple-system,'Plus Jakarta Sans',sans-serif;padding-bottom:70px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;}
+.topbar h1{font-size:22px;font-weight:400;}
+.topbar-right{display:flex;align-items:center;gap:10px;}
+.badge-active{font-size:10px;font-weight:600;color:var(--green);background:rgba(52,211,153,0.12);padding:4px 10px;border-radius:10px;letter-spacing:0.3px;}
+.icon-btn{width:34px;height:34px;border-radius:50%;background:var(--elevated);display:flex;align-items:center;justify-content:center;font-size:14px;}
 
-.ecosystem-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:28px;}
+.tabs{display:flex;gap:24px;padding:0 20px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.tab{padding:10px 0;font-size:13px;color:var(--text-muted);border-bottom:2px solid transparent;}
+.tab.active{color:var(--gold);border-color:var(--gold);font-weight:500;}
+
+.content{padding:0 20px;}
+.portfolio-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+.portfolio-head h2{font-size:20px;font-weight:400;margin-bottom:4px;letter-spacing:-0.3px;}
+.sub{font-size:11px;color:var(--text-muted);font-weight:300;}
+.period-row{display:flex;align-items:center;gap:14px;}
+.period-toggle{display:flex;gap:14px;}
+.period-btn{font-size:11px;letter-spacing:0.5px;color:var(--text-muted);padding:4px 0;border-bottom:2px solid transparent;text-transform:uppercase;}
+.period-btn.active{color:var(--gold);border-color:var(--gold);font-weight:500;}
+.year-select{font-size:11px;border:1px solid var(--border);border-radius:8px;padding:6px 12px;background:var(--elevated);color:var(--text-primary);}
+
+.ecosystem-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-bottom:16px;}
 .ecosystem-tile{
-  background:var(--card-bg);border:1px solid var(--border);border-radius:14px;
-  padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.3);
-  transition:box-shadow .2s ease, transform .2s ease, border-color .2s ease;
+  --brand:#707080;
+  background:var(--card-bg);border:1px solid var(--border);border-radius:18px;
+  padding:28px 24px 26px;
+  box-shadow:0 1px 3px rgba(0,0,0,0.3);
   cursor:pointer; position:relative; overflow:hidden;
-  display:flex; flex-direction:column; gap:14px;
+  min-height:352px; display:flex; flex-direction:column; justify-content:space-between;
 }
-.ecosystem-tile:hover{box-shadow:0 8px 24px rgba(0,0,0,0.4);transform:translateY(-2px);border-color:var(--border-strong);}
-.ecosystem-tile .logo{width:100%;height:60px;border-radius:10px;object-fit:contain;object-position:left center;background:#fff;padding:8px 12px;flex-shrink:0;}
-.ecosystem-tile .eco-name{font-size:13.5px;font-weight:500;}
-.ecosystem-tile .eco-points{font-size:26px;font-weight:300;letter-spacing:-0.5px;color:var(--gold);font-variant-numeric:tabular-nums;}
+.ecosystem-tile::before{
+  content:'';position:absolute;top:-60px;right:-60px;width:220px;height:220px;border-radius:50%;
+  background:radial-gradient(circle, var(--brand) 0%, transparent 70%);opacity:0.16;pointer-events:none;
+}
+.ecosystem-tile .logo{height:208px;max-width:100%;object-fit:contain;object-position:left center;position:relative;display:block;margin-bottom:16px;}
+.ecosystem-tile .eco-points{font-size:36px;font-weight:300;letter-spacing:-0.7px;color:var(--gold);font-variant-numeric:tabular-nums;position:relative;line-height:1;}
+
+.cashback-tile{display:flex;align-items:center;justify-content:space-between;padding:22px 24px;border-radius:18px;
+  background:var(--card-bg);border:1px solid var(--border);margin-bottom:28px;}
+.cashback-left{display:flex;align-items:center;gap:14px;}
+.cashback-icon{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#b45309,#d97706);flex-shrink:0;}
+.cashback-name{font-size:14px;font-weight:400;}
+.cashback-sub{font-size:11px;color:var(--text-muted);margin-top:2px;}
+.cashback-amt{font-size:26px;font-weight:300;color:var(--green);font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.5px;}
+
+.section-label{font-size:10px;font-weight:500;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;}
+.your-cards-strip{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;margin-bottom:28px;}
+.card-tile{width:180px;height:114px;border-radius:12px;flex-shrink:0;padding:14px 16px;
+  display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 4px 12px rgba(0,0,0,0.3);position:relative;overflow:hidden;}
+.card-tile .ct-name{font-size:10px;color:rgba(255,255,255,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:1;}
+.card-tile .ct-bottom{display:flex;justify-content:space-between;align-items:flex-end;position:relative;z-index:1;}
+.card-tile .ct-mask{font-size:10px;color:rgba(255,255,255,0.6);font-weight:300;}
+.card-tile .ct-chip{width:24px;height:18px;border-radius:3px;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.15);}
+
+.challenge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
+.challenge-tile{background:var(--card-bg);border:1px solid var(--border);border-radius:14px;padding:16px 18px;}
+.challenge-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
+.challenge-name{font-size:13px;font-weight:400;}
+.challenge-sub{font-size:11px;color:var(--text-muted);margin-top:2px;}
+.challenge-status{font-size:10px;padding:2px 7px;border-radius:10px;background:var(--gold-soft);color:var(--gold);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;margin-left:8px;}
+.challenge-status.done{background:rgba(52,211,153,0.12);color:var(--green);}
+.progress-row{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px;}
+.progress-track{height:5px;border-radius:5px;background:var(--elevated);overflow:hidden;margin-bottom:6px;}
+.progress-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--gold),#e8c060);}
+.progress-note{font-size:11px;color:var(--text-muted);}
+
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;padding:10px 0;
+  background:var(--bg);border-top:1px solid var(--border);}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:var(--text-muted);}
+.nav-item.active{color:#3b82f6;}
 </style>
 </head>
 <body>
-<h2>Portfolio</h2>
-<div class="sub">2026-07-01 — 2026-07-19</div>
 
-<div class="ecosystem-grid">
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/hilton_honors.png"/></div>
-    <div class="eco-name">Hilton Honors</div>
-    <div class="eco-points">6,548</div>
+<div class="topbar">
+  <h1>Cards</h1>
+  <div class="topbar-right">
+    <span class="badge-active">13 ACTIVE</span>
+    <div class="icon-btn">&#9789;</div>
+    <div class="icon-btn">&#8635;</div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/amex_mr.png"/></div>
-    <div class="eco-name">Amex MR</div>
-    <div class="eco-points">3,445</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active">Portfolio</div>
+  <div class="tab">Swipe Advisor</div>
+  <div class="tab">Card Management</div>
+</div>
+
+<div class="content">
+  <div class="portfolio-head">
+    <div>
+      <h2>Portfolio</h2>
+      <div class="sub">2026-07-01 — 2026-07-24</div>
+    </div>
+    <div class="period-row">
+      <div class="period-toggle">
+        <div class="period-btn">MTD</div>
+        <div class="period-btn active">QTD</div>
+        <div class="period-btn">YTD</div>
+      </div>
+      <select class="year-select"><option>2026</option></select>
+    </div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/citi_thankyou.png"/></div>
-    <div class="eco-name">Citi ThankYou</div>
-    <div class="eco-points">2,500</div>
+
+  <div class="ecosystem-grid">
+    <div class="ecosystem-tile" style="--brand:#7c3aed">
+      <img class="logo" src="/static/ecosystem-logos/hilton_t_dark.png"/>
+      <div class="eco-points">7,223</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#059669">
+      <img class="logo" src="/static/ecosystem-logos/amex_t_light.png"/>
+      <div class="eco-points">5,449</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#0891b2">
+      <img class="logo" src="/static/ecosystem-logos/citi_t_dark.png"/>
+      <div class="eco-points">2,500</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#1a56db">
+      <img class="logo" src="/static/ecosystem-logos/chase_t_dark.png"/>
+      <div class="eco-points">1,829</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#b45309">
+      <img class="logo" src="/static/ecosystem-logos/bonvoy_t_dark.png"/>
+      <div class="eco-points">2,209</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#374151">
+      <img class="logo" src="/static/ecosystem-logos/united_t_dark.png"/>
+      <div class="eco-points">1,571</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#1e40af">
+      <img class="logo" src="/static/ecosystem-logos/delta_t_dark.png"/>
+      <div class="eco-points">15</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#9f1239">
+      <img class="logo" src="/static/ecosystem-logos/hyatt_t_dark.png"/>
+      <div class="eco-points">0</div>
+    </div>
+    <div class="ecosystem-tile" style="--brand:#0d9488">
+      <div class="logo" style="display:flex;align-items:center;font-size:15px;font-weight:600;color:var(--text-secondary)">Atmos Rewards</div>
+      <div class="eco-points">0</div>
+    </div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/chase_ur.png"/></div>
-    <div class="eco-name">Chase UR</div>
-    <div class="eco-points">1,777</div>
+
+  <div class="cashback-tile">
+    <div class="cashback-left">
+      <div class="cashback-icon"></div>
+      <div>
+        <div class="cashback-name">Cash Back</div>
+        <div class="cashback-sub">Earned this period</div>
+      </div>
+    </div>
+    <div class="cashback-amt">$4,989.63</div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/marriott_bonvoy.png"/></div>
-    <div class="eco-name">Marriott Bonvoy</div>
-    <div class="eco-points">2,209</div>
+
+  <div class="section-label">Your Cards</div>
+  <div class="your-cards-strip">
+    <div class="card-tile" style="background:linear-gradient(135deg,#7f1d1d,#450a0a)">
+      <div class="ct-name">World of Hyatt Card</div>
+      <div class="ct-bottom"><div class="ct-mask">···1677</div><div class="ct-chip"></div></div>
+    </div>
+    <div class="card-tile" style="background:linear-gradient(135deg,#1e3a5f,#0f172a)">
+      <div class="ct-name">Chase Sapphire Preferred</div>
+      <div class="ct-bottom"><div class="ct-mask">···3698</div><div class="ct-chip"></div></div>
+    </div>
+    <div class="card-tile" style="background:linear-gradient(135deg,#0d9488,#115e59)">
+      <div class="ct-name">Chase Freedom Unlimited</div>
+      <div class="ct-bottom"><div class="ct-mask">···4341</div><div class="ct-chip"></div></div>
+    </div>
+    <div class="card-tile" style="background:linear-gradient(135deg,#374151,#1f2937)">
+      <div class="ct-name">United Explorer 9968</div>
+      <div class="ct-bottom"><div class="ct-mask">···9968</div><div class="ct-chip"></div></div>
+    </div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/united_mileageplus.png"/></div>
-    <div class="eco-name">United MileagePlus</div>
-    <div class="eco-points">1,550</div>
+
+  <div class="section-label">Active Challenges</div>
+  <div class="challenge-grid">
+    <div class="challenge-tile">
+      <div class="challenge-top">
+        <div>
+          <div class="challenge-name">Hilton Aspire FNC</div>
+          <div class="challenge-sub">Hilton Aspire ···1009</div>
+        </div>
+        <div class="challenge-status">Active</div>
+      </div>
+      <div class="progress-row"><span>$13,899 spent</span><span>$30,000 goal</span></div>
+      <div class="progress-track"><div class="progress-fill" style="width:46%"></div></div>
+      <div class="progress-note">$16,101 to go</div>
+    </div>
+    <div class="challenge-tile">
+      <div class="challenge-top">
+        <div>
+          <div class="challenge-name">Employee Card SUB</div>
+          <div class="challenge-sub">Amex BBP ···1008</div>
+        </div>
+        <div class="challenge-status">Active</div>
+      </div>
+      <div class="progress-row"><span>$3,597 spent</span><span>$4,000 goal</span></div>
+      <div class="progress-track"><div class="progress-fill" style="width:90%"></div></div>
+      <div class="progress-note">$403 to go</div>
+    </div>
   </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/delta_skymiles.png"/></div>
-    <div class="eco-name">Delta SkyMiles</div>
-    <div class="eco-points">25</div>
-  </div>
-  <div class="ecosystem-tile">
-    <div class="logo-row"><img class="logo" src="http://localhost:5173/ecosystem-logos/atmos_rewards.png"/></div>
-    <div class="eco-name">Atmos Rewards</div>
-    <div class="eco-points">0</div>
-  </div>
+</div>
+
+<div class="bottom-nav">
+  <div class="nav-item active">&#8962;<span>Home</span></div>
+  <div class="nav-item">&#8646;<span>Txns</span></div>
+  <div class="nav-item active">&#9635;<span>Cards</span></div>
+  <div class="nav-item">&#9201;<span>Budget</span></div>
+  <div class="nav-item">&#8942;<span>More</span></div>
 </div>
 
 </body>

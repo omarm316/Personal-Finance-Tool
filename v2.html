@@ -7127,6 +7127,19 @@ function ChallengeCard({ch,onClick}){
 }
 
 function CardsPage({toast,refreshKey}){
+  // Theme toggle mutates document.documentElement's data-theme attribute
+  // directly (colors update instantly via CSS, no React re-render needed
+  // for that) — but the ecosystem logo picker below needs to know the
+  // *current* theme at render time, and a stale read (e.g. via a plain
+  // document.documentElement.getAttribute() inline in the render) would
+  // only reflect whatever the theme was the last time this component
+  // happened to re-render for some other reason. Track it as real state.
+  const[pageTheme,setPageTheme]=useState(()=>document.documentElement.getAttribute('data-theme')||'dark');
+  useEffect(()=>{
+    const obs=new MutationObserver(()=>setPageTheme(document.documentElement.getAttribute('data-theme')||'dark'));
+    obs.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+    return()=>obs.disconnect();
+  },[]);
   const[accounts,setAccounts]=useState([]);
   const[allAccounts,setAllAccounts]=useState([]);
   const[products,setProducts]=useState([]);
@@ -7436,65 +7449,73 @@ function CardsPage({toast,refreshKey}){
                 if(n.includes('united')||n.includes('mileageplus'))return'#374151';
                 return'var(--blue-primary)';
               };
-              const ecoGradient=(name)=>{
+              // Real vector-quality logos Omer supplied (assets/logos_color/,
+              // 2026-07-24) — replaces the old small monochrome-silhouette
+              // treatment. Files are per-theme (_t_dark/_t_light); some
+              // ecosystems only have one variant (chase=dark only, amex=light
+              // only — amex's mark has no dark-only elements so its light
+              // version reads fine on either theme), so this falls back to
+              // whichever exists rather than requiring both.
+              const logoVariants={hilton:['dark','light'],amex:['light'],citi:['dark','light'],chase:['dark'],
+                bonvoy:['dark','light'],delta:['dark','light'],hyatt:['dark','light'],united:['dark','light'],aa:['dark','light']};
+              // Marks with their own solid-color backdrop (e.g. Amex's filled
+              // blue box) read fine against either theme, so it's safe to
+              // reuse their only variant on the "wrong" theme. Bare line-art
+              // marks (Chase's dark-only white text has no backdrop of its
+              // own) go invisible if forced onto the mismatched theme — for
+              // those, no available variant means no logo, not a broken one.
+              const selfContainedKeys=new Set(['amex']);
+              const logoKey=(name)=>{
                 const n=(name||'').toLowerCase();
-                if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,var(--blue-primary))';
-                if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
-                if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
-                if(n.includes('citi'))return'linear-gradient(135deg,#155e75,#06b6d4)';
-                if(n.includes('marriott')||n.includes('bonvoy'))return'linear-gradient(135deg,#92400e,#d97706)';
-                if(n.includes('delta')||n.includes('skymiles'))return'linear-gradient(135deg,#1e3a5f,var(--blue-primary))';
-                if(n.includes('hyatt'))return'linear-gradient(135deg,#7f1d1d,#dc2626)';
-                if(n.includes('united')||n.includes('mileageplus'))return'linear-gradient(135deg,#374151,#6b7280)';
-                return'linear-gradient(135deg,var(--blue-primary),#60a5fa)';
-              };
-              const ecoImg=(name)=>{
-                const n=(name||'').toLowerCase();
-                if(n.includes('chase')||n.includes('ultimate'))return'/static/ecosystems/chase_ur.png';
-                if(n.includes('amex')||n.includes('membership'))return'/static/ecosystems/amex_mr.png';
-                if(n.includes('hilton'))return'/static/ecosystems/hilton_honors.png';
-                if(n.includes('citi'))return'/static/ecosystems/citi_thankyou.png';
-                if(n.includes('marriott')||n.includes('bonvoy'))return'/static/ecosystems/marriott_bonvoy.png';
-                if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
-                if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
-                if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
-                if(n.includes('capital one'))return'/static/ecosystems/capital_one_miles.png';
-                if(n.includes('ihg'))return'/static/ecosystems/ihg_rewards.png';
-                if(n.includes('aadvantage')||n.includes('aa '))return'/static/ecosystems/aa_aadvantage.png';
-                if(n.includes('southwest'))return'/static/ecosystems/southwest_rr.png';
-                if(n.includes('jetblue'))return'/static/ecosystems/jetblue_trueblue.png';
-                if(n.includes('alaska'))return'/static/ecosystems/alaska_mileage_plan.png';
-                if(n.includes('atmos'))return'/static/ecosystems/atmos_rewards.png';
+                if(n.includes('chase')||n.includes('ultimate'))return'chase';
+                if(n.includes('amex')||n.includes('membership'))return'amex';
+                if(n.includes('hilton'))return'hilton';
+                if(n.includes('citi'))return'citi';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'bonvoy';
+                if(n.includes('delta')||n.includes('skymiles'))return'delta';
+                if(n.includes('hyatt'))return'hyatt';
+                if(n.includes('united')||n.includes('mileageplus'))return'united';
+                if(n.includes('aadvantage'))return'aa';
                 return null;
+              };
+              const ecoLogo=(name)=>{
+                const key=logoKey(name);
+                if(!key)return null;
+                const variants=logoVariants[key]||[];
+                const want=pageTheme==='light'?'light':'dark';
+                if(!variants.includes(want)&&!selfContainedKeys.has(key))return null;
+                const use=variants.includes(want)?want:variants[0];
+                return use?`/static/ecosystem-logos/${key}_t_${use}.png`:null;
               };
               const pointsEcos=earnData.ecosystems.filter(e=>!e.is_cash_back);
               const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
               return(
                 <>
-                  {/* ── Ecosystem Grid (2 columns) ── */}
-                  <div className="grid-2" style={{marginBottom:24}}>
+                  {/* ── Ecosystem Grid — big logo-forward tiles ── */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))',gap:14,marginBottom:24}}>
                     {pointsEcos.map(eco=>{
                       const col=ecoColor(eco.name);
-                      const img=ecoImg(eco.name);
-                      const grad=ecoGradient(eco.name);
+                      const logo=ecoLogo(eco.name);
                       return(
                         <div key={eco.id}
-                          style={{display:'flex',alignItems:'center',gap:16,padding:'18px 20px',borderRadius:14,
+                          style={{padding:'28px 24px 26px',borderRadius:18,minHeight:220,
                             background:'var(--surface)',border:'1px solid var(--border)',cursor:'pointer',
+                            position:'relative',overflow:'hidden',display:'flex',flexDirection:'column',justifyContent:'space-between',
                             transition:'all 0.2s ease'}}
                           onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
                           onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor=`${col}44`;}}
                           onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
-                          <div style={{width:44,height:30,borderRadius:8,background:grad,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-                            {img&&<img src={img} alt="" style={{width:28,height:28,objectFit:'contain',filter:'brightness(0) invert(1)',opacity:0.9}} onError={e=>{e.target.style.display='none'}}/>}
+                          <div style={{position:'absolute',top:-60,right:-60,width:200,height:200,borderRadius:'50%',
+                            background:`radial-gradient(circle, ${col} 0%, transparent 70%)`,opacity:0.16,pointerEvents:'none'}}/>
+                          {logo
+                            ?<img src={logo} alt={eco.name} style={{height:96,maxWidth:'100%',objectFit:'contain',objectPosition:'left center',position:'relative',marginBottom:14}}
+                                onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block';}}/>
+                            :null}
+                          <div style={{fontSize:15,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:14,display:logo?'none':'block'}}>{eco.name}</div>
+                          <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
+                            <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--gold)'}}>{eco.points_earned.toLocaleString()}</div>
+                            <div style={{color:'var(--text-muted)',fontSize:16,opacity:0.4}}>›</div>
                           </div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{eco.name}</div>
-                          </div>
-                          <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:26,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-1px',lineHeight:1,color:'var(--blue-primary)'}}>{eco.points_earned.toLocaleString()}</div>
-                          </div>
-                          <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
                         </div>
                       );
                     })}
