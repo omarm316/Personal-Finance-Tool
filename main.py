@@ -4621,6 +4621,149 @@ async def cards_portfolio(db: Session = Depends(get_db)):
     }
 
 
+def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
+                                redemption_rows, transfers_out, transfers_in,
+                                adjustment_rows, person_transfer_rows, known_people):
+    """
+    Current balance, split per-person (Omer / Daniella / "Shared" for
+    untagged legacy data) with a combined Total. Shared by
+    /api/ecosystems/{id}/earn-detail (full ledger detail, the source of
+    truth) and /api/cards/earn-summary (Portfolio tile headline number) so
+    the two can never silently diverge on what "current balance" means —
+    they did exactly that (period-earned vs. all-time balance) before this
+    was factored out, which is what prompted this refactor.
+
+    A manual PointsBalanceSnapshot (if any exists FOR THAT BUCKET) is its
+    baseline — corrects for drift the computed math can't see (unlogged
+    promo bonuses, benefit credits, redemptions made outside this app,
+    etc.). Only activity after the snapshot's date is added on top;
+    everything before it is assumed already folded into the snapshotted
+    value. Each bucket can have its own baseline date (Omer might set his
+    balance today, Daniella's might still be unset) — there is
+    deliberately no single shared "as of" date at the Total level.
+    """
+    from datetime import date as _date
+
+    def _bucket_matches(row_person, bucket):
+        if bucket is None:  # "Shared" — untagged/legacy rows
+            return not row_person
+        return row_person == bucket
+
+    def _compute_balance_bucket(bucket):
+        snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
+        if bucket is None:
+            snap_q = snap_q.filter(or_(PointsBalanceSnapshot.person.is_(None), PointsBalanceSnapshot.person == ''))
+        else:
+            snap_q = snap_q.filter(PointsBalanceSnapshot.person == bucket)
+        latest = snap_q.order_by(PointsBalanceSnapshot.snapshot_date.desc()).first()
+        b_baseline = latest.balance if latest else 0.0
+        b_baseline_date = latest.snapshot_date if latest else None
+
+        b_earned = 0.0
+        if eco_accts:
+            earn_q = db.query(Transaction).filter(
+                Transaction.account_id.in_(eco_accts),
+                Transaction.is_excluded != True,
+            )
+            if bucket is None:
+                earn_q = earn_q.filter(or_(Transaction.spender.is_(None), Transaction.spender == ''))
+            else:
+                earn_q = earn_q.filter(Transaction.spender == bucket)
+            if b_baseline_date:
+                earn_q = earn_q.filter(Transaction.date > b_baseline_date)
+            for t in earn_q.all():
+                if t.action != 'Expense':
+                    continue
+                info = acct_info.get(t.account_id)
+                if not info:
+                    continue
+                b_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info.get('issuer'))['points']
+
+        b_redeemed = sum(
+            r.points_redeemed for r in redemption_rows
+            if _bucket_matches(r.person, bucket) and (not b_baseline_date or r.redemption_date > b_baseline_date)
+        )
+        b_transferred_out = sum(
+            t['points_sent'] for t in transfers_out
+            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
+        )
+        b_transferred_in = sum(
+            t['points_received'] for t in transfers_in
+            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
+        )
+        b_adjusted = sum(
+            a.points_delta for a in adjustment_rows
+            if _bucket_matches(a.person, bucket) and (not b_baseline_date or a.adjustment_date > b_baseline_date)
+        )
+        # Person-to-person transfers only ever move between two named
+        # people — "Shared" can't send or receive one.
+        b_person_out = 0.0
+        b_person_in = 0.0
+        if bucket is not None:
+            b_person_out = sum(
+                pt.points for pt in person_transfer_rows
+                if pt.from_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
+            )
+            b_person_in = sum(
+                pt.points for pt in person_transfer_rows
+                if pt.to_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
+            )
+
+        b_current = round(
+            b_baseline + b_earned - b_redeemed - b_transferred_out + b_transferred_in
+            + b_adjusted - b_person_out + b_person_in
+        )
+        return {
+            'starting_balance': round(b_baseline, 2),
+            'earned_since_baseline': round(b_earned, 2),
+            'redeemed_since_baseline': round(b_redeemed, 2),
+            'transferred_out_since_baseline': round(b_transferred_out, 2),
+            'transferred_in_since_baseline': round(b_transferred_in, 2),
+            'adjusted_since_baseline': round(b_adjusted, 2),
+            'person_transfer_out_since_baseline': round(b_person_out, 2),
+            'person_transfer_in_since_baseline': round(b_person_in, 2),
+            'current_balance': b_current,
+            'balance_as_of': b_baseline_date.isoformat() if b_baseline_date else None,
+        }
+
+    balance_by_person = {person: _compute_balance_bucket(person) for person in known_people}
+    shared_bucket = _compute_balance_bucket(None)
+    # Only surface "Shared" if it actually holds something — otherwise every
+    # ecosystem would show a pointless all-zero third row forever.
+    if any(shared_bucket[f] for f in (
+        'starting_balance', 'earned_since_baseline', 'redeemed_since_baseline',
+        'transferred_out_since_baseline', 'transferred_in_since_baseline',
+        'adjusted_since_baseline', 'current_balance',
+    )):
+        balance_by_person['Shared'] = shared_bucket
+
+    def _total_field(field):
+        return round(sum(b[field] for b in balance_by_person.values()), 2)
+
+    current_balance = round(sum(b['current_balance'] for b in balance_by_person.values()))
+    # No single shared "as of" date makes sense once buckets can each have
+    # their own — surface the most recent one that exists as a summary
+    # label (None if not a single bucket has a snapshot yet).
+    _bucket_dates = [b['balance_as_of'] for b in balance_by_person.values() if b['balance_as_of']]
+    baseline_date = max((_date.fromisoformat(d) for d in _bucket_dates), default=None)
+
+    balance_breakdown = {
+        'starting_balance': _total_field('starting_balance'),
+        'earned_since_baseline': _total_field('earned_since_baseline'),
+        'redeemed_since_baseline': _total_field('redeemed_since_baseline'),
+        'transferred_out_since_baseline': _total_field('transferred_out_since_baseline'),
+        'transferred_in_since_baseline': _total_field('transferred_in_since_baseline'),
+        'adjusted_since_baseline': _total_field('adjusted_since_baseline'),
+    }
+
+    return {
+        'current_balance': current_balance,
+        'balance_as_of': baseline_date.isoformat() if baseline_date else None,
+        'balance_breakdown': balance_breakdown,
+        'balance_by_person': balance_by_person,
+    }
+
+
 @app.get("/api/cards/earn-summary")
 async def cards_earn_summary(
     period: str = 'qtd',
@@ -4841,6 +4984,49 @@ async def cards_earn_summary(
             }
             for aid, p in sorted(data['by_acct'].items(), key=lambda x: -x[1])
         ]
+
+        # Current balance — same math as the ecosystem drill-down page (see
+        # _compute_ecosystem_balance), not just this period's earn, so the
+        # Portfolio tile and the drill-down page never show two different
+        # numbers for "how many points do I have." Skipped for cash back
+        # (not a points balance to track) and Amex not currently modeled here.
+        current_balance = None
+        if not eco.is_cash_back:
+            eco_accts_bal = list(data['by_acct'].keys())
+            redemption_rows_bal = db.query(Redemption).filter_by(ecosystem_id=eco_id).all()
+            transfers_out_bal = [
+                _serialize_transfer(t) for t in
+                db.query(Transfer).filter_by(source_ecosystem_id=eco_id).all()
+            ]
+            transfers_in_bal = [
+                _serialize_transfer(t) for t in
+                db.query(Transfer).filter_by(destination_ecosystem_id=eco_id).all()
+            ]
+            adjustment_rows_bal = db.query(PointsAdjustment).filter_by(ecosystem_id=eco_id).all()
+            person_transfer_rows_bal = db.query(PersonPointsTransfer).filter_by(ecosystem_id=eco_id).all()
+            known_people_bal = {'Omer', 'Daniella'}
+            for s in db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id).all():
+                if s.person:
+                    known_people_bal.add(s.person)
+            for a in adjustment_rows_bal:
+                if a.person:
+                    known_people_bal.add(a.person)
+            for r in redemption_rows_bal:
+                if r.person:
+                    known_people_bal.add(r.person)
+            for t in transfers_out_bal + transfers_in_bal:
+                if t.get('person'):
+                    known_people_bal.add(t['person'])
+            for pt in person_transfer_rows_bal:
+                known_people_bal.add(pt.from_person)
+                known_people_bal.add(pt.to_person)
+            bal = _compute_ecosystem_balance(
+                db, eco_id, eco_accts_bal, acct_info, cat_parent_map,
+                redemption_rows_bal, transfers_out_bal, transfers_in_bal,
+                adjustment_rows_bal, person_transfer_rows_bal, sorted(known_people_bal),
+            )
+            current_balance = bal['current_balance']
+
         ecosystems_out.append({
             'id':            eco_id,
             'name':          eco.name,
@@ -4849,6 +5035,7 @@ async def cards_earn_summary(
             'is_cash_back':  eco.is_cash_back,
             'points_earned': pts,
             'est_value':     value,
+            'current_balance': current_balance,
             'cards':         cards,
         })
     ecosystems_out.sort(key=lambda x: x['est_value'], reverse=True)
@@ -5328,136 +5515,22 @@ async def ecosystem_earn_detail(
             'issuer':        card.issuer if card else None,
         }
 
-    # Current balance, split per-person (Omer / Daniella / "Shared" for
-    # untagged legacy data) with a combined Total. A manual
-    # PointsBalanceSnapshot (if any exists FOR THAT BUCKET) is its baseline —
-    # corrects for drift the computed math can't see (unlogged promo
-    # bonuses, benefit credits, redemptions made outside this app, etc.).
-    # Only activity after the snapshot's date is added on top; everything
-    # before it is assumed already folded into the snapshotted value. Each
-    # bucket can have its own baseline date (Omer might set his balance
-    # today, Daniella's might still be unset) — there is deliberately no
-    # single shared "as of" date at the Total level. Deliberately NOT
-    # period-scoped like total_points below (which only reflects the
-    # selected MTD/QTD/YTD window) — this is "how many points do we
-    # actually have right now," not "how many did we earn this quarter."
-    def _bucket_matches(row_person, bucket):
-        if bucket is None:  # "Shared" — untagged/legacy rows
-            return not row_person
-        return row_person == bucket
-
-    def _compute_balance_bucket(bucket):
-        snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
-        if bucket is None:
-            snap_q = snap_q.filter(or_(PointsBalanceSnapshot.person.is_(None), PointsBalanceSnapshot.person == ''))
-        else:
-            snap_q = snap_q.filter(PointsBalanceSnapshot.person == bucket)
-        latest = snap_q.order_by(PointsBalanceSnapshot.snapshot_date.desc()).first()
-        b_baseline = latest.balance if latest else 0.0
-        b_baseline_date = latest.snapshot_date if latest else None
-
-        b_earned = 0.0
-        if eco_accts:
-            earn_q = db.query(Transaction).filter(
-                Transaction.account_id.in_(eco_accts),
-                Transaction.is_excluded != True,
-            )
-            if bucket is None:
-                earn_q = earn_q.filter(or_(Transaction.spender.is_(None), Transaction.spender == ''))
-            else:
-                earn_q = earn_q.filter(Transaction.spender == bucket)
-            if b_baseline_date:
-                earn_q = earn_q.filter(Transaction.date > b_baseline_date)
-            for t in earn_q.all():
-                if t.action != 'Expense':
-                    continue
-                info = acct_info.get(t.account_id)
-                if not info:
-                    continue
-                b_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])['points']
-
-        b_redeemed = sum(
-            r.points_redeemed for r in redemption_rows
-            if _bucket_matches(r.person, bucket) and (not b_baseline_date or r.redemption_date > b_baseline_date)
-        )
-        b_transferred_out = sum(
-            t['points_sent'] for t in transfers_out
-            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
-        )
-        b_transferred_in = sum(
-            t['points_received'] for t in transfers_in
-            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
-        )
-        b_adjusted = sum(
-            a.points_delta for a in adjustment_rows
-            if _bucket_matches(a.person, bucket) and (not b_baseline_date or a.adjustment_date > b_baseline_date)
-        )
-        # Person-to-person transfers only ever move between two named
-        # people — "Shared" can't send or receive one.
-        b_person_out = 0.0
-        b_person_in = 0.0
-        if bucket is not None:
-            b_person_out = sum(
-                pt.points for pt in person_transfer_rows
-                if pt.from_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
-            )
-            b_person_in = sum(
-                pt.points for pt in person_transfer_rows
-                if pt.to_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
-            )
-
-        b_current = round(
-            b_baseline + b_earned - b_redeemed - b_transferred_out + b_transferred_in
-            + b_adjusted - b_person_out + b_person_in
-        )
-        return {
-            'starting_balance': round(b_baseline, 2),
-            'earned_since_baseline': round(b_earned, 2),
-            'redeemed_since_baseline': round(b_redeemed, 2),
-            'transferred_out_since_baseline': round(b_transferred_out, 2),
-            'transferred_in_since_baseline': round(b_transferred_in, 2),
-            'adjusted_since_baseline': round(b_adjusted, 2),
-            'person_transfer_out_since_baseline': round(b_person_out, 2),
-            'person_transfer_in_since_baseline': round(b_person_in, 2),
-            'current_balance': b_current,
-            'balance_as_of': b_baseline_date.isoformat() if b_baseline_date else None,
-        }
-
-    balance_by_person = {person: _compute_balance_bucket(person) for person in known_people}
-    shared_bucket = _compute_balance_bucket(None)
-    # Only surface "Shared" if it actually holds something — otherwise every
-    # ecosystem would show a pointless all-zero third row forever.
-    if any(shared_bucket[f] for f in (
-        'starting_balance', 'earned_since_baseline', 'redeemed_since_baseline',
-        'transferred_out_since_baseline', 'transferred_in_since_baseline',
-        'adjusted_since_baseline', 'current_balance',
-    )):
-        balance_by_person['Shared'] = shared_bucket
-
-    def _total_field(field):
-        return round(sum(b[field] for b in balance_by_person.values()), 2)
-
-    baseline = _total_field('starting_balance')
-    earned_since = _total_field('earned_since_baseline')
-    redeemed_since = _total_field('redeemed_since_baseline')
-    transferred_out_since = _total_field('transferred_out_since_baseline')
-    transferred_in_since = _total_field('transferred_in_since_baseline')
-    adjusted_since = _total_field('adjusted_since_baseline')
-    current_balance = round(sum(b['current_balance'] for b in balance_by_person.values()))
-    # No single shared "as of" date makes sense once buckets can each have
-    # their own — surface the most recent one that exists as a summary
-    # label (None if not a single bucket has a snapshot yet).
-    _bucket_dates = [b['balance_as_of'] for b in balance_by_person.values() if b['balance_as_of']]
-    baseline_date = max((_date.fromisoformat(d) for d in _bucket_dates), default=None)
-
-    balance_breakdown = {
-        'starting_balance': round(baseline, 2),
-        'earned_since_baseline': round(earned_since, 2),
-        'redeemed_since_baseline': round(redeemed_since, 2),
-        'transferred_out_since_baseline': round(transferred_out_since, 2),
-        'transferred_in_since_baseline': round(transferred_in_since, 2),
-        'adjusted_since_baseline': round(adjusted_since, 2),
-    }
+    # Current balance, split per-person with a combined Total — see
+    # _compute_ecosystem_balance() for the actual math (shared with
+    # /api/cards/earn-summary's Portfolio-tile headline number so the two
+    # can never silently diverge). Deliberately NOT period-scoped like
+    # total_points below (which only reflects the selected MTD/QTD/YTD
+    # window) — this is "how many points do we actually have right now,"
+    # not "how many did we earn this quarter."
+    _bal = _compute_ecosystem_balance(
+        db, eco_id, eco_accts, acct_info, cat_parent_map,
+        redemption_rows, transfers_out, transfers_in, adjustment_rows,
+        person_transfer_rows, known_people,
+    )
+    current_balance = _bal['current_balance']
+    baseline_date = _date.fromisoformat(_bal['balance_as_of']) if _bal['balance_as_of'] else None
+    balance_breakdown = _bal['balance_breakdown']
+    balance_by_person = _bal['balance_by_person']
 
     if not eco_accts:
         return {

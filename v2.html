@@ -7716,7 +7716,10 @@ function CardsPage({toast,refreshKey}){
                             :null}
                           <div style={{fontSize:15,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:14,display:logo?'none':'block'}}>{eco.name}</div>
                           <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
-                            <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--gold)'}}>{eco.points_earned.toLocaleString()}</div>
+                            <div>
+                              <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--gold)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
+                              {eco.current_balance!=null&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:5,fontWeight:300}}>+{eco.points_earned.toLocaleString()} this {earnPeriod.toUpperCase()}</div>}
+                            </div>
                             <div style={{color:'var(--text-muted)',fontSize:16,opacity:0.4}}>›</div>
                           </div>
                         </div>
