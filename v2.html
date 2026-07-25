@@ -31,7 +31,6 @@
   --green: #10B981;
   --red: #EF4444;
   --amber: #F59E0B;
-  --gold: #F59E0B;
   --sidebar-w: 240px;
   --glass-blur: blur(20px);
 }
@@ -186,7 +185,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   top: 0;
   z-index: 90;
 }
-.topbar-title { font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.topbar-title { font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 400; letter-spacing: -0.3px; color: var(--text-primary); }
 
 .theme-toggle {
   background: var(--surface);
@@ -234,7 +233,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   gap: 8px;
   background: var(--accent-gradient);
   color: white;
-  border: none;
+  border: 1px solid rgba(var(--blue-primary-rgb), 0.4);
   padding: 10px 20px;
   border-radius: 12px;
   font-weight: 600;
@@ -252,10 +251,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 
 .btn-sm { padding: 6px 14px; border-radius: 10px; font-size: 12px; }
-.btn-secondary { background: var(--elevated); color: var(--text-primary); border: none !important; box-shadow: 0 2px 10px rgba(0,0,0,0.05); outline: none !important; }
+.btn-secondary { background: var(--elevated); color: var(--text-primary); border: 1px solid var(--border-strong) !important; box-shadow: 0 2px 10px rgba(0,0,0,0.05); outline: none !important; }
 .btn-secondary:hover { background: var(--surface-hover); border-color: var(--blue-soft); }
-.btn-ghost { background: none; color: var(--text-secondary); box-shadow: none; border: none; outline: none; }
-.btn-ghost:hover { background: var(--surface-hover); color: var(--text-primary); }
+.btn-ghost { background: none; color: var(--text-secondary); box-shadow: none; border: 1px solid var(--border); outline: none; }
+.btn-ghost:hover { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-strong); }
 
 .sel-pill { display: flex; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 4px; gap: 4px; backdrop-filter: var(--glass-blur); }
 .sel-pill button { border: none; background: none; color: var(--text-secondary); padding: 6px 16px; border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
@@ -352,8 +351,8 @@ tr:hover td { background: var(--surface-hover); }
 
 /* ── Button variants ── */
 .edit-actions { display: flex; align-items: center; gap: 8px; }
-.btn-primary { background: var(--accent-gradient); color: white; }
-.btn-success { background: var(--green); color: white; }
+.btn-primary { background: var(--accent-gradient); color: white; border: 1px solid rgba(var(--blue-primary-rgb), 0.4); }
+.btn-success { background: var(--green); color: white; border: 1px solid rgba(16, 185, 129, 0.4); }
 .btn-xs { padding: 4px 10px; border-radius: 8px; font-size: 11px; }
 
 /* ── Misc ── */
@@ -2100,8 +2099,8 @@ function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSel
                 <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{fmtDate(t.date)}</span>
                 {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300,overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
                 <span style={{fontSize:10,padding:'1px 7px',borderRadius:4,
-                  background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'var(--gold-soft)':'var(--elevated)'),
-                  color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--gold)':'var(--text-muted)'),fontWeight:400}}>
+                  background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)'),
+                  color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--blue-primary)':'var(--text-muted)'),fontWeight:400}}>
                   {catLabel}
                 </span>
                 {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(251,191,36,0.12)',color:'var(--amber)',fontWeight:400}}>Review</span>}
@@ -2339,7 +2338,7 @@ function TransactionsPage({categories,toast,refreshKey}){
         {enrichJob&&(()=>{
           const elapsed=enrichJob.startedAt?Math.round((Date.now()-enrichJob.startedAt)/1000):0;
           const timedOut=enrichJob.status==='running'&&elapsed>90;
-          const bgColor=timedOut?'rgba(251,191,36,0.08)':enrichJob.status==='done'?'rgba(52,211,153,0.08)':enrichJob.status==='error'?'rgba(248,113,113,0.08)':'var(--gold-soft)';
+          const bgColor=timedOut?'rgba(251,191,36,0.08)':enrichJob.status==='done'?'rgba(52,211,153,0.08)':enrichJob.status==='error'?'rgba(248,113,113,0.08)':'rgba(var(--blue-primary-rgb), 0.12)';
           return(
           <div style={{padding:'8px 16px',background:bgColor,borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:300}}>
             {enrichJob.status==='running'&&<div className="spinner" style={{width:14,height:14,flexShrink:0}}/>}
@@ -2359,8 +2358,8 @@ function TransactionsPage({categories,toast,refreshKey}){
           );
         })()}
         {selectedIds.size>0&&(
-          <div style={{padding:'8px 16px',background:'var(--gold-soft)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
-            <span style={{fontWeight:400,color:'var(--gold)'}}>{selectedIds.size} selected</span>
+          <div style={{padding:'8px 16px',background:'rgba(var(--blue-primary-rgb), 0.12)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+            <span style={{fontWeight:400,color:'var(--blue-primary)'}}>{selectedIds.size} selected</span>
             <button type="button" className="btn btn-sm btn-primary" onClick={()=>setShowBatchEdit(true)}>✎ Edit Selected</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setSelectedIds(new Set())}>✕ Deselect All</button>
           </div>
@@ -2522,7 +2521,7 @@ function BudgetBarChart({actuals,targets,actualsPrior,targetsPrior,expenseCats})
   const gv=p=>cs?cs.getPropertyValue(p).trim():'';
   const gridC=gv('--border')||'rgba(255,255,255,0.06)';
   const labelC=gv('--text-muted')||'#707080';
-  const goldC=gv('--gold')||'#d4a44a';
+  const curC=gv('--blue-primary')||'#2563EB';
   const greenC=gv('--green')||'#34d399';
   const amberC=gv('--amber')||'#fbbf24';
   const redC=gv('--red')||'#f87171';
@@ -2545,7 +2544,7 @@ function BudgetBarChart({actuals,targets,actualsPrior,targetsPrior,expenseCats})
         const x=xMid(i)-barW/2;
         return(
           <g key={i}>
-            {isCur&&<rect x={pad.left+i*colW} y={pad.top} width={colW} height={cH} fill={goldC} opacity={0.06} rx={2}/>}
+            {isCur&&<rect x={pad.left+i*colW} y={pad.top} width={colW} height={cH} fill={curC} opacity={0.06} rx={2}/>}
             {actual>0&&<rect x={x} y={yV(actual)} width={barW} height={bH} fill={barColor} opacity={0.82} rx={2}/>}
             {budget>0&&<line x1={x-3} y1={yV(budget)} x2={x+barW+3} y2={yV(budget)} stroke={labelC} strokeWidth={2} strokeLinecap="round"/>}
             <text x={xMid(i)} y={H-6} textAnchor="middle" fontSize={9} fill={isCur?txtC:labelC} fontWeight={isCur?500:300}>{label}</text>
@@ -3059,7 +3058,7 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
       {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
 
       {/* Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+      <header className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', marginBottom: 0, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h2 style={{fontSize: 28, fontWeight: 600, letterSpacing: '-0.5px'}}>Good {greeting}, Omer</h2>
           <p style={{fontSize: 14, color: 'var(--text-secondary)', marginTop: 4}}>Here's your financial overview today.</p>
@@ -3481,7 +3480,7 @@ function DeleteAccountModal({account,onDone,onClose}){
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'none',padding:'6px 14px'}} onClick={doDelete} disabled={busy}>{busy?'Deleting…':'Delete Permanently'}</button>
+          <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'1px solid rgba(248,113,113,0.4)',padding:'6px 14px'}} onClick={doDelete} disabled={busy}>{busy?'Deleting…':'Delete Permanently'}</button>
         </div>
       </div>
     </div>
@@ -3618,8 +3617,7 @@ function AccountsPage({banks,onConnectBank,onSync,toast,refreshKey}){
       {deleteAccount&&<DeleteAccountModal account={deleteAccount} onDone={handleDeleteDone} onClose={()=>setDeleteAccount(null)}/>}
 
       {/* Page Header */}
-      <div className="card" style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 24px', marginBottom:24}}>
-        <h2 style={{margin:0, fontSize:22, fontFamily:'Outfit, sans-serif'}}>Accounts</h2>
+      <div className="card" style={{display:'flex', justifyContent:'flex-end', alignItems:'center', padding:'16px 24px', marginBottom:24}}>
         <div style={{display:'flex', gap:10}}>
           <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();onSync()}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:6}}><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -4166,10 +4164,10 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
   return(
     <div>
       {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
-      <div style={{display:'flex',gap:24,marginBottom:20,borderBottom:'1px solid var(--border)',paddingBottom:0,width:'fit-content'}}>
+      <div className="card" style={{display:'flex',gap:24,marginBottom:24,padding:'12px 24px'}}>
         {tabs.map(t=>(<button type="button" key={t.id} onClick={()=>setTab(t.id)}
-          style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,
-            background:'transparent',color:tab===t.id?'var(--gold)':'var(--text-muted)',transition:'all 0.15s',marginBottom:'-1px'}}>{t.label}</button>))}
+          style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,
+            background:'transparent',color:tab===t.id?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s',marginBottom:'-1px'}}>{t.label}</button>))}
       </div>
 
       {tab==='prefs'&&<div>
@@ -4326,7 +4324,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
               <div className="settings-label">🔄 Fresh Start</div>
               <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts, clears sync cursors, triggers a full re-download. Account records, categories, and rules are preserved.</div>
             </div>
-            <button type="button" className="btn btn-sm" style={{background:'var(--amber)',color:'#0c0c10',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+            <button type="button" className="btn btn-sm" style={{background:'var(--amber)',color:'#0c0c10',border:'1px solid rgba(251,191,36,0.4)',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
               title:'Fresh Start',
               body:'This will delete ALL Plaid-synced transactions and re-download everything from scratch.\n\nAccount records, categories, and rules are kept.',
               confirmLabel:'Fresh Start',danger:true,
@@ -4343,7 +4341,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
               <div className="settings-label">💣 Nuke Everything</div>
               <div className="settings-desc">Deletes ALL transactions, ALL accounts, and ALL bank connections. The app is left completely empty. Reconnect your banks from scratch via + Connect Bank. Categories and rules are preserved.</div>
             </div>
-            <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'none',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+            <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'1px solid rgba(248,113,113,0.4)',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
               title:'⚠️ Nuke Everything',
               body:'This will permanently delete:\n• All transactions\n• All accounts\n• All bank connections\n\nCategories and rules are kept. This cannot be undone.',
               confirmLabel:'💣 Nuke Everything',danger:true,requiredInput:'NUKE',
@@ -4381,7 +4379,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
             </div>
           </div>
           {/* Add Rule modal */}
-          {showAddRule&&<div style={{padding:'16px 20px',background:'var(--gold-soft)',border:'1px solid var(--gold)',borderRadius:10,margin:'0 16px 16px'}}>
+          {showAddRule&&<div style={{padding:'16px 20px',background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:10,margin:'0 16px 16px'}}>
             <div style={{fontSize:13,fontWeight:400,marginBottom:8,color:'var(--text-primary)'}}>New Rule</div>
             <div style={{display:'grid',gridTemplateColumns:'80px 100px 1fr 100px 100px',gap:8,fontSize:12,marginBottom:8}}>
               <input type="number" value={ruleEditVals.priority||100} onChange={e=>setRuleEditVals(v=>({...v,priority:parseInt(e.target.value)}))} placeholder="Priority" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
@@ -4542,7 +4540,7 @@ function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoS
                     <td style={{padding:'5px 8px 5px 0'}}>
                       <span style={{fontWeight:500}}>{keep.name}</span>
                       <span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>…{keep.mask}</span>
-                      {keep.card_count>0&&<span style={{marginLeft:4,fontSize:10,background:'var(--gold-soft)',color:'var(--gold)',borderRadius:3,padding:'1px 4px'}}>{keep.card_count} card{keep.card_count!==1?'s':''}</span>}
+                      {keep.card_count>0&&<span style={{marginLeft:4,fontSize:10,background:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)',borderRadius:3,padding:'1px 4px'}}>{keep.card_count} card{keep.card_count!==1?'s':''}</span>}
                       <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{keep.transaction_count} txn{keep.transaction_count!==1?'s':''}</div>
                     </td>
                     <td style={{padding:'5px 8px'}}>
@@ -5531,7 +5529,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
         {/* Card artwork — floated in the bottom-right corner of the hero */}
         {cardImgSrc&&<img src={cardImgSrc} alt="" onError={e=>{e.target.style.display='none';}}
           style={{position:'absolute',bottom:16,right:24,height:90,borderRadius:6,boxShadow:'0 4px 20px rgba(0,0,0,0.35)',opacity:0.92,pointerEvents:'none'}}/>}
-        <button type="button" onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>&#8592; Back</button>
+        <button type="button" onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>&#8592; Back</button>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
           <div>
             <div style={{fontSize:28,fontWeight:400,letterSpacing:'-0.5px',lineHeight:1.2}}>{displayName}</div>
@@ -5880,8 +5878,8 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
           :challenges.length===0
             ?<div style={{padding:'20px 0',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No challenges yet. Click + New to add one.</div>
             :challenges.map(ch=>{
-              const statusColor={upcoming:'var(--text-muted)',active:'var(--gold)',unlocked:'var(--green)',expired:'var(--text-muted)'}[ch.status]||'var(--text-muted)';
-              const barColor={upcoming:'var(--border)',active:'var(--gold)',unlocked:'var(--green)',expired:'var(--border)'}[ch.status]||'var(--border)';
+              const statusColor={upcoming:'var(--text-muted)',active:'var(--blue-primary)',unlocked:'var(--green)',expired:'var(--text-muted)'}[ch.status]||'var(--text-muted)';
+              const barColor={upcoming:'var(--border)',active:'var(--blue-primary)',unlocked:'var(--green)',expired:'var(--border)'}[ch.status]||'var(--border)';
               const estVal=null; // valuation display removed per design decision
               return(
                 <div key={ch.id} onClick={()=>filterTxnsToChallenge(ch)} title="Click to filter Transactions to this challenge's date range"
@@ -5892,7 +5890,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                         <span style={{fontSize:14,fontWeight:400}}>{ch.name}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:barColor+'22',color:statusColor,fontWeight:500,textTransform:'uppercase'}}>{ch.status}</span>
                         <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--border)',color:'var(--text-muted)'}}>{ch.challenge_type.replace(/_/g,' ')}</span>
-                        {ch.max_occurrences&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--gold-soft)',color:'var(--gold)',fontWeight:500}}>{ch.occurrences_earned||0} of {ch.max_occurrences} earned</span>}
+                        {ch.max_occurrences&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)',fontWeight:500}}>{ch.occurrences_earned||0} of {ch.max_occurrences} earned</span>}
                         {ch.spender_filter&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--violet-soft)',color:'var(--violet)',fontWeight:500}}>{ch.spender_filter} only</span>}
                         {ch.category_names&&ch.category_names.length>0&&<span style={{fontSize:11,color:'var(--text-muted)'}}>&#183; {ch.category_names.join(', ')}</span>}
                       </div>
@@ -6188,7 +6186,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                                 {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
                               </select>
                               <button type="button" onClick={()=>saveCscEdit(t.id,editingCscVal)}
-                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
                               <button type="button" onClick={()=>setEditingCscId(null)}
                                 style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
                             </div>
@@ -6232,7 +6230,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                                 {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
                               </select>
                               <button type="button" onClick={()=>saveActionEdit(t.id,editingActionVal)}
-                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
                               <button type="button" onClick={()=>setEditingActionId(null)}
                                 style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
                             </div>
@@ -6252,7 +6250,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
                                 onChange={e=>setEditingPtsOverrideVal(e.target.value)}
                                 placeholder="Points" style={{width:70,fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
                               <button type="button" onClick={()=>savePtsOverride(t.id,editingPtsOverrideVal)}
-                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
                               <button type="button" onClick={()=>setEditingPtsOverrideId(null)}
                                 style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
                               {t.points_earn_classification==='manual_override'&&
@@ -6710,7 +6708,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     <div>
       {/* Back button */}
       <button type="button" onClick={onBack}
-        style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--gold)',
+        style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--blue-primary)',
           cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'Plus Jakarta Sans, sans-serif',
           padding:0,transition:'opacity 0.2s'}}
         onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
@@ -6735,8 +6733,8 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
           <div style={{display:'flex',gap:16}}>
             {['mtd','qtd','ytd'].map(p=>(
               <button type="button" key={p} onClick={()=>setPeriod(p)}
-                style={{padding:'4px 0',border:'none',borderBottom:period===p?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:period===p?500:400,letterSpacing:'0.5px',
-                  background:'transparent',color:period===p?'var(--gold)':'var(--text-muted)',
+                style={{padding:'4px 0',border:'none',borderBottom:period===p?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:period===p?500:400,letterSpacing:'0.5px',
+                  background:'transparent',color:period===p?'var(--blue-primary)':'var(--text-muted)',
                   transition:'all 0.15s',textTransform:'uppercase'}}>
                 {p}
               </button>
@@ -6835,9 +6833,9 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                       <tr>
                         <td style={{padding:'10px 8px 0 0',borderTop:'1px solid var(--border)',fontWeight:500}}>Current Balance</td>
                         {cols.map(p=>(
-                          <td key={p} style={{textAlign:'right',padding:'10px 8px 0',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--gold)'}}>{fmt(b[p].current_balance)}</td>
+                          <td key={p} style={{textAlign:'right',padding:'10px 8px 0',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--blue-primary)'}}>{fmt(b[p].current_balance)}</td>
                         ))}
-                        <td style={{textAlign:'right',padding:'10px 0 0 8px',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:700,color:'var(--gold)',fontSize:14}}>{fmt(sharedFor(p=>b[p].current_balance))}</td>
+                        <td style={{textAlign:'right',padding:'10px 0 0 8px',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:700,color:'var(--blue-primary)',fontSize:14}}>{fmt(sharedFor(p=>b[p].current_balance))}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -7375,8 +7373,8 @@ function ChallengeCard({ch,onClick}){
           </div>
         </div>
         <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,marginLeft:8,flexShrink:0,
-          background:ch.status==='unlocked'?'rgba(52,211,153,0.12)':ch.status==='active'?'var(--gold-soft)':'var(--elevated)',
-          color:ch.status==='unlocked'?'var(--green)':ch.status==='active'?'var(--gold)':'var(--text-muted)',
+          background:ch.status==='unlocked'?'rgba(52,211,153,0.12)':ch.status==='active'?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)',
+          color:ch.status==='unlocked'?'var(--green)':ch.status==='active'?'var(--blue-primary)':'var(--text-muted)',
           fontWeight:500,textTransform:'uppercase',letterSpacing:'0.5px'}}>
           {ch.status}
         </span>
@@ -7387,12 +7385,12 @@ function ChallengeCard({ch,onClick}){
           <span>${(ch.progress_target??ch.spend_threshold).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
         </div>
         <div style={{height:5,borderRadius:5,background:'var(--elevated)',overflow:'hidden',marginBottom:6}}>
-          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'linear-gradient(90deg,var(--gold),#e8c060)',transition:'width 0.5s ease'}}/>
+          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'linear-gradient(90deg,var(--blue-primary),#93c5fd)',transition:'width 0.5s ease'}}/>
         </div>
         {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)'}}>${ch.remaining_spend.toLocaleString(undefined,{maximumFractionDigits:0})} to go</div>}
       </>}
       {!isThreshold&&ch.bonus_type==='per_dollar'&&<div style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>
-        <span style={{fontWeight:400,fontFamily:'Plus Jakarta Sans',fontSize:16,color:'var(--gold)'}}>+{ch.bonus_amount}x</span>
+        <span style={{fontWeight:400,fontFamily:'Plus Jakarta Sans',fontSize:16,color:'var(--blue-primary)'}}>+{ch.bonus_amount}x</span>
         {ch.spend_cap&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names?.join(', ')||'all spend'} · ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
       </div>}
     </div>
@@ -7550,12 +7548,12 @@ function CardsPage({toast,refreshKey}){
       {/* Tab switcher — the MTD/QTD/YTD + year range selector lives inline
           here (only relevant to the Portfolio tab) instead of its own row
           below, to save vertical space. */}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',flexWrap:'wrap',gap:12,marginBottom:24,borderBottom:'1px solid var(--border)',paddingBottom:0}}>
+      <div className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12,marginBottom:24,padding:'12px 24px'}}>
         <div style={{display:'flex',gap:24}}>
           {[{id:'accounts',label:'Portfolio'},{id:'swipe',label:'Swipe Advisor'},{id:'cards',label:'Card Management'}].map(t=>(
             <button type="button" key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
-              style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,letterSpacing:'0.2px',
-                background:'transparent',color:tab===t.id?'var(--gold)':'var(--text-muted)',
+              style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,letterSpacing:'0.2px',
+                background:'transparent',color:tab===t.id?'var(--blue-primary)':'var(--text-muted)',
                 transition:'all 0.15s',marginBottom:'-1px'}}>
               {t.label}
             </button>
@@ -7565,8 +7563,8 @@ function CardsPage({toast,refreshKey}){
           <div style={{display:'flex',gap:16}}>
             {['mtd','qtd','ytd'].map(p=>(
               <button type="button" key={p} onClick={()=>setEarnPeriod(p)}
-                style={{padding:'4px 0',border:'none',borderBottom:earnPeriod===p?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:earnPeriod===p?500:400,letterSpacing:'0.5px',
-                  background:'transparent',color:earnPeriod===p?'var(--gold)':'var(--text-muted)',
+                style={{padding:'4px 0',border:'none',borderBottom:earnPeriod===p?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:earnPeriod===p?500:400,letterSpacing:'0.5px',
+                  background:'transparent',color:earnPeriod===p?'var(--blue-primary)':'var(--text-muted)',
                   transition:'all 0.15s',textTransform:'uppercase'}}>
                 {p}
               </button>
@@ -7621,16 +7619,16 @@ function CardsPage({toast,refreshKey}){
         /* LEGACY CARD MANAGEMENT */
         <div>
           {/* ── Auto-detected Product Matches ── */}
-          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'1px solid var(--gold)',borderLeft:'3px solid var(--gold)'}}>
+          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'1px solid var(--blue-primary)',borderLeft:'3px solid var(--blue-primary)'}}>
             <div className="section-header" style={{paddingBottom:8}}>
-              <div className="section-title" style={{color:'var(--gold)',fontSize:13}}>Auto-detected Product Matches</div>
+              <div className="section-title" style={{color:'var(--blue-primary)',fontSize:13}}>Auto-detected Product Matches</div>
               <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
             </div>
             <div style={{padding:'0 20px 14px',display:'flex',flexDirection:'column',gap:8}}>
               {suggestions.map(s=>(
                 <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 12px',background:'var(--elevated)',borderRadius:8,border:'1px solid var(--border)'}}>
                   <div style={{flex:1,fontSize:13,fontWeight:400}}>{s.account_name}{s.mask?` ···${s.mask}`:''} <span style={{fontWeight:300,color:'var(--text-muted)'}}>→ {s.suggested_product_name}</span></div>
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'rgba(52,211,153,0.12)':'var(--gold-soft)',color:s.confidence==='high'?'var(--green)':'var(--gold)',fontWeight:500}}>{s.confidence}</span>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'rgba(52,211,153,0.12)':'rgba(var(--blue-primary-rgb), 0.12)',color:s.confidence==='high'?'var(--green)':'var(--blue-primary)',fontWeight:500}}>{s.confidence}</span>
                   <button type="button" className="btn btn-sm btn-primary" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>{linking[s.account_id]?'...':'Confirm'}</button>
                 </div>
               ))}
@@ -7787,7 +7785,7 @@ function CardsPage({toast,refreshKey}){
                           <div style={{fontSize:15,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:14,display:logo?'none':'block'}}>{eco.name}</div>
                           <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
                             <div>
-                              <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--gold)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
+                              <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
                               {eco.current_balance!=null&&<div style={{fontSize:11,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:5,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
                             </div>
                             <div style={{color:'var(--text-muted)',fontSize:16,opacity:0.4}}>›</div>
@@ -7955,7 +7953,7 @@ function GCBPage({toast,refreshKey}){
       {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
 
       {/* Period selector */}
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20}}>
+      <div className="card" style={{display:'flex',alignItems:'center',gap:10,marginBottom:24,padding:'12px 24px'}}>
         <select className="filter-select" value={year} onChange={e=>setYear(parseInt(e.target.value))}>
           {[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=><option key={y} value={y}>{y}</option>)}
         </select>
@@ -8275,7 +8273,7 @@ function BudgetsPage({categories,toast,refreshKey}){
   /* ── NET row ───────────────────────────────────────────────────────────── */
   const renderNetRow=(budgetNet,actualNet)=>{
     if(isMob) return(
-      <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
+      <tr style={{borderTop:'3px solid var(--blue-primary)',background:'rgba(var(--blue-primary-rgb), 0.12)'}}>
         <td style={{fontWeight:500,fontSize:13,paddingLeft:10,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
         <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
         <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
@@ -8283,7 +8281,7 @@ function BudgetsPage({categories,toast,refreshKey}){
       </tr>
     );
     return(
-    <tr style={{borderTop:'3px solid var(--gold)',background:'var(--gold-soft)'}}>
+    <tr style={{borderTop:'3px solid var(--blue-primary)',background:'rgba(var(--blue-primary-rgb), 0.12)'}}>
       <td style={{fontWeight:500,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
       <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
       <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
@@ -8501,12 +8499,12 @@ function BudgetsPage({categories,toast,refreshKey}){
               const val=yearEdits[cat]?.[String(m)]??'';
               const actual=getActual(cat,m);
               return(
-                <td key={m} style={{padding:'3px 3px',background:isCur?'var(--gold-soft)':'transparent',minWidth:82}}>
+                <td key={m} style={{padding:'3px 3px',background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'transparent',minWidth:82}}>
                   <input type="number" step="1" min="0" value={val}
                     onChange={e=>setCell(cat,m,e.target.value)}
                     style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:300,
-                      background:isCur?'var(--gold-soft)':'var(--elevated)',color:'var(--text-primary)',
-                      outline:isCur?'1px solid var(--gold)':undefined}}
+                      background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)',color:'var(--text-primary)',
+                      outline:isCur?'1px solid var(--blue-primary)':undefined}}
                     placeholder={actual>0?String(Math.round(actual)):''}/>
                   {actual>0&&<div style={{fontSize:9,color:isIncome?'var(--green)':'var(--text-muted)',textAlign:'right',padding:'1px 3px 0',opacity:0.8,fontWeight:300}}>
                     act {fmt(actual)}</div>}
@@ -8534,9 +8532,9 @@ function BudgetsPage({categories,toast,refreshKey}){
                     const isCur=(i+1)===curMonth&&year===curYear;
                     return(
                       <th key={i} style={{textAlign:'center',padding:'6px 4px',fontWeight:isCur?500:400,fontSize:10,textTransform:'uppercase',letterSpacing:'1px',
-                        color:isCur?'var(--gold)':'var(--text-muted)',minWidth:82,
-                        background:isCur?'var(--gold-soft)':'transparent',
-                        borderBottom:isCur?'2px solid var(--gold)':undefined}}>
+                        color:isCur?'var(--blue-primary)':'var(--text-muted)',minWidth:82,
+                        background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'transparent',
+                        borderBottom:isCur?'2px solid var(--blue-primary)':undefined}}>
                         {mo}{isCur?' ★':''}
                       </th>
                     );
@@ -8588,7 +8586,6 @@ function BudgetsPage({categories,toast,refreshKey}){
       {/* Top Header Card */}
       <div className="card" style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 24px', marginBottom:24, flexWrap:'wrap', gap:16}}>
         <div style={{display:'flex', alignItems:'center', gap:20}}>
-          <h2 style={{margin:0, fontSize:22, fontFamily:'Outfit, sans-serif'}}>Budget</h2>
           <div style={{display:'flex', gap:12}}>
             {[curYear-1,curYear,curYear+1].map(y=>(
               <button type="button" key={y} onClick={(e)=>{e.preventDefault();setYear(y);setEditing(false);setSuggestions({});}}
@@ -8938,7 +8935,7 @@ function NetWorthPage({toast,refreshKey}){
         <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
           <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Net Worth Over Time</div>
           <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:200}}>
-            <defs><linearGradient id="nwAreaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gold)" stopOpacity="0.25"/><stop offset="100%" stopColor="var(--gold)" stopOpacity="0"/></linearGradient></defs>
+            <defs><linearGradient id="nwAreaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue-primary)" stopOpacity="0.25"/><stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/></linearGradient></defs>
             {[0,0.25,0.5,0.75,1].map((p,i)=>{
               const y=padC.t+(1-p)*cH;const val=yMin+yRng*p;
               return(<g key={i}><line x1={padC.l} y1={y} x2={W-padC.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
@@ -8950,10 +8947,10 @@ function NetWorthPage({toast,refreshKey}){
               return<text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="Plus Jakarta Sans">{MO[dt.getMonth()]}</text>;
             })}
             <path d={areaD} fill="url(#nwAreaGrad)"/>
-            <path d={pathD} fill="none" stroke="var(--gold)" strokeWidth={2} strokeLinecap="round"/>
+            <path d={pathD} fill="none" stroke="var(--blue-primary)" strokeWidth={2} strokeLinecap="round"/>
             {pts.map((p,i)=>(
               <g key={i}>
-                <circle cx={p[0]} cy={p[1]} r={3} fill="var(--gold)" style={{cursor:'pointer'}}/>
+                <circle cx={p[0]} cy={p[1]} r={3} fill="var(--blue-primary)" style={{cursor:'pointer'}}/>
                 <title>{tlData[i].date}: {fmt(tlData[i].net_worth)}</title>
               </g>
             ))}
@@ -9048,9 +9045,9 @@ function NetWorthPage({toast,refreshKey}){
             {tlItems.length>1&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:16,marginBottom:16}}>
               <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',marginBottom:8,textTransform:'uppercase',letterSpacing:'1.5px'}}>Balance Over Time</div>
               <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:180}}>
-                <polyline fill="none" stroke="var(--gold)" strokeWidth="2" points={balPts}/>
+                <polyline fill="none" stroke="var(--blue-primary)" strokeWidth="2" points={balPts}/>
                 <polyline fill="url(#balgrad)" stroke="none" points={`${pad},${chartH-pad} ${balPts} ${pad+(tlItems.length-1)/(tlItems.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
-                <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--gold)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--gold)" stopOpacity="0"/></linearGradient></defs>
+                <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue-primary)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/></linearGradient></defs>
                 <text x={pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)">{tlItems[0]?.date}</text>
                 <text x={chartW-pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlItems[tlItems.length-1]?.date}</text>
                 <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(maxBal)}</text>
@@ -9070,11 +9067,11 @@ function NetWorthPage({toast,refreshKey}){
                   {!stmtView&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{tlItems.length} days</span>}
                   <div style={{display:'flex',gap:16}}>
                     <button type="button" onClick={()=>setStmtView(false)}
-                      style={{padding:'4px 0',border:'none',borderBottom:!stmtView?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:!stmtView?500:400,
-                        background:'transparent',color:!stmtView?'var(--gold)':'var(--text-muted)',transition:'all 0.15s'}}>Daily</button>
+                      style={{padding:'4px 0',border:'none',borderBottom:!stmtView?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:!stmtView?500:400,
+                        background:'transparent',color:!stmtView?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Daily</button>
                     <button type="button" onClick={()=>setStmtView(true)}
-                      style={{padding:'4px 0',border:'none',borderBottom:stmtView?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:stmtView?500:400,
-                        background:'transparent',color:stmtView?'var(--gold)':'var(--text-muted)',transition:'all 0.15s'}}>Statement</button>
+                      style={{padding:'4px 0',border:'none',borderBottom:stmtView?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:stmtView?500:400,
+                        background:'transparent',color:stmtView?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Statement</button>
                   </div>
                 </div>
               </div>
@@ -9155,20 +9152,20 @@ function NetWorthPage({toast,refreshKey}){
   return(
     <div>
       {/* Top bar: As Of date + sub-tabs */}
-      <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:16,flexWrap:'wrap'}}>
+      <div className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,marginBottom:24,flexWrap:'wrap',padding:'12px 24px'}}>
+        <div style={{display:'flex',gap:20}}>
+          <button type="button" onClick={()=>setSubTab('networth')}
+            style={{padding:'5px 0',border:'none',borderBottom:subTab==='networth'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='networth'?500:400,
+              background:'transparent',color:subTab==='networth'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Net Worth</button>
+          <button type="button" onClick={()=>setSubTab('balances')}
+            style={{padding:'5px 0',border:'none',borderBottom:subTab==='balances'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='balances'?500:400,
+              background:'transparent',color:subTab==='balances'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Account Balances</button>
+        </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>As of</span>
           <input type="date" value={asOf} onChange={e=>{setAsOf(e.target.value);setTimeline(null);}}
             className="date-input" style={{padding:'4px 8px',fontSize:13}}/>
           <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setAsOf(todayStr);setTimeline(null);}}>Today</button>
-        </div>
-        <div style={{display:'flex',gap:20}}>
-          <button type="button" onClick={()=>setSubTab('networth')}
-            style={{padding:'5px 0',border:'none',borderBottom:subTab==='networth'?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='networth'?500:400,
-              background:'transparent',color:subTab==='networth'?'var(--gold)':'var(--text-muted)',transition:'all 0.15s'}}>Net Worth</button>
-          <button type="button" onClick={()=>setSubTab('balances')}
-            style={{padding:'5px 0',border:'none',borderBottom:subTab==='balances'?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='balances'?500:400,
-              background:'transparent',color:subTab==='balances'?'var(--gold)':'var(--text-muted)',transition:'all 0.15s'}}>Account Balances</button>
         </div>
       </div>
 
@@ -9207,7 +9204,7 @@ function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel
   const prevEsc=tax+ins;
   const prevPrin=pmt>0?Math.round((pmt-prevInt-prevEsc)*100)/100:0;
   return(
-    <div style={{padding:'16px 20px',background:'var(--gold-soft)',border:'1px solid var(--gold)',borderRadius:14,margin:'0 0 16px'}}>
+    <div style={{padding:'16px 20px',background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:14,margin:'0 0 16px'}}>
       <div style={{fontSize:13,fontWeight:400,marginBottom:12,color:'var(--text-primary)'}}>{isNew?'New Loan':'Edit Loan'}</div>
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:8,marginBottom:8}}>
         <div>{lbl('Lender',true)}{inp('lender')}</div>
@@ -9387,7 +9384,7 @@ function LoansPage({toast,refreshKey}){
               })}</tbody>
             </table></div>
           </div>}
-          {linkPreview&&<div className="grid-4" style={{background:'var(--gold-soft)',border:'1px solid var(--gold)',borderRadius:10,padding:'10px 14px',marginBottom:12,gap:8}}>
+          {linkPreview&&<div className="grid-4" style={{background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:10,padding:'10px 14px',marginBottom:12,gap:8}}>
             {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
               <div key={lbl} style={{textAlign:'center'}}>
                 <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase'}}>{lbl}</div>
@@ -9464,7 +9461,7 @@ function LoansPage({toast,refreshKey}){
 
         const maxMonths=Math.max(...timelineLoans.map(l=>l.payoffMonths),1);
         const maxYears=Math.ceil(maxMonths/12);
-        const COLORS=['var(--gold)','var(--green)','#60a5fa','#a78bfa','var(--red)','var(--amber)'];
+        const COLORS=['var(--blue-primary)','var(--green)','#06b6d4','#a78bfa','var(--red)','var(--amber)'];
 
         return(
           <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:20}}>
@@ -9798,7 +9795,7 @@ function CashFlowPage({toast,refreshKey}){
 
   // ── Overlay helpers ───────────────────────────────────────────────────
   const BLANK_OV={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
-  const SOURCE_BADGE={manual:{label:'Manual',bg:'var(--gold-soft)',color:'var(--gold)'},cc_payment:{label:'CC',bg:'rgba(248,113,113,0.12)',color:'var(--red)'},loan_payment:{label:'Loan',bg:'rgba(139,92,246,0.12)',color:'var(--violet)'}};
+  const SOURCE_BADGE={manual:{label:'Manual',bg:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)'},cc_payment:{label:'CC',bg:'rgba(248,113,113,0.12)',color:'var(--red)'},loan_payment:{label:'Loan',bg:'rgba(139,92,246,0.12)',color:'var(--violet)'}};
   const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_OV);setShowOverlayForm(true);};
   const openEditOverlay=o=>{
     setEditingOverlay(o);
@@ -9862,7 +9859,6 @@ function CashFlowPage({toast,refreshKey}){
   return(
     <div>
       {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
-      <h2 style={{fontSize:20,fontWeight:400,letterSpacing:'-0.3px',marginBottom:24}}>Cash Flow & Forecasting</h2>
 
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <div className="metric-grid grid-4" style={{marginBottom:24}}>
@@ -9878,7 +9874,7 @@ function CashFlowPage({toast,refreshKey}){
         </div>
         <div className="card metric-card">
           <div className="metric-label">Net Cash Flow</div>
-          <div className="metric-value" style={{color:netCF>=0?'var(--gold)':'var(--red)'}}>{netCF>=0?'+':''}{netCF<0?`(${fmt(Math.abs(netCF))})`:fmt(netCF)}</div>
+          <div className="metric-value" style={{color:netCF>=0?'var(--blue-primary)':'var(--red)'}}>{netCF>=0?'+':''}{netCF<0?`(${fmt(Math.abs(netCF))})`:fmt(netCF)}</div>
           <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>income − outflows</span></div>
         </div>
         <div className="card metric-card">
@@ -9932,8 +9928,8 @@ function CashFlowPage({toast,refreshKey}){
           <div style={{display:'flex',gap:16}}>
             {[['month','This Month'],['last30','Last 30 Days'],['next30','Next 30 Days']].map(([k,label])=>(
               <button type="button" key={k} onClick={()=>setBreakdownRange(k)}
-                style={{padding:'4px 0',border:'none',borderBottom:breakdownRange===k?'2px solid var(--gold)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:breakdownRange===k?500:400,
-                  background:'transparent',color:breakdownRange===k?'var(--gold)':'var(--text-muted)',
+                style={{padding:'4px 0',border:'none',borderBottom:breakdownRange===k?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:breakdownRange===k?500:400,
+                  background:'transparent',color:breakdownRange===k?'var(--blue-primary)':'var(--text-muted)',
                   transition:'all 0.15s',fontFamily:'inherit',letterSpacing:'0.2px'}}>
                 {label}
               </button>
@@ -10273,7 +10269,7 @@ function CashFlowPage({toast,refreshKey}){
                 <div style={{display:'flex',gap:28,padding:'10px 18px',borderTop:'1px solid var(--border)',background:'var(--elevated)',fontSize:12,fontWeight:300,color:'var(--text-muted)'}}>
                   <span>Upcoming inflows: <span style={{color:'var(--green)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>+{fmt(ovUpIn)}</span></span>
                   <span>Outflows: <span style={{color:'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>({fmt(Math.abs(ovUpOut))})</span></span>
-                  <span>Net: <span style={{color:net>=0?'var(--gold)':'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
+                  <span>Net: <span style={{color:net>=0?'var(--blue-primary)':'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
                 </div>
               );
             })()}
@@ -10591,7 +10587,7 @@ function DailyBalancesPage({toast,refreshKey}){
 
   return(
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{display:'flex',gap:24,marginBottom:8,borderBottom:'1px solid var(--border)',paddingBottom:0,width:'fit-content'}}>
+      <div className="card" style={{display:'flex',gap:24,padding:'12px 24px'}}>
         <button type="button" onClick={()=>setTab('balances')}
           style={{padding:'12px 0',border:'none',borderBottom:tab==='balances'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:13,fontWeight:tab==='balances'?700:500,letterSpacing:'0.2px',
             background:'transparent',color:tab==='balances'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.2s ease',marginBottom:'-1px'}}>Daily Balances</button>
@@ -10602,9 +10598,8 @@ function DailyBalancesPage({toast,refreshKey}){
 
       {tab==='reconciliation'?<ReconciliationPanel toast={toast}/>:<>
       <LiquidityForecastCard toast={toast} />
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:0,flexWrap:'wrap',gap:16}}>
-        <div><h2 style={{fontSize:20,fontWeight:600,letterSpacing:'-0.5px'}}>Daily Balance Timeline</h2>
-          <p style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>{numDays} days · end-of-day · <span style={{fontStyle:'italic', opacity: 0.8}}>italic = projected</span> · <span style={{color:'var(--blue-primary)'}}>◈</span> = detail</p>
+      <div className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:16,padding:'16px 24px'}}>
+        <div><p style={{fontSize:12,color:'var(--text-secondary)',margin:0}}>{numDays} days · end-of-day · <span style={{fontStyle:'italic', opacity: 0.8}}>italic = projected</span> · <span style={{color:'var(--blue-primary)'}}>◈</span> = detail</p>
         </div>
         <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
           <div className="sel-pill">
@@ -10932,7 +10927,7 @@ function App(){
     window.addEventListener('online',on);window.addEventListener('offline',off);
     return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off);};
   },[handleRefresh]);
-  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balances',cashplanner:'Cash Flows',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balance Timeline',cashplanner:'Cash Flow & Forecasting',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
 
   return(
     <div className="app-container">
@@ -10999,7 +10994,7 @@ if('serviceWorker' in navigator){
     setTimeout(function(){
       var tip=document.createElement('div');
       tip.id='ios-install-tip';
-      tip.style.cssText='position:fixed;bottom:74px;left:12px;right:12px;z-index:9999;background:var(--surface);border:1px solid var(--gold);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4)';
+      tip.style.cssText='position:fixed;bottom:74px;left:12px;right:12px;z-index:9999;background:var(--surface);border:1px solid var(--blue-primary);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4)';
       var inner=document.createElement('div');
       inner.style.flex='1';
       var title=document.createElement('div');

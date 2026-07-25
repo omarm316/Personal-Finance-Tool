@@ -5,6 +5,24 @@
 
 ---
 
+## Session 2026-07-25 (cont'd) — App-wide UI design-system pass (BACKLOG H6, closed)
+
+Follow-through on the H6 item logged during the Transactions-page session earlier the same day. User's four asks, checked against BACKLOG/PLAN notes first: subtle borders on all buttons (reference: the GCB/Rule row-action buttons on Transactions), top-of-page nav rows should follow the Budgets screen's layout, no page-level horizontal scroll (vertical is fine), and duplicate page titles removed (topbar title vs. an in-page heading repeating the same name above the KPI cards — Cash Flow page was the example, keep only the top one styled like the removed "Cash Flow & Forecasting" heading).
+
+Two scope decisions confirmed with the user mid-session before touching code: (1) where a page's removed duplicate heading had richer text than the plain sidebar label, promote that fuller text to the surviving top title rather than keeping the short nav label; (2) while wiring nav rows, found the old `var(--gold)` theme still driving ~70 spots app-wide (not just nav) — user chose the full gold→blue pass over a nav-only fix, closing out the color-palette half of H6 in the same session rather than leaving it for later.
+
+**Shipped, `v2.html` only** (full detail in BACKLOG.md's Recently Completed):
+- Global button-border CSS (`.btn`/`.btn-primary`/`.btn-secondary`/`.btn-ghost`/`.btn-success`) + 7 ad-hoc colored buttons that had `border:'none'` fixed individually.
+- Duplicate in-page titles removed on Accounts/Budgets/Cash Flow/Daily Balances; `.topbar-title` restyled to 20px/400/-0.3px (the nicer style the removed headings used); `titles` map promoted `cashplanner`→"Cash Flow & Forecasting" and `cashflow`→"Daily Balance Timeline". Dashboard's personalized greeting deliberately left alone — not a true duplicate.
+- 7 bare top-of-page nav rows (Dashboard, Settings, Cards, Net Worth, GCB, Daily Balances ×2) wrapped in `.card` to match Budgets' title-left/controls-right pattern; also found and removed a fully duplicated dead sub-tab block in `NetWorthPage`'s source.
+- Horizontal-scroll audit: no page-level overflow found or introduced — Budgets' two wide (1100-1200px) annual/edit-year tables already scroll contained within a zero-padding, `overflow:hidden` card. Confirmed via `document.documentElement.scrollWidth` at 1400px and 768px, both themes.
+- Full gold→blue palette pass: `var(--gold)`→`var(--blue-primary)`, `var(--gold-soft)`→`rgba(var(--blue-primary-rgb),0.12)` everywhere (~70 sites — tab underlines, KPI figures, chart lines/gradients, points/reward badges). Along the way, found `--gold-soft` was never actually defined as a CSS custom property (same latent-bug shape as the known B13 `--violet`/`--violet-soft` gap) — those backgrounds had been silently invisible. Fixed 3 non-`var()` call sites by hand (a `getComputedStyle` JS read with a hardcoded gold fallback hex, a hardcoded `#e8c060` gradient stop, and the Loans payoff-timeline chart's categorical color array, where a straight swap to blue-primary would have collided with an existing blue in the same palette — used cyan `#06b6d4` instead there for visual distinctness). Removed the now-unused `--gold` CSS variable; kept `--amber` (same hex, but a separate token still legitimately used for warning states). Deliberately left untouched: `amex_gold`/`delta_gold` card-art gradient keys (real card brand colors, unrelated to app theme) and the traffic-light-style hardcoded `#f59e0b` warning colors used elsewhere for utilization/status indicators.
+- Verified live against the local dev server across all 11 pages, dark + light theme, desktop (1400px) and tablet (768px) widths — no console errors, no horizontal overflow.
+
+**Not touched this session**: `frontend.html` (retired, not the daily driver per the 2026-07-21 promotion note below) — none of these fixes were ported there.
+
+---
+
 ## Session 2026-07-25 — Transactions page: row-action alignment, filter Apply button, filter palette fix
 
 Scoped Transactions-page session per user's four initial reactions. All fixed and verified live in `v2.html`:
