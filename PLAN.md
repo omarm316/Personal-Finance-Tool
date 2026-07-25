@@ -16,6 +16,14 @@ Scoped Transactions-page session per user's four initial reactions. All fixed an
 
 **Deliberately not done this session** (scope discipline — see B-below): a broader UI cleanup request came in mid-session ("all menus incl. horizontal nav, all filter menus on-palette, subtle borders on buttons, fonts aligned system-wide"). Confirmed with user this is out of scope for a Transactions-page session and belongs in its own dedicated session since it touches the sidebar nav and every page, not just Transactions — logged as BACKLOG H6.
 
+**Follow-up in the same session** — user reported the `MultiSelectFilter` dropdown panel itself was translucent (it used `var(--surface)`, alpha 0.4/0.55, with no backdrop-blur, so table rows showed straight through) and asked for three more changes:
+- Panel background made genuinely opaque — added a new `--surface-solid` CSS var (`#0F172A` dark / `#FFFFFF` light, same base color as `--surface` but alpha 1) and switched the dropdown to it.
+- Merged "Select All"/"Clear All" into one toggle button whose label reflects current state (`isAll ? 'Clear All' : 'Select All'`), moved to the bottom-left of the panel (previously two separate buttons at the top).
+- Added a per-dropdown "Apply" button (bottom-right of the panel) via a new optional `onApply` prop on `MultiSelectFilter` — clicking it calls `onApply()` then closes the panel. Each of the three Transactions filters wires its own `onApply` (e.g. `onApply={()=>setActionFilter(draftActionFilter)}`), so each dropdown applies independently rather than all three together.
+- Removed the single global "Apply" button that sat next to "+ Manual" from the earlier fix in this session (along with the now-dead `filtersDirty`/`applyFilters` helpers it used) — applying is now scoped per-dropdown instead.
+
+Note: `MultiSelectFilter` is also used on the Accounts/Net Worth page (`v2.html` ~line 9022) where `selected`/`onChange` already apply live (no draft/apply concept there). That usage doesn't pass `onApply`, so its new Apply button is a no-op beyond closing the panel — harmless, and it still benefits from the opaque-background and merged-toggle fixes since those are visual/structural, not behavioral.
+
 ---
 
 ## Session 2026-07-24 (cont'd) — Per-person (Omer/Daniella) points balance splitting

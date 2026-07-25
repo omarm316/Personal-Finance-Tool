@@ -39,6 +39,7 @@
 [data-theme="light"] {
   --bg: #F0F4F8;
   --surface: rgba(255, 255, 255, 0.55);
+  --surface-solid: #FFFFFF;
   --surface-hover: rgba(255, 255, 255, 0.75);
   --elevated: rgba(255, 255, 255, 0.85);
   --border: rgba(15, 23, 42, 0.08);
@@ -53,6 +54,7 @@
 [data-theme="dark"] {
   --bg: #020617;
   --surface: rgba(15, 23, 42, 0.4);
+  --surface-solid: #0F172A;
   --surface-hover: rgba(15, 23, 42, 0.6);
   --elevated: rgba(30, 41, 59, 0.5);
   --border: rgba(255, 255, 255, 0.06);
@@ -704,7 +706,7 @@ const showCategoryForType=(t)=>BUDGET_TYPES_SET.has(t);
 /* selected: null = all (no filter), Set = specific checked items.
    All checkboxes appear checked when selected is null.
    "Select All" → null.  "Clear All" → empty Set. */
-function MultiSelectFilter({options,selected,onChange,label,renderOption}){
+function MultiSelectFilter({options,selected,onChange,label,renderOption,onApply}){
   const[open,setOpen]=useState(false);
   const ref=useRef(null);
   useEffect(()=>{
@@ -741,28 +743,31 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption}){
         <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{displayText}</span>
         <span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,opacity:.5}}>{open?'▲':'▼'}</span>
       </button>
-      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:220,maxHeight:320,overflowY:'auto',
-        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'var(--shadow-lg)',
-        zIndex:50,padding:'6px 0',fontSize:13,fontFamily:'inherit'}}>
-        <div style={{display:'flex',justifyContent:'space-between',padding:'4px 12px 8px',borderBottom:'1px solid var(--border)',marginBottom:4}}>
-          <button type="button" style={{border:'none',background:'none',color:'var(--blue-primary)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit',fontWeight:isAll?600:400}}
-            onClick={()=>onChange(null)}>Select All</button>
-          <button type="button" style={{border:'none',background:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit'}}
-            onClick={()=>onChange(new Set())}>Clear All</button>
+      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:220,maxHeight:360,
+        display:'flex',flexDirection:'column',
+        background:'var(--surface-solid)',border:'1px solid var(--border-strong)',borderRadius:10,boxShadow:'var(--shadow-lg)',
+        zIndex:50,fontSize:13,fontFamily:'inherit',overflow:'hidden'}}>
+        <div style={{overflowY:'auto',padding:'6px 0'}}>
+          {options.map(o=>{const chk=isChecked(o.value);return(
+            <div key={o.value} onClick={()=>toggle(o.value)}
+              style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',
+                background:chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent',
+                color:chk?'var(--text-primary)':'var(--text-muted)'}}
+              onMouseEnter={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.12)':'var(--elevated)'}
+              onMouseLeave={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent'}>
+              <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${chk?'var(--blue-primary)':'var(--border)'}`,
+                display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,
+                background:chk?'var(--blue-primary)':'transparent',color:chk?'#fff':'transparent'}}>✓</span>
+              <span style={{fontSize:13,fontWeight:chk?400:300}}>{renderOption?renderOption(o):o.label}</span>
+            </div>
+          );})}
         </div>
-        {options.map(o=>{const chk=isChecked(o.value);return(
-          <div key={o.value} onClick={()=>toggle(o.value)}
-            style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',
-              background:chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent',
-              color:chk?'var(--text-primary)':'var(--text-muted)'}}
-            onMouseEnter={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.12)':'var(--elevated)'}
-            onMouseLeave={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent'}>
-            <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${chk?'var(--blue-primary)':'var(--border)'}`,
-              display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,
-              background:chk?'var(--blue-primary)':'transparent',color:chk?'#fff':'transparent'}}>✓</span>
-            <span style={{fontSize:13,fontWeight:chk?400:300}}>{renderOption?renderOption(o):o.label}</span>
-          </div>
-        );})}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',borderTop:'1px solid var(--border)',flexShrink:0}}>
+          <button type="button" style={{border:'none',background:'none',color:'var(--blue-primary)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit',fontWeight:500}}
+            onClick={()=>onChange(isAll?new Set():null)}>{isAll?'Clear All':'Select All'}</button>
+          <button type="button" className="btn btn-sm btn-primary" style={{padding:'4px 14px',fontSize:12}}
+            onClick={()=>{onApply&&onApply();setOpen(false);}}>Apply</button>
+        </div>
       </div>}
     </div>
   );
@@ -2147,11 +2152,6 @@ function TransactionsPage({categories,toast,refreshKey}){
   const _acctKey=useMemo(()=>accountFilter===null?'__all__':[...accountFilter].sort().join(','),[accountFilter]);
   const _catKey=useMemo(()=>catFilter===null?'__all__':[...catFilter].sort().join(','),[catFilter]);
   const _actionKey=useMemo(()=>actionFilter===null?'__all__':[...actionFilter].sort().join(','),[actionFilter]);
-  const _draftAcctKey=useMemo(()=>draftAccountFilter===null?'__all__':[...draftAccountFilter].sort().join(','),[draftAccountFilter]);
-  const _draftCatKey=useMemo(()=>draftCatFilter===null?'__all__':[...draftCatFilter].sort().join(','),[draftCatFilter]);
-  const _draftActionKey=useMemo(()=>draftActionFilter===null?'__all__':[...draftActionFilter].sort().join(','),[draftActionFilter]);
-  const filtersDirty=_draftAcctKey!==_acctKey||_draftCatKey!==_catKey||_draftActionKey!==_actionKey;
-  const applyFilters=()=>{setAccountFilter(draftAccountFilter);setCatFilter(draftCatFilter);setActionFilter(draftActionFilter);};
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
     setTableLoading(true);
@@ -2281,13 +2281,11 @@ function TransactionsPage({categories,toast,refreshKey}){
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <MultiSelectFilter label="All types" options={TXN_TYPES.map(a=>({value:a,label:a}))}
-              selected={draftActionFilter} onChange={setDraftActionFilter}/>
+              selected={draftActionFilter} onChange={setDraftActionFilter} onApply={()=>setActionFilter(draftActionFilter)}/>
             <MultiSelectFilter label="All categories" options={sortedCats(categories).map(c=>({value:c.name,label:c.name}))}
-              selected={draftCatFilter} onChange={setDraftCatFilter}/>
+              selected={draftCatFilter} onChange={setDraftCatFilter} onApply={()=>setCatFilter(draftCatFilter)}/>
             <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name}))}
-              selected={draftAccountFilter} onChange={setDraftAccountFilter}/>
-            <button type="button" className="btn btn-sm btn-primary" onClick={applyFilters} disabled={!filtersDirty}
-              title={filtersDirty?'Apply the selected type/category/account filters':'No pending filter changes'}>Apply{filtersDirty?' •':''}</button>
+              selected={draftAccountFilter} onChange={setDraftAccountFilter} onApply={()=>setAccountFilter(draftAccountFilter)}/>
             <button type="button" className="btn btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
             <button type="button" className="btn btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           </div>
