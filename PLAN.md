@@ -42,6 +42,8 @@ Scoped Transactions-page session per user's four initial reactions. All fixed an
 
 Note: `MultiSelectFilter` is also used on the Accounts/Net Worth page (`v2.html` ~line 9022) where `selected`/`onChange` already apply live (no draft/apply concept there). That usage doesn't pass `onApply`, so its new Apply button is a no-op beyond closing the panel — harmless, and it still benefits from the opaque-background and merged-toggle fixes since those are visual/structural, not behavioral.
 
+**Second follow-up, same session** — added a contains-match search box to `MultiSelectFilter` (confirmed with user: all three Transactions dropdowns get it, not just Accounts). Typing filters the visible option list by substring match on `o.label` (case-insensitive); account labels already include the last-4 digits server-side (`f"{name} {mask}"`, main.py), so searching digits or name both work with no backend change. The merged Select All/Clear All toggle now scopes to whatever's currently filtered rather than the full option list (confirmed with user) — tested live: searching "4341" narrowed to one Chase account, clicking "Clear All" deselected only that one match while leaving the other 43 accounts' checked state untouched (counter showed "43/44"), and Apply correctly dropped the transaction count from 455→450. Search box resets when the panel closes so each open starts fresh; an empty-results state ("No matches") disables the toggle button.
+
 ---
 
 ## Session 2026-07-24 (cont'd) — Per-person (Omer/Daniella) points balance splitting
