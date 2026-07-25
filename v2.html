@@ -618,6 +618,7 @@ const ICON_PATHS={
   settings:`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
   chevronLeft:`<polyline points="15 18 9 12 15 6"/>`,
   chevronRight:`<polyline points="9 18 15 12 9 6"/>`,
+  info:`<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`,
 };
 function Icon({name,size=16,style}){
   const p=ICON_PATHS[name]||'';
@@ -733,9 +734,9 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption}){
     <div ref={ref} style={{position:'relative',display:'inline-block'}}>
       <button type="button" onClick={()=>setOpen(o=>!o)} className="filter-select"
         style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',textAlign:'left',
-          border:isFiltered?'1px solid var(--gold)':'1px solid var(--border)',
-          background:isFiltered?'rgba(212,164,74,0.06)':'var(--surface)',
-          color:isFiltered?'var(--gold)':'var(--text-primary)',
+          border:isFiltered?'1px solid var(--blue-primary)':'1px solid var(--border)',
+          background:isFiltered?'rgba(var(--blue-primary-rgb),0.06)':'var(--surface)',
+          color:isFiltered?'var(--blue-primary)':'var(--text-primary)',
           minWidth:0,whiteSpace:'nowrap',paddingRight:24,position:'relative'}}>
         <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{displayText}</span>
         <span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,opacity:.5}}>{open?'▲':'▼'}</span>
@@ -744,7 +745,7 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption}){
         background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'var(--shadow-lg)',
         zIndex:50,padding:'6px 0',fontSize:13,fontFamily:'inherit'}}>
         <div style={{display:'flex',justifyContent:'space-between',padding:'4px 12px 8px',borderBottom:'1px solid var(--border)',marginBottom:4}}>
-          <button type="button" style={{border:'none',background:'none',color:'var(--gold)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit',fontWeight:isAll?600:400}}
+          <button type="button" style={{border:'none',background:'none',color:'var(--blue-primary)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit',fontWeight:isAll?600:400}}
             onClick={()=>onChange(null)}>Select All</button>
           <button type="button" style={{border:'none',background:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:12,padding:0,fontFamily:'inherit'}}
             onClick={()=>onChange(new Set())}>Clear All</button>
@@ -752,13 +753,13 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption}){
         {options.map(o=>{const chk=isChecked(o.value);return(
           <div key={o.value} onClick={()=>toggle(o.value)}
             style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',
-              background:chk?'rgba(212,164,74,0.08)':'transparent',
+              background:chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent',
               color:chk?'var(--text-primary)':'var(--text-muted)'}}
-            onMouseEnter={e=>e.currentTarget.style.background=chk?'rgba(212,164,74,0.12)':'var(--elevated)'}
-            onMouseLeave={e=>e.currentTarget.style.background=chk?'rgba(212,164,74,0.08)':'transparent'}>
-            <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${chk?'var(--gold)':'var(--border)'}`,
+            onMouseEnter={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.12)':'var(--elevated)'}
+            onMouseLeave={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent'}>
+            <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${chk?'var(--blue-primary)':'var(--border)'}`,
               display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,
-              background:chk?'var(--gold)':'transparent',color:chk?'#1a1a2e':'transparent'}}>✓</span>
+              background:chk?'var(--blue-primary)':'transparent',color:chk?'#fff':'transparent'}}>✓</span>
             <span style={{fontSize:13,fontWeight:chk?400:300}}>{renderOption?renderOption(o):o.label}</span>
           </div>
         );})}
@@ -1066,7 +1067,9 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
             <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowRulePrompt(false)}>No</button>
           </div>
           :<div className="edit-actions" style={{justifyContent:'flex-end'}}>
-            {txn.needs_review&&!locked&&<button type="button" className="btn btn-sm btn-primary" style={{background:'var(--blue-neon)', boxShadow: '0 0 10px rgba(56,189,248,0.2)'}} onClick={()=>onReview(txn)}>Review</button>}
+            <div style={{width:74,display:'flex',justifyContent:'flex-start'}}>
+              {txn.needs_review&&!locked&&<button type="button" className="btn btn-sm btn-primary" style={{background:'var(--blue-neon)', boxShadow: '0 0 10px rgba(56,189,248,0.2)'}} onClick={()=>onReview(txn)}>Review</button>}
+            </div>
             <button type="button" className="btn btn-sm btn-ghost" style={{padding:6}} onClick={()=>setShowTxnInfo(true)} title="Details"><Icon name="info" size={14}/></button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)}>{txn.is_split?'Splits':'Split'}</button>
@@ -1084,7 +1087,9 @@ function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,
               title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
               {excluded?'↩':'⊘'}
             </button>
-            {locked && <button type="button" className="btn btn-sm btn-ghost" onClick={toggleLock} title="Unlock">🔓</button>}
+            <div style={{width:32,display:'flex',justifyContent:'flex-start'}}>
+              {locked && <button type="button" className="btn btn-sm btn-ghost" onClick={toggleLock} title="Unlock">🔓</button>}
+            </div>
           </div>
         }
       </td>
@@ -2114,11 +2119,17 @@ function TransactionsPage({categories,toast,refreshKey}){
   const[endDate,setEndDate]=useState('');
   const[catFilter,setCatFilter]=useState(null);       // null=all, Set=specific
   const[actionFilter,setActionFilter]=useState(null);  // null=all, Set=specific
+  /* Draft copies for the type/category/account dropdowns — only take effect (copied into
+     the applied state above) when the user clicks Apply, so toggling checkboxes doesn't
+     re-filter/re-fetch on every click. */
+  const[draftCatFilter,setDraftCatFilter]=useState(null);
+  const[draftActionFilter,setDraftActionFilter]=useState(null);
   const[reviewTxn,setReviewTxn]=useState(null);
   const[showManual,setShowManual]=useState(false);
   const[splitTxn,setSplitTxn]=useState(null);
   const[accounts,setAccounts]=useState([]);
   const[accountFilter,setAccountFilter]=useState(null); // null=all, Set=specific
+  const[draftAccountFilter,setDraftAccountFilter]=useState(null);
   const[showImport,setShowImport]=useState(false);
   const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
   const[showMoreMenu,setShowMoreMenu]=useState(false);
@@ -2135,6 +2146,12 @@ function TransactionsPage({categories,toast,refreshKey}){
   const[tableLoading,setTableLoading]=useState(false);
   const _acctKey=useMemo(()=>accountFilter===null?'__all__':[...accountFilter].sort().join(','),[accountFilter]);
   const _catKey=useMemo(()=>catFilter===null?'__all__':[...catFilter].sort().join(','),[catFilter]);
+  const _actionKey=useMemo(()=>actionFilter===null?'__all__':[...actionFilter].sort().join(','),[actionFilter]);
+  const _draftAcctKey=useMemo(()=>draftAccountFilter===null?'__all__':[...draftAccountFilter].sort().join(','),[draftAccountFilter]);
+  const _draftCatKey=useMemo(()=>draftCatFilter===null?'__all__':[...draftCatFilter].sort().join(','),[draftCatFilter]);
+  const _draftActionKey=useMemo(()=>draftActionFilter===null?'__all__':[...draftActionFilter].sort().join(','),[draftActionFilter]);
+  const filtersDirty=_draftAcctKey!==_acctKey||_draftCatKey!==_catKey||_draftActionKey!==_actionKey;
+  const applyFilters=()=>{setAccountFilter(draftAccountFilter);setCatFilter(draftCatFilter);setActionFilter(draftActionFilter);};
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
     setTableLoading(true);
@@ -2177,7 +2194,6 @@ function TransactionsPage({categories,toast,refreshKey}){
     }catch(e){toast('Batch update failed: '+e.message,'error');}
   };
   /* Clear selection whenever the visible set changes (filter applied) */
-  const _actionKey=useMemo(()=>actionFilter===null?'__all__':[...actionFilter].sort().join(','),[actionFilter]);
   useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,showDupes,showExcluded]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
@@ -2265,11 +2281,13 @@ function TransactionsPage({categories,toast,refreshKey}){
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <MultiSelectFilter label="All types" options={TXN_TYPES.map(a=>({value:a,label:a}))}
-              selected={actionFilter} onChange={setActionFilter}/>
+              selected={draftActionFilter} onChange={setDraftActionFilter}/>
             <MultiSelectFilter label="All categories" options={sortedCats(categories).map(c=>({value:c.name,label:c.name}))}
-              selected={catFilter} onChange={setCatFilter}/>
+              selected={draftCatFilter} onChange={setDraftCatFilter}/>
             <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name}))}
-              selected={accountFilter} onChange={setAccountFilter}/>
+              selected={draftAccountFilter} onChange={setDraftAccountFilter}/>
+            <button type="button" className="btn btn-sm btn-primary" onClick={applyFilters} disabled={!filtersDirty}
+              title={filtersDirty?'Apply the selected type/category/account filters':'No pending filter changes'}>Apply{filtersDirty?' •':''}</button>
             <button type="button" className="btn btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
             <button type="button" className="btn btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           </div>
@@ -2303,8 +2321,8 @@ function TransactionsPage({categories,toast,refreshKey}){
           </div>
           
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {(startDate||endDate||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear)&&
-              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
+            {(startDate||endDate||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null)&&
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
             {showMoreMenu&&<div style={{position:'absolute',right:24,top:'100%',marginTop:4,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:8,zIndex:20,boxShadow:'var(--card-shadow)',minWidth:180}}
               onMouseLeave={()=>setShowMoreMenu(false)}>

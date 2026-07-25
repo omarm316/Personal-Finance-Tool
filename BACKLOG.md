@@ -33,6 +33,7 @@
 | H3 | **Transaction: filter by description/merchant** | Text search input — already exists; verify working well |
 | H4 | **Challenge: verify recalc correctness** | Confirm spend from `activation_date` → today captured correctly |
 | H5 | **Card Research Skill — capture benefits** | Extract full benefit list and auto-POST to `/api/card-products/{id}/benefits` |
+| H6 | **App-wide UI design-system pass** | Found 2026-07-25 during a Transactions-page session (see PLAN.md): sidebar nav + all filter menus should adhere to one consistent color palette (the Transactions-page filter-menu fix already moved `MultiSelectFilter` from leftover gold to blue — same audit needed elsewhere), buttons need proper-but-subtle borders app-wide, and fonts should be aligned/consistent across all pages. User explicitly deferred this to its own dedicated session rather than bundling into the Transactions-page session, since it spans the nav and every page, not just one module. |
 
 ---
 

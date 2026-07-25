@@ -1,7 +1,20 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-24
+> Last updated: 2026-07-25
+
+---
+
+## Session 2026-07-25 — Transactions page: row-action alignment, filter Apply button, filter palette fix
+
+Scoped Transactions-page session per user's four initial reactions. All fixed and verified live in `v2.html`:
+
+1. **Row-action button alignment** — `TxnRow`'s action cell (`v2.html`, ~line 1068) conditionally rendered the "Review" button (`needs_review && !locked`) and the "Unlock" 🔓 button (`locked`) inline, so every other button (Details/Edit/Split/GCB/Rule/Exclude) shifted horizontally depending on row state. Fixed by wrapping both conditional buttons in fixed-width slot `<div>`s (74px/32px) that are always rendered, empty or not — confirmed via DOM measurement that Edit's x-position is now identical across every row regardless of Review's presence.
+2. **Filter "Apply" button** — Added draft state (`draftActionFilter`/`draftCatFilter`/`draftAccountFilter`) for the Type/Category/Account `MultiSelectFilter` dropdowns; user confirmed scope should be limited to just these three dropdowns (not search, date range, or Needs Review — those stay live/instant). New `filtersDirty` flag + `applyFilters()` drives an Apply button next to the dropdowns; Clear Filters resets drafts too. Verified: toggling a checkbox doesn't touch the table until Apply is clicked.
+3. **Filter menu color scheme** — `MultiSelectFilter` (used for these three dropdowns) was hardcoded to the old gold theme (`var(--gold)`) left over from `frontend.html`'s "midnight luxury" theme, clashing with `v2.html`'s blue "Premium Glassy Blue" palette used everywhere else (Review button, badges, `.filter-select:focus`, etc.). Swapped every gold reference to `var(--blue-primary)` / `rgba(var(--blue-primary-rgb), X)`. Verified in both dark and light theme.
+4. **Stray blank button** — Root cause: the "Details" button (opens the Transaction Info modal) used `<Icon name="info"/>`, but `info` was never defined in `ICON_PATHS` — it silently rendered an empty `<svg>`, i.e. a genuinely blank clickable button. Present on every row, but most noticeable on rows without the colorful Review button next to it. Fixed by adding the missing `info` icon path rather than removing the button, since `showTxnInfo` is a real, working feature.
+
+**Deliberately not done this session** (scope discipline — see B-below): a broader UI cleanup request came in mid-session ("all menus incl. horizontal nav, all filter menus on-palette, subtle borders on buttons, fonts aligned system-wide"). Confirmed with user this is out of scope for a Transactions-page session and belongs in its own dedicated session since it touches the sidebar nav and every page, not just Transactions — logged as BACKLOG H6.
 
 ---
 
