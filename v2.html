@@ -4858,6 +4858,13 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[logUsageNotes,setLogUsageNotes]=useState('');
   const[benefitSaving,setBenefitSaving]=useState(false);
   const[togglingCycle,setTogglingCycle]=useState(null);   // benefit id currently mid-toggle (disables its grid)
+  // Card product change + history state
+  const[allCardProducts,setAllCardProducts]=useState([]);
+  const[productHistory,setProductHistory]=useState([]);
+  const[showHistory,setShowHistory]=useState(false);
+  const[showChangeProductModal,setShowChangeProductModal]=useState(false);
+  const[changeProductForm,setChangeProductForm]=useState({product_id:'',effective_date:new Date().toISOString().slice(0,10)});
+  const[changingProduct,setChangingProduct]=useState(false);
   const txnSectionRef=useRef(null);   // Transactions card — scrolled into view when a challenge sets the custom filter
   const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd,silent)=>{
     // silent=true skips the loading flag — used for post-edit refreshes so the
@@ -5120,6 +5127,37 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     catch(e){toast('Failed to load benefits','error');}
     finally{setBenefitsLoading(false);}
   };
+  // Card product change + history — lets a card's linked product be swapped
+  // (e.g. issuer product-changes Bonvoy Boundless → Ritz-Carlton) while
+  // keeping the same account/card and all its transaction history. Past
+  // transactions' points stay locked to whatever product was active when
+  // they posted (see _lock_points_for_transaction in main.py) — changing
+  // the product here only affects new/edited transactions going forward.
+  const loadProductHistory=async(cardId)=>{
+    if(!cardId)return;
+    try{setProductHistory(await apiFetch(`/cards/${cardId}/product-history`));}
+    catch(e){/* non-fatal — history is a display-only nicety */}
+  };
+  const openChangeProductModal=()=>{
+    setChangeProductForm({product_id:'',effective_date:new Date().toISOString().slice(0,10)});
+    setShowChangeProductModal(true);
+  };
+  const saveChangeProduct=async()=>{
+    if(!d?.card?.id){toast('No card linked to this account yet','error');return;}
+    if(!changeProductForm.product_id){toast('Choose a product','error');return;}
+    setChangingProduct(true);
+    try{
+      const r=await apiFetch(`/cards/${d.card.id}/change-product`,{method:'POST',body:JSON.stringify({
+        product_id:parseInt(changeProductForm.product_id,10),
+        effective_date:changeProductForm.effective_date,
+      })});
+      toast(`Changed to ${r.new_product_name}`);
+      setShowChangeProductModal(false);
+      await load();
+      loadProductHistory(d.card.id);
+    }catch(e){toast('Change failed: '+(e?.message||''),'error');}
+    finally{setChangingProduct(false);}
+  };
   const saveBenefit=async()=>{
     if(!benefitForm.benefit_name.trim()){toast('Benefit name required','error');return;}
     if(!d?.product?.id){toast('No product linked to this card','error');return;}
@@ -5196,8 +5234,12 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   useEffect(()=>{if(d)load(spendPeriod,true);},[spendPeriod]);
   // When card detail loads, load challenges + benefits for this card
   useEffect(()=>{
-    if(d?.card?.id){loadChallenges(d.card.id);loadBenefits(d.card.id);}
+    if(d?.card?.id){loadChallenges(d.card.id);loadBenefits(d.card.id);loadProductHistory(d.card.id);}
   },[d?.card?.id]);
+  // Full product catalog, for the Change Product picker
+  useEffect(()=>{
+    apiFetch('/card-products').then(setAllCardProducts).catch(()=>{});
+  },[]);
   // Transactions filter — reload when year/month/quarter/view/cscFilter changes
   useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd);setSelectedTxnIds(new Set());},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd]);
   // Load grouped unclassified merchants when filter='__none__'
@@ -5545,10 +5587,49 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     </div>
   );
 
+  const ChangeProductModal=showChangeProductModal&&(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="card" style={{width:440,maxWidth:'94vw',padding:0}}>
+        <div style={{padding:'18px 24px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:16,fontWeight:400}}>{p?'Change Card Product':'Link Card Product'}</div>
+          <button type="button" onClick={()=>setShowChangeProductModal(false)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'var(--text-muted)'}}>×</button>
+        </div>
+        <div style={{padding:'18px 24px',display:'flex',flexDirection:'column',gap:12}}>
+          {p&&<div style={{fontSize:12.5,color:'var(--text-muted)'}}>
+            Currently <strong style={{color:'var(--text-primary)'}}>{p.card_name}</strong>. Past transactions keep earning at {p.card_name}'s rates — only new spend (and the date below onward) uses the new product.
+          </div>}
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>New Product *</label>
+            <select value={changeProductForm.product_id} onChange={e=>setChangeProductForm(f=>({...f,product_id:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+              <option value=''>Select a product…</option>
+              {[...allCardProducts].sort((a,b)=>(a.card_name||'').localeCompare(b.card_name||'')).map(cp=>(
+                <option key={cp.id} value={cp.id}>{cp.card_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Effective Date</label>
+            <input type='date' value={changeProductForm.effective_date}
+              onChange={e=>setChangeProductForm(f=>({...f,effective_date:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',boxSizing:'border-box'}}/>
+          </div>
+        </div>
+        <div style={{padding:'12px 24px 18px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={()=>setShowChangeProductModal(false)}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={saveChangeProduct} disabled={changingProduct}>
+            {changingProduct?'Saving…':p?'Change Product':'Link Product'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return(
     <div style={{width:'100%'}}>
       {ChallengeModal}
       {BenefitModal}
+      {ChangeProductModal}
       {DeleteConfirm}
       {/* Hero */}
       <div style={{background:grad,borderRadius:16,padding:'28px 32px',color:'#fff',marginBottom:24,position:'relative',overflow:'hidden'}}>
@@ -5585,9 +5666,31 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
         </div>}
       </div>
 
+      {c&&<div className="card" style={{marginBottom:24,padding:'14px 20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Card Product</div>
+            <div style={{fontSize:15,fontWeight:400,marginTop:2}}>{p?p.card_name:'Not linked'}</div>
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {productHistory.length>1&&
+              <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setShowHistory(s=>!s)}>{showHistory?'Hide History':'Product History'}</button>}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={openChangeProductModal}>{p?'Change Product':'Link Product'}</button>
+          </div>
+        </div>
+        {showHistory&&productHistory.length>0&&<div style={{marginTop:12,borderTop:'1px solid var(--border)',paddingTop:10}}>
+          {productHistory.map(h=>(
+            <div key={h.id} style={{display:'flex',justifyContent:'space-between',fontSize:12.5,padding:'4px 0',color:h.is_current?'var(--text-primary)':'var(--text-muted)'}}>
+              <span>{h.product_name||'(unknown product)'}</span>
+              <span>{fmtDate(h.effective_from)} &ndash; {h.is_current?'present':fmtDate(h.effective_to)}</span>
+            </div>
+          ))}
+        </div>}
+      </div>}
+
       {!p&&<div className="card" style={{marginBottom:24,padding:20,border:'2px solid var(--amber)',background:'rgba(251,191,36,0.1)'}}>
         <div style={{fontSize:14,fontWeight:500,color:'var(--amber)',marginBottom:4}}>No Card Product Linked</div>
-        <div style={{fontSize:13,color:'var(--amber)'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Go back and use the product dropdown to link it.</div>
+        <div style={{fontSize:13,color:'var(--amber)'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Use the "Link Product" button above, or go back and use the product dropdown.</div>
       </div>}
 
       {(c||p)&&<div className="grid-4" style={{marginBottom:24}}>

@@ -27,7 +27,7 @@ from database import (
     init_db, Account, Transaction, Category,
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
-    PointsEcosystem, CardProduct, CardProductReward, CardEarningRate,
+    PointsEcosystem, CardProduct, CardProductReward, CardEarningRate, CardProductHistory,
     CardBenefit, BenefitUsage, SpendChallenge, ChallengeCardLink, ChallengeCategoryLink,
     Redemption, TransferRatio, Transfer, PointsBalanceSnapshot, PointsAdjustment, PersonPointsTransfer,
     CHALLENGE_TEMPLATES,
@@ -1430,6 +1430,14 @@ async def startup_event():
 
         # Product catalog is seeded by seed_card_products() above — no Excel import needed
 
+        try:
+            _backfill_product_history_and_locked_points(session)
+        except Exception as lock_err:
+            session.rollback()
+            logger.warning(f"_backfill_product_history_and_locked_points failed: {lock_err}")
+            import traceback
+            traceback.print_exc()
+
         # One-time fix: correct balance observations for credit/loan accounts
         # where plaid_balance was stored with wrong sign (positive instead of negative).
         # Use _sign_plaid_balance to determine which accounts are liability-type.
@@ -1981,7 +1989,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
             needs_review_flag = compute_needs_review(action, category, confidence, final_source)
 
-            db.add(Transaction(
+            new_txn = Transaction(
                 plaid_transaction_id=txn_data['plaid_transaction_id'],
                 account_id=account.id,
                 date=txn_date,
@@ -2001,8 +2009,10 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 year=txn_date.year,
                 month=txn_date.month,
                 day=txn_date.day,
-            ))
+            )
+            db.add(new_txn)
             db.flush()   # catch constraint errors per-transaction, not at batch commit
+            _lock_points_for_transaction(db, new_txn)
             sp.commit()  # release savepoint — this row is now safe in the outer transaction
             total_added += 1
 
@@ -2037,6 +2047,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             existing.day           = new_date.day
             existing.amount        = new_amount
             existing.merchant_name = txn_data.get('merchant_name') or existing.merchant_name
+            _lock_points_for_transaction(db, existing)
             modified_count += 1
         except Exception as mod_err:
             modified_errors += 1
@@ -2072,6 +2083,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             note = " [removed by Plaid — may reappear with a new ID]"
             if existing.description_clean and note not in existing.description_clean:
                 existing.description_clean = existing.description_clean + note
+            _lock_points_for_transaction(db, existing)
             removed_count += 1
             logger.info(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
         except Exception as rem_err:
@@ -3365,10 +3377,57 @@ def _best_description(raw: str, stored_clean, enrichment_source=None, categorize
     return raw
 
 
+def _build_product_rate_maps(db, product_ids: list[int]) -> dict[int, tuple]:
+    """
+    The per-product half of the rate lookup, shared by _build_points_lookup()
+    (keyed by account, for "what does this card currently earn" displays) and
+    _lock_points_for_transaction() (keyed by whichever product was actually in
+    effect on one specific transaction's date).
+
+    Returns {product_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp)}
+    where bonus_by_name = {category_name: additional_multiplier}.
+    """
+    if not product_ids:
+        return {}
+
+    products   = {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(product_ids)).all()}
+    eco_ids    = [p.ecosystem_id for p in products.values() if p.ecosystem_id]
+    ecosystems = {e.id: e for e in db.query(PointsEcosystem).filter(PointsEcosystem.id.in_(eco_ids)).all()}
+
+    all_rewards = db.query(CardProductReward)\
+        .filter(CardProductReward.product_id.in_(product_ids)).all()
+    rewards_by_product: dict[int, list] = {}
+    for r in all_rewards:
+        rewards_by_product.setdefault(r.product_id, []).append(r)
+
+    rate_maps: dict[int, tuple] = {}
+    for product_id, product in products.items():
+        eco     = ecosystems.get(product.ecosystem_id) if product.ecosystem_id else None
+        rewards = rewards_by_product.get(product_id, [])
+        base    = next((r.multiplier for r in rewards if r.is_base_rate), 1.0)
+        bonus_by_name = {
+            r.points_category.name: r.multiplier
+            for r in rewards
+            if not r.is_base_rate and r.points_category
+        }
+        rate_maps[product_id] = (
+            base,
+            bonus_by_name,
+            eco.currency_name if eco else 'Points',
+            eco.name if eco else None,
+            eco.your_cpp if eco else 1.0,
+        )
+    return rate_maps
+
+
 def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
     """
-    Pre-build the data structures needed to compute earn rates for a batch of
-    transactions without N+1 queries.
+    Pre-build the data structures needed to display a card's CURRENT earn
+    structure for a batch of accounts without N+1 queries. NOTE: this answers
+    "what does this account's card earn today" — it is no longer used to
+    compute any specific transaction's points (those are locked, see
+    Transaction.points_earned / _lock_points_for_transaction below); it's for
+    "current rate" displays like the portfolio and benefits pages.
 
     Returns:
       points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp, issuer)}
@@ -3387,41 +3446,173 @@ def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
     if not product_ids:
         return {}, cat_parent_map
 
-    products   = {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(product_ids)).all()}
-    eco_ids    = [p.ecosystem_id for p in products.values() if p.ecosystem_id]
-    ecosystems = {e.id: e for e in db.query(PointsEcosystem).filter(PointsEcosystem.id.in_(eco_ids)).all()}
-
-    all_rewards = db.query(CardProductReward)\
-        .filter(CardProductReward.product_id.in_(product_ids)).all()
-    rewards_by_product: dict[int, list] = {}
-    for r in all_rewards:
-        rewards_by_product.setdefault(r.product_id, []).append(r)
+    rate_maps = _build_product_rate_maps(db, product_ids)
 
     points_lookup: dict[int, tuple] = {}
     for acct_id, card in acct_to_card.items():
-        if not card.product_id:
+        if not card.product_id or card.product_id not in rate_maps:
             continue
-        product = products.get(card.product_id)
-        if not product:
-            continue
-        eco     = ecosystems.get(product.ecosystem_id) if product.ecosystem_id else None
-        rewards = rewards_by_product.get(card.product_id, [])
-        base    = next((r.multiplier for r in rewards if r.is_base_rate), 1.0)
-        bonus_by_name = {
-            r.points_category.name: r.multiplier
-            for r in rewards
-            if not r.is_base_rate and r.points_category
-        }
-        points_lookup[acct_id] = (
-            base,
-            bonus_by_name,
-            eco.currency_name if eco else 'Points',
-            eco.name if eco else None,
-            eco.your_cpp if eco else 1.0,
-            card.issuer,
-        )
+        base, bonus_by_name, currency_name, eco_name, your_cpp = rate_maps[card.product_id]
+        points_lookup[acct_id] = (base, bonus_by_name, currency_name, eco_name, your_cpp, card.issuer)
 
     return points_lookup, cat_parent_map
+
+
+def _resolve_product_for_date(db, card_id: int, txn_date) -> int | None:
+    """
+    Which CardProduct was in effect for this card on this date. Checks
+    CardProductHistory (effective-dated, mirrors TransferRatio) first; falls
+    back to the card's CURRENT product_id if no history row exists yet
+    (every card before its first product change, and legacy data before this
+    feature shipped).
+    """
+    if not card_id:
+        return None
+    d = txn_date.date() if hasattr(txn_date, 'date') else txn_date
+    hist = (
+        db.query(CardProductHistory)
+        .filter(
+            CardProductHistory.card_id == card_id,
+            CardProductHistory.effective_from <= d,
+        )
+        .filter(or_(CardProductHistory.effective_to.is_(None), CardProductHistory.effective_to > d))
+        .order_by(CardProductHistory.effective_from.desc())
+        .first()
+    )
+    if hist:
+        return hist.product_id
+    card = db.query(Card).filter_by(id=card_id).first()
+    return card.product_id if card else None
+
+
+def _lock_points_for_transaction(db, t) -> None:
+    """
+    Compute this transaction's points-earn ONCE, using whichever product was
+    actually in effect on the transaction's own date, and freeze the result
+    onto the row (points_earned/points_earn_classification/points_product_id/
+    points_locked_at). Nothing else re-derives this later on read — see the
+    module docstring near Transaction.points_earned in database.py.
+
+    Call this at creation (sync/import/manual) and again whenever an edit
+    changes a field compute_points_earn() depends on (category, is_excluded,
+    points_earn_override, action). Re-locking still resolves the product as
+    of the transaction's OWN date, so correcting an old transaction's category
+    today doesn't pull in today's (possibly changed) product's rates.
+    """
+    t.points_locked_at = datetime.utcnow()
+
+    if not t.card_id:
+        t.points_earned = None
+        t.points_earn_classification = None
+        t.points_earn_rate = None
+        t.points_product_id = None
+        return
+
+    product_id = _resolve_product_for_date(db, t.card_id, t.date)
+    if not product_id:
+        t.points_earned = None
+        t.points_earn_classification = None
+        t.points_earn_rate = None
+        t.points_product_id = None
+        return
+
+    rate_info = _build_product_rate_maps(db, [product_id]).get(product_id)
+    if not rate_info:
+        t.points_earned = None
+        t.points_earn_classification = None
+        t.points_earn_rate = None
+        t.points_product_id = product_id
+        return
+
+    base_rate, bonus_by_name = rate_info[0], rate_info[1]
+    card = db.query(Card).filter_by(id=t.card_id).first()
+    cat_parent_map = {c.name: c.parent_key for c in db.query(PointsCategory).all()}
+    result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
+
+    t.points_earned = result['points']
+    t.points_earn_classification = result['classification']
+    t.points_earn_rate = result['earn_rate']
+    t.points_product_id = product_id
+
+
+def _backfill_product_history_and_locked_points(session):
+    """
+    One-time backfill, safe to run on every startup (both halves are guarded
+    so already-processed rows are skipped):
+
+    1. Bootstrap a CardProductHistory row for every card that has a product
+       but no history yet — every card before this feature shipped.
+    2. Lock points_earned for every transaction that predates this feature
+       (points_locked_at IS NULL).
+
+    Both use TODAY's current product — the best available truth for
+    pre-existing data — so nothing visibly changes right after deploy. A
+    real product change from here on is what starts writing a second history
+    row and locking old spend under the product that was actually active.
+    """
+    from datetime import date as _date
+
+    cards_with_product = session.query(Card).filter(Card.product_id.isnot(None)).all()
+    bootstrapped = 0
+    for card in cards_with_product:
+        if session.query(CardProductHistory).filter_by(card_id=card.id).first():
+            continue
+        earliest_txn = (
+            session.query(Transaction)
+            .filter_by(card_id=card.id)
+            .order_by(Transaction.date.asc())
+            .first()
+        )
+        bootstrap_from = (
+            earliest_txn.date.date() if earliest_txn
+            else (card.issue_date.date() if card.issue_date else _date.today())
+        )
+        session.add(CardProductHistory(
+            card_id=card.id, product_id=card.product_id,
+            effective_from=bootstrap_from, effective_to=None,
+        ))
+        bootstrapped += 1
+    if bootstrapped:
+        session.commit()
+        logger.info(f"  Migration: bootstrapped CardProductHistory for {bootstrapped} card(s)")
+
+    # Locking each row via _lock_points_for_transaction() would re-query
+    # PointsCategory/Card/CardProduct/etc. per transaction — fine for a
+    # single interactive edit, far too slow here against a remote DB with
+    # ~1-2k rows (each iteration is several network round trips). Precompute
+    # everything once instead and iterate in pure Python.
+    unlocked = session.query(Transaction).filter(Transaction.points_locked_at.is_(None)).all()
+    if unlocked:
+        cat_parent_map = {c.name: c.parent_key for c in session.query(PointsCategory).all()}
+        card_ids = {t.card_id for t in unlocked if t.card_id}
+        cards_by_id = (
+            {c.id: c for c in session.query(Card).filter(Card.id.in_(card_ids)).all()}
+            if card_ids else {}
+        )
+        product_ids = [c.product_id for c in cards_by_id.values() if c.product_id]
+        rate_maps = _build_product_rate_maps(session, product_ids)
+
+        now = datetime.utcnow()
+        for t in unlocked:
+            t.points_locked_at = now
+            card = cards_by_id.get(t.card_id) if t.card_id else None
+            product_id = card.product_id if card else None
+            rate_info = rate_maps.get(product_id) if product_id else None
+            if not rate_info:
+                t.points_earned = None
+                t.points_earn_classification = None
+                t.points_earn_rate = None
+                t.points_product_id = product_id
+                continue
+            base_rate, bonus_by_name = rate_info[0], rate_info[1]
+            result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
+            t.points_earned = result['points']
+            t.points_earn_classification = result['classification']
+            t.points_earn_rate = result['earn_rate']
+            t.points_product_id = product_id
+
+        session.commit()
+        logger.info(f"  Migration: locked points_earned for {len(unlocked)} pre-existing transaction(s)")
 
 
 def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat_parent_map=None):
@@ -3445,20 +3636,22 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
         categorizer=categorizer
     )
 
-    # Points earn — computed via compute_points_earn() for any transaction where
-    # we know the card's product (not just Expense rows, so credits/clawbacks
-    # are visible too instead of silently omitted).
+    # Points earn — LOCKED at write time (see _lock_points_for_transaction()),
+    # never recomputed here. currency/eco_name/cpp are still read from
+    # points_lookup (the account's CURRENT product) purely for display
+    # metadata — they don't affect the frozen points_earned value itself.
     points_earn = None
-    if points_lookup is not None and cat_parent_map is not None and t.account_id in points_lookup:
-        base, bonus_by_name, currency, eco_name, your_cpp, issuer = points_lookup[t.account_id]
-        result = compute_points_earn(t, base, bonus_by_name, cat_parent_map, issuer)
-        parent = cat_parent_map.get(t.points_category) if t.points_category else None
+    if t.points_earned is not None:
+        parent = cat_parent_map.get(t.points_category) if (cat_parent_map and t.points_category) else None
+        currency = eco_name = your_cpp = None
+        if points_lookup is not None and t.account_id in points_lookup:
+            _, _, currency, eco_name, your_cpp, _ = points_lookup[t.account_id]
         points_earn = {
             'points_category':    t.points_category,       # e.g. "Drugstore" or "United"
             'points_category_l1': parent,                  # e.g. None or "Airlines"
-            'earn_rate':          result['earn_rate'],      # total multiplier, e.g. 3.0 (None when N/A)
-            'points_estimated':   round(result['points'], 1),  # signed — negative for clawbacks
-            'classification':     result['classification'],
+            'earn_rate':          t.points_earn_rate,        # total multiplier, e.g. 3.0 (None when N/A)
+            'points_estimated':   round(t.points_earned, 1),  # signed — negative for clawbacks
+            'classification':     t.points_earn_classification,
             'currency':           currency,                # e.g. "Ultimate Rewards"
             'eco_name':           eco_name,
             'cpp':                your_cpp,                # for value estimate in UI
@@ -3598,11 +3791,13 @@ async def update_transaction(
     categorizer  = CategorizationEngine(db)
     old_category = t.category_final
     old_action   = t.action
+    _relock      = False  # any field below that compute_points_earn() depends on
 
     if update.category is not None and update.category != t.category_manual:
         t.category_manual = update.category
         t.updated_at      = datetime.utcnow()
         t.is_locked       = True
+        _relock           = True
         if old_category != update.category:
             categorizer.record_correction(t, old_category, update.category, old_action, update.action)
 
@@ -3610,6 +3805,7 @@ async def update_transaction(
         t.action     = update.action
         t.updated_at = datetime.utcnow()
         t.is_locked  = True
+        _relock      = True
         # Section 4C: Clear category when type is not Expense/Income
         if update.action not in BUDGET_TYPES:
             t.category_manual = ''
@@ -3628,16 +3824,20 @@ async def update_transaction(
         t.gcb_tagged = update.is_gcb  # Keep legacy column in sync
     if update.points_category is not None:
         t.points_category = update.points_category
+        _relock = True
     if update.is_excluded is not None:
         t.is_excluded = update.is_excluded
         t.updated_at  = datetime.utcnow()
+        _relock       = True
 
     if update.clear_points_earn_override:
         t.points_earn_override = None
         t.updated_at = datetime.utcnow()
+        _relock = True
     elif update.points_earn_override is not None:
         t.points_earn_override = update.points_earn_override
         t.updated_at = datetime.utcnow()
+        _relock = True
 
     if update.description_clean is not None:
         t.description_clean = update.description_clean
@@ -3646,6 +3846,9 @@ async def update_transaction(
     if update.spender is not None:
         t.spender = update.spender or None
         t.updated_at = datetime.utcnow()
+
+    if _relock:
+        _lock_points_for_transaction(db, t)
 
     db.commit()
     return {"message": "Transaction updated"}
@@ -3671,12 +3874,14 @@ async def batch_update_transactions(
 
         old_category = t.category_final
         old_action = t.action
+        _relock = False
 
         if update.category is not None:
             if update.category != t.category_manual:
                 t.category_manual = update.category
                 t.updated_at = datetime.utcnow()
                 t.is_locked = True
+                _relock = True
                 if old_category != update.category:
                     categorizer.record_correction(t, old_category, update.category,
                                                   old_action, update.action)
@@ -3685,6 +3890,7 @@ async def batch_update_transactions(
             t.action = update.action
             t.updated_at = datetime.utcnow()
             t.is_locked = True
+            _relock = True
             # Clear category when type doesn't support it
             if update.action not in BUDGET_TYPES:
                 t.category_manual = ''
@@ -3705,6 +3911,9 @@ async def batch_update_transactions(
         if update.spender is not None:
             t.spender = update.spender or None
             t.updated_at = datetime.utcnow()
+
+        if _relock:
+            _lock_points_for_transaction(db, t)
 
         updated += 1
 
@@ -4674,10 +4883,8 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
             for t in earn_q.all():
                 if t.action != 'Expense':
                     continue
-                info = acct_info.get(t.account_id)
-                if not info:
-                    continue
-                b_earned += compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info.get('issuer'))['points']
+                # Locked at write time — see _lock_points_for_transaction().
+                b_earned += t.points_earned or 0
 
         b_redeemed = sum(
             r.points_redeemed for r in redemption_rows
@@ -4879,12 +5086,10 @@ async def cards_earn_summary(
             'issuer':        card.issuer if card else None,
         }
 
-    # ── per-transaction points via compute_points_earn() ────────────────────
-    # Matches /api/ecosystems/{id}/earn-detail's approach — a flat SQL SUM
-    # can't express compute_points_earn()'s sign/rounding/override rules
-    # (Amex per-dollar rounding, points_earn_override, payment-description
-    # detection), which caused this endpoint's Portfolio-tile totals to
-    # silently diverge from the ecosystem drill-down page.
+    # ── per-transaction points, read from the locked column ─────────────────
+    # Matches /api/ecosystems/{id}/earn-detail's approach — points_earned was
+    # frozen at write time (see _lock_points_for_transaction()), so summing
+    # it here can't silently diverge from the ecosystem drill-down page.
     window_rows = (
         db.query(Transaction)
         .filter(
@@ -4910,8 +5115,8 @@ async def cards_earn_summary(
             continue
         if t.action != 'Expense':
             continue
-        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info.get('issuer'))
-        pts = result['points']
+        # Locked at write time — see _lock_points_for_transaction().
+        pts = t.points_earned or 0
         eco_id = info['eco_id']
         acct_id = t.account_id
 
@@ -5555,9 +5760,9 @@ async def ecosystem_earn_detail(
             'total_points_adjusted': round(total_points_adjusted, 2),
         }
 
-    # Per-transaction classification via compute_points_earn() — a flat SQL
-    # SUM can't express the sign-flip on credits, so this fetches actual
-    # rows in the window and sums signed points in Python.
+    # Per-transaction classification read from the locked column (points_earned
+    # was frozen at write time — see _lock_points_for_transaction()) — a flat
+    # SQL SUM can't express the sign-flip on credits, so this sums in Python.
     window_rows = (
         db.query(Transaction)
         .filter(
@@ -5575,11 +5780,8 @@ async def ecosystem_earn_detail(
     for t in window_rows:
         if t.action != 'Expense':
             continue
-        info = acct_info.get(t.account_id)
-        if not info:
-            continue
-        result = compute_points_earn(t, info['base_rate'], info['bonus_by_name'], cat_parent_map, info['issuer'])
-        pts = result['points']
+        # Locked at write time — see _lock_points_for_transaction().
+        pts = t.points_earned or 0
         total_pts += pts
         cat_key = t.points_category or 'Other'
         by_cat[cat_key]        = by_cat.get(cat_key, 0.0)        + pts
@@ -6887,6 +7089,122 @@ async def link_account_to_product(account_id: int, body: dict, db: Session = Dep
     }
 
 
+@app.post("/api/cards/{card_id}/change-product")
+async def change_card_product(card_id: int, body: dict, db: Session = Depends(get_db)):
+    """
+    Convert a card to a different product going forward — e.g. the issuer
+    product-changes a Marriott Bonvoy Boundless card to Ritz-Carlton — while
+    keeping the same Account/Card and its full transaction history.
+
+    Unlike link-product (a bare overwrite meant for first-time linking of an
+    unlinked account), this closes out the current CardProductHistory row and
+    opens a new one, so which product was active on any given date stays
+    discoverable. Critically, it never touches any existing Transaction row:
+    each one already locked its own points_earned/points_product_id at write
+    time (see _lock_points_for_transaction()), so old spend keeps computing
+    under the OLD product's rates and only new/edited transactions pick up
+    the new one — no retroactive change to historical numbers.
+    """
+    card = db.query(Card).filter_by(id=card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    new_product_id = body.get('product_id')
+    if not new_product_id:
+        raise HTTPException(status_code=400, detail="product_id is required")
+
+    new_product = db.query(CardProduct).filter_by(id=new_product_id).first()
+    if not new_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    from datetime import date as _date
+    effective_date_str = body.get('effective_date')
+    effective_date = _date.fromisoformat(effective_date_str[:10]) if effective_date_str else _date.today()
+
+    current_hist = (
+        db.query(CardProductHistory)
+        .filter_by(card_id=card_id, effective_to=None)
+        .order_by(CardProductHistory.effective_from.desc())
+        .first()
+    )
+    if not current_hist and card.product_id:
+        # Bootstrap: no history row exists yet (every card before its first
+        # product change) — synthesize one starting from the card's earliest
+        # transaction, falling back to its issue date.
+        earliest_txn = (
+            db.query(Transaction)
+            .filter_by(card_id=card_id)
+            .order_by(Transaction.date.asc())
+            .first()
+        )
+        bootstrap_from = (
+            earliest_txn.date.date() if earliest_txn
+            else (card.issue_date.date() if card.issue_date else effective_date)
+        )
+        current_hist = CardProductHistory(
+            card_id=card_id, product_id=card.product_id,
+            effective_from=bootstrap_from, effective_to=None,
+        )
+        db.add(current_hist)
+        db.flush()
+
+    if current_hist:
+        current_hist.effective_to = effective_date
+
+    db.add(CardProductHistory(
+        card_id=card_id, product_id=new_product_id,
+        effective_from=effective_date, effective_to=None,
+    ))
+
+    # Same dual-write convention as link-product, so every "current product"
+    # read site (e.g. _build_points_lookup) keeps working unchanged.
+    card.product_id = new_product_id
+    if new_product.ecosystem_id:
+        card.ecosystem_id = new_product.ecosystem_id
+    if card.account_id:
+        account = db.query(Account).filter_by(id=card.account_id).first()
+        if account:
+            account.product_id = new_product_id
+
+    db.commit()
+    return {
+        "status": "changed",
+        "card_id": card_id,
+        "new_product_id": new_product_id,
+        "new_product_name": new_product.card_name,
+        "effective_date": effective_date.isoformat(),
+    }
+
+
+@app.get("/api/cards/{card_id}/product-history")
+async def get_card_product_history(card_id: int, db: Session = Depends(get_db)):
+    """Chronological product-change log for a card, oldest first."""
+    card = db.query(Card).filter_by(id=card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    rows = (
+        db.query(CardProductHistory)
+        .filter_by(card_id=card_id)
+        .order_by(CardProductHistory.effective_from.asc())
+        .all()
+    )
+    product_ids = {r.product_id for r in rows}
+    products = (
+        {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(product_ids)).all()}
+        if product_ids else {}
+    )
+
+    return [{
+        "id": r.id,
+        "product_id": r.product_id,
+        "product_name": products[r.product_id].card_name if r.product_id in products else None,
+        "effective_from": r.effective_from.isoformat(),
+        "effective_to": r.effective_to.isoformat() if r.effective_to else None,
+        "is_current": r.effective_to is None,
+    } for r in rows]
+
+
 @app.get("/api/accounts/{account_id}/card-detail")
 async def account_card_detail(account_id: int, months: int = 3, period: str = None, db: Session = Depends(get_db)):
     """
@@ -7000,7 +7318,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         .order_by(Transaction.date.desc()).limit(30).all()
     recent_txns = []
     for t in txns:
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
+        # Locked at write time — see _lock_points_for_transaction().
         recent_txns.append({
             'id': t.id, 'date': t.date.strftime('%Y-%m-%d'),
             'description': t.description_clean or t.description_raw,
@@ -7008,14 +7326,14 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             'category': t.category_manual or t.category_auto,
             'points_category': t.points_category,
             'action': t.action,
-            'earn_rate': result['earn_rate'] or 0,
-            'points_earn': round(result['points'], 1),
-            'points_earn_classification': result['classification'],
+            'earn_rate': t.points_earn_rate or 0,
+            'points_earn': round(t.points_earned or 0, 1),
+            'points_earn_classification': t.points_earn_classification,
         })
 
-    # Spending grouped by points_category — sums signed points-earn per
-    # category via compute_points_earn() (a flat SQL SUM can't express the
-    # sign-flip on credits, so this is a Python-side loop).
+    # Spending grouped by points_category — sums the locked points_earned
+    # column per category (a flat SQL SUM can't express the sign-flip on
+    # credits, so this is a Python-side loop).
     window_txns = (
         db.query(Transaction)
         .filter(
@@ -7029,12 +7347,11 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     for t in window_txns:
         if t.action != 'Expense':
             continue
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
         label = t.points_category or 'Other'
         entry = cat_agg.setdefault(label, {'amount': 0.0, 'count': 0, 'points': 0.0})
         entry['amount'] += -t.amount   # expenses negative, returns positive → net spend
         entry['count'] += 1
-        entry['points'] += result['points']
+        entry['points'] += t.points_earned or 0  # locked at write time
 
     for label, agg in cat_agg.items():
         amt  = round(max(0.0, agg['amount']), 2)  # net spend ≥ 0 for display
@@ -7288,28 +7605,24 @@ async def account_transactions(
     else:
         filtered = all_period_txns
 
-    # Build summary across filtered set — signed points-earn via
-    # compute_points_earn() (handles exclusions/clawbacks correctly; the old
-    # flat `amount<0` gate double-counted credits as spend-free but didn't
-    # subtract clawbacks, and ignored is_excluded/_NON_EARNING_CATS/Transfer).
+    # Build summary across filtered set — signed points-earn read straight
+    # off the locked columns (see _lock_points_for_transaction()).
     total_spend = 0.0
     total_pts   = 0.0
     by_csc: dict[str, dict] = {}
-    points_by_id: dict[int, dict] = {}
     for t in filtered:
-        result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
-        points_by_id[t.id] = result
+        pts = t.points_earned or 0
         # Excluded transactions (annual fees, etc.) don't count as spend either —
         # matches the SUB/challenge spend calc's own is_excluded filter.
         if t.amount and t.amount < 0 and not t.is_excluded:
             total_spend += abs(t.amount)
-        total_pts += result['points']
+        total_pts += pts
         key = t.points_category or '__none__'
         if key not in by_csc:
             by_csc[key] = {'spend': 0.0, 'pts': 0.0, 'count': 0}
         if t.amount and t.amount < 0 and not t.is_excluded:
             by_csc[key]['spend'] += abs(t.amount)
-        by_csc[key]['pts']   += result['points']
+        by_csc[key]['pts']   += pts
         by_csc[key]['count'] += 1
 
     rows = [{
@@ -7322,9 +7635,9 @@ async def account_transactions(
         'spender': t.spender,
         'action': t.action,
         'is_excluded': bool(t.is_excluded),
-        'earn_rate': points_by_id[t.id]['earn_rate'] or 0,
-        'points_earn': round(points_by_id[t.id]['points'], 1),
-        'points_earn_classification': points_by_id[t.id]['classification'],
+        'earn_rate': t.points_earn_rate or 0,
+        'points_earn': round(t.points_earned or 0, 1),
+        'points_earn_classification': t.points_earn_classification,
     } for t in filtered[:200]]
 
     return {
@@ -7863,6 +8176,7 @@ async def import_transactions(
             is_locked            = False,
         )
         db.add(txn)
+        _lock_points_for_transaction(db, txn)
         imported += 1
 
     db.commit()
@@ -9045,6 +9359,8 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
     if not date_strings:
         raise HTTPException(status_code=400, detail="At least one date is required")
 
+    linked_card_id = account.card.id if account.card else None
+
     created_ids = []
     for ds in date_strings:
         txn_date = datetime.strptime(ds, "%Y-%m-%d")
@@ -9062,12 +9378,14 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
             needs_review=False,
             is_locked=True,
             import_source='manual',
+            card_id=linked_card_id,
             year=txn_date.year,
             month=txn_date.month,
             day=txn_date.day,
         )
         db.add(txn)
         db.flush()
+        _lock_points_for_transaction(db, txn)
         created_ids.append(txn.id)
 
         # Create splits if provided
@@ -10049,6 +10367,7 @@ async def link_loan_transaction(
     txn.description_clean = f'{loan.lender} payment'
     txn.needs_review = False
     txn.is_locked = True
+    _lock_points_for_transaction(db, txn)
 
     # Update the loan
     loan.current_balance = round((loan.current_balance or 0) - split['principal'], 2)

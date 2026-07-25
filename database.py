@@ -172,6 +172,19 @@ class Transaction(Base):
     # main.py) — sticks even if the auto-classification logic later changes.
     points_earn_override = Column(Float, nullable=True)
 
+    # Locked points earn — computed once (at sync/import/manual-create time, or
+    # re-computed when an edit changes something compute_points_earn() depends on)
+    # and then frozen. Reads never call compute_points_earn() live anymore; they
+    # just read this column. This is what makes a later card product change
+    # non-retroactive: old transactions keep whatever product produced this value,
+    # regardless of what the card's *current* product is. See
+    # _lock_points_for_transaction() / CardProductHistory in main.py.
+    points_earned = Column(Float, nullable=True)
+    points_earn_classification = Column(String(20), nullable=True)  # 'earn'|'clawback'|'excluded'|'manual_override'
+    points_earn_rate = Column(Float, nullable=True)  # multiplier used, frozen alongside points_earned (display only)
+    points_product_id = Column(Integer, ForeignKey('card_products.id'), nullable=True)
+    points_locked_at = Column(DateTime, nullable=True)
+
     # Free-text tag for who made this purchase (e.g. "Omer", "Daniella") — manual only,
     # Plaid gives no cardholder-level signal on shared/authorized-user accounts.
     # Lets a SpendChallenge.spender_filter scope its spend calc to one person's purchases.
@@ -484,6 +497,29 @@ class CardProduct(Base):
     rewards = relationship("CardProductReward", back_populates="product", cascade="all, delete-orphan")
     benefits = relationship("CardBenefit", back_populates="product", cascade="all, delete-orphan")
     cards = relationship("Card", back_populates="product")
+
+
+class CardProductHistory(Base):
+    """Effective-dated log of which CardProduct a physical Card was linked to.
+    Same pattern as TransferRatio: a product change closes the current row's
+    effective_to and opens a new one rather than overwriting Card.product_id
+    in place. effective_to = NULL means "current". Existing Transaction rows
+    are never touched by a product change — each locked its own
+    points_product_id at write time (see Transaction.points_earned) — this
+    table exists purely as the audit/display trail of what changed when, and
+    to tell newly-synced/backfilled transactions which product was active on
+    their date."""
+    __tablename__ = 'card_product_history'
+
+    id             = Column(Integer, primary_key=True)
+    card_id        = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False, index=True)
+    product_id     = Column(Integer, ForeignKey('card_products.id'), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to   = Column(Date, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    card    = relationship('Card', foreign_keys=[card_id])
+    product = relationship('CardProduct', foreign_keys=[product_id])
 
 
 class CardProductReward(Base):
@@ -1030,6 +1066,11 @@ def run_migrations(engine):
             ('content_hash',      'VARCHAR(20)'),
             ('points_earn_override', 'FLOAT'),
             ('spender',           'VARCHAR(100)'),
+            ('points_earned',              'FLOAT'),
+            ('points_earn_classification', 'VARCHAR(20)'),
+            ('points_earn_rate',           'FLOAT'),
+            ('points_product_id',          'INTEGER'),
+            ('points_locked_at',           'TIMESTAMP'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),

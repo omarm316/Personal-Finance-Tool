@@ -5,6 +5,29 @@
 
 ---
 
+## Session 2026-07-25 (cont'd) — Card product changes with locked, point-in-time points
+
+Trigger: two real Marriott Bonvoy Boundless cards were product-changed to Ritz-Carlton by the issuer, and the app had no way to reflect a product change at all — `POST /api/accounts/{id}/link-product` is a bare overwrite with zero history, reachable in the UI only for never-linked accounts.
+
+Design constraint from Omer, after weighing full retroactive per-transaction date-resolution against a cheaper "current product only" approach: **"once a transaction posts, the points should lock and not dynamically compute"** — a middle ground between the two, without literally severing the account from its history as first floated.
+
+**Shipped:**
+- `CardProductHistory` (`database.py`) — effective-dated log per card, mirrors the existing `TransferRatio` pattern (`effective_from`/`effective_to`, `NULL` = current).
+- `Transaction` gained `points_earned`, `points_earn_classification`, `points_earn_rate`, `points_product_id`, `points_locked_at` (`database.py`) — computed once and frozen; nothing reads live `compute_points_earn()` on the read path anymore.
+- `main.py`: `_resolve_product_for_date()`, `_build_product_rate_maps()` (refactored out of `_build_points_lookup()`), `_lock_points_for_transaction()` — the one write-time locking path, wired into Plaid sync (new + modified + removed txns), CSV/OFX import, manual transaction create, and `update_transaction`/`batch_update_transactions` (re-locks using whichever product was active *on the transaction's own date* whenever category/action/is_excluded/points_earn_override changes).
+- All ~8 former live-compute read sites (`_serialize_txn`, ecosystem/portfolio earn rollups, `account_card_detail`, `account_transactions`) now just read the locked columns — net deletion of code at each site.
+- `POST /api/cards/{card_id}/change-product` + `GET /api/cards/{card_id}/product-history` — the actual "change product" action (bootstraps history on first use, closes old row, opens new, dual-writes `account.product_id`/`card.product_id` same as `link-product`). Never touches existing `Transaction` rows.
+- One-time startup backfill (`_backfill_product_history_and_locked_points`, called from `startup_event`) — bootstraps one history row per already-linked card and locks every pre-existing transaction using today's product (best available truth). Rewritten once already after the first version did per-transaction queries and was clocked at 20-30+ min against the remote Railway Postgres; the shipped version precomputes all rate maps once and iterates in pure Python (ran in ~3 minutes for 2,199 transactions, mostly the final commit's per-row UPDATE flush).
+- Frontend (`v2.html`, `AccountCardDetailPage`): "Card Product" header block with current product name + Change Product button + modal (product picker, effective date) + collapsible product-history list.
+
+**Verified live** against the real Bonvoy Brilliant 1000 card (temporarily switched to Amex Platinum and back): old transactions' locked points were untouched by the switch, a new transaction dated after the switch picked up the new product's rate, editing an old (pre-switch) transaction's category re-locked it against the *old* product (not current) — confirmed the whole point of the design. Test transaction and the temporary product-history rows were cleaned up afterward; only the real schema/backfill state remains.
+
+**Discovered mid-session, unresolved and worth a heads-up**: before starting, the production DB already had this exact schema (table + 5 columns, 0 rows) despite no server having run it — traced to a concurrent Claude Code session active in the same directory (confirmed via two unattributed git commits, one of which explicitly deferred "the actual product-change modeling" to this session). Asked Omer, who confirmed it was expected/his doing; proceeded. Underlying concurrent-session risk (same non-worktree-isolated directory, shared production DB) is still open — see `feedback_workflow.md`.
+
+**Not done yet**: the two real Boundless→Ritz-Carlton migrations themselves — blocked on a Ritz-Carlton `CardProduct` not existing in the catalog yet (the other session's card-art commit only swapped the image asset on the existing `marriott_bonvoy_boundless` product_key as a stopgap). Needs a real Ritz-Carlton product added to the catalog before `change-product` can be run for real on those two cards.
+
+---
+
 ## Session 2026-07-25 (cont'd) — App-wide UI design-system pass (BACKLOG H6, closed)
 
 Follow-through on the H6 item logged during the Transactions-page session earlier the same day. User's four asks, checked against BACKLOG/PLAN notes first: subtle borders on all buttons (reference: the GCB/Rule row-action buttons on Transactions), top-of-page nav rows should follow the Budgets screen's layout, no page-level horizontal scroll (vertical is fine), and duplicate page titles removed (topbar title vs. an in-page heading repeating the same name above the KPI cards — Cash Flow page was the example, keep only the top one styled like the removed "Cash Flow & Forecasting" heading).
