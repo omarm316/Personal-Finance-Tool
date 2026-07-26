@@ -6469,6 +6469,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('southwest'))return'#b45309';
     if(n.includes('jetblue'))return'#0369a1';
     if(n.includes('discover'))return'#ea580c';
+    if(n.includes('bilt'))return'#15803d';
     return'var(--blue)';
   },[ecoName]);
 
@@ -6804,6 +6805,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
     if(n.includes('southwest'))return'linear-gradient(135deg,#92400e,#f59e0b)';
     if(n.includes('jetblue'))return'linear-gradient(135deg,#0c4a6e,#38bdf8)';
     if(n.includes('discover'))return'linear-gradient(135deg,#9a3412,#fb923c)';
+    if(n.includes('bilt'))return'linear-gradient(135deg,#14532d,#22c55e)';
     return'linear-gradient(135deg,var(--blue-primary),#60a5fa)';
   },[ecoName]);
 
@@ -7877,6 +7879,9 @@ function CardsPage({toast,refreshKey}){
                 if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
                 if(n.includes('hyatt'))return'#9f1239';
                 if(n.includes('united')||n.includes('mileageplus'))return'#374151';
+                if(n.includes('capital one'))return'#dc2626';
+                if(n.includes('atmos'))return'#0891b2';
+                if(n.includes('bilt'))return'#15803d';
                 return'var(--blue-primary)';
               };
               // Real vector-quality logos Omer supplied (assets/logos_color/,
@@ -7924,33 +7929,36 @@ function CardsPage({toast,refreshKey}){
               const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
               return(
                 <>
-                  {/* ── Ecosystem Grid — big logo-forward tiles ── */}
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))',gap:14,marginBottom:24}}>
+                  {/* ── Ecosystem Grid — logo-forward tiles, sized down (2026-07-26)
+                      so more fit per row/without vertical scroll now that Capital
+                      One/Atmos/Bilt bring the ecosystem count past what the old
+                      230px-min/220px-tall tiles comfortably fit on one screen. */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:10,marginBottom:24}}>
                     {pointsEcos.map(eco=>{
                       const col=ecoColor(eco.name);
                       const logo=ecoLogo(eco.name);
                       return(
                         <div key={eco.id}
-                          style={{padding:'28px 24px 26px',borderRadius:18,minHeight:220,
+                          style={{padding:'16px 14px 14px',borderRadius:14,minHeight:140,
                             background:'var(--surface)',border:'1px solid var(--border)',cursor:'pointer',
                             position:'relative',overflow:'hidden',display:'flex',flexDirection:'column',justifyContent:'space-between',
                             transition:'all 0.2s ease'}}
                           onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
                           onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor=`${col}44`;}}
                           onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
-                          <div style={{position:'absolute',top:-60,right:-60,width:200,height:200,borderRadius:'50%',
+                          <div style={{position:'absolute',top:-36,right:-36,width:120,height:120,borderRadius:'50%',
                             background:`radial-gradient(circle, ${col} 0%, transparent 70%)`,opacity:0.16,pointerEvents:'none'}}/>
                           {logo
-                            ?<img src={logo} alt={eco.name} style={{height:96,maxWidth:'100%',objectFit:'contain',objectPosition:'left center',position:'relative',marginBottom:14}}
+                            ?<img src={logo} alt={eco.name} style={{height:56,maxWidth:'100%',objectFit:'contain',objectPosition:'left center',position:'relative',marginBottom:8}}
                                 onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block';}}/>
                             :null}
-                          <div style={{fontSize:15,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:14,display:logo?'none':'block'}}>{eco.name}</div>
+                          <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:8,display:logo?'none':'block'}}>{eco.name}</div>
                           <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
                             <div>
-                              <div style={{fontSize:32,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.6px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
-                              {eco.current_balance!=null&&<div style={{fontSize:11,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:5,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
+                              <div style={{fontSize:21,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.4px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
+                              {eco.current_balance!=null&&<div style={{fontSize:10,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:4,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
                             </div>
-                            <div style={{color:'var(--text-muted)',fontSize:16,opacity:0.4}}>›</div>
+                            <div style={{color:'var(--text-muted)',fontSize:14,opacity:0.4}}>›</div>
                           </div>
                         </div>
                       );
