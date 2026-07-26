@@ -739,6 +739,17 @@ function MultiSelectFilter({options,selected,onChange,label,renderOption,onApply
     if(!q)return options;
     return options.filter(o=>String(o.label).toLowerCase().includes(q));
   },[options,query]);
+  /* Search-to-select: typing (or clearing) the search box replaces the whole selection with
+     exactly what's currently filtered, live on every keystroke — so "search, then Apply" is
+     enough to end up with just the matches selected, no separate Clear All/checkbox step needed.
+     Skipped on mount and while closed, so opening the panel never clobbers the existing selection
+     (the query-reset-on-close effect above also changes `query`, which would otherwise re-fire this). */
+  const didMountRef=useRef(false);
+  useEffect(()=>{
+    if(!didMountRef.current){didMountRef.current=true;return;}
+    if(!open)return;
+    onChange(filteredOptions.length>=allVals.size?null:new Set(filteredOptions.map(o=>o.value)));
+  },[query]);
   /* Select All/Clear All toggle scopes to whatever's currently filtered, not the full option set */
   const visibleAllChecked=filteredOptions.length>0&&filteredOptions.every(o=>isChecked(o.value));
   const toggleVisible=()=>{
