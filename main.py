@@ -5533,6 +5533,10 @@ async def cash_back_earn_detail(
          for k, v in by_cat.items()],
         key=lambda x: -x['points'],
     )
+    # Same "Your Cards shouldn't drop a card with 0 spend this period" fix as
+    # the non-cash-back branch below.
+    for aid in eco_accts:
+        by_acct.setdefault(aid, 0.0)
     by_card_out = sorted(
         [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
           'mask': acct_info[aid]['mask'], 'points': round(p)}
@@ -5906,6 +5910,12 @@ async def ecosystem_earn_detail(
          for k, v in by_cat.items()],
         key=lambda x: -x['points'],
     )
+    # Every card linked to this ecosystem belongs in "Your Cards," even one
+    # with zero spend in the selected period — otherwise a card that simply
+    # wasn't used this MTD/QTD/YTD silently vanishes from its own ecosystem
+    # page instead of showing 0.
+    for aid in eco_accts:
+        by_acct.setdefault(aid, 0.0)
     by_card_out = sorted(
         [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
           'mask': acct_info[aid]['mask'], 'points': round(p)}
