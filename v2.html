@@ -3879,15 +3879,15 @@ function BankRow({item,toast,onRenamed,onSynced}){
         onSuccess:async()=>{
           try{
             await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
-            toast(`✓ ${item.institution_name} reconnected — syncing transactions…`);
+            toast(`✓ ${item.institution_name} — syncing accounts…`);
             setTimeout(()=>onSynced&&onSynced(),10000);
-          }catch(e){toast('Reconnect complete but sync failed to start','error');}
+          }catch(e){toast('Linked, but sync failed to start','error');}
           finally{setReconnecting(false);}
         },
         onExit:()=>setReconnecting(false),
       });
       handler.open();
-    }catch(e){toast('Failed to start reconnect: '+(e.message||e),'error');setReconnecting(false);}
+    }catch(e){toast('Failed to open Plaid: '+(e.message||e),'error');setReconnecting(false);}
   };
   const save=async()=>{
     try{
@@ -3945,6 +3945,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
           }
           <button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'4px 10px'}} onClick={(e)=>{e.preventDefault();setExpanded(x=>!x)}}>{expanded?'▲':'▼'}</button>
           {item.is_active&&<button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();forceResync()}} disabled={resyncing}>{resyncing?'Syncing…':'↺ Sync'}</button>}
+          {item.is_active&&!item.last_error_code&&<button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();openReconnect()}} disabled={reconnecting}>{reconnecting?'Opening…':'+ Add Account'}</button>}
           <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)', border:'1px solid rgba(239, 68, 68, 0.2)'}} onClick={(e)=>{
             e.preventDefault();
             if(item.transaction_count===0){

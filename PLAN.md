@@ -1,7 +1,17 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-25
+> Last updated: 2026-07-26
+
+---
+
+## Session 2026-07-26 — Accounts screen: "add account to an existing bank" flow
+
+Trigger: Omer opened a few new checking accounts and asked how to wire them into the app. Found the app already had the right backend primitive (`GET /api/plaid/update-link-token/{item_id}` + `POST /api/plaid/update-complete/{item_id}` — Plaid Link in update mode against an existing item's access_token, no duplicate bank connection) but the only UI entry point to it (`openReconnect` in `BankRow`, `v2.html`) was gated behind `item.last_error_code==='ITEM_LOGIN_REQUIRED'` — pure error-recovery, no way to reach it from a healthy connection.
+
+**Shipped**: added a "+ Add Account" button next to the existing "↺ Sync" button on every healthy (`is_active && !last_error_code`) row in Settings → Bank Links (`v2.html`, `BankRow`) — reuses `openReconnect` as-is, no backend changes. Generalized the two user-facing toast strings in `openReconnect` (previously said "reconnected", now say "syncing accounts…" / "Linked, but sync failed to start") since the function now serves both the error-recovery and add-account paths. Verified live: button renders correctly on a healthy bank row (Citibank/Daniella), positioned between Sync and Remove, no new console errors.
+
+**Not done / next step for Omer**: actually click "+ Add Account" on the bank(s) where the new checking accounts live and select them in the Plaid Link modal — that step needs real bank credentials, not something to drive from here. Per the existing in-app hint, run Settings → Bank Links → Scan for Duplicates afterward. This is also the first real-world exercise of backlog item F2 (Plaid re-link duplicate-safety, previously unverified) — worth confirming no dupes/broken accounts result and closing F2 out if clean.
 
 ---
 
