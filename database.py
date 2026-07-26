@@ -1997,19 +1997,25 @@ def seed_card_products(session):
 
         # Bilt Card 2.0 (launched 2026) replaced the original single Bilt
         # Mastercard (discontinued Feb 2026) with three tiers — this is the
-        # mid-tier Obsidian. Portal-boosted rates (4x hotels/3x flights via
-        # Bilt Travel) and the separate "4% Bilt Cash" cash-back currency
-        # aren't modeled — same rationale as Chase/Citi/Capital One's own
-        # travel portals: no dedicated booking-channel category exists yet,
-        # and Bilt Cash is a different currency from Bilt points, not more
-        # of the same one this app tracks.
+        # mid-tier Obsidian. Real earn structure per Omer (2026-07-26, card-
+        # holder correction — the card lets you pick ONE bonus category, not
+        # both): 3x on Groceries (his choice over Dining), capped at $25K/yr
+        # (cap not enforced — no per-category annual-cap mechanism on
+        # CardProductReward), 1x on everything else. Portal-boosted rates
+        # (4x hotels/3x flights via Bilt Travel), the separate "4% Bilt Cash"
+        # currency, and any temporary "points accelerator" promo all
+        # deliberately NOT modeled here — the accelerator is tracked as its
+        # own SpendChallenge instead when active, same pattern as every
+        # other issuer's limited-time bonus offers.
         ("bilt_obsidian", "Bilt Obsidian Card", "Bilt Rewards", "active", 95, [
+            ("3x Groceries (up to $25,000/yr)", 0, "annual", "Groceries",
+             "Chosen over the card's alternate Dining bonus-category option. Cap not enforced by this app."),
             ("$100 Annual Bilt Travel Hotel Credit", 100, "annual", "Hotels",
              "Issued as two $50 statement credits, semi-annual, for stays booked via Bilt Travel."),
             ("Rent Payment Points (no transaction fee)", 0, "annual", None,
              "Up to 1x points on rent/mortgage payments via Bilt, up to 100,000 pts/yr — not a spend category this app tracks."),
         ], {
-            "_base": 1, "Dining": 2, "Groceries": 2, "Airlines": 1, "Hotels": 1,
+            "_base": 1, "Groceries": 2,
         }),
 
         ("united_explorer", "United℠ Explorer Card",
