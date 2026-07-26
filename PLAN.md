@@ -5,6 +5,19 @@
 
 ---
 
+## Session 2026-07-26 — Cards module cleanup pass: B15/B16/B17/F9
+
+Worked through 4 items logged to BACKLOG.md the prior turn ("let's work on these"). Full detail in BACKLOG.md's Recently Completed section — summary here:
+
+- **B15 (Capital One Miles missing from Portfolio)**: root cause was B14 — no catalog match for the one Capital One account held ("VentureOne"), and the auto-suggester's only option ("Capital One Venture") is a different product with different rates. Researched VentureOne's real rates via web search (1.25x base, 5x hotels/rental cars via Capital One Travel portal — not modeled, same precedent as Citi Strata), added `capital_one_venture_one` to the catalog, linked the account.
+- **Found mid-fix, much bigger than expected**: linking the product alone didn't make the tile show real numbers — a concurrent session's locked-points architecture (`_lock_points_for_transaction()`, keyed by `Transaction.card_id`) means points are computed once at write time, not live, so a first-time product link doesn't retroactively fix already-written transactions. Checked the blast radius: **1,356 of 2,320 transactions app-wide (58%) had no `card_id`** and were permanently stuck at 0 points regardless of correct product links. Scoped a safe fix to the unambiguous cases — 28 credit accounts (Capital One plus 27 others found the same way) each with exactly one `Card` row — and backfilled `card_id` + relocked all 674 of their transactions. Left the harder remainder (~682, mostly one checking account where it's expected/harmless, plus a handful needing a closer look) as the residual B18, flagged for whoever owns the locked-points work since it's clearly mid-flight from a concurrent session.
+- **B16 (card thumbnails cropping too aggressively)**: audited every `static/cards/*.png` against the 180×114 tile's `object-fit:cover` — only one real mismatch, `us_bank_cash_plus.png` (a genuinely portrait-oriented US Bank design, 384×609). Recropped to a landscape band centered on the logo.
+- **F9 (last-4-digits badge redesign)**: moved the digits into a small rounded-rectangle badge (bottom-left, ~10% opacity, subtle border) and dropped the "···" prefix, per spec.
+- **B17 (challenge cards — progress bar + duplicate categories)**: turned out to be a pure frontend gap — the backend's `_challenge_progress()` already computes `progress_pct`/`progress_target`/`remaining_spend` identically whether a challenge is `spend_threshold`- or `spend_cap`-based, but `ChallengeCard` (v2.html) only rendered the progress-bar treatment for the threshold case. Widened the condition, removed `category_names` from the header (redundant with the "+Nx on [Categories]" line), dropped the now-duplicate dollar figures from that line when the progress bar already shows them. Verified against the real "Q3 5x Groceries" challenges.
+- User confirmed the B17 read before implementation ("I think we are on the same page, yes") — no further clarification needed.
+
+---
+
 ## Session 2026-07-26 — Accounts screen: "add account to an existing bank" flow
 
 Trigger: Omer opened a few new checking accounts and asked how to wire them into the app. Found the app already had the right backend primitive (`GET /api/plaid/update-link-token/{item_id}` + `POST /api/plaid/update-complete/{item_id}` — Plaid Link in update mode against an existing item's access_token, no duplicate bank connection) but the only UI entry point to it (`openReconnect` in `BankRow`, `v2.html`) was gated behind `item.last_error_code==='ITEM_LOGIN_REQUIRED'` — pure error-recovery, no way to reach it from a healthy connection.

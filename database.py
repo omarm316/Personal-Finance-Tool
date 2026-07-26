@@ -1890,6 +1890,15 @@ def seed_card_products(session):
         ("capital_one_venture", "Capital One Venture", "Capital One Miles", "not_held", 95, [],
          {"_base": 2, "Hotels": 3}),
 
+        # No-annual-fee sibling of Venture — a genuinely different product
+        # (1.25x base vs. Venture's 2x), not a lower-tier naming variant.
+        # Was previously getting auto-suggested "Capital One Venture" by
+        # mistake (see BACKLOG B10/B14/B15) since no catalog match existed.
+        ("capital_one_venture_one", "Capital One VentureOne", "Capital One Miles", "active", 0, [
+            ("5x Miles on Hotels/Rental Cars/Vacation Rentals via Capital One Travel", 0, "annual", None,
+             "Portal-booked only — direct hotel/rental-car purchases still earn the 1.25x base rate. Not modeled as an automatic earn-rate override since there's no 'Capital One Travel' booking-channel category yet."),
+        ], {"_base": 1.25}),
+
         ("capital_one_savor_one", "Capital One SavorOne", "Cash Back", "not_held", 0, [],
          {"_base": 1, "Dining": 2, "Groceries": 2, "Streaming": 2, "Live Entertainment": 2}),
 
