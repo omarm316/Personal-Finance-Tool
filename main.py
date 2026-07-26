@@ -1554,6 +1554,14 @@ async def plaid_update_complete(item_id: str, background_tasks: BackgroundTasks,
     Called after a successful Plaid Link update-mode flow.
     Clears the stored error, marks the item healthy, and kicks off a fresh sync.
     No public_token exchange is needed — the access_token is unchanged.
+
+    clear_cursor=True is required here (not just for error-recovery): update
+    mode is also how newly-selected accounts (account_selection_enabled) get
+    added to an existing item, and only the clear_cursor branch of
+    _sync_item_background reconciles Plaid's account list into new `Account`
+    rows. Without it, a newly-added account has no `Account` row and every
+    one of its transactions is silently skipped by `_sync_item` (no matching
+    account_id).
     """
     item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
     if not item:
@@ -1562,7 +1570,7 @@ async def plaid_update_complete(item_id: str, background_tasks: BackgroundTasks,
     item.last_error_message = None
     item.last_error_at      = None
     db.commit()
-    background_tasks.add_task(_sync_item_background, item_id, False)
+    background_tasks.add_task(_sync_item_background, item_id, True)
     return {"message": f"{item.institution_name} reconnected — sync started",
             "institution_name": item.institution_name}
 

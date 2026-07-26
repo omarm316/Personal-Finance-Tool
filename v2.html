@@ -3880,7 +3880,7 @@ function BankRow({item,toast,onRenamed,onSynced}){
           try{
             await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
             toast(`✓ ${item.institution_name} — syncing accounts…`);
-            setTimeout(()=>onSynced&&onSynced(),10000);
+            setTimeout(()=>onSynced&&onSynced(),15000);
           }catch(e){toast('Linked, but sync failed to start','error');}
           finally{setReconnecting(false);}
         },

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from plaid.api import plaid_api
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+from plaid.model.link_token_create_request_update import LinkTokenCreateRequestUpdate
 from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
@@ -94,8 +95,11 @@ class PlaidClient:
             language='en',
         )
         if access_token:
-            # Update mode — pass existing access_token; products must NOT be set
+            # Update mode — pass existing access_token; products must NOT be set.
+            # account_selection_enabled lets the user pick newly-available accounts
+            # at the institution, not just re-authenticate the ones already linked.
             kwargs['access_token'] = access_token
+            kwargs['update'] = LinkTokenCreateRequestUpdate(account_selection_enabled=True)
         else:
             # New connection — specify products
             kwargs['products'] = [Products("transactions")]
