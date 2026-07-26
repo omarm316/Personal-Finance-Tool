@@ -8059,9 +8059,14 @@ function CardsPage({toast,refreshKey}){
                                   (not a wide bar) so the badge's own edge already reads as "this is
                                   the number," making the "···" redaction prefix redundant, and the
                                   dark backdrop keeps the digits from blending into busy/bright card
-                                  art underneath (F9, 2026-07-25; tightened + darkened 2026-07-26). */}
+                                  art underneath (F9, 2026-07-25; tightened + darkened 2026-07-26).
+                                  Inner span has a fixed minWidth (measured for "0000", the widest
+                                  4-digit combo at this font — "1111" is the narrowest at ~59% of
+                                  that) so every badge is the same size regardless of which digits
+                                  a given card happens to have, instead of hugging narrower digits
+                                  into a smaller box. */}
                               {acct.mask&&<div style={{position:'relative',zIndex:1,display:'inline-block',padding:'2px 6px',borderRadius:5,background:'rgba(0,0,0,0.78)',border:'1px solid rgba(255,255,255,0.1)'}}>
-                                <span style={{fontSize:13,fontWeight:700,letterSpacing:'0.5px',color:'#fff'}}>{acct.mask}</span>
+                                <span style={{fontSize:13,fontWeight:700,letterSpacing:'0.5px',color:'#fff',display:'inline-block',minWidth:39,textAlign:'center'}}>{acct.mask}</span>
                               </div>}
                             </div>
                           );
