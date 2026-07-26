@@ -6935,10 +6935,21 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
               const fmt=v=>Math.round(v||0).toLocaleString(undefined,{maximumFractionDigits:0});
               const rows=[
                 {label:'+ Earned',get:p=>b[p].earned_since_baseline,color:'var(--green)'},
+              ];
+              // Points sit "pending" (earned but not yet posted to the
+              // loyalty account — this app's rule: statement close day + 1)
+              // until the day after the card's statement closes. Shown as a
+              // subtraction from Earned so Current Balance reconciles to
+              // posted-only; only surfaced when it's actually nonzero
+              // somewhere, same convention as the Adjusted/Sent-Received
+              // rows below.
+              if(allBuckets.some(p=>(b[p].pending_since_baseline||0)!==0))
+                rows.push({label:'− Pending (not yet posted)',get:p=>-(b[p].pending_since_baseline||0),color:'var(--amber)'});
+              rows.push(
                 {label:'− Redeemed',get:p=>-b[p].redeemed_since_baseline,color:'var(--red)'},
                 {label:'− Transferred Out',get:p=>-b[p].transferred_out_since_baseline,color:'var(--red)'},
                 {label:'+ Transferred In',get:p=>b[p].transferred_in_since_baseline,color:'var(--green)'},
-              ];
+              );
               if(allBuckets.some(p=>b[p].adjusted_since_baseline!==0))
                 rows.push({label:'± Adjusted',get:p=>b[p].adjusted_since_baseline,color:null});
               if(allBuckets.some(p=>(b[p].person_transfer_out_since_baseline||0)!==0||(b[p].person_transfer_in_since_baseline||0)!==0)){
@@ -7282,6 +7293,20 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 <SearchCreateSelect value={redemptionForm.person} options={people} placeholder="Unattributed"
                   emptyLabel="Unattributed" onChange={v=>setRedemptionForm(f=>({...f,person:v}))}/>
               </div>
+              {(()=>{
+                const wanted=parseFloat(redemptionForm.points_redeemed)||0;
+                if(!wanted)return null;
+                const available=redemptionForm.person
+                  ?(data.balance_by_person?.[redemptionForm.person]?.current_balance)
+                  :data.current_balance;
+                if(available==null||wanted<=available)return null;
+                const gap=Math.round(wanted-available);
+                return(
+                  <div style={{fontSize:12,color:'var(--amber)',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',borderRadius:8,padding:'8px 12px'}}>
+                    ⚠ This exceeds {redemptionForm.person||'the'} posted balance ({available.toLocaleString()} pts) by {gap.toLocaleString()} pts — some points may still be pending, or you may need to buy points to cover the gap. This won't block saving.
+                  </div>
+                );
+              })()}
               <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
                 <textarea className="search-input" value={redemptionForm.notes} onChange={e=>setRedemptionForm(f=>({...f,notes:e.target.value}))}
@@ -7978,6 +8003,7 @@ function CardsPage({toast,refreshKey}){
                             <div>
                               <div style={{fontSize:21,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.4px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
                               {eco.current_balance!=null&&<div style={{fontSize:10,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:4,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
+                              {!!eco.pending_balance&&<div style={{fontSize:10,color:'var(--amber)',marginTop:2,fontWeight:300}}>{Math.round(eco.pending_balance).toLocaleString()} pending</div>}
                             </div>
                             <div style={{color:'var(--text-muted)',fontSize:14,opacity:0.4}}>›</div>
                           </div>

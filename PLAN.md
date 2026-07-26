@@ -5,6 +5,23 @@
 
 ---
 
+## Session 2026-07-26 (cont'd) — Pending vs. posted points
+
+Omer's ask: points sit "pending" until the day after a card's statement closes, then post to the loyalty account — the app should track that distinction, not treat every earned point as immediately redeemable. Discussed design first (4 questions asked, all answered before writing code): Omer will fill in every card's `statement_close_day` himself (no fallback logic needed beyond "treat unknown as posted immediately"); the posting rule is a flat +1 day, no per-issuer variation; pending shows as a Portfolio-tile secondary line (same pattern as the existing "+X this QTD") plus a new row in the ecosystem page's Balance Ledger; redemptions warn but don't block against pending points, since Omer sometimes buys points to cover a gap.
+
+**Shipped**: `_statement_close_date()`/`_points_pending()` (`main.py`) compute, per transaction, which billing cycle it belongs to (month-end clamped) and whether "today" is still before that cycle's close+1. `_compute_ecosystem_balance()` now splits `earned_since_baseline` into `pending_since_baseline`/`posted_since_baseline`, and `current_balance` uses posted-only (so it's an accurate "what can I actually redeem right now" number) — `earned_since_baseline` itself is untouched, so period-earned stats elsewhere in the app don't change meaning. Auto-top-category accounts (Citi Custom Cash-style) are excluded from the pending split — their bonus is a monthly aggregate with no single transaction date, documented as a known limitation. `pending_balance` threaded through both balance-serving endpoints. Frontend: amber "X pending" line on Portfolio tiles, a new "− Pending" Balance Ledger row (conditionally shown, only when nonzero), and a non-blocking warning banner on the Redemption modal when the entered amount exceeds the posted balance.
+
+**Real bug hit and fixed during this same session**: a `rows.push(...)` call in the Balance Ledger edit was accidentally closed with `]` instead of `)`, which is a genuine JS syntax error — this silently broke the *entire app* (Babel's in-browser transform can't parse past a syntax error, so React never mounts, and no console.error appears beyond the compile step's usual "deoptimised" notice simply not showing up, which is easy to miss). Diagnosed by grabbing the live page's own inline `<script type="text/babel">` content and running it through `Babel.transform()` directly in devtools to get the actual parse error location, rather than guessing from a blank screen. Worth remembering for next time this happens: a blank v2.html page with no console errors almost certainly means the Babel compile step itself is failing — check that first, don't assume it's a data/network issue.
+
+Verified live end-to-end: Amex MR's Balance Ledger (Daniella -3,072 / Omer -1,537 pending) matched a direct backend query exactly; Portfolio tiles across 6+ ecosystems showed correct, varying pending figures; close-day math spot-checked against mid-cycle/post-close/month-end-clamp cases.
+
+Same session, smaller fixes:
+- **AA AAdvantage Miles wired up** — Omer: "add aadvantage miles as its own ecosystem." The ecosystem already existed in the catalog but had zero linked `CardProduct`s. Researched the real AAdvantage Platinum Select card (Citi-issued), added it to the catalog, created the missing `Card` row for the already-connected account (same "sync doesn't auto-create a Card row" gap as Bilt/West Elm/Fidelity Visa, see B18's addendum), backfilled and relocked its 103 transactions.
+- **B21 fixed** — ecosystem drill-down's "Your Cards" list was silently dropping any card with zero spend in the currently-selected MTD/QTD/YTD period, rather than showing it with 0 points. Found via Omer reporting "Hilton Honors ···1008" missing (its last transaction predates the current QTD window) — the card was correctly linked all along, this was a pure display bug in `by_card`'s construction.
+- Full detail for both in BACKLOG.md's Recently Completed.
+
+---
+
 ## Session 2026-07-26 (cont'd) — Card.primary_user (per-card default owner)
 
 Trigger: Omer, mid-way through the ecosystem drill-down work — "every card now needs a primary user, to correctly allocate points earnings, redemptions, etc. We also need to account for points transferring from one person's account to the other person's account." Confirmed this should attribute retroactively (existing untagged transactions on a card should pick up its owner), not just going forward.

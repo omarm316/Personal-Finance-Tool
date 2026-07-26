@@ -4839,6 +4839,35 @@ async def cards_portfolio(db: Session = Depends(get_db)):
     }
 
 
+def _statement_close_date(txn_date, close_day):
+    """The close date of the billing cycle a transaction on `txn_date` falls
+    into, given a card's `statement_close_day` (1-31). Clamps to the last
+    real day of the month (e.g. close_day=31 in February -> Feb 28/29),
+    same convention as every other day-of-month field in this app."""
+    import calendar
+    last_day = calendar.monthrange(txn_date.year, txn_date.month)[1]
+    this_close = txn_date.replace(day=min(close_day, last_day))
+    if txn_date.day <= this_close.day:
+        return this_close
+    year, month = (txn_date.year + 1, 1) if txn_date.month == 12 else (txn_date.year, txn_date.month + 1)
+    last_day_next = calendar.monthrange(year, month)[1]
+    return txn_date.replace(year=year, month=month, day=min(close_day, last_day_next))
+
+
+def _points_pending(txn_date, close_day, today):
+    """Points sit "pending" in the loyalty program from the purchase date
+    until the day after the statement closes — this app's flat +1-day
+    posting rule (Omer's call: applies uniformly, no per-issuer variation
+    modeled). A card with no known statement_close_day is treated as
+    posting immediately (can't compute a cycle without one — expected to
+    become rare as close days get filled in for every active card)."""
+    if not close_day:
+        return False
+    from datetime import timedelta as _td
+    posts_on = _statement_close_date(txn_date, close_day) + _td(days=1)
+    return today < posts_on
+
+
 def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                                 redemption_rows, transfers_out, transfers_in,
                                 adjustment_rows, person_transfer_rows, known_people):
@@ -4874,10 +4903,19 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
     # still wins whenever it's set (e.g. one specific purchase on a joint
     # card actually made by the other person).
     card_primary_user: dict[int, str] = {}
+    # Statement close day per card — drives the pending-vs-posted split
+    # below (points sit "pending" from purchase date until the day after
+    # the card's statement closes; a card with no close day set is treated
+    # as posting immediately, see _points_pending()).
+    card_close_day: dict[int, int] = {}
     if eco_accts:
-        for c in db.query(Card).filter(Card.account_id.in_(eco_accts), Card.primary_user.isnot(None)).all():
+        for c in db.query(Card).filter(Card.account_id.in_(eco_accts)).all():
             if c.primary_user:
                 card_primary_user[c.id] = c.primary_user
+            if c.statement_close_day:
+                card_close_day[c.id] = c.statement_close_day
+
+    _today = _date.today()
 
     def _compute_balance_bucket(bucket):
         snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
@@ -4890,6 +4928,15 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
         b_baseline_date = latest.snapshot_date if latest else None
 
         b_earned = 0.0
+        # Points earned but not yet posted to the loyalty account (still
+        # within the card's current billing cycle + 1 day) — subtracted out
+        # of current_balance below, since they aren't actually redeemable
+        # yet. Auto-top-category accounts (Citi Custom Cash-style) are
+        # deliberately excluded from this — their bonus is computed monthly,
+        # not per-transaction, so there's no single purchase date to check
+        # against a statement cycle; treated as posted immediately, a known
+        # simplification (same class of limitation as B11).
+        b_pending = 0.0
         if eco_accts:
             earn_q = db.query(Transaction).filter(
                 Transaction.account_id.in_(eco_accts),
@@ -4924,7 +4971,10 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                 if acct_info.get(t.account_id, {}).get('has_auto_top'):
                     continue
                 # Locked at write time — see _lock_points_for_transaction().
-                b_earned += t.points_earned or 0
+                pts = t.points_earned or 0
+                b_earned += pts
+                if pts and _points_pending(t.date.date(), card_close_day.get(t.card_id), _today):
+                    b_pending += pts
 
             # auto_top_category accounts (e.g. Citi Custom Cash), Shared
             # bucket only: calc_auto_top_category_points() computes a whole
@@ -4976,13 +5026,20 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                 if pt.to_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
             )
 
+        # current_balance only counts POSTED points — pending ones aren't
+        # actually redeemable yet. earned_since_baseline stays the full
+        # accrual figure (period-earned stats elsewhere in the app want
+        # "how much did I earn," not "how much can I spend right now").
+        b_posted = b_earned - b_pending
         b_current = round(
-            b_baseline + b_earned - b_redeemed - b_transferred_out + b_transferred_in
+            b_baseline + b_posted - b_redeemed - b_transferred_out + b_transferred_in
             + b_adjusted - b_person_out + b_person_in
         )
         return {
             'starting_balance': round(b_baseline, 2),
             'earned_since_baseline': round(b_earned, 2),
+            'pending_since_baseline': round(b_pending, 2),
+            'posted_since_baseline': round(b_posted, 2),
             'redeemed_since_baseline': round(b_redeemed, 2),
             'transferred_out_since_baseline': round(b_transferred_out, 2),
             'transferred_in_since_baseline': round(b_transferred_in, 2),
@@ -5017,14 +5074,18 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
     balance_breakdown = {
         'starting_balance': _total_field('starting_balance'),
         'earned_since_baseline': _total_field('earned_since_baseline'),
+        'pending_since_baseline': _total_field('pending_since_baseline'),
+        'posted_since_baseline': _total_field('posted_since_baseline'),
         'redeemed_since_baseline': _total_field('redeemed_since_baseline'),
         'transferred_out_since_baseline': _total_field('transferred_out_since_baseline'),
         'transferred_in_since_baseline': _total_field('transferred_in_since_baseline'),
         'adjusted_since_baseline': _total_field('adjusted_since_baseline'),
     }
+    pending_balance = _total_field('pending_since_baseline')
 
     return {
         'current_balance': current_balance,
+        'pending_balance': pending_balance,
         'balance_as_of': baseline_date.isoformat() if baseline_date else None,
         'balance_breakdown': balance_breakdown,
         'balance_by_person': balance_by_person,
@@ -5256,6 +5317,7 @@ async def cards_earn_summary(
         # numbers for "how many points do I have." Skipped for cash back
         # (not a points balance to track) and Amex not currently modeled here.
         current_balance = None
+        pending_balance = None
         if not eco.is_cash_back:
             eco_accts_bal = list(data['by_acct'].keys())
             redemption_rows_bal = db.query(Redemption).filter_by(ecosystem_id=eco_id).all()
@@ -5296,6 +5358,7 @@ async def cards_earn_summary(
                 adjustment_rows_bal, person_transfer_rows_bal, sorted(known_people_bal),
             )
             current_balance = bal['current_balance']
+            pending_balance = bal['pending_balance']
 
         ecosystems_out.append({
             'id':            eco_id,
@@ -5306,6 +5369,7 @@ async def cards_earn_summary(
             'points_earned': pts,
             'est_value':     value,
             'current_balance': current_balance,
+            'pending_balance': pending_balance,
             'cards':         cards,
         })
     ecosystems_out.sort(key=lambda x: x['est_value'], reverse=True)
@@ -5823,6 +5887,7 @@ async def ecosystem_earn_detail(
         person_transfer_rows, known_people,
     )
     current_balance = _bal['current_balance']
+    pending_balance = _bal['pending_balance']
     baseline_date = _date.fromisoformat(_bal['balance_as_of']) if _bal['balance_as_of'] else None
     balance_breakdown = _bal['balance_breakdown']
     balance_by_person = _bal['balance_by_person']
@@ -5834,6 +5899,7 @@ async def ecosystem_earn_detail(
             'start': start.isoformat(), 'end': end.isoformat(),
             'total_points': 0, 'est_value': 0,
             'current_balance': current_balance,
+            'pending_balance': pending_balance,
             'balance_as_of': baseline_date.isoformat() if baseline_date else None,
             'balance_breakdown': balance_breakdown,
             'balance_by_person': balance_by_person,
@@ -5981,6 +6047,7 @@ async def ecosystem_earn_detail(
         'total_points':  total_pts_r,
         'est_value':     round(total_pts_r * cpp, 2),
         'current_balance': current_balance,
+        'pending_balance': pending_balance,
         'balance_as_of': baseline_date.isoformat() if baseline_date else None,
         'balance_breakdown': balance_breakdown,
         'balance_by_person': balance_by_person,
