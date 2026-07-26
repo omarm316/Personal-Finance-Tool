@@ -7597,6 +7597,10 @@ function CardsPage({toast,refreshKey}){
   const[editing,setEditing]=useState(null);
   const[editVals,setEditVals]=useState({});
   const[showInactive,setShowInactive]=useState(false);
+  // Primary Cardholder options — same baseline+discovered convention as
+  // spender tagging elsewhere (SearchCreateSelect on the ecosystem pages).
+  const[people,setPeople]=useState(['Omer','Daniella']);
+  useEffect(()=>{apiFetch('/transactions/spenders').then(s=>setPeople(p=>Array.from(new Set([...p,...s])))).catch(()=>{});},[]);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -7659,7 +7663,7 @@ function CardsPage({toast,refreshKey}){
   useEffect(()=>{load().then(()=>loadSuggestions());},[load,refreshKey]);
 
   // Legacy card management
-  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??''});};
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??'',primary_user:card.primary_user||''});};
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
     try{
@@ -7812,7 +7816,7 @@ function CardsPage({toast,refreshKey}){
                   <th>Card</th><th>Issuer</th><th>Network</th>
                   <th style={{textAlign:'center'}}>Close Day</th><th style={{textAlign:'center'}}>Due Day</th>
                   <th style={{textAlign:'right'}}>Credit Limit</th><th style={{textAlign:'right'}}>Annual Fee</th>
-                  <th>Linked Account</th><th>Actions</th>
+                  <th>Linked Account</th><th>Primary User</th><th>Actions</th>
                 </tr></thead>
                 <tbody>{visible.map(c=>(
                   <tr key={c.id} style={{opacity:c.is_active?1:0.5}}>
@@ -7833,6 +7837,10 @@ function CardsPage({toast,refreshKey}){
                           {allAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
                         </select>
                       </td>
+                      <td onClick={e=>e.stopPropagation()} style={{minWidth:120}}>
+                        <SearchCreateSelect value={editVals.primary_user||''} options={people} placeholder="Shared / unassigned"
+                          emptyLabel="Shared / unassigned" onChange={v=>setEditVals(vv=>({...vv,primary_user:v}))}/>
+                      </td>
                       <td onClick={e=>e.stopPropagation()}><div style={{display:'flex',gap:4}}>
                         <button type="button" className="btn btn-sm btn-success" onClick={()=>saveEdit(c.id)}>Save</button>
                         <button type="button" className="btn btn-sm btn-ghost" onClick={cancelEdit}>X</button>
@@ -7852,6 +7860,7 @@ function CardsPage({toast,refreshKey}){
                           </span>
                           :<span style={{color:'var(--text-muted)',fontSize:11}}>Not linked</span>}
                       </td>
+                      <td style={{fontSize:12,color:c.primary_user?'var(--text-primary)':'var(--text-muted)'}}>{c.primary_user||'Shared'}</td>
                       <td onClick={e=>e.stopPropagation()}><button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
                     </>}
                   </tr>

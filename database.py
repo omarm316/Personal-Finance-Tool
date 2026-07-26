@@ -444,6 +444,13 @@ class Card(Base):
     payment_account_id = Column(Integer, ForeignKey('accounts.id'), nullable=True)  # Checking account that pays this card
     product_id = Column(Integer, ForeignKey('card_products.id'), nullable=True, index=True)  # Links to card product
     ecosystem_id = Column(Integer, ForeignKey('points_ecosystems.id'), nullable=True)  # Legacy — prefer product.ecosystem
+    # Default person this card's earn belongs to (free-text, same "Omer"/
+    # "Daniella" convention as Transaction.spender) — the per-person balance
+    # math falls back to this for any transaction with no spender manually
+    # tagged, so a card's whole history has an owner by default instead of
+    # defaulting to "Shared." spender still wins when set (e.g. a specific
+    # purchase on a joint card actually made by the other person).
+    primary_user = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -1099,6 +1106,7 @@ def run_migrations(engine):
             ('payment_account_id', 'INTEGER'),
             ('product_id', 'INTEGER'),
             ('ecosystem_id', 'INTEGER'),
+            ('primary_user', 'VARCHAR(100)'),
         ],
         'loans': [
             ('balance_date',          'DATE'),

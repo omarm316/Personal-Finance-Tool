@@ -4154,6 +4154,7 @@ def _serialize_card(c: Card) -> dict:
         "linked_account_name": linked_account_name,
         "payment_account_id": c.payment_account_id,
         "payment_account_name": payment_account_name,
+        "primary_user": c.primary_user,
         "is_active": c.is_active, "notes": c.notes,
     }
 
@@ -4171,10 +4172,10 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Card not found")
     allowed = ["card_name", "last_four", "statement_close_day", "payment_due_day",
                "credit_limit", "plaid_account_id", "account_id", "payment_account_id",
-               "is_active", "notes", "annual_fee"]
+               "is_active", "notes", "annual_fee", "primary_user"]
     for k, v in updates.items():
         if k in allowed:
-            setattr(card, k, v)
+            setattr(card, k, v if k != 'primary_user' else (v or None))
     db.commit()
     return {"message": "Updated"}
 
@@ -4866,6 +4867,18 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
             return not row_person
         return row_person == bucket
 
+    # Card.primary_user is the fallback owner for any transaction with no
+    # spender manually tagged — a card's whole history belongs to its
+    # cardholder by default, "Shared" is now only for cards with genuinely
+    # no assigned owner (or a joint card left that way on purpose). spender
+    # still wins whenever it's set (e.g. one specific purchase on a joint
+    # card actually made by the other person).
+    card_primary_user: dict[int, str] = {}
+    if eco_accts:
+        for c in db.query(Card).filter(Card.account_id.in_(eco_accts), Card.primary_user.isnot(None)).all():
+            if c.primary_user:
+                card_primary_user[c.id] = c.primary_user
+
     def _compute_balance_bucket(bucket):
         snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
         if bucket is None:
@@ -4882,8 +4895,22 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                 Transaction.account_id.in_(eco_accts),
                 Transaction.is_excluded != True,
             )
+            _no_spender = or_(Transaction.spender.is_(None), Transaction.spender == '')
+            _owned_card_ids = [cid for cid, u in card_primary_user.items() if u == bucket] if bucket is not None else []
             if bucket is None:
-                earn_q = earn_q.filter(or_(Transaction.spender.is_(None), Transaction.spender == ''))
+                # Shared: no spender tagged, AND (no card_id at all, or that
+                # card has no primary_user) — i.e. not claimed by anyone else's
+                # card-level default either.
+                _owner_card_ids = list(card_primary_user.keys())
+                if _owner_card_ids:
+                    earn_q = earn_q.filter(_no_spender, or_(Transaction.card_id.is_(None), ~Transaction.card_id.in_(_owner_card_ids)))
+                else:
+                    earn_q = earn_q.filter(_no_spender)
+            elif _owned_card_ids:
+                earn_q = earn_q.filter(or_(
+                    Transaction.spender == bucket,
+                    and_(_no_spender, Transaction.card_id.in_(_owned_card_ids)),
+                ))
             else:
                 earn_q = earn_q.filter(Transaction.spender == bucket)
             if b_baseline_date:
@@ -5258,6 +5285,9 @@ async def cards_earn_summary(
             for pt in person_transfer_rows_bal:
                 known_people_bal.add(pt.from_person)
                 known_people_bal.add(pt.to_person)
+            if eco_accts_bal:
+                for c in db.query(Card).filter(Card.account_id.in_(eco_accts_bal), Card.primary_user.isnot(None)).all():
+                    known_people_bal.add(c.primary_user)
             bal = _compute_ecosystem_balance(
                 db, eco_id, eco_accts_bal, acct_info, cat_parent_map,
                 redemption_rows_bal, transfers_out_bal, transfers_in_bal,
@@ -5672,6 +5702,16 @@ async def ecosystem_earn_detail(
     for pt in person_transfer_rows:
         known_people.add(pt.from_person)
         known_people.add(pt.to_person)
+    # Also fold in anyone set as a card's primary_user in this ecosystem —
+    # a person who only ever owns a card (never manually spender-tagged or
+    # otherwise mentioned) still needs their own bucket, not to be silently
+    # dropped into "Shared."
+    _product_ids_in_eco = [p.id for p in db.query(CardProduct).filter_by(ecosystem_id=eco_id).all()]
+    _card_owner_filter = Card.ecosystem_id == eco_id
+    if _product_ids_in_eco:
+        _card_owner_filter = or_(_card_owner_filter, Card.product_id.in_(_product_ids_in_eco))
+    for c in db.query(Card).filter(_card_owner_filter, Card.primary_user.isnot(None)).all():
+        known_people.add(c.primary_user)
     known_people = sorted(known_people)
 
     today = _date.today()
