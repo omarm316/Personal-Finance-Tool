@@ -5,6 +5,22 @@
 
 ---
 
+## Session 2026-07-26 (cont'd) — Ecosystem drill-down page pass, starting with Amex MR
+
+Omer's ask: work through one card-ecosystem drill-down page in depth, then reuse the fix pattern across all of them (Amex MR, Chase UR, Citi ThankYou, Marriott Bonvoy, etc. all share the same `EcosystemDetailPage`/`ecosystem_earn_detail()` code path, so a fix here is structural, not per-ecosystem). Started by loading the live Amex MR page and flagging four things worth a decision: blank card-art icons, Omer's negative QTD balance, odd category nesting, and the two known carryover bugs (B11, B13). Omer picked the negative balance and B11/B13 to act on this session; the other two are logged as B19/B20 for later.
+
+- **Investigated the -1,660 balance** before assuming it was a bug: traced it to one real transaction (txn 8392, $835.21 "HOBOKEN PUBLIC SCHOO...", tagged `spender=Omer`, still unreviewed). This app stores expenses as negative amounts / credits as positive, so a positive amount here means `compute_points_earn()` correctly classified it `clawback`. Confirmed with Omer it's a real refund — categorized it "Education" and marked reviewed via the actual API endpoint (no math touched, matches his answer).
+- **B11 fixed**: `ecosystem_earn_detail()` had no `auto_top_category` branch (unlike `/api/cards/earn-summary`), so any ecosystem holding a card like Citi Custom Cash (5%-on-top-category) silently under-reported on the drill-down page. This is live today — Citi Custom Cash ···3240 is linked to Citi ThankYou. Ported the same `calc_auto_top_category_points()` branch from `earn-summary`. Verified: Citi ThankYou's category breakdown now shows the 2,500-pt "Auto-Optimized" bucket, matching the Portfolio tile exactly (previously 0 there, this is a real behavior change, not just cosmetic).
+- **Found the same gap one level deeper while verifying**: `_compute_ecosystem_balance()`'s per-person earn loop had the identical flaw — Citi ThankYou's all-time Current Balance showed 0 instead of ~17,247. Asked Omer whether to fix now (simpler Shared-bucket-only version, since no Citi Custom Cash transaction has ever been spender-tagged) vs. log as follow-up — he chose fix now. A fully correct per-person-prorated version isn't possible without `calc_auto_top_category_points()` supporting a spender filter, so this is scoped to the untagged/Shared bucket with the limitation documented in code.
+- **B13 fixed**: `--violet`/`--violet-soft`/`--violet-border` (17 call sites across `v2.html` — challenge-bonus panel, spender badges, benefit tags, bulk-select bar) were never defined as real CSS vars. Defined them using the exact violet already hardcoded ad-hoc elsewhere in the file (`rgba(139,92,246,...)`, Net Worth's "Other Assets" tint) rather than picking a new color. Verified live on the Amex BBP ···1008 "⚡ Bonus from Challenges" panel, both themes — went from fully invisible to properly styled.
+- Full detail in BACKLOG.md's Recently Completed section (search "B11/B13 fixed").
+
+**Not done, logged as new backlog items (Omer deferred both)**: B19 (the small "Your Cards" list icons on this page render as blank gray squares — real card art was wired into this exact page back on 2026-07-24, so this looks like a different, unfixed render path) and B20 (the "Points by Category" breakdown can show both a generic "Other" row for untagged spend and a separately-named "Other / Uncategorized" catalog category, which reads as a confusing near-duplicate).
+
+**Extrapolation note for next session**: B11's fix (the `has_auto_top`/`calc_auto_top_category_points()` branch in `ecosystem_earn_detail()`) and B13's fix (the CSS vars) are both structural — every other ecosystem page benefits automatically, no per-page porting needed. The Hoboken-transaction-style investigation (checking whether an ecosystem's negative/odd balance is a real data issue vs. a code bug) is a workflow to repeat per-ecosystem if Omer reports something similar elsewhere, not a one-time fix.
+
+---
+
 ## Session 2026-07-26 — Cards module cleanup pass: B15/B16/B17/F9
 
 Worked through 4 items logged to BACKLOG.md the prior turn ("let's work on these"). Full detail in BACKLOG.md's Recently Completed section — summary here:

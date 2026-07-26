@@ -4859,7 +4859,7 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
     balance today, Daniella's might still be unset) — there is
     deliberately no single shared "as of" date at the Total level.
     """
-    from datetime import date as _date
+    from datetime import date as _date, timedelta as _timedelta
 
     def _bucket_matches(row_person, bucket):
         if bucket is None:  # "Shared" — untagged/legacy rows
@@ -4891,8 +4891,33 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
             for t in earn_q.all():
                 if t.action != 'Expense':
                     continue
+                # auto_top_category accounts can't be read from the locked
+                # column (it can't express the "top category" waterfall) —
+                # handled separately below. See B11.
+                if acct_info.get(t.account_id, {}).get('has_auto_top'):
+                    continue
                 # Locked at write time — see _lock_points_for_transaction().
                 b_earned += t.points_earned or 0
+
+            # auto_top_category accounts (e.g. Citi Custom Cash), Shared
+            # bucket only: calc_auto_top_category_points() computes a whole
+            # account's bonus month-by-month and has no per-spender
+            # breakdown, so this only attributes correctly as long as no
+            # transaction on that account has ever been tagged to a specific
+            # person (true for every such account today). See B11.
+            if bucket is None:
+                for acct_id in eco_accts:
+                    a_info = acct_info.get(acct_id, {})
+                    if not a_info.get('has_auto_top'):
+                        continue
+                    product = a_info.get('product')
+                    if not product:
+                        continue
+                    auto_start = (b_baseline_date + _timedelta(days=1)) if b_baseline_date else _date(2000, 1, 1)
+                    try:
+                        b_earned += calc_auto_top_category_points(db, acct_id, product, auto_start, _date.today())
+                    except Exception:
+                        pass
 
         b_redeemed = sum(
             r.points_redeemed for r in redemption_rows
@@ -5704,19 +5729,26 @@ async def ecosystem_earn_detail(
 
         base_rate = 1.0
         bonus_by_name: dict[str, float] = {}
+        has_auto_top = False
         if product:
             pid = product.id
             if pid not in products_cache:
                 rates = db.query(CardProductReward).filter_by(product_id=pid).all()
                 _b = 1.0
                 _bb: dict[str, float] = {}
+                _has_auto = False
                 for r in rates:
                     if r.is_base_rate:
                         _b = r.multiplier
                     elif r.points_category_id and r.points_category:
-                        _bb[r.points_category.name] = r.multiplier
-                products_cache[pid] = (_b, _bb)
-            base_rate, bonus_by_name = products_cache[product.id]
+                        rtype = getattr(r, 'reward_type', 'fixed') or 'fixed'
+                        if rtype == 'auto_top_category':
+                            # skip — handled by calc_auto_top_category_points below
+                            _has_auto = True
+                        else:
+                            _bb[r.points_category.name] = r.multiplier
+                products_cache[pid] = (_b, _bb, _has_auto)
+            base_rate, bonus_by_name, has_auto_top = products_cache[product.id]
 
         eco_accts.append(acct.id)
         acct_info[acct.id] = {
@@ -5726,6 +5758,8 @@ async def ecosystem_earn_detail(
             'mask':          acct.mask,
             'card_name':     card.card_name if card else None,
             'issuer':        card.issuer if card else None,
+            'has_auto_top':  has_auto_top,
+            'product':       product,
         }
 
     # Current balance, split per-person with a combined Total — see
@@ -5788,12 +5822,37 @@ async def ecosystem_earn_detail(
     for t in window_rows:
         if t.action != 'Expense':
             continue
+        # auto_top_category accounts are handled separately below, same as
+        # /api/cards/earn-summary — compute_points_earn()'s flat base_rate
+        # can't express the "top category gets 5x" waterfall.
+        if acct_info[t.account_id].get('has_auto_top'):
+            continue
         # Locked at write time — see _lock_points_for_transaction().
         pts = t.points_earned or 0
         total_pts += pts
         cat_key = t.points_category or 'Other'
         by_cat[cat_key]        = by_cat.get(cat_key, 0.0)        + pts
         by_acct[t.account_id]  = by_acct.get(t.account_id, 0.0)  + pts
+
+    # auto_top_category accounts (e.g. Citi Custom Cash) — mirrors
+    # /api/cards/earn-summary's equivalent branch so the Portfolio tile and
+    # this drill-down page can't silently diverge on ecosystems that hold
+    # one of these cards (see B11).
+    for acct_id in eco_accts:
+        info = acct_info[acct_id]
+        if not info.get('has_auto_top'):
+            continue
+        product = info.get('product')
+        if not product:
+            continue
+        try:
+            pts = calc_auto_top_category_points(db, acct_id, product, start, end)
+        except Exception:
+            pts = 0.0
+        total_pts += pts
+        by_acct[acct_id] = by_acct.get(acct_id, 0.0) + pts
+        by_cat['Auto-Optimized (5% Top Category)'] = \
+            by_cat.get('Auto-Optimized (5% Top Category)', 0.0) + pts
 
     cpp   = float(eco.your_cpp)
     total_pts_r = round(total_pts)
