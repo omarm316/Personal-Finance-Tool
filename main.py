@@ -4956,7 +4956,7 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
         )
         b_transferred_in = sum(
             t['points_received'] for t in transfers_in
-            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
+            if _bucket_matches(t.get('to_person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
         )
         b_adjusted = sum(
             a.points_delta for a in adjustment_rows
@@ -5282,6 +5282,8 @@ async def cards_earn_summary(
             for t in transfers_out_bal + transfers_in_bal:
                 if t.get('person'):
                     known_people_bal.add(t['person'])
+                if t.get('to_person'):
+                    known_people_bal.add(t['to_person'])
             for pt in person_transfer_rows_bal:
                 known_people_bal.add(pt.from_person)
                 known_people_bal.add(pt.to_person)
@@ -5699,6 +5701,8 @@ async def ecosystem_earn_detail(
     for t in transfers_in:
         if t.get('person'):
             known_people.add(t['person'])
+        if t.get('to_person'):
+            known_people.add(t['to_person'])
     for pt in person_transfer_rows:
         known_people.add(pt.from_person)
         known_people.add(pt.to_person)
@@ -6457,6 +6461,7 @@ def _serialize_transfer(t: Transfer) -> dict:
         'transfer_date': t.transfer_date.isoformat(),
         'notes': t.notes,
         'person': t.person,
+        'to_person': t.to_person or t.person,
     }
 
 
@@ -6508,6 +6513,7 @@ async def create_transfer(data: dict = Body(...), db: Session = Depends(get_db))
             transfer_date=_date.fromisoformat(data['transfer_date']),
             notes=data.get('notes'),
             person=data.get('person') or None,
+            to_person=data.get('to_person') or None,
         )
         db.add(t)
         db.commit()
@@ -6535,7 +6541,7 @@ async def update_transfer(transfer_id: int, data: dict = Body(...), db: Session 
             setattr(t, field, float(data[field]) if data[field] is not None else None)
     if 'transfer_date' in data:
         t.transfer_date = _date.fromisoformat(data['transfer_date'])
-    for field in ('notes', 'person'):
+    for field in ('notes', 'person', 'to_person'):
         if field in data:
             setattr(t, field, data[field] or None)
     db.commit()

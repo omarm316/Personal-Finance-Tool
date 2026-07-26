@@ -6608,7 +6608,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
   };
 
   /* ── Transfers (value-neutral point movement, separate from Redemptions) ── */
-  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:'',person:''};
+  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:'',person:'',to_person:''};
   const[showTransferModal,setShowTransferModal]=useState(false);
   const[editingTransferId,setEditingTransferId]=useState(null);
   const[transferForm,setTransferForm]=useState(emptyTransferForm);
@@ -6666,6 +6666,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
         transfer_date:transferForm.transfer_date,
         notes:transferForm.notes||null,
         person:transferForm.person||null,
+        to_person:transferForm.to_person||null,
       };
       if(editingTransferId) await apiFetch(`/transfers/${editingTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
       else await apiFetch('/transfers',{method:'POST',body:JSON.stringify(body)});
@@ -7189,7 +7190,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                   <div key={`out-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
                     borderBottom:'1px solid var(--border)'}}>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>→ {t.destination_ecosystem_name}</div>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>→ {t.destination_ecosystem_name}{t.person&&t.to_person&&t.person!==t.to_person?` (${t.person} → ${t.to_person})`:t.person?` (${t.person})`:''}</div>
                       <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
                         {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
                       </div>
@@ -7201,7 +7202,7 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                   <div key={`in-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
                     borderBottom:'1px solid var(--border)'}}>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>← {t.source_ecosystem_name}</div>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>← {t.source_ecosystem_name}{t.person&&t.to_person&&t.person!==t.to_person?` (${t.person} → ${t.to_person})`:t.to_person?` (${t.to_person})`:''}</div>
                       <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
                         {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
                       </div>
@@ -7339,11 +7340,21 @@ function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectA
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Date</label>
                 <input className="date-input" type="date" style={{width:'100%'}} value={transferForm.transfer_date} onChange={e=>setTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
               </div>
-              <div>
-                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
-                <SearchCreateSelect value={transferForm.person} options={people} placeholder="Unattributed"
-                  emptyLabel="Unattributed" onChange={v=>setTransferForm(f=>({...f,person:v}))}/>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points — sending <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                  <SearchCreateSelect value={transferForm.person} options={people} placeholder="Unattributed"
+                    emptyLabel="Unattributed" onChange={v=>setTransferForm(f=>({...f,person:v}))}/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points — receiving <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                  <SearchCreateSelect value={transferForm.to_person} options={people} placeholder="Same as sending"
+                    emptyLabel="Same as sending" onChange={v=>setTransferForm(f=>({...f,to_person:v}))}/>
+                </div>
               </div>
+              {transferForm.person&&transferForm.to_person&&transferForm.person!==transferForm.to_person&&
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>Cross-person transfer: {transferForm.person} → {transferForm.to_person}.</div>
+              }
               <div>
                 <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
                 <textarea className="search-input" value={transferForm.notes} onChange={e=>setTransferForm(f=>({...f,notes:e.target.value}))}

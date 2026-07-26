@@ -731,10 +731,16 @@ class Transfer(Base):
     points_received           = Column(Float, nullable=False)
     transfer_date              = Column(Date, nullable=False)
     notes                      = Column(Text, nullable=True)
-    # Whose points these were on both sides — a currency-to-currency
-    # transfer is still one person's points moving, not points changing
-    # ownership. Nullable/blank = shared pool (legacy rows).
+    # Whose points these were on the SENDING side (the source ecosystem).
+    # Nullable/blank = shared pool (legacy rows).
     person                     = Column(String(100), nullable=True)
+    # Whose points these become on the RECEIVING side (the destination
+    # ecosystem) — usually the same as `person` (one person moving their own
+    # points to a different currency), but can differ for a cross-person
+    # transfer (e.g. Omer's Chase UR -> Daniella's Marriott Bonvoy). Falls
+    # back to `person` wherever unset, so existing same-person rows and any
+    # write path that doesn't set it explicitly keep their old meaning.
+    to_person                  = Column(String(100), nullable=True)
     created_at                  = Column(DateTime, default=datetime.utcnow)
 
     source_ecosystem      = relationship('PointsEcosystem', foreign_keys=[source_ecosystem_id])
@@ -1165,6 +1171,7 @@ def run_migrations(engine):
         ],
         'transfers': [
             ('person', 'VARCHAR(100)'),
+            ('to_person', 'VARCHAR(100)'),
         ],
         'points_balance_snapshots': [
             ('person', 'VARCHAR(100)'),
