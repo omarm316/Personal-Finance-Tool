@@ -2033,6 +2033,28 @@ def seed_card_products(session):
             "_base": 1, "Groceries": 2,
         }),
 
+        # Real rates verified via web search 2026-07-26 (not memory): 2x
+        # Dining/Gas/eligible AA purchases, 1x elsewhere, $99/yr (waived
+        # first year). "Eligible AA purchases" modeled as the catalog's
+        # specific "American Airlines" category (not the generic "Airlines"
+        # bucket), since the bonus is AA-only, not any airline. The
+        # $125-flight-discount-after-$20k-spend perk and the annual-award-
+        # travel companion certificate are real but not modeled as
+        # trackable benefits here (conditional/one-off, not a recurring
+        # credit) — documented as notes instead.
+        ("citi_aa_platinum_select", "AAdvantage Platinum Select",
+         "AA AAdvantage", "active", 99, [
+            ("Free First Checked Bag", 0, "annual", None,
+             "American Airlines domestic itineraries; cardholder + up to 4 companions on the same reservation."),
+            ("No Foreign Transaction Fees", 0, "annual", None, None),
+            ("$125 Flight Discount", 125, "annual", None,
+             "Requires $20,000+ spend in the membership year, plus renewing the card — not a fixed recurring credit, tracked here as a note only."),
+            ("Complimentary Apple TV+ (1 year)", 156, "annual", None,
+             "Promotional as of 2026 — must activate by 12/31/2026, not a standing perk."),
+        ], {
+            "_base": 1, "Dining": 1, "Gas Stations": 1, "American Airlines": 1,
+        }),
+
         ("united_explorer", "United℠ Explorer Card",
          "United MileagePlus", "active", 150, [
             ("Free First Checked Bag", 0, "annual", None,
