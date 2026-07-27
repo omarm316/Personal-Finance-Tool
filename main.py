@@ -4172,10 +4172,20 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Card not found")
     allowed = ["card_name", "last_four", "statement_close_day", "payment_due_day",
                "credit_limit", "plaid_account_id", "account_id", "payment_account_id",
-               "is_active", "notes", "annual_fee", "primary_user"]
+               "is_active", "notes", "annual_fee", "primary_user", "issue_date"]
     for k, v in updates.items():
-        if k in allowed:
-            setattr(card, k, v if k != 'primary_user' else (v or None))
+        if k not in allowed:
+            continue
+        if k == 'primary_user':
+            setattr(card, k, v or None)
+        elif k == 'issue_date':
+            # Doubles as the annual-fee anniversary — the fee posts each year
+            # on this date's month/day (Omer's confirmed convention, no
+            # separate anniversary field). Accepts a plain "YYYY-MM-DD" from
+            # the date input.
+            card.issue_date = datetime.fromisoformat(v) if v else None
+        else:
+            setattr(card, k, v)
     db.commit()
     return {"message": "Updated"}
 

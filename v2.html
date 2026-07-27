@@ -7699,7 +7699,20 @@ function CardsPage({toast,refreshKey}){
   useEffect(()=>{load().then(()=>loadSuggestions());},[load,refreshKey]);
 
   // Legacy card management
-  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??'',primary_user:card.primary_user||''});};
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??'',primary_user:card.primary_user||'',issue_date:card.issue_date?card.issue_date.slice(0,10):''});};
+  // Anniversary date doubles as the annual-fee due date — the fee posts
+  // each year on this date's month/day. Returns days until the next
+  // occurrence (handles Feb 29 in non-leap years by clamping to the 28th,
+  // same convention as the backend's statement/payment day math).
+  const daysToAnniversary=isoDate=>{
+    if(!isoDate)return null;
+    const d=new Date(isoDate+'T00:00:00');
+    const today=new Date();today.setHours(0,0,0,0);
+    const mkDate=(y,m,day)=>{const last=new Date(y,m+1,0).getDate();return new Date(y,m,Math.min(day,last));};
+    let next=mkDate(today.getFullYear(),d.getMonth(),d.getDate());
+    if(next<today)next=mkDate(today.getFullYear()+1,d.getMonth(),d.getDate());
+    return Math.round((next-today)/86400000);
+  };
   const cancelEdit=()=>{setEditing(null);setEditVals({});};
   const saveEdit=async(cardId)=>{
     try{
@@ -7851,6 +7864,7 @@ function CardsPage({toast,refreshKey}){
                 <thead><tr>
                   <th>Card</th><th>Issuer</th><th>Network</th>
                   <th style={{textAlign:'center'}}>Close Day</th><th style={{textAlign:'center'}}>Due Day</th>
+                  <th>Anniversary</th>
                   <th style={{textAlign:'right'}}>Credit Limit</th><th style={{textAlign:'right'}}>Annual Fee</th>
                   <th>Linked Account</th><th>Primary User</th><th>Actions</th>
                 </tr></thead>
@@ -7865,6 +7879,7 @@ function CardsPage({toast,refreshKey}){
                       <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.statement_close_day} onChange={e=>setEditVals(v=>({...v,statement_close_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.payment_due_day} onChange={e=>setEditVals(v=>({...v,payment_due_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="date" value={editVals.issue_date} onChange={e=>setEditVals(v=>({...v,issue_date:e.target.value}))} style={{width:130,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.credit_limit} onChange={e=>setEditVals(v=>({...v,credit_limit:e.target.value}))} style={{width:90,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.annual_fee} onChange={e=>setEditVals(v=>({...v,annual_fee:e.target.value}))} style={{width:70,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
                       <td onClick={e=>e.stopPropagation()}>
@@ -7886,6 +7901,14 @@ function CardsPage({toast,refreshKey}){
                       <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
                       <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.statement_close_day||'--'}</td>
                       <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.payment_due_day||'--'}</td>
+                      <td style={{fontSize:12}}>
+                        {c.issue_date
+                          ?<>
+                            <div style={{fontFamily:'Plus Jakarta Sans'}}>{new Date(c.issue_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div>
+                            {!!c.annual_fee&&<div style={{fontSize:10,color:'var(--text-muted)'}}>${c.annual_fee} in {daysToAnniversary(c.issue_date.slice(0,10))}d</div>}
+                          </>
+                          :<span style={{color:'var(--text-muted)'}}>--</span>}
+                      </td>
                       <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>--</span>}</td>
                       <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans',color:c.annual_fee?'var(--red)':'var(--text-muted)'}}>{c.annual_fee?`$${c.annual_fee}`:'$0'}</td>
                       <td style={{fontSize:12}}>
