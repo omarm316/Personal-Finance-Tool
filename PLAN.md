@@ -1,7 +1,26 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-26
+> Last updated: 2026-07-27
+
+---
+
+## Session 2026-07-27 — Dashboard page review
+
+Omer: "let's look closely at the Dashboard page." Read it live at desktop and mobile widths and checked every displayed figure against the API rather than eyeballing it — which is what surfaced the main bug, since the chart *looked* plausible.
+
+**Three fixes shipped** (all in `DashboardPage`, `v2.html`; full detail in BACKLOG.md's Recently Completed):
+1. **Spending Trend was plotting spending + income** — `getMonthTotal` didn't apply the `Transfer`/`Work` SKIP set the rest of the dashboard uses, and `Work` is income. Not just a scale error: the chart claimed March was peak spending and declining since, when March was actually the *lowest* month and May the peak.
+2. **Spending Trend ignored the year selector** — the 6-month window was built from `new Date()` while the data came from the `viewYear` payload, so picking 2025 plotted 2025 figures under 2026 labels. Window now ends on the selected month, and the header carries an explicit range label.
+3. **"Checking & Savings" % badge was fabricated** — prior balance estimated as `current − net cash flow`, which rendered "+583%" in Annual YTD. Dropped rather than faked.
+
+**Method note worth repeating:** the Spending Trend bug had been live for a while and is invisible to inspection — the line is smooth, the axis is sane, the numbers are the right order of magnitude. It only fell out of pulling `/api/budget/actuals` directly and summing it two ways (all categories vs. ex-`Transfer`/`Work`). For any dashboard number, compute the expected value from the API and diff it against the pixel; don't trust "looks about right." A related tell that would have caught it faster: the July chart point (16.1k) contradicted the Budget Performance Total (7.0k) *on the same screen* — cross-check figures against each other before assuming both are fine.
+
+**Second method note:** consolidating the duplicate `const SKIP` was mandatory, not tidiness — two `const` declarations of the same name in one block scope is a syntax error, and per the 2026-07-26 session note that manifests as a fully blank v2.html with no useful console output. Check for an existing declaration before adding one to a shared IIFE body in this file.
+
+**Logged, not fixed** (all found during this pass, all deferred to keep the change reviewable): **B22** mobile Top Budgets shows "$4,060.50 left" for a category with no budget; **B23** 3 of 11 dashboard API calls feed state nothing renders (ties into B4's slow loads); **B24** KPI cards stack 1-per-row on mobile, ~1,300px of scroll before content; **B25** the Expenses KPI and Budget Performance Total differ by $299 (`Work`-categorized expenses) with no indication they're on different bases.
+
+**Not investigated:** whether the Recent Activity list should filter credit-card transfers server-side — it fetches `limit=12` then drops rows client-side, so it renders fewer than 12 (10 at the time of review). Cosmetic, no ticket opened.
 
 ---
 

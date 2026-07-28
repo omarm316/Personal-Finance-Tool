@@ -3087,10 +3087,13 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
   const netPct=kpiCalcPct(kpiNet,priorNet);
   const _bSum=key=>netWorth?.buckets?.[key]?.accounts?.reduce((s,a)=>s+a.balance,0)??0;
   const csBal=netWorth?_bSum('Cash & Savings'):null;
-  const invBal=netWorth?_bSum('Investments'):null;
-  // Estimated prior-period balance = current - net flows this period
-  const csPct=(csBal!==null&&Math.abs(csBal-kpiNet)>1)?kpiCalcPct(csBal,csBal-kpiNet):null;
-  const invPct=(invBal!==null&&Math.abs(invBal-kpiNet)>1)?kpiCalcPct(invBal,invBal-kpiNet):null;
+  // No % badge on Checking & Savings: it's a point-in-time balance and we have
+  // no historical one to compare it against. The estimate that used to sit here
+  // (prior balance = current − net cash flow) wasn't a real prior balance — net
+  // cash flow spans every account, including card spend that never touched
+  // checking — and it went absurd once the estimate crossed zero, rendering
+  // "+583%" in Annual YTD. A real figure needs a per-bucket historical balance
+  // from the backend; until that exists, show nothing rather than a fake.
   const netValue=kpiNet<0?`(${fmt(Math.abs(kpiNet))})`:fmt(kpiNet);
 
   return(
@@ -3123,7 +3126,7 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
           return<span style={{background:good?'rgba(16,185,129,0.12)':'rgba(239,68,68,0.12)',color:good?'var(--green)':'var(--red)',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{pct>0?'+':''}{pct}%</span>;
         };
         const cards=[
-          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',pct:csPct,invert:false},
+          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',pct:null,invert:false},
           {label:'Net Worth',value:netWorth?.net_worth!=null?fmt(netWorth.net_worth):'—',pct:null,invert:false, highlight: true},
           {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false},
           {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true},
@@ -3148,18 +3151,38 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
       {/* ── Spending Trend (full-width on desktop) + Budget Overview (mobile only) ── */}
       {(()=>{
         const isMob=window.innerWidth<768;
+        /* Non-spending buckets. 'Work' is income and 'Transfer' is money moving
+           between accounts — summing them into a "spending" line plots spend +
+           income, which overstates every month and can invert the trend
+           entirely. Same set BudgetAndSpendingCard and the mobile bars use. */
+        const SKIP=new Set(['Transfer','Work']);
         /* Derive monthly spending totals from budgetActuals + budgetActualsPrior */
         const MO_LABELS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const curY=new Date().getFullYear();
         const curM=new Date().getMonth()+1;
+        /* The window ends on the *selected* month, not on today. budgetActuals
+           is fetched for viewYear (and budgetActualsPrior for viewYear-1), so
+           anchoring on today would read the selected year's payload under
+           current-year labels — picking 2025 silently plotted 2025 figures
+           against Feb…Jul 2026. Clamped so we never trail into future months. */
+        const endY=viewYear;
+        const endM=viewYear<curY?12:Math.min(viewMonth,curM);
         const months6=Array.from({length:6},(_,i)=>{
-          const d=new Date(curY,curM-1-(5-i),1);
+          const d=new Date(endY,endM-1-(5-i),1);
           return{year:d.getFullYear(),month:d.getMonth()+1,label:MO_LABELS[d.getMonth()]};
         });
+        /* months6 spans at most viewYear and viewYear-1, which is exactly the
+           pair of payloads we hold — so this lookup can't cross into a year we
+           didn't fetch. */
         const getMonthTotal=(yr,mo)=>{
-          const src=yr===curY?budgetActuals:budgetActualsPrior;
-          return Object.values(src).reduce((s,catMonths)=>s+(catMonths?.[String(mo)]||0),0);
+          const src=yr===viewYear?budgetActuals:budgetActualsPrior;
+          return Object.entries(src).reduce((s,[cat,catMonths])=>
+            SKIP.has(cat)?s:s+(catMonths?.[String(mo)]||0),0);
         };
+        const spanYears=months6[0].year!==months6[5].year;
+        const rangeLabel=spanYears
+          ?`${months6[0].label} ${months6[0].year} – ${months6[5].label} ${months6[5].year}`
+          :`${months6[0].label} – ${months6[5].label} ${months6[5].year}`;
         const spendData=months6.map(m=>({...m,amount:getMonthTotal(m.year,m.month)}));
         const maxSpend=Math.max(...spendData.map(d=>d.amount),100);
         /* Add 10% headroom so the top of the chart doesn't get clipped */
@@ -3206,7 +3229,6 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
         /* Budget overview bars (mobile only) — top 6 categories for current month */
         const mo=viewMonth||(new Date().getMonth()+1);
         const mStr=String(mo);
-        const SKIP=new Set(['Transfer','Work']);
         const budgetRows=[];
         const allCats=new Set([...Object.keys(budgetTargets),...Object.keys(budgetActuals)]);
         allCats.forEach(cat=>{
@@ -3225,7 +3247,10 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
           <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
             {/* Spending Trend Chart — full width */}
             <div className="card">
-              <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Spending Trend</div>
+              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:12,flexWrap:'wrap',marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Spending Trend</div>
+                <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>{rangeLabel}</div>
+              </div>
               <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:240}}>
                 <defs>
                   <linearGradient id="spendAreaGrad" x1="0" y1="0" x2="0" y2="1">
