@@ -2162,6 +2162,8 @@ function TransactionsPage({categories,toast,refreshKey}){
   const[needsReview,setNeedsReview]=useState(false);
   const[startDate,setStartDate]=useState('');
   const[endDate,setEndDate]=useState('');
+  const[minAmount,setMinAmount]=useState('');
+  const[maxAmount,setMaxAmount]=useState('');
   const[catFilter,setCatFilter]=useState(null);       // null=all, Set=specific
   const[actionFilter,setActionFilter]=useState(null);  // null=all, Set=specific
   /* Draft copies for the type/category/account dropdowns — only take effect (copied into
@@ -2234,7 +2236,7 @@ function TransactionsPage({categories,toast,refreshKey}){
     }catch(e){toast('Batch update failed: '+e.message,'error');}
   };
   /* Clear selection whenever the visible set changes (filter applied) */
-  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,showDupes,showExcluded]);
+  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,minAmount,maxAmount,showDupes,showExcluded]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
      A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
@@ -2262,6 +2264,10 @@ function TransactionsPage({categories,toast,refreshKey}){
   if(catFilter!==null)visible=visible.filter(t=>catFilter.has(t.category_final));
   if(actionFilter!==null)visible=visible.filter(t=>actionFilter.has(t.action));
   if(accountFilter!==null)visible=visible.filter(t=>accountFilter.has(String(t.account_id)));
+  const _minAmt=minAmount!==''?Math.abs(parseFloat(minAmount)):null;
+  const _maxAmt=maxAmount!==''?Math.abs(parseFloat(maxAmount)):null;
+  if(_minAmt!==null&&!isNaN(_minAmt))visible=visible.filter(t=>Math.abs(t.amount)>=_minAmt);
+  if(_maxAmt!==null&&!isNaN(_maxAmt))visible=visible.filter(t=>Math.abs(t.amount)<=_maxAmt);
   if(sortCol){
     const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?(t.category_final||'').toLowerCase():(t.account_name||'').toLowerCase();
     visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
@@ -2355,12 +2361,19 @@ function TransactionsPage({categories,toast,refreshKey}){
               <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
               <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} title="Filters by dollar magnitude, regardless of expense/income direction">
+              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="Min $" className="date-input" style={{width:90}}
+                value={minAmount} onChange={e=>setMinAmount(e.target.value)}/>
+              <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
+              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="Max $" className="date-input" style={{width:90}}
+                value={maxAmount} onChange={e=>setMaxAmount(e.target.value)}/>
+            </div>
             <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
           </div>
           
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {(startDate||endDate||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null)&&
-              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
+            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null)&&
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
             {showMoreMenu&&<div style={{position:'absolute',right:24,top:'100%',marginTop:4,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:8,zIndex:20,boxShadow:'var(--card-shadow)',minWidth:180}}
               onMouseLeave={()=>setShowMoreMenu(false)}>
