@@ -4928,6 +4928,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[txnSummary,setTxnSummary]=useState(null);
   const[availCscs,setAvailCscs]=useState([]);
   const[cscFilter,setCscFilter]=useState('');   // '' = all, '__none__' = no CSC, or a category name
+  const[catFilter,setCatFilter]=useState('');   // general category filter (category_manual/category_auto), independent of CSC — e.g. 'Fees & Interest' for the annual-fee-vs-credits drill-down
   const[descFilter,setDescFilter]=useState('');  // free-text description/merchant search
   const[sortCol,setSortCol]=useState('date');    // 'date'|'description'|'amount'|'csc'|'pts'
   const[sortDir,setSortDir]=useState('desc');    // 'asc'|'desc'
@@ -4977,7 +4978,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[changeProductForm,setChangeProductForm]=useState({product_id:'',effective_date:new Date().toISOString().slice(0,10)});
   const[changingProduct,setChangingProduct]=useState(false);
   const txnSectionRef=useRef(null);   // Transactions card — scrolled into view when a challenge sets the custom filter
-  const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd,silent)=>{
+  const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd,silent,cat)=>{
     // silent=true skips the loading flag — used for post-edit refreshes so the
     // table doesn't unmount to a spinner and cause the page to jump; the full
     // loading state stays for real period/filter changes (initial load feel).
@@ -4985,6 +4986,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     try{
       const y=yr??txnYear; const m=mo??txnMonth; const v=view||txnView; const q=qtr??txnQuarter;
       const c=csc!==undefined?csc:cscFilter;
+      const cat2=cat!==undefined?cat:catFilter;
       const cs=cStart!==undefined?cStart:customStart; const ce=cEnd!==undefined?cEnd:customEnd;
       let qs;
       if(v==='custom'&&cs&&ce) qs=`start_date=${cs}&end_date=${ce}&action=Expense`;
@@ -4992,6 +4994,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       else if(v==='qtd') qs=`year=${y}&quarter=${q}&action=Expense`;
       else qs=`year=${y}&month=${m}&action=Expense`;
       if(c) qs+=`&csc=${encodeURIComponent(c)}`;
+      if(cat2) qs+=`&category=${encodeURIComponent(cat2)}`;
       const r=await apiFetch(`/accounts/${accountId}/transactions?${qs}`);
       setTxns(r.transactions||[]);
       setTxnSummary(r.summary||null);
@@ -5173,6 +5176,20 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     setChallengeFilterName(ch.name);
     txnSectionRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
   };
+  // Clicking the Annual Fee tile filters Transactions to the 'Fees & Interest'
+  // category for the current fee cycle (anniversary-anchored on the backend —
+  // see _annual_fee_cycle_window) — same drill-down pattern as challenges,
+  // but keyed on the general category field instead of the CSC/points-category.
+  const filterTxnsToFeesInterest=()=>{
+    if(!d?.annual_fee_summary)return;
+    const{cycle_start,cycle_end}=d.annual_fee_summary;
+    setTxnView('custom');
+    setCustomStart(cycle_start);
+    setCustomEnd(cycle_end);
+    setCatFilter('Fees & Interest');
+    setChallengeFilterName('Fees & Interest — this cycle');
+    txnSectionRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
   // Same as filterTxnsToChallenge, but for a challenge clicked from the
   // Portfolio page (before this component has its own `challenges` list
   // loaded) — the Portfolio-level challenge object already carries
@@ -5352,7 +5369,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
     apiFetch('/card-products').then(setAllCardProducts).catch(()=>{});
   },[]);
   // Transactions filter — reload when year/month/quarter/view/cscFilter changes
-  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd);setSelectedTxnIds(new Set());},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd]);
+  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd,false,catFilter);setSelectedTxnIds(new Set());},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd,catFilter]);
   // Load grouped unclassified merchants when filter='__none__'
   useEffect(()=>{if(cscFilter==='__none__')loadUnclassified();},[accountId,cscFilter]);
 
@@ -5805,8 +5822,37 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
       </div>}
 
       {(c||p)&&<div className="grid-4" style={{marginBottom:24}}>
+        {/* Annual Fee — nets against 'Fees & Interest'-categorized credits for the
+            current anniversary-anchored cycle (see _annual_fee_cycle_window in
+            main.py), so it's not just displaying the sticker fee but answering
+            "is this fee worth it." Clickable when there's fee-cycle activity to
+            drill into; falls back to the plain sticker-fee display otherwise. */}
+        {(()=>{
+          const afs=d.annual_fee_summary;
+          const hasActivity=afs&&(afs.fee_charged>0||afs.credits_received>0);
+          return(
+            <div className="card" onClick={hasActivity?filterTxnsToFeesInterest:undefined}
+              title={hasActivity?`Click to view this cycle's Fees & Interest transactions (${fmtDate(afs.cycle_start)} – ${fmtDate(afs.cycle_end)})`:undefined}
+              style={{padding:'14px 16px',textAlign:'center',cursor:hasActivity?'pointer':'default'}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Annual Fee</div>
+              {hasActivity?(
+                <>
+                  <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:afs.net_cost>0?'var(--red)':'var(--green)'}}>
+                    ${afs.net_cost.toFixed(0)} net
+                  </div>
+                  <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>
+                    ${afs.fee_charged.toFixed(0)} fee &middot; ${afs.credits_received.toFixed(0)} credits
+                  </div>
+                </>
+              ):(
+                <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:c&&c.annual_fee?'var(--red)':'var(--green)'}}>
+                  {c&&c.annual_fee?`$${c.annual_fee}`:(p&&p.notes&&p.notes.includes('$')?p.notes.replace('Annual fee: ',''):'$0')}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {[
-          {label:'Annual Fee',value:c&&c.annual_fee?`$${c.annual_fee}`:(p&&p.notes&&p.notes.includes('$')?p.notes.replace('Annual fee: ',''):'$0'),color:c&&c.annual_fee?'var(--red)':'var(--green)'},
           {label:'Credit Limit',value:c&&c.credit_limit?`$${c.credit_limit.toLocaleString()}`:'--'},
           {label:'Stmt Close',value:c&&c.statement_close_day?`Day ${c.statement_close_day}`:'--'},
           {label:'Payment Due',value:c&&c.payment_due_day?`Day ${c.payment_due_day}`:'--'},
@@ -6196,7 +6242,7 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
             {/* Monthly / QTD / YTD / Custom toggle */}
             <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
               {[['monthly','Monthly'],['qtd','QTD'],['ytd','YTD'],['custom','Custom']].map(([v,label])=>(
-                <button type="button" key={v} onClick={()=>{setTxnView(v);if(v!=='custom')setChallengeFilterName(null);}}
+                <button type="button" key={v} onClick={()=>{setTxnView(v);if(v!=='custom'){setChallengeFilterName(null);setCatFilter('');}}}
                   style={{padding:'3px 10px',borderRadius:4,border:'none',cursor:'pointer',fontSize:11,fontWeight:txnView===v?700:400,
                     background:txnView===v?'var(--bg)':'transparent',
                     color:txnView===v?'var(--text-primary)':'var(--text-muted)',
@@ -6225,20 +6271,20 @@ function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
             </div>}
             {/* Custom range */}
             {txnView==='custom'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
-              <input type="date" value={customStart} onChange={e=>{setChallengeFilterName(null);setCustomStart(e.target.value);}}
+              <input type="date" value={customStart} onChange={e=>{setChallengeFilterName(null);setCatFilter('');setCustomStart(e.target.value);}}
                 style={{fontSize:12,padding:'3px 6px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
               <span style={{fontSize:12,color:'var(--text-muted)'}}>&#8212;</span>
-              <input type="date" value={customEnd} onChange={e=>{setChallengeFilterName(null);setCustomEnd(e.target.value);}}
+              <input type="date" value={customEnd} onChange={e=>{setChallengeFilterName(null);setCatFilter('');setCustomEnd(e.target.value);}}
                 style={{fontSize:12,padding:'3px 6px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
             </div>}
           </div>
         </div>
-        {/* Challenge-linked filter chip */}
+        {/* Custom-filter chip — set by clicking a challenge card or the Annual Fee tile */}
         {challengeFilterName&&txnView==='custom'&&(
           <div style={{marginBottom:10}}>
             <span style={{fontSize:11,padding:'3px 10px',borderRadius:12,background:'var(--violet-soft)',color:'var(--violet)',display:'inline-flex',alignItems:'center',gap:6}}>
-              Filtered to challenge: {challengeFilterName}
-              <button type="button" onClick={()=>{setChallengeFilterName(null);setTxnView('monthly');}}
+              Filtered: {challengeFilterName}
+              <button type="button" onClick={()=>{setChallengeFilterName(null);setCatFilter('');setTxnView('monthly');}}
                 style={{background:'none',border:'none',cursor:'pointer',color:'inherit',fontSize:12,padding:0,lineHeight:1}}>&#10005;</button>
             </span>
           </div>

@@ -7405,6 +7405,37 @@ async def get_card_product_history(card_id: int, db: Session = Depends(get_db)):
     } for r in rows]
 
 
+def _annual_fee_cycle_window(issue_date) -> tuple:
+    """
+    (cycle_start, cycle_end) for the annual-fee cycle currently in effect,
+    anchored to the card's issue_date anniversary — the fee posts on this
+    date each year, so anchoring here (rather than calendar year) keeps a
+    fee charged in, say, March correctly netted against credits redeemed
+    through the following February, even though that window crosses Jan 1.
+    Falls back to the current calendar year when issue_date is unset.
+    """
+    from datetime import date as _date, timedelta as _timedelta
+    import calendar as _cal
+    today = _date.today()
+    if not issue_date:
+        return _date(today.year, 1, 1), _date(today.year, 12, 31)
+    d = issue_date.date() if hasattr(issue_date, 'date') else issue_date
+    month, day = d.month, d.day
+
+    def _safe_date(year, month, day):
+        last_day = _cal.monthrange(year, month)[1]
+        return _date(year, month, min(day, last_day))
+
+    this_year_anniv = _safe_date(today.year, month, day)
+    if today >= this_year_anniv:
+        cycle_start = this_year_anniv
+        cycle_end = _safe_date(today.year + 1, month, day) - _timedelta(days=1)
+    else:
+        cycle_start = _safe_date(today.year - 1, month, day)
+        cycle_end = this_year_anniv - _timedelta(days=1)
+    return cycle_start, cycle_end
+
+
 @app.get("/api/accounts/{account_id}/card-detail")
 async def account_card_detail(account_id: int, months: int = 3, period: str = None, db: Session = Depends(get_db)):
     """
@@ -7606,6 +7637,34 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     if card and card.credit_limit and balance:
         utilization = round(abs(balance) / card.credit_limit * 100, 1)
 
+    # Annual fee vs. credits — Omer classifies both the fee itself and any
+    # credits he redeems under the general category 'Fees & Interest', so
+    # netting that category within the current fee cycle answers "is this
+    # fee worth it" directly, without a separate credits-tracking scheme.
+    annual_fee_summary = None
+    if card:
+        cycle_start, cycle_end = _annual_fee_cycle_window(card.issue_date)
+        fee_cat_txns = (
+            db.query(Transaction)
+            .filter(
+                Transaction.account_id == account.id,
+                Transaction.date >= cycle_start,
+                Transaction.date <= cycle_end,
+                Transaction.is_excluded != True,
+            )
+            .all()
+        )
+        fee_cat_txns = [t for t in fee_cat_txns if (t.category_manual or t.category_auto) == 'Fees & Interest']
+        fee_charged = sum(-t.amount for t in fee_cat_txns if t.amount < 0)
+        credits_received = sum(t.amount for t in fee_cat_txns if t.amount > 0)
+        annual_fee_summary = {
+            'fee_charged': round(fee_charged, 2),
+            'credits_received': round(credits_received, 2),
+            'net_cost': round(fee_charged - credits_received, 2),
+            'cycle_start': cycle_start.isoformat(),
+            'cycle_end': cycle_end.isoformat(),
+        }
+
     # Challenge bonus points — separate from base-rate points.
     # Shows bonus pts earned across all active challenges for this card
     # (for threshold challenges, only count if threshold met).
@@ -7697,6 +7756,7 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         'earning_structure': earning_structure,
         'base_rate': base_rate,
         'benefits': benefits,
+        'annual_fee_summary': annual_fee_summary,
         'spend_challenges': [],   # loaded separately via /api/challenges
         'utilization': utilization,
         'spending_by_category': spending_by_category,
@@ -7719,6 +7779,7 @@ async def account_transactions(
     end_date: str = None,
     action: str = None,
     csc: str = None,
+    category: str = None,
     db: Session = Depends(get_db),
 ):
     """Filtered transaction list for an account.
@@ -7730,7 +7791,10 @@ async def account_transactions(
     - year + quarter (1-4)  → calendar quarter (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
     - year only             → full calendar year
     - neither               → most recent 200 transactions
-    Optionally filter by action ('Expense', 'Income', etc.) and csc (points_category).
+    Optionally filter by action ('Expense', 'Income', etc.), csc (points_category,
+    the earn-rate category), and category (category_manual/category_auto, the
+    general finance category — independent of csc; e.g. 'Fees & Interest' for
+    the annual-fee-vs-credits view, where txns are usually points-category-less).
     Pass csc='__none__' to return only transactions with no points_category assigned.
     Returns {transactions: [...], summary: {total_spend, total_pts, by_csc: {...}},
              available_cscs: [...]}.
@@ -7804,6 +7868,10 @@ async def account_transactions(
         filtered = [t for t in all_period_txns if t.points_category == csc]
     else:
         filtered = all_period_txns
+
+    # Apply general-category filter (independent of csc — e.g. 'Fees & Interest')
+    if category:
+        filtered = [t for t in filtered if (t.category_manual or t.category_auto) == category]
 
     # Build summary across filtered set — signed points-earn read straight
     # off the locked columns (see _lock_points_for_transaction()).

@@ -1,7 +1,25 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-27
+> Last updated: 2026-07-28
+
+---
+
+## Session 2026-07-28 — Card detail: annual fee vs. credits
+
+Omer classifies both the annual fee itself and any credits he redeems under the general category `Fees & Interest` — asked for a way to see, at the card level, whether the fee "makes sense" by netting that category.
+
+**Design agreed before building:** the existing "Annual Fee" KPI tile on `AccountCardDetailPage` (top stats row) was the natural home rather than a new section. Net cost = `sum(amount)` for `Fees & Interest`-categorized transactions (fee posts negative, credits post positive, so the sum falls out naturally) within the *current annual-fee cycle* — anchored to `Card.issue_date`'s month/day (the anniversary, added in an earlier session) rather than calendar year, so a fee charged in March correctly nets against credits redeemed through the following February even though that crosses Jan 1. Falls back to calendar year when `issue_date` is unset. Clicking the tile drills into the Transactions table below, filtered to that category + cycle window — same pattern already used for challenge-card clicks.
+
+**Shipped:**
+- `_annual_fee_cycle_window(issue_date)` (`main.py`) — the anniversary-anchored cycle helper, handles Feb 29 safely.
+- `account_card_detail()` gained `annual_fee_summary` (`fee_charged`/`credits_received`/`net_cost`/`cycle_start`/`cycle_end`), computed from `Fees & Interest`-categorized txns (`category_manual`/`category_auto`, independent of the points-category/CSC field — annual fees and credits are typically points-category-less) in the current cycle.
+- `account_transactions()` gained a `category` query param (general category, separate from the existing `csc` param) so the drill-down can filter on it.
+- Frontend: Annual Fee tile shows `$X net` + `$Y fee · $Z credits` and is clickable when there's cycle activity (falls back to the plain sticker-fee display when there's none to drill into yet); reused/generalized the existing challenge-click-to-filter machinery (`challengeFilterName` badge copy now generic — "Filtered: X" — since it now serves two triggers, not just challenges) with a new `catFilter` state threaded through `loadTxns()`.
+
+**Verified live** against Amex Platinum 1009 (real fee/credit data: $895 fee, $537 credits, cycle correctly anchored to the card's 3/25 issue-date anniversary → showed "$358 net"); confirmed the click-through filters the transaction table to exactly those 16 `Fees & Interest` rows, and the dismiss (✕) correctly clears both the date range and the new category filter back to the default Monthly view.
+
+**Found, not fixed, unrelated to this change:** `/api/cards/earn-summary` (the Portfolio page's per-ecosystem earn tiles) took ~44s to respond during verification — pre-existing N+1-style per-account product lookups in that endpoint, not something touched today. Worth a dedicated look; logged as B26 in BACKLOG.md.
 
 ---
 
