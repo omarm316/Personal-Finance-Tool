@@ -224,6 +224,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .card:hover { border-color: var(--blue-soft); }
 
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+/* Two equal half-width cards side by side (Spending Trend / Recent Transactions).
+   align-items:stretch so both cards match height regardless of content. */
+.dash-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: stretch; }
+@media (max-width: 900px) { .dash-split { grid-template-columns: 1fr; } }
 .metric-card { padding: 20px; margin-bottom: 0; }
 .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 .metric-value { font-family: 'Outfit', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
@@ -2754,10 +2758,6 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
 
   const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
   const totalActual=rows.reduce((s,r)=>s+r.actual,0);
-  // Shared scale so every bar's length is comparable — budget becomes a tick
-  // on this scale instead of the value each row is normalized against, so a
-  // category 459% over budget no longer looks identical to one 8% over.
-  const scaleMax=Math.max(1,totalActual,totalBudget,...rows.map(r=>Math.max(r.actual,r.budget)))*1.15;
 
   const handleSort=col=>{
     if(sortBy===col)setSortDir(d=>d==='desc'?'asc':'desc');
@@ -2768,8 +2768,18 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
     const aBot=a.cat==='Other';
     const bBot=b.cat==='Other';
     if(aBot&&!bBot)return 1;if(!aBot&&bBot)return -1;
+    // Unbudgeted rows have no % to rank on. They used to sort as Infinity,
+    // which pinned them above genuinely over-budget categories and made the
+    // order look arbitrary — a $270 no-budget row outranking Travel at 458%.
+    // They now sink below every budgeted row, ordered among themselves by
+    // amount, so "worst overrun first" actually holds at the top of the table.
+    if(sortBy==='pct'){
+      const aNo=!(a.budget>0),bNo=!(b.budget>0);
+      if(aNo!==bNo)return aNo?1:-1;
+      if(aNo&&bNo)return b.actual-a.actual;
+    }
     let aV,bV;
-    if(sortBy==='pct'){aV=a.budget>0?a.actual/a.budget:(a.actual>0?Infinity:0);bV=b.budget>0?b.actual/b.budget:(b.actual>0?Infinity:0);}
+    if(sortBy==='pct'){aV=a.actual/a.budget;bV=b.actual/b.budget;}
     else if(sortBy==='actual'){aV=a.actual;bV=b.actual;}
     else{aV=a.budget;bV=b.budget;}
     return sortDir==='desc'?bV-aV:aV-bV;
@@ -2790,22 +2800,35 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
     const isCredit=actual<0;
     const hasBudget=budget>0;
     const hasActual=actual>0;
-    const showBar=!isCredit&&(hasBudget||hasActual);
-    const pct=hasBudget?actual/budget:(hasActual?1:0);
+    const pct=hasBudget?actual/budget:0;
     const over=hasBudget&&pct>=1;
     const near=hasBudget&&!over&&pct>=0.8;
     const noBudget=!hasBudget&&hasActual;
-    const barColor=noBudget?'var(--text-muted)':over?'var(--red)':near?'var(--amber)':'var(--blue-primary)';
-    // Bar length is relative to the shared scale, not this row's own budget —
-    // so length stays comparable across rows even past 100% of budget.
-    const barPct=showBar?Math.min((actual/scaleMax)*100,100):0;
-    const tickPct=hasBudget?Math.min((budget/scaleMax)*100,100):null;
-    const pctLabel=hasBudget?`${Math.round(pct*100)}%`:null;
+    // Every track runs 0–100% of that row's own budget, so a given position
+    // means the same thing on every row and the 25/50/75 markers are readable
+    // at a glance. Over-budget rows fill the track and carry their true figure
+    // in the label (458% fills the same as 101% — the number disambiguates).
+    const barPct=hasBudget?Math.min(pct*100,100):0;
+    // Over/near fills are weighted *heavier* than under-budget ones. At a 100%
+    // scale every over-budget row fills the whole track, so if the alarm colors
+    // were the faintest the rows needing attention would read as the calmest
+    // ones on screen — the opposite of the point.
+    const fillBg=over?'var(--red)':near?'var(--amber)':'var(--blue-primary)';
+    const fillOpacity=over?0.42:near?0.38:0.30;
+    // The label is right-aligned to the *track*, so on anything under 100% it
+    // sits on empty track rather than on the fill — and --blue-soft/--amber on
+    // a near-white track fails contrast in light theme. Only over-budget rows
+    // (fill reaches the label) keep a status color; the rest use body text and
+    // let the bar carry the status.
+    const pctColor=over?'var(--red)':'var(--text-secondary)';
+    // Credit rows get no % either: "-17% of budget" for a net refund is noise,
+    // and the green +$732.61 in the Actual column already says what happened.
+    const pctLabel=(hasBudget&&!isCredit)?`${Math.round(pct*100)}%`:null;
     const isActive=!isTotal&&activeCat===cat;
     const clickable=!isTotal&&onCatClick;
     return(
       <div onClick={clickable?()=>onCatClick(cat):undefined}
-        style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'12px 24px',gap:14,
+        style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'10px 24px',gap:14,
         borderBottom:isTotal?'2px solid var(--border)':'1px solid var(--border)',
         background:isActive?'rgba(var(--blue-primary-rgb), 0.1)':isTotal?'var(--elevated)':'transparent',
         cursor:clickable?'pointer':'default',transition:'all 0.2s ease'}}
@@ -2814,26 +2837,30 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
           {isTotal?'Total':cat}
         </span>
-        {showBar?(
-          <div style={{position:'relative',height:8,borderRadius:4,overflow:'visible',
-            background:'var(--border)', flex: 1}}>
-            {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
-              background:barColor,opacity:noBudget?0.45:(over?0.55:0.9),
-              borderRadius:4,transition:'width 0.4s ease'}}/>}
-            {tickPct!==null&&<div style={{position:'absolute',left:`${tickPct}%`,top:-3,bottom:-3,width:2,
-              borderRadius:1,background:'var(--text-secondary)'}}/>}
+        <div style={{position:'relative',height:24,borderRadius:6,overflow:'hidden',
+          background:'var(--border)',border:'1px solid var(--border)'}}>
+          {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
+            background:fillBg,opacity:fillOpacity,transition:'width 0.4s ease'}}/>}
+          {/* Quarter markers, drawn over the fill so they stay legible on a
+              filled track. Credit rows get an empty track — no bar, no label —
+              since "% of budget spent" is meaningless for a net refund. */}
+          {!isCredit&&[25,50,75].map(m=>(
+            <div key={m} style={{position:'absolute',left:`${m}%`,top:0,bottom:0,width:1,
+              background:'var(--border-strong)'}}/>
+          ))}
+          <div style={{position:'relative',height:'100%',display:'flex',alignItems:'center',
+            justifyContent:'flex-end',padding:'0 8px'}}>
+            {pctLabel&&<span style={{fontSize:10.5,fontWeight:700,color:pctColor,
+              fontVariantNumeric:'tabular-nums'}}>{pctLabel}</span>}
+            {noBudget&&<span style={{fontSize:9.5,fontWeight:500,color:'var(--text-muted)'}}>no budget set</span>}
           </div>
-        ):(
-          <span style={{fontSize:12,color:'var(--green)',fontWeight:600,letterSpacing:'0.3px'}}>INCOME</span>
-        )}
-        <div style={{textAlign:'right', display:'flex', flexDirection:'column'}}>
-           <span style={{fontSize:14,fontWeight:isTotal?700:600,
-            color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
-            {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
-          </span>
-          {pctLabel && <span style={{fontSize:10, color:over?'var(--red)':near?'var(--amber)':'var(--text-muted)', fontWeight:600}}>{pctLabel}</span>}
-          {noBudget && <span style={{fontSize:10, color:'var(--text-muted)', fontWeight:600}}>no budget</span>}
         </div>
+        {/* Just the number — the % moved into the bar, so this column stays a
+            clean, sortable column of dollar amounts. */}
+        <span style={{textAlign:'right',fontSize:14,fontWeight:isTotal?700:600,fontVariantNumeric:'tabular-nums',
+          color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
+          {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
+        </span>
         <span style={{textAlign:'right',fontSize:13,fontWeight:isTotal?600:400,
           color:'var(--text-secondary)'}}>
           {hasBudget?fmt(budget):'—'}
@@ -2882,7 +2909,7 @@ function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYe
         <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--amber)',display:'inline-block'}}/>Near limit</span>
         <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--red)',display:'inline-block'}}/>Over budget</span>
         <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--text-muted)',display:'inline-block'}}/>No budget set</span>
-        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:2,height:9,borderRadius:1,background:'var(--text-secondary)',display:'inline-block'}}/>Budget line</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:1,height:9,background:'var(--border-strong)',display:'inline-block'}}/>25 / 50 / 75% of budget</span>
       </div>}
     </div>
   );
@@ -2927,6 +2954,72 @@ function CategoryDetailPanel({detail,onClose}){
             </div>
           </div>
       }
+    </div>
+  );
+}
+
+/* Half-width companion to the Spending Trend chart. Shows the five most recent
+   transactions; "See more" fades in on hover over the card rather than sitting
+   there permanently, so the card reads as content first and navigation second.
+   Kept touch-reachable by also revealing on focus-within and on tap (see the
+   coarse-pointer note below). */
+function RecentTransactionsCard({recent,onSeeMore,onRowClick}){
+  const[hover,setHover]=useState(false);
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  /* Credit-card payment transfers are noise here — the same filter the old
+     full-width table used. Applied before the slice so we always land on five
+     real rows rather than five-minus-however-many-got-filtered. */
+  const rows=(recent||[])
+    .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
+    .slice(0,5);
+  /* On touch there's no hover, so the button would never appear. Pin it visible
+     when the device can't hover at all. */
+  const coarse=typeof window!=='undefined'&&window.matchMedia&&window.matchMedia('(hover: none)').matches;
+  const showBtn=hover||coarse;
+  return(
+    <div className="card" style={{margin:0,display:'flex',flexDirection:'column'}}
+      onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      onFocus={()=>setHover(true)} onBlur={()=>setHover(false)}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:16,minHeight:24}}>
+        <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Recent Transactions</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onSeeMore}
+          tabIndex={showBtn?0:-1} aria-hidden={!showBtn}
+          style={{opacity:showBtn?1:0,pointerEvents:showBtn?'auto':'none',
+            transition:'opacity 0.18s ease',whiteSpace:'nowrap'}}>
+          See more →
+        </button>
+      </div>
+      {rows.length===0
+        ?<div className="empty" style={{flex:1}}><div className="empty-icon">◎</div><span>No transactions yet</span></div>
+        :<div style={{display:'flex',flexDirection:'column'}}>
+          {rows.map((t,i)=>{
+            const dt=new Date((t.date||'').substring(0,10)+'T12:00:00');
+            const shortDate=`${MO[dt.getMonth()]} ${dt.getDate()}`;
+            const amtDisplay=t.amount<0?`-${fmt(Math.abs(t.amount))}`:`+${fmt(t.amount)}`;
+            return(
+              <div key={t.id} onClick={()=>onRowClick(t)} className="row-hover"
+                style={{display:'grid',gridTemplateColumns:'52px 1fr auto',alignItems:'center',gap:12,
+                  padding:'11px 4px',cursor:'pointer',
+                  borderTop:i===0?'none':'1px solid var(--border)'}}>
+                <span style={{color:'var(--text-muted)',fontSize:12.5,fontWeight:400,whiteSpace:'nowrap'}}>{shortDate}</span>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13.5,fontWeight:500,color:'var(--text-primary)',
+                    overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {t.description_display||t.description_raw}
+                  </div>
+                  {showCategoryForType(t.action)&&
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {normalizeCat(t.category_final)}
+                    </div>}
+                </div>
+                <span style={{textAlign:'right',whiteSpace:'nowrap',fontSize:13.5,fontWeight:600,
+                  fontVariantNumeric:'tabular-nums',
+                  color:t.amount<0?'var(--red)':t.amount>0?'var(--green)':'var(--text-primary)'}}>{amtDisplay}</span>
+              </div>
+            );
+          })}
+        </div>}
     </div>
   );
 }
@@ -3201,7 +3294,10 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
         /* Add 10% headroom so the top of the chart doesn't get clipped */
         const yMax=maxSpend*1.1;
         /* SVG dimensions */
-        const W=500,H=160,pad={t:14,r:15,b:28,l:44};
+        /* Left padding dropped from 44 to 24 now that the y-axis labels are
+           gone — 24 is just enough for the first/last point's direct value
+           label to sit centered without clipping at the viewBox edge. */
+        const W=500,H=160,pad={t:14,r:24,b:28,l:24};
         const cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;
         const pts=spendData.map((d,i)=>[
           pad.l+(i/(spendData.length-1))*cW,
@@ -3258,8 +3354,9 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
 
         return(
           <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
-            {/* Spending Trend Chart — full width */}
-            <div className="card">
+            {/* Spending Trend (left 50%) + Recent Transactions (right 50%) */}
+            <div className="dash-split">
+            <div className="card" style={{margin:0,display:'flex',flexDirection:'column'}}>
               <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:12,flexWrap:'wrap',marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Spending Trend</div>
                 <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>{rangeLabel}</div>
@@ -3271,16 +3368,13 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
                     <stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/>
                   </linearGradient>
                 </defs>
-                {/* Grid lines */}
+                {/* Grid lines. No y-axis value labels — every point is already
+                    directly labeled with its own figure, so the axis scale was
+                    duplicating information while eating horizontal space this
+                    card no longer has at half width. */}
                 {[0,0.25,0.5,0.75,1].map((p,i)=>{
                   const y=pad.t+(1-p)*cH;
-                  const val=yMax*p;
-                  return(
-                    <g key={i}>
-                      <line x1={pad.l} y1={y} x2={W-pad.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
-                      <text x={pad.l-8} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontWeight={500}>{val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text>
-                    </g>
-                  );
+                  return <line key={i} x1={pad.l} y1={y} x2={W-pad.r} y2={y} stroke="var(--border)" strokeWidth={1}/>;
                 })}
                 {/* X labels */}
                 {spendData.map((d,i)=>(
@@ -3314,6 +3408,9 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
                   </g>
                 ))}
               </svg>
+            </div>
+
+            <RecentTransactionsCard recent={recent} onSeeMore={()=>setPage('transactions')} onRowClick={setReviewTxn}/>
             </div>
 
             {/* Budget Overview — mobile only */}
@@ -3361,48 +3458,9 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
         <CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>
       </div>}
 
-      {/* ── Recent Transactions (full width) ─────────────────────────────────── */}
-      <div className="card table-card" style={{marginTop: 0}}>
-        <div className="table-header">
-          <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Recent Activity</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setPage('transactions')}>
-            See more →
-          </button>
-        </div>
-        <div className="table-wrap">
-          {recent.length===0
-            ?<div className="empty"><div className="empty-icon">◎</div><span>No transactions yet</span></div>
-            :<table><thead><tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Category</th>
-              <th style={{textAlign:'right'}}>Amount</th>
-            </tr></thead><tbody>{recent
-              .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
-              .map(t=>{
-              const dateStr=(t.date||'').substring(0,10);
-              const dt=new Date(dateStr+'T12:00:00');
-              const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-              const shortDate=`${MO[dt.getMonth()]} ${dt.getDate()}`;
-              const amtDisplay=t.amount<0?`-${fmt(Math.abs(t.amount))}`:(`+${fmt(t.amount)}`);
-              const cat=normalizeCat(t.category_final);
-              return(
-              <tr key={t.id} onClick={()=>setReviewTxn(t)} style={{cursor:'pointer'}} className="row-hover">
-                <td style={{color:'var(--text-muted)',fontSize:13,fontWeight:400,whiteSpace:'nowrap'}}>{shortDate}</td>
-                <td style={{fontSize:14,fontWeight:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,width:'50%'}}>{t.description_display||t.description_raw}</td>
-                <td>
-                  {showCategoryForType(t.action)&&<span className="badge" style={{background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)'}}>{cat}</span>}
-                </td>
-                <td style={{textAlign:'right',whiteSpace:'nowrap',fontSize:14,fontWeight:600,
-                  color:t.amount<0?'var(--red)':t.amount>0?'var(--green)':'var(--text-primary)'}}>{amtDisplay}</td>
-              </tr>
-              );
-            })}</tbody></table>
-          }
-        </div>
-      </div>
-
-      {/* Budget vs. Actual and Needs Review removed — use Budgets page and Transactions page respectively */}
+      {/* Budget vs. Actual and Needs Review removed — use Budgets page and Transactions page respectively.
+          The full-width Recent Activity table that used to sit here is gone too — recent
+          transactions now live in the half-width card beside the Spending Trend. */}
     </div>
   );
 }

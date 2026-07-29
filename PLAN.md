@@ -5,6 +5,20 @@
 
 ---
 
+## Session 2026-07-27 (cont'd) — Dashboard layout pass
+
+Omer's five follow-ups after the review below: 0–100% budget bars with 25/50/75 markers, thicker bars matching his proposal artifact, no "INCOME" label, Spending Trend and Recent Transactions as a 50/50 row with a hover-reveal "See more", and the old full-width Recent Activity table removed. All five shipped and verified in both themes at desktop and mobile widths — detail in BACKLOG.md's Recently Completed.
+
+**Reference resolution note:** "similar to the proposal we recently looked at together" didn't match anything in `mockups/` (all five files there use 3–5px bars, *thinner* than what was live). Asked rather than guessed; Omer supplied a claude.ai artifact URL, which `WebFetch` can read directly — that gave the exact spec (24px track, 6px radius, in-bar right-aligned label at 10.5px/700). Worth remembering that artifact URLs are fetchable, since design references for this project increasingly live there rather than in the repo.
+
+**Two corrections made during verification that the spec didn't cover** — both are cases where transplanting the artifact's values 1:1 would have been wrong, because the artifact assumed a *shared* scale and Omer had asked for a 100% scale:
+- The artifact's soft fills (0.16 alpha) work for short over-budget bars. At a 100% scale, over-budget rows fill the entire track — so the faintest color ended up on the rows that most need attention. Over/near now weighted heavier than under-budget.
+- The % label right-aligns to the track, so below 100% it sits on empty track rather than on the fill; `--blue-soft`/`--amber` there fails contrast in light theme. Only over-budget keeps a status color.
+
+**Service-worker gotcha, cost real time:** after editing `v2.html`, the page kept executing a stale cached copy and threw `RecentTransactionsCard is not defined` for a function that was demonstrably in the file and in the server's response. The PWA service worker (`shell-v11`/`api-v11` caches) was serving the old HTML. Diagnose by reading the live `<script type="text/babel">` content and searching it for the new identifier — if it's missing there but present in `curl` output, it's the cache. Fix: unregister every SW registration, `caches.delete()` all keys, reload. Add this to the checklist alongside the Babel-syntax-error-blanks-the-page note below.
+
+---
+
 ## Session 2026-07-27 — Dashboard page review
 
 Omer: "let's look closely at the Dashboard page." Read it live at desktop and mobile widths and checked every displayed figure against the API rather than eyeballing it — which is what surfaced the main bug, since the chart *looked* plausible.
