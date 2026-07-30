@@ -10,6 +10,59 @@
 
 ---
 
+## Session 2026-07-30 (cont'd) — Docs cleanup + Vite migration (Phase 1)
+
+Omer: "start with cleanup, then the split."
+
+**Docs cleanup — 186KB → 49KB.** BACKLOG.md 83→30KB, PLAN.md 103→19KB, with everything
+older archived under `docs/archive/`. These two files are read at the start of every
+session, so they were the largest *recurring* context cost in the project — bigger than
+the code, which is only ever read in ranges. Also rewrote **Architecture Notes**, which
+had drifted into being actively misleading (claimed SQLite, named the retired
+`frontend.html`, described the long-removed gold theme) and added a "Traps that have
+bitten more than once" section.
+
+**Vite migration, Phase 1 — toolchain only, deliberately not the component split.**
+The risky parts of this change are the build tooling and the Railway deploy, not the
+file layout. So step one moves the *entire* former `v2.html` script into a single
+`frontend/src/main.jsx` and proves the pipeline end to end. Phase 2 (splitting into
+`components/`, `pages/`, `hooks/`, `lib/`) is now a pure refactor with a working build
+underneath it and no deployment risk attached.
+
+- `frontend/` — Vite + React 18 + `@vitejs/plugin-react`. Builds to `static/app`
+  (`base: '/static/app/'`), which FastAPI's existing `/static` mount already serves.
+- `main.py`: new `_frontend_index()` serves the build and **falls back to `v2.html`
+  with a loud warning** if it's missing, so a fresh checkout still runs. `/`, `/v2`
+  and `/plaid/oauth-return` all use it. `/v2` also stopped reading the file into a
+  string and now returns a `FileResponse` like the others.
+- `Dockerfile` is now multi-stage: `node:20-slim` builds, `python:3.11-slim` serves.
+  Build output is gitignored and never committed.
+- `static/sw.js` → `v12`, and its CDN precache list is now empty — React, ReactDOM and
+  Babel are no longer fetched from cdnjs. Bumping the version is what evicts the old
+  shell cache holding the pre-build HTML.
+
+**A real bug the build caught that in-browser Babel had silently tolerated:** a
+duplicate `display` key in one object literal (`display:'block'` then `display:'flex'`
+on the same style object, v2.html ~line 5124). The second wins, so the first was dead
+code. Worth knowing that esbuild surfaces this class of thing that Babel-standalone
+just swallowed.
+
+**Verified:** clean `npm ci && npm run build` reproduces identical asset hashes; `/`
+serves the built index with no cdnjs/Babel tags; all 10 routes render with **zero
+console errors**; `typeof Babel === 'undefined'` confirms the in-browser compiler is
+gone; DOMContentLoaded is **15ms** (previously gated on downloading 736KB of HTML and
+Babel-transforming ~11k lines on every load).
+
+**Not verified — flagged deliberately:** Docker is not available in this environment,
+so the multi-stage image build itself is untested. The failure mode is safe (a failed
+Railway build leaves the current deploy live), and the two things most likely to break
+it were found and fixed by inspection: `npm ci` needs the lockfile (committed), and
+`frontend/node_modules` had to be added to `.dockerignore` or `COPY frontend/ ./`
+would overwrite the container's install with macOS-native binaries. **Watch the first
+Railway deploy.**
+
+---
+
 ## Session 2026-07-30 (cont'd) — Backlog audit, B5 fixed, Plaid capability question
 
 Omer handed over prioritization ("go by whatever you feel you should prioritize"), mentioned he holds a **VentureOne (no annual fee)** and just acquired a **Citi Strata Premier** that should sync soon, and said the next deep-dives are **Cash Flow, Daily Balances, and Loans**.

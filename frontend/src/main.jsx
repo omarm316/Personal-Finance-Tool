@@ -1,0 +1,10957 @@
+import React,{useState,useEffect,useCallback,useMemo,useRef} from 'react';
+import ReactDOM from 'react-dom';
+import {createRoot} from 'react-dom/client';
+import './index.css';
+const API='/api';
+const fmt=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(n??0));
+const fmtRound=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
+const fmtDate=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const fmtMonthLabel=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',year:'2-digit'});};
+/* ── Pull-to-refresh hook (mobile only) ─────────────────────────────── */
+function usePullToRefresh(contentRef,onRefresh){
+  const[ptrState,setPtrState]=useState('idle'); // idle|pulling|releasing|done
+  const[pullY,setPullY]=useState(0);
+  const startY=useRef(0);const active=useRef(false);
+  const THRESHOLD=70;
+  useEffect(()=>{
+    const el=contentRef.current;if(!el)return;
+    const isMobile=()=>window.innerWidth<=768;
+    const onStart=e=>{if(!isMobile()||el.scrollTop>5)return;startY.current=e.touches[0].clientY;active.current=true;};
+    const onMove=e=>{
+      if(!active.current)return;
+      const dy=e.touches[0].clientY-startY.current;
+      if(dy<0||el.scrollTop>5){active.current=false;setPullY(0);setPtrState('idle');return;}
+      /* Dampen the pull distance */
+      const dampened=Math.min(dy*0.45,120);
+      setPullY(dampened);setPtrState(dampened>=THRESHOLD?'releasing':'pulling');
+      if(dy>10)e.preventDefault();
+    };
+    const onEnd=()=>{
+      if(!active.current)return;active.current=false;
+      if(ptrState==='releasing'){setPtrState('done');onRefresh();setTimeout(()=>{setPtrState('idle');setPullY(0);},600);}
+      else{setPtrState('idle');setPullY(0);}
+    };
+    el.addEventListener('touchstart',onStart,{passive:true});
+    el.addEventListener('touchmove',onMove,{passive:false});
+    el.addEventListener('touchend',onEnd,{passive:true});
+    return()=>{el.removeEventListener('touchstart',onStart);el.removeEventListener('touchmove',onMove);el.removeEventListener('touchend',onEnd);};
+  },[contentRef,onRefresh,ptrState]);
+  return{ptrState,pullY};
+}
+
+/* ── Pull-to-refresh indicator component ───────────────────────────── */
+function PullToRefreshIndicator({pullY,ptrState}){
+  if(ptrState==='idle'&&pullY===0)return null;
+  const ready=ptrState==='releasing'||ptrState==='done';
+  const rotation=Math.min(pullY/70*180,180);
+  return(
+    <div className="ptr-indicator" style={{top:Math.max(pullY-20,12),opacity:pullY>10?1:0}}>
+      <div className={`ptr-spinner ${ready?'releasing':''}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+          style={{transform:ready?undefined:`rotate(${rotation}deg)`}}>
+          <path d="M23 4v6h-6M1 20v-6h6"/>
+          <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* ── Skeleton loading placeholders ─────────────────────────────────── */
+function SkeletonCard({height=90,style={}}){return <div className="skeleton skeleton-card" style={{height,...style}}/>;}
+function SkeletonRow({count=5}){return <>{Array.from({length:count},(_,i)=><div key={i} className="skeleton skeleton-row"/>)}</>;}
+function SkeletonDashboard(){return(
+  <div style={{display:'flex',flexDirection:'column',gap:24}}>
+    <div className="metric-grid">
+      {[1,2,3,4,5].map(i=><SkeletonCard key={i} height={100}/>)}
+    </div>
+    <SkeletonCard height={300}/>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
+      <SkeletonCard height={300}/>
+      <SkeletonCard height={300}/>
+    </div>
+  </div>
+);}
+function SkeletonTable({rows=8}){return(
+  <div className="card" style={{padding:24, display:'flex', flexDirection:'column', gap:12}}>
+    <div className="skeleton" style={{height:44, borderRadius:12, marginBottom:12}}/>
+    <SkeletonRow count={rows}/>
+  </div>
+);}
+
+const CHART_COLORS=['#38BDF8','#6ee7b7','#fcd34d','#c4b5fd','#67e8f9','#fdba74','rgba(248,113,113,0.3)','#bef264'];
+// Canonical category colors — primary keys match database.py seed_categories exactly.
+// Legacy aliases kept for backward-compat (old transactions may carry these names).
+const CATEGORY_COLORS={
+  // ── Canonical (database.py seed) ──────────────────────────────────────────
+  'Groceries':'#16a34a','Dining':'#ea580c','Transportation':'var(--blue-primary)',
+  'Housing':'#b45309','Utilities':'#0891b2','Healthcare':'#dc2626',
+  'Insurance':'#4f46e5','Vehicle':'#7c3aed','Fitness':'#0d9488',
+  'Self Care':'#c026d3','Clothing':'#db2777','Electronics':'#475569',
+  'Streaming':'#9333ea','Travel':'#0284c7','Home':'#92400e',
+  'Kids':'#65a30d','Entertainment':'#9333ea','Gifts':'#e11d48',
+  'For Others':'#e11d48','Education':'#ca8a04','Fees & Interest':'#475569',
+  'Other':'#6b7280','Business':'#0891b2','Investment Gain (Loss)':'#15803d',
+  'Work':'#15803d','Transfer':'#94a3b8','Unclassified':'#9ca3af',
+  // ── Legacy aliases ────────────────────────────────────────────────────────
+  'Supermarket':'#16a34a','Restaurants':'#ea580c','Food & Drink':'#ea580c',
+  'Auto':'var(--blue-primary)','Gas':'#7c3aed','Fuel':'#7c3aed',
+  'Electric':'#0891b2','Water':'#0891b2','Internet':'#0891b2',
+  'Health':'#dc2626','Medical':'#dc2626','Pharmacy':'#dc2626',
+  'Personal Care':'#c026d3','Subscriptions':'#9333ea',
+  'Hotel':'#0284c7','Flights':'#0284c7','Shopping':'#db2777',
+  'Tuition':'#ca8a04','Rent':'#b45309','Mortgage':'#b45309',
+  'Coffee':'#92400e','Pets':'#65a30d','Charity':'#e11d48',
+  'Taxes':'#475569','Fees':'#475569','Income':'#15803d','Paycheck':'#15803d',
+};
+const _FALLBACK_COLORS=['#38BDF8','#16a34a','#ea580c','#7c3aed','#0891b2','#db2777','#9333ea','#ca8a04','#0d9488','#c026d3','#dc2626','#b45309'];
+const _hashStr=s=>Math.abs(s.split('').reduce((a,c)=>(a*31+c.charCodeAt(0))|0,0));
+const getCatColor=cat=>CATEGORY_COLORS[cat]||_FALLBACK_COLORS[_hashStr(cat||'')%_FALLBACK_COLORS.length];
+const hexToRgba=(hex,alpha)=>{const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${alpha})`;};
+const normalizeCat=cat=>(!cat||cat==='Unclassified')?'Other':cat;
+const monthStart=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
+const todayStr=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const localDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+function useToast(){
+  const[toasts,setToasts]=useState([]);
+  const add=(msg,type='success')=>{
+    const id=Date.now();
+    setToasts(t=>[...t,{id,msg,type}]);
+    // Error toasts stay 8 seconds so diagnostic text can be read
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),type==='error'?8000:3500);
+  };
+  return{toasts,toast:add};
+}
+
+function useIsMobile(){
+  const[m,setM]=useState(()=>typeof window!=='undefined'&&window.innerWidth<768);
+  useEffect(()=>{
+    const fn=()=>setM(window.innerWidth<768);
+    window.addEventListener('resize',fn,{passive:true});
+    return()=>window.removeEventListener('resize',fn);
+  },[]);
+  return m;
+}
+
+function CollapsibleSection({title,children,defaultOpen=true,count}){
+  const isMobile=useIsMobile();
+  const[open,setOpen]=useState(defaultOpen||!isMobile);
+  useEffect(()=>{if(!isMobile)setOpen(true);},[isMobile]);
+  const label=count!=null?`${title} (${count})`:title;
+  return(
+    <div style={{marginBottom:16}}>
+      <button type="button" onClick={()=>isMobile&&setOpen(!open)} style={{
+        display:'flex',alignItems:'center',gap:8,width:'100%',border:'none',background:'none',
+        cursor:isMobile?'pointer':'default',padding:'10px 0',fontFamily:'inherit'}}>
+        <span style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>{label}</span>
+        {isMobile&&<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"
+          style={{transition:'transform 0.2s',transform:open?'rotate(180deg)':'rotate(0deg)'}}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>}
+        <div style={{flex:1,height:1,background:'var(--border)'}}/>
+      </button>
+      <div style={{overflow:'hidden',maxHeight:open?'none':'0',transition:open?'none':'max-height 0.3s ease',opacity:open?1:0}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MobileNav({page,setPage}){
+  const S=({d,sz=20})=><svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>;
+  const tabs=[
+    {id:'dashboard',label:'Home',icon:<S d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>},
+    {id:'transactions',label:'Txns',icon:<S d="M17 1l4 4-4 4M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 01-4 4H3"/>},
+    {id:'cards',label:'Cards',icon:<S d="M1 4h22v16H1V4zm0 6h22"/>},
+    {id:'budgets',label:'Budget',icon:<S d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 6v4l3 3"/>},
+    {id:'settings',label:'More',icon:<S d="M12 13a1 1 0 100-2 1 1 0 000 2zm7 0a1 1 0 100-2 1 1 0 000 2zM5 13a1 1 0 100-2 1 1 0 000 2z"/>},
+  ];
+  return(
+    <nav className="mobile-nav">
+      {tabs.map(t=>(
+        <button type="button" key={t.id} className={`mobile-nav-btn${page===t.id?' active':''}`} onClick={(e)=>{e.preventDefault();setPage(t.id);}}>
+          <span className="nav-icon">{t.icon}</span>
+          <span>{t.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+async function apiFetch(path,opts={}){
+  const res=await fetch(API+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});
+  if(!res.ok){const text=await res.text();let msg=text;try{const j=JSON.parse(text);if(j.detail)msg=j.detail;}catch{}throw new Error(msg);}
+  return res.json();
+}
+
+function ToastContainer({toasts}){
+  return<div className="toast-container">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>;
+}
+
+const ICON_PATHS={
+  home:`<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
+  arrowUpDown:`<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>`,
+  target:`<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>`,
+  trendingUp:`<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>`,
+  calendar:`<rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>`,
+  banknote:`<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>`,
+  building:`<rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/>`,
+  star:`<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>`,
+  creditCard:`<rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/>`,
+  wallet:`<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>`,
+  settings:`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
+  chevronLeft:`<polyline points="15 18 9 12 15 6"/>`,
+  chevronRight:`<polyline points="9 18 15 12 9 6"/>`,
+  info:`<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`,
+};
+function Icon({name,size=16,style}){
+  const p=ICON_PATHS[name]||'';
+  return<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} dangerouslySetInnerHTML={{__html:p}}/>;
+}
+
+function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCollapsed}){
+  const nav=[
+    {id:'dashboard',icon:<Icon name="home"/>,label:'Dashboard'},
+    {id:'transactions',icon:<Icon name="arrowUpDown"/>,label:'Transactions'},
+    {id:'budgets',icon:<Icon name="target"/>,label:'Budgets'},
+    {id:'networth',icon:<Icon name="trendingUp"/>,label:'Net Worth'},
+    {id:'cashflow',icon:<Icon name="calendar"/>,label:'Daily Balances'},
+    {id:'cashplanner',icon:<Icon name="banknote"/>,label:'Cash Flow'},
+    {id:'loans',icon:<Icon name="building"/>,label:'Loans'},
+    {id:'gcb',icon:<Icon name="star"/>,label:'GCB'},
+    {id:'cards',icon:<Icon name="creditCard"/>,label:'Cards'},
+    {id:'accounts',icon:<Icon name="wallet"/>,label:'Accounts'},
+    {id:'settings',icon:<Icon name="settings"/>,label:'Settings'},
+  ];
+  const uniqueBanks=[...new Map(banks.map(b=>[b.institution_name,b])).values()];
+  const toggle=()=>{const next=!collapsed;setCollapsed(next);try{localStorage.setItem('nav-collapsed',next?'1':'0');}catch(e){}};
+  const[banksOpen,setBanksOpen]=useState(()=>{try{return localStorage.getItem('banks-open')!=='0';}catch(e){return true;}});
+  const toggleBanks=()=>{const next=!banksOpen;setBanksOpen(next);try{localStorage.setItem('banks-open',next?'1':'0');}catch(e){}};
+
+  return(
+    <aside className={`sidebar${collapsed?' collapsed':''}`}>
+      <div className="sidebar-logo">
+        <div className="logo-icon-box">M</div>
+        {!collapsed&&<h1>Moresheth</h1>}
+      </div>
+      
+      <button type="button" className="sidebar-toggle" onClick={toggle} title={collapsed?'Expand':'Collapse'}>
+        <Icon name={collapsed?'chevronRight':'chevronLeft'} size={14}/>
+      </button>
+
+      <nav className="sidebar-nav">
+        {nav.map(n=>(
+          <button type="button" key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={(e)=>{e.preventDefault();setPage(n.id);}} title={collapsed?n.label:''}>
+            <span className="nav-icon">{n.icon}</span>
+            {!collapsed&&<span>{n.label}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="sidebar-footer">
+        {!collapsed && <div style={{fontSize:10,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:8,padding:'0 4px'}}>Connections</div>}
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          {banksOpen && !collapsed && uniqueBanks.map((b,i)=>(
+            <div key={i} className="sidebar-bank"><span className="bank-dot"/><span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{b.institution_name}</span></div>
+          ))}
+          <div style={{display:'flex',gap:6,marginTop:collapsed?0:8}}>
+            <button type="button" className="btn btn-sm btn-primary" style={{flex:1,justifyContent:'center'}} onClick={onConnectBank} title="Connect bank">{collapsed?'+':'+ Bank'}</button>
+            {!collapsed && <button type="button" className="btn btn-sm btn-secondary" style={{flex:1,justifyContent:'center'}} onClick={onSync}>Sync</button>}
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* Sort categories: alphabetical, with "For Others", "Other", "Unclassified" pinned to the bottom */
+const _CATS_LAST=new Set(['For Others','Other','Unclassified','other']);
+const sortedCats=(cats)=>{
+  const regular=[...cats].filter(c=>!_CATS_LAST.has(c.name)).sort((a,b)=>a.name.localeCompare(b.name));
+  const last=[...cats].filter(c=>_CATS_LAST.has(c.name)).sort((a,b)=>a.name.localeCompare(b.name));
+  return[...regular,...last];
+};
+/* Capitalize first letter of each word — used for legacy lowercase DB values */
+const toTitleCase=s=>s?s.replace(/(^|\s|_)(\S)/g,(_,sep,c)=>(sep===' '?sep:' ')+c.toUpperCase()).trim():'';
+/* Display-friendly account type labels (acronyms stay uppercase) */
+const _ACCT_TYPE_LABELS={'cd':'CD','hsa':'HSA','fsa':'FSA','ira':'IRA','401k':'401(k)'};
+const fmtAcctType=s=>s?(_ACCT_TYPE_LABELS[s.toLowerCase()]||toTitleCase(s)):'';
+
+/* 8 canonical transaction types (Section 4B) */
+const TXN_TYPES=['Expense','Income','Transfer','Investment Gain (Loss)','Purchase','Sale','Depreciation','Other'];
+/* Types that show a category selector — only Expense and Income (Section 4C) */
+const BUDGET_TYPES_SET=new Set(['Expense','Income']);
+/* Category only shown for Expense/Income */
+const showCategoryForType=(t)=>BUDGET_TYPES_SET.has(t);
+
+/* ── Reusable multi-select dropdown filter ───────────────────────────── */
+/* selected: null = all (no filter), Set = specific checked items.
+   All checkboxes appear checked when selected is null.
+   "Select All" → null.  "Clear All" → empty Set. */
+function MultiSelectFilter({options,selected,onChange,label,renderOption,onApply}){
+  const[open,setOpen]=useState(false);
+  const[query,setQuery]=useState('');
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open]);
+  /* Reset the search box each time the panel closes, so it starts fresh next open */
+  useEffect(()=>{if(!open)setQuery('');},[open]);
+  const isAll=selected===null;
+  const allVals=useMemo(()=>new Set(options.map(o=>o.value)),[options]);
+  const isChecked=v=>isAll||selected.has(v);
+  const checkedCount=isAll?options.length:(selected?selected.size:0);
+  const isFiltered=!isAll;
+  const toggle=v=>{
+    if(isAll){/* uncheck one from "all" → Set with everything except v */
+      const n=new Set(allVals);n.delete(v);onChange(n);
+    }else if(selected.has(v)){
+      const n=new Set(selected);n.delete(v);onChange(n);
+    }else{
+      const n=new Set(selected);n.add(v);
+      /* if all are now checked, go back to null */
+      if(n.size>=allVals.size)onChange(null);else onChange(n);
+    }
+  };
+  /* Contains-match search over option labels (account labels already include the last-4 digits) */
+  const filteredOptions=useMemo(()=>{
+    const q=query.trim().toLowerCase();
+    if(!q)return options;
+    return options.filter(o=>String(o.label).toLowerCase().includes(q));
+  },[options,query]);
+  /* Search-to-select: typing (or clearing) the search box replaces the whole selection with
+     exactly what's currently filtered, live on every keystroke — so "search, then Apply" is
+     enough to end up with just the matches selected, no separate Clear All/checkbox step needed.
+     Skipped on mount and while closed, so opening the panel never clobbers the existing selection
+     (the query-reset-on-close effect above also changes `query`, which would otherwise re-fire this). */
+  const didMountRef=useRef(false);
+  useEffect(()=>{
+    if(!didMountRef.current){didMountRef.current=true;return;}
+    if(!open)return;
+    onChange(filteredOptions.length>=allVals.size?null:new Set(filteredOptions.map(o=>o.value)));
+  },[query]);
+  /* Select All/Clear All toggle scopes to whatever's currently filtered, not the full option set */
+  const visibleAllChecked=filteredOptions.length>0&&filteredOptions.every(o=>isChecked(o.value));
+  const toggleVisible=()=>{
+    const next=isAll?new Set(allVals):new Set(selected);
+    if(visibleAllChecked)filteredOptions.forEach(o=>next.delete(o.value));
+    else filteredOptions.forEach(o=>next.add(o.value));
+    if(next.size>=allVals.size)onChange(null);else onChange(next);
+  };
+  const displayText=isAll?label:checkedCount===0?`${label} (none)`:`${label} (${checkedCount}/${options.length})`;
+  return(
+    <div ref={ref} style={{position:'relative',display:'inline-block'}}>
+      <button type="button" onClick={()=>setOpen(o=>!o)} className="filter-select"
+        style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',textAlign:'left',
+          border:isFiltered?'1px solid var(--blue-primary)':'1px solid var(--border)',
+          background:isFiltered?'rgba(var(--blue-primary-rgb),0.06)':'var(--surface)',
+          color:isFiltered?'var(--blue-primary)':'var(--text-primary)',
+          minWidth:0,whiteSpace:'nowrap',paddingRight:24,position:'relative'}}>
+        <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{displayText}</span>
+        <span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,opacity:.5}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:240,maxHeight:380,
+        display:'flex',flexDirection:'column',
+        background:'var(--surface-solid)',border:'1px solid var(--border-strong)',borderRadius:10,boxShadow:'var(--shadow-lg)',
+        zIndex:50,fontSize:13,fontFamily:'inherit',overflow:'hidden'}}>
+        <div style={{padding:'8px 10px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+          <input autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search…"
+            onClick={e=>e.stopPropagation()}
+            style={{width:'100%',boxSizing:'border-box',background:'var(--elevated)',border:'1px solid var(--border)',
+              borderRadius:8,padding:'6px 10px',fontSize:12.5,color:'var(--text-primary)',fontFamily:'inherit'}}/>
+        </div>
+        <div style={{overflowY:'auto',padding:'6px 0'}}>
+          {filteredOptions.length===0
+            ?<div style={{padding:'16px 12px',textAlign:'center',color:'var(--text-muted)',fontSize:12.5}}>No matches</div>
+            :filteredOptions.map(o=>{const chk=isChecked(o.value);return(
+            <div key={o.value} onClick={()=>toggle(o.value)}
+              style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',
+                background:chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent',
+                color:chk?'var(--text-primary)':'var(--text-muted)'}}
+              onMouseEnter={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.12)':'var(--elevated)'}
+              onMouseLeave={e=>e.currentTarget.style.background=chk?'rgba(var(--blue-primary-rgb),0.08)':'transparent'}>
+              <span style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${chk?'var(--blue-primary)':'var(--border)'}`,
+                display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,
+                background:chk?'var(--blue-primary)':'transparent',color:chk?'#fff':'transparent'}}>✓</span>
+              <span style={{fontSize:13,fontWeight:chk?400:300}}>{renderOption?renderOption(o):o.label}</span>
+            </div>
+          );})}
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',borderTop:'1px solid var(--border)',flexShrink:0}}>
+          <button type="button" disabled={filteredOptions.length===0}
+            style={{border:'none',background:'none',cursor:filteredOptions.length===0?'default':'pointer',fontSize:12,padding:0,fontFamily:'inherit',fontWeight:500,
+              color:filteredOptions.length===0?'var(--text-muted)':'var(--blue-primary)'}}
+            onClick={toggleVisible}>{visibleAllChecked?'Clear All':'Select All'}</button>
+          <button type="button" className="btn btn-sm btn-primary" style={{padding:'4px 14px',fontSize:12}}
+            onClick={()=>{onApply&&onApply();setOpen(false);}}>Apply</button>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+// Type-to-filter combobox: pick an existing option, or type a new value and
+// click "+ Add" to create it on the fly. Ported from MARGIN's SearchCreateSelect.tsx
+// (frontend/src/components/SearchCreateSelect.tsx) — same interaction, restyled
+// inline to match this file's convention instead of MARGIN's separate CSS classes.
+function SearchCreateSelect({value,onChange,options,placeholder,emptyLabel,autoFocus}){
+  const[query,setQuery]=useState(value||'');
+  const[open,setOpen]=useState(false);
+  const rootRef=useRef(null);
+  useEffect(()=>{setQuery(value||'');},[value]);
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{
+      if(rootRef.current&&!rootRef.current.contains(e.target)){setOpen(false);setQuery(value||'');}
+    };
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open,value]);
+  const filtered=query.trim()
+    ?options.filter(o=>o.toLowerCase().includes(query.trim().toLowerCase()))
+    :options;
+  const select=o=>{onChange(o);setQuery(o);setOpen(false);};
+  const optStyle={padding:'6px 10px',cursor:'pointer',fontSize:12.5};
+  return(
+    <div ref={rootRef} style={{position:'relative'}}>
+      <input autoFocus={autoFocus} value={query} placeholder={placeholder||'Search or add…'}
+        onChange={e=>{setQuery(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)}
+        style={{fontSize:12.5,padding:'5px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:'100%',boxSizing:'border-box'}}/>
+      {open&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:160,maxHeight:200,overflowY:'auto',
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 4px 16px rgba(0,0,0,0.2)',zIndex:80,padding:'4px 0'}}>
+        {!query.trim()&&emptyLabel&&
+          <div style={{...optStyle,color:'var(--text-muted)'}} onClick={()=>{onChange('');setQuery('');setOpen(false);}}>{emptyLabel}</div>}
+        {filtered.length>0
+          ?filtered.map(o=>(
+            <div key={o} style={optStyle} onClick={()=>select(o)}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--elevated)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>{o}</div>
+          ))
+          :query.trim()
+            ?<div style={{...optStyle,color:'var(--blue-primary)',fontWeight:600}} onClick={()=>select(query.trim())}>+ Add "{query.trim()}"</div>
+            :<div style={{...optStyle,color:'var(--text-muted)',fontStyle:'italic',cursor:'default'}}>No matches</div>}
+      </div>}
+    </div>
+  );
+}
+
+function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
+  const[category,setCategory]=useState(txn.category_final||'');
+  const[action,setAction]=useState(txn.action||'Expense');
+  const[saving,setSaving]=useState(false);
+  const[createRule,setCreateRule]=useState(txn.enrichment_source==='llm'||txn.enrichment_source==='fallback');
+  /* When type changes, clear category if new type hides it */
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave(txn.id,{category,action,needs_review:false});
+    /* If checkbox is ticked and it's an LLM/fallback-sourced txn, create a rule */
+    if(createRule&&showCategoryForType(action)&&category&&category!=='Unclassified'){
+      try{await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});}
+      catch(e){/* Non-fatal — rule creation failure shouldn't block the save */}
+    }
+    setSaving(false);onClose();
+  };
+  const isLlmOrFallback=txn.enrichment_source==='llm'||txn.enrichment_source==='fallback';
+  return(
+    <div className="review-overlay" style={{zIndex: 5000}}>
+      <div className="review-panel" style={{maxWidth: 480}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}}>
+          <div>
+            <h3 style={{fontSize:18,fontWeight:600,fontFamily:'Outfit'}}>Review Transaction</h3>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>{fmtDate(txn.date)} · <span className={txn.amount<0?'amount-neg':'amount-pos'}>{txn.amount<0?'-':'+'}{fmt(Math.abs(txn.amount))}</span></p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} style={{padding:4, minHeight: 0}}>✕</button>
+        </div>
+
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          <div className="review-field">
+            <label>Description</label>
+            <input className="search-input" value={txn.description_display||txn.description_raw} readOnly style={{background:'var(--surface)',color:'var(--text-secondary)',cursor:'default'}}/>
+            {txn.description_display&&txn.description_display!==txn.description_raw&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:6,fontWeight:600}}>RAW: {txn.description_raw}</div>}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1.5fr',gap:16}}>
+            <div className="review-field">
+              <label>Type</label>
+              <select className="filter-select" style={{width:'100%'}} value={action} onChange={e=>handleTypeChange(e.target.value)}>
+                {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+              </select>
+            </div>
+            {showCategoryForType(action)&&<div className="review-field">
+              <label>Category</label>
+              <select className="filter-select" style={{width:'100%'}} value={category} onChange={e=>setCategory(e.target.value)}>
+                <option value="">— Select category —</option>
+                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>}
+          </div>
+
+          {isLlmOrFallback&&showCategoryForType(action)&&
+            <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,color:'var(--text-primary)',marginTop:8,cursor:'pointer',fontWeight:500}}>
+              <input type="checkbox" style={{width:16,height:16}} checked={createRule} onChange={e=>setCreateRule(e.target.checked)}/>
+              <span>Save as auto-categorization rule</span>
+            </label>}
+        </div>
+
+        <div className="review-actions" style={{marginTop:32}}>
+          <button type="button" className="btn btn-ghost" onClick={()=>{onIgnore(txn.id);onClose();}} title="Remove from review queue without categorizing">Ignore</button>
+          <div style={{display:'flex',gap:12}}>
+            <button type="button" className="btn btn-secondary" onClick={onDiscard}>Discard</button>
+            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'…':'✓ Save Changes'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── ConfirmModal — replaces all browser confirm()/prompt() ─────────────── */
+function ConfirmModal({title,body,confirmLabel='Confirm',danger=false,requiredInput=null,onConfirm,onClose}){
+  const[inputVal,setInputVal]=useState('');
+  const[busy,setBusy]=useState(false);
+  const canConfirm=!requiredInput||inputVal===requiredInput;
+  const handleConfirm=async()=>{
+    if(!canConfirm||busy)return;
+    setBusy(true);
+    try{await onConfirm();}
+    finally{setBusy(false);onClose();}
+  };
+  return ReactDOM.createPortal(
+    <div className="review-overlay" style={{zIndex:11000}}>
+      <div className="review-panel" style={{maxWidth:420}}>
+        <div style={{fontSize:18,fontWeight:600,marginBottom:12,fontFamily:'Outfit',color:danger?'var(--red)':'var(--text-primary)'}}>{title}</div>
+        {body&&<div style={{fontSize:14,color:'var(--text-secondary)',marginBottom:requiredInput?16:32,lineHeight:1.5}}>{body}</div>}
+        {requiredInput&&<div style={{marginBottom:24}}>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:8,fontWeight:600}}>Type <strong style={{color:'var(--text-primary)'}}>{requiredInput}</strong> to confirm:</div>
+          <input className="search-input" value={inputVal} onChange={e=>setInputVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter')handleConfirm();}}
+            placeholder={requiredInput} autoFocus />
+        </div>}
+        <div style={{display:'flex',justifyContent:'flex-end',gap:12}}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="btn" disabled={!canConfirm||busy} onClick={handleConfirm}
+            style={{background:danger?'var(--red)':'var(--blue-primary)',boxShadow:danger?'0 4px 15px rgba(239, 68, 68, 0.2)':'0 4px 15px rgba(var(--blue-primary-rgb), 0.2)', opacity: canConfirm?1:0.5}}>
+            {busy?'…':confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
+  const[locked,setLocked]=useState(txn.is_locked);
+  const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[excluded,setExcluded]=useState(txn.is_excluded||false);
+  const[editing,setEditing]=useState(false);
+  const[category,setCategory]=useState(txn.category_final);
+  const[action,setAction]=useState(txn.action);
+  const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||txn.description_raw||'');
+  const[saving,setSaving]=useState(false);
+  const[expanded,setExpanded]=useState(false);
+  /* Transaction info modal */
+  const[showTxnInfo,setShowTxnInfo]=useState(false);
+  /* Quick Rule creation */
+  const[showQuickRule,setShowQuickRule]=useState(false);
+  const[rulePattern,setRulePattern]=useState(txn.description_clean||txn.description_raw||'');
+  const[ruleDesc,setRuleDesc]=useState(txn.description_clean||txn.description_raw||'');
+  const[ruleAction,setRuleAction]=useState(txn.action||'Expense');
+  const[ruleCategory,setRuleCategory]=useState(txn.category_final||'');
+  const[ruleSaving,setRuleSaving]=useState(false);
+  /* rowClass: excluded rows get a distinct muted style */
+  const rowClass=excluded?'row-excluded':locked?'row-locked':txn.needs_review?'row-review':txn.action==='Transfer'?'row-transfer':'';
+  /* When type changes in edit mode, clear category if new type hides it */
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const[showRulePrompt,setShowRulePrompt]=useState(false);
+  const[ruleCreating,setRuleCreating]=useState(false);
+  const[cm,setCm]=useState(null);
+  const isLlmSource=txn.enrichment_source==='llm'||txn.enrichment_source==='override';
+  /* Points-earn manual override (see compute_points_earn in main.py) */
+  const[showPointsOverride,setShowPointsOverride]=useState(false);
+  const[pointsOverrideVal,setPointsOverrideVal]=useState(
+    txn.points_earn&&txn.points_earn.classification==='manual_override'?String(txn.points_earn.points_estimated):''
+  );
+  const[pointsOverrideSaving,setPointsOverrideSaving]=useState(false);
+  const savePointsOverride=async()=>{
+    if(pointsOverrideVal===''||isNaN(Number(pointsOverrideVal)))return;
+    setPointsOverrideSaving(true);
+    try{await onSave(txn.id,{points_earn_override:Number(pointsOverrideVal)});toast&&toast('Points override saved');setShowPointsOverride(false);}
+    catch(e){toast&&toast('Failed to save override: '+e.message,'error');}
+    finally{setPointsOverrideSaving(false);}
+  };
+  const resetPointsOverride=async()=>{
+    setPointsOverrideSaving(true);
+    try{await onSave(txn.id,{clear_points_earn_override:true});toast&&toast('Reset to auto-classification');setPointsOverrideVal('');setShowPointsOverride(false);}
+    catch(e){toast&&toast('Failed to reset: '+e.message,'error');}
+    finally{setPointsOverrideSaving(false);}
+  };
+  const save=async()=>{
+    const updates={category,action,needs_review:false};
+    if(descClean!==(txn.description_clean||txn.description_display||txn.description_raw||''))updates.description_clean=descClean;
+    setSaving(true);await onSave(txn.id,updates);setLocked(true);setSaving(false);setEditing(false);
+    /* Only offer rule creation when enrichment came from LLM (not already a rule) */
+    if(isLlmSource&&category&&category!=='Unclassified')setShowRulePrompt(true);
+  };
+  const createRuleFromTxn=async()=>{
+    setRuleCreating(true);
+    try{
+      /* Use new smart rule API — uses clean merchant name, deduplicates, priority 200 */
+      await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});
+      onSave(txn.id,{needs_review:false});/* Mark reviewed + reload */
+    }catch(e){}
+    finally{setRuleCreating(false);setShowRulePrompt(false);}
+  };
+  const saveQuickRule=async()=>{
+    if(!rulePattern.trim())return;
+    setRuleSaving(true);
+    try{
+      const res=await apiFetch('/rules',{method:'POST',body:JSON.stringify({
+        pattern:rulePattern.trim(),match_type:'contains',
+        set_action:ruleAction||null,set_category:ruleCategory||null,
+        set_description:ruleDesc.trim()||null,priority:100
+      })});
+      toast&&toast(`Rule created — ${res.reapplied?.updated??0} transactions updated (${res.reapplied?.unlocked??0} unlocked)`);
+      await onSave(txn.id,{needs_review:false});/* Mark reviewed + reload */
+    }catch(e){toast&&toast('Failed to create rule: '+e.message,'error');}
+    finally{setRuleSaving(false);setShowQuickRule(false);}
+  };
+  const cancel=()=>{setCategory(txn.category_final);setAction(txn.action);setDescClean(txn.description_clean||txn.description_display||txn.description_raw||'');setEditing(false);};
+  const toggleLock=async()=>{const nl=!locked;await onSave(txn.id,{is_locked:nl});setLocked(nl);};
+  const toggleExclude=async()=>{const ne=!excluded;await onSave(txn.id,{is_excluded:ne});setExcluded(ne);};
+  const amtClass=txn.action==='Transfer'?'amount-neutral':txn.amount<0?'amount-neg':'amount-pos';
+  const typeBadge=(a)=>{const l=(a||'').toLowerCase();return l==='income'?'income':l==='transfer'?'transfer':'expense';};
+  const displayAction=txn.action_display||txn.action;
+  return(
+    <React.Fragment>
+    <tr className={rowClass} style={selected?{background:'rgba(var(--blue-primary-rgb), 0.08)'}:{}}>
+      <td style={{width:48,paddingLeft:24,verticalAlign:'middle'}}>
+        <input type="checkbox" checked={!!selected} onChange={()=>onToggleSelect(txn.id)} onClick={e=>e.stopPropagation()} style={{cursor:'pointer'}}/>
+      </td>
+      <td style={{color:'var(--text-secondary)',whiteSpace:'nowrap',fontSize:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          {txn.is_split&&<span onClick={()=>setExpanded(!expanded)} style={{cursor:'pointer',display:'inline-block',transition:'transform 0.2s',transform:expanded?'rotate(90deg)':'rotate(0deg)',fontSize:12,color:'var(--blue-primary)',userSelect:'none'}}>▸</span>}
+          {fmtDate(txn.date)}
+        </div>
+      </td>
+      <td>
+        {editing
+          ?<input value={descClean} onChange={e=>setDescClean(e.target.value)} className="search-input"
+            style={{fontSize:12.5,padding:'6px 12px',width:'100%',boxSizing:'border-box'}}
+            placeholder="Display name"/>
+          :<div style={{fontWeight:600,fontSize:12.5,color:'var(--text-primary)'}}>{txn.description_display||txn.description_raw}</div>
+        }
+        <div style={{display:'flex',gap:6,alignItems:'center',marginTop:4,flexWrap:'wrap'}}>
+          {txn.category_confidence<0.8&&!locked&&<span style={{fontSize:10,color:'var(--amber)',fontWeight:600}}>{Math.round((txn.category_confidence||0)*100)}% AI CONFIDENCE</span>}
+          {txn.enrichment_source&&txn.enrichment_source!=='rule'&&(()=>{
+            const src=txn.enrichment_source;
+            const cfg={llm:{bg:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',label:'AI ENRICHED'},override:{bg:'rgba(16,185,129,0.1)',color:'var(--green)',label:'AUTO-OVERRIDE'},fallback:{bg:'var(--border)',color:'var(--text-muted)',label:src.toUpperCase()}};
+            const c=cfg[src]||cfg.fallback;
+            return<span className="badge" style={{background:c.bg,color:c.color,fontSize:9}} title={`Source: ${src}`}>{c.label}</span>;
+          })()}
+        </div>
+      </td>
+      <td><span className={amtClass} style={{fontSize:12.5}}>{txn.amount<0?'-':'+'}{fmt(txn.amount)}</span></td>
+      <td>
+        {editing
+          ?<select value={action} onChange={e=>handleTypeChange(e.target.value)} className="filter-select" style={{padding:'4px 8px'}}>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+          :<span className={`badge badge-${typeBadge(txn.action)}`}>{displayAction}</span>
+        }
+      </td>
+      <td>
+        {!showCategoryForType(displayAction)
+          ?<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>
+          :editing
+            ?<select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{padding:'4px 8px',width:140}}>
+              <option value="">Unclassified</option>
+              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            :<span className="badge" style={{background:'rgba(59,130,246,0.08)',color:'var(--blue-vibrant)'}}>
+              {normalizeCat(txn.category_final)}
+              {txn.category_manual&&<span style={{marginLeft:6,opacity:0.6}}>✎</span>}
+            </span>
+        }
+      </td>
+      <td style={{color:'var(--text-muted)',fontSize:12,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={txn.account_name}>{txn.account_name}</td>
+      <td style={{paddingRight:24}}>
+        {editing
+          ?<div className="edit-actions" style={{justifyContent:'flex-end'}}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={save} disabled={saving}>{saving?'…':'Save'}</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={cancel}>✕</button>
+          </div>
+          :showRulePrompt
+          ?<div className="edit-actions" style={{justifyContent:'flex-end'}}>
+            <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:600}}>NEW RULE?</span>
+            <button type="button" className="btn btn-sm btn-primary" onClick={createRuleFromTxn} disabled={ruleCreating}>{ruleCreating?'…':'Create'}</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowRulePrompt(false)}>No</button>
+          </div>
+          :<div className="edit-actions" style={{justifyContent:'flex-end'}}>
+            <div style={{width:74,display:'flex',justifyContent:'flex-start'}}>
+              {txn.needs_review&&!locked&&<button type="button" className="btn btn-sm btn-primary" style={{background:'var(--blue-neon)', boxShadow: '0 0 10px rgba(56,189,248,0.2)'}} onClick={()=>onReview(txn)}>Review</button>}
+            </div>
+            <button type="button" className="btn btn-sm btn-ghost" style={{padding:6}} onClick={()=>setShowTxnInfo(true)} title="Details"><Icon name="info" size={14}/></button>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)}>{txn.is_split?'Splits':'Split'}</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 8px',fontSize:11,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
+              onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
+              title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',border:'1px solid rgba(59,130,246,0.2)'}}
+              onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
+              title="Create a rule from this transaction">Rule</button>
+            <button type="button" className="btn btn-sm"
+              style={{padding:'4px 7px',fontSize:11,background:excluded?'rgba(248,113,113,0.12)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
+              onClick={toggleExclude}
+              title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
+              {excluded?'↩':'⊘'}
+            </button>
+            <div style={{width:32,display:'flex',justifyContent:'flex-start'}}>
+              {locked && <button type="button" className="btn btn-sm btn-ghost" onClick={toggleLock} title="Unlock">🔓</button>}
+            </div>
+          </div>
+        }
+      </td>
+    </tr>
+    {expanded&&txn.splits&&txn.splits.map((s,i)=>(
+      <tr key={`split-${txn.id}-${i}`} style={{background:'rgba(59,130,246,0.03)',fontSize:13}}>
+        <td></td>
+        <td></td>
+        <td style={{paddingLeft:32,color:'var(--text-secondary)',fontWeight:500}}>{s.description||<span style={{color:'var(--text-muted)',fontStyle:'italic'}}>—</span>}</td>
+        <td><span style={{color:'var(--text-secondary)',fontWeight:600}}>{s.amount<0?'-':'+'}{fmt(s.amount)}</span></td>
+        <td><span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:11}}>{s.action||'Expense'}</span></td>
+        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{s.category}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+        <td></td>
+        <td></td>
+      </tr>
+    ))}
+    {showQuickRule&&ReactDOM.createPortal(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:'var(--elevated)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',border:'1px solid var(--border-strong)',borderRadius:14,padding:32,width:500,maxWidth:'92vw',boxShadow:'0 24px 64px rgba(0,0,0,0.35)',display:'flex',flexDirection:'column',gap:20}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontWeight:400,fontSize:18,color:'var(--text-primary)'}}>Create Rule</div>
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Auto-categorize future matching transactions</div>
+            </div>
+            <button type="button" className="btn btn-ghost" style={{padding:'4px 8px',fontSize:16,lineHeight:1}} onClick={()=>setShowQuickRule(false)}>✕</button>
+          </div>
+          {/* Source transaction */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 14px',fontSize:12,color:'var(--text-secondary)'}}>
+            <span style={{fontWeight:500,color:'var(--text-muted)',marginRight:6}}>From transaction:</span>
+            <span style={{fontFamily:'monospace',color:'var(--text-primary)'}}>{txn.description_raw}</span>
+          </div>
+          {/* Match Pattern */}
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <label style={{fontWeight:500,fontSize:13,color:'var(--text-primary)'}}>Match Pattern</label>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:2}}>Text to look for in the bank description. Any transaction containing this text will match.</div>
+            <input value={rulePattern} onChange={e=>setRulePattern(e.target.value)}
+              placeholder="e.g. STARBUCKS"
+              style={{fontSize:13,padding:'8px 12px',border:'1px solid var(--border)',borderRadius:7,width:'100%',boxSizing:'border-box',background:'var(--bg)',color:'var(--text-primary)'}}
+              autoFocus/>
+          </div>
+          {/* Display Name */}
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <label style={{fontWeight:500,fontSize:13,color:'var(--text-primary)'}}>Display Name</label>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:2}}>The clean, readable name shown for matched transactions (replaces the raw bank description).</div>
+            <input value={ruleDesc} onChange={e=>setRuleDesc(e.target.value)}
+              placeholder="e.g. Starbucks Coffee"
+              style={{fontSize:13,padding:'8px 12px',border:'1px solid var(--border)',borderRadius:7,width:'100%',boxSizing:'border-box',background:'var(--bg)',color:'var(--text-primary)'}}/>
+          </div>
+          {/* Type + Category */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <label style={{fontWeight:500,fontSize:13,color:'var(--text-primary)'}}>Type</label>
+              <select value={ruleAction} onChange={e=>setRuleAction(e.target.value)}
+                className="filter-select"
+                style={{fontSize:13,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,background:'var(--bg)',color:'var(--text-primary)'}}>
+                {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              <label style={{fontWeight:500,fontSize:13,color:'var(--text-primary)'}}>Category</label>
+              <select value={ruleCategory} onChange={e=>setRuleCategory(e.target.value)}
+                className="filter-select"
+                style={{fontSize:13,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,background:'var(--bg)',color:'var(--text-primary)'}}>
+                <option value="">No category</option>
+                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Actions */}
+          <div style={{display:'flex',gap:10,justifyContent:'flex-end',paddingTop:4}}>
+            <button type="button" className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px'}} onClick={()=>setShowQuickRule(false)}>Cancel</button>
+            <button type="button" className="btn btn-success" style={{fontSize:13,padding:'8px 22px',fontWeight:500}} onClick={saveQuickRule} disabled={ruleSaving}>
+              {ruleSaving?'Saving…':'Save Rule'}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    {showTxnInfo&&ReactDOM.createPortal(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:'var(--elevated)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',border:'1px solid var(--border-strong)',borderRadius:14,padding:32,width:580,maxWidth:'94vw',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(0,0,0,0.35)',display:'flex',flexDirection:'column',gap:18}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontWeight:400,fontSize:18,color:'var(--text-primary)'}}>Transaction Details</div>
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>ID #{txn.id}</div>
+            </div>
+            <button type="button" className="btn btn-ghost" style={{padding:'4px 8px',fontSize:16,lineHeight:1}} onClick={()=>setShowTxnInfo(false)}>✕</button>
+          </div>
+          {/* Description block */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px',display:'flex',flexDirection:'column',gap:4}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</div>
+            <div style={{fontWeight:500,fontSize:15,color:'var(--text-primary)'}}>{txn.description_display||txn.description_raw}</div>
+            {txn.description_display&&txn.description_display!==txn.description_raw&&(
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                <span style={{fontWeight:500}}>Raw: </span>
+                <span style={{fontFamily:'monospace'}}>{txn.description_raw}</span>
+              </div>
+            )}
+          </div>
+          {/* Info grid */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            {(()=>{
+              const importLabel={plaid:'Plaid',csv:'CSV',ofx:'OFX',manual:'Manual'};
+              const enrichLabel={llm:'AI',rule:'Rule',override:'Manual Override',fallback:'Fallback'};
+              const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):'—';
+              const src=txn.import_source||'plaid';
+              const enr=txn.enrichment_source||null;
+              return[
+                ['Date',fmtDate(txn.date)],
+                ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
+                ['Account',txn.account_name],
+                ['Type',txn.action_display||cap(txn.action)],
+                ['Category',normalizeCat(txn.category_final)],
+                ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
+                ['Import Source',importLabel[src]||cap(src)],
+                ['Enrichment',enr?(enrichLabel[enr]||cap(enr)):'—'],
+              ];
+            })().map(([label,value])=>(
+              <div key={label} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px'}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:3}}>{label}</div>
+                <div style={{fontSize:13,color:'var(--text-primary)',fontWeight:500,wordBreak:'break-word'}}>{value}</div>
+              </div>
+            ))}
+          </div>
+          {/* Category override note */}
+          {txn.category_manual&&txn.category_auto&&txn.category_auto!==txn.category_manual&&(
+            <div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:8,padding:'9px 13px',border:'1px solid var(--border)'}}>
+              <span style={{fontWeight:500}}>AI suggested: </span><span>{txn.category_auto}</span>
+              <span style={{margin:'0 8px',opacity:0.4}}>→</span>
+              <span style={{fontWeight:500}}>Manual override: </span><span>{txn.category_manual}</span>
+            </div>
+          )}
+          {/* Points earn — color/label follow compute_points_earn()'s classification
+              rather than always reading as a positive "you earned this" box. */}
+          {txn.points_earn&&(()=>{
+            const cls=txn.points_earn.classification;
+            const isClawback=cls==='clawback';
+            const isOverride=cls==='manual_override';
+            const isNeutral=cls==='excluded';
+            const color=isClawback?'var(--red)':isOverride?'var(--amber)':isNeutral?'var(--text-muted)':'var(--green)';
+            const bg=isClawback?'rgba(248,113,113,0.1)':isOverride?'rgba(251,191,36,0.1)':isNeutral?'var(--elevated)':'rgba(52,211,153,0.1)';
+            const border=isClawback?'rgba(248,113,113,0.3)':isOverride?'rgba(251,191,36,0.3)':isNeutral?'var(--border)':'rgba(52,211,153,0.3)';
+            const label={
+              earn:'Points Earn', clawback:'Points Clawback',
+              excluded:'Excluded From Earn Calc', manual_override:'Manual Override',
+            }[cls]||'Points Earn';
+            return(
+            <div style={{background:bg,border:`1px solid ${border}`,borderRadius:10,padding:'12px 14px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:500,color,textTransform:'uppercase',letterSpacing:'0.05em'}}>{label}</div>
+                <button type="button" onClick={()=>setShowPointsOverride(!showPointsOverride)}
+                  style={{fontSize:11,color:'var(--text-muted)',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>
+                  {isOverride?'Edit override':'Adjust'}
+                </button>
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                  {txn.points_earn.points_category?(
+                    <span style={{display:'flex',alignItems:'center',gap:4}}>
+                      {txn.points_earn.points_category_l1&&(
+                        <>
+                          <span style={{fontSize:12,color,background:bg,borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category_l1}</span>
+                          <span style={{fontSize:11,color}}>›</span>
+                        </>
+                      )}
+                      <span style={{fontSize:12,fontWeight:500,color,background:bg,borderRadius:5,padding:'2px 7px'}}>{txn.points_earn.points_category}</span>
+                    </span>
+                  ):(
+                    <span style={{fontSize:12,color,fontStyle:'italic'}}>Base rate</span>
+                  )}
+                  {txn.points_earn.earn_rate!=null&&<span style={{fontSize:13,fontWeight:400,color}}>{txn.points_earn.earn_rate}x</span>}
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:18,fontWeight:400,color}}>
+                    {txn.points_earn.points_estimated.toLocaleString(undefined,{maximumFractionDigits:0})} pts
+                  </div>
+                  <div style={{fontSize:11,color}}>
+                    ≈ ${(txn.points_earn.points_estimated*txn.points_earn.cpp/100).toFixed(2)} value · {txn.points_earn.currency}
+                  </div>
+                </div>
+              </div>
+              {showPointsOverride&&(
+                <div style={{display:'flex',gap:8,alignItems:'center',marginTop:10,paddingTop:10,borderTop:`1px solid ${border}`}}>
+                  <input type="number" step="1" value={pointsOverrideVal} onChange={e=>setPointsOverrideVal(e.target.value)}
+                    placeholder="Points value" style={{width:110,padding:'6px 10px',fontSize:13,borderRadius:8,border:'1px solid var(--border-strong)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={pointsOverrideSaving} onClick={savePointsOverride}>Save</button>
+                  {isOverride&&<button type="button" className="btn btn-sm btn-ghost" disabled={pointsOverrideSaving} onClick={resetPointsOverride}>Reset to auto</button>}
+                </div>
+              )}
+            </div>
+            );
+          })()}
+          {/* Flags */}
+          {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {locked&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒 Locked</span>}
+              {txn.is_gcb&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.12)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⭐ GCB</span>}
+              {excluded&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)'}}>⊘ Excluded</span>}
+              {txn.needs_review&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.1)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⚠ Needs Review</span>}
+            </div>
+          )}
+          {/* Splits breakdown */}
+          {txn.is_split&&txn.splits&&txn.splits.length>0&&(
+            <div>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Splits ({txn.splits.length})</div>
+              <div style={{border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
+                {txn.splits.map((s,i)=>(
+                  <div key={i} style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:10,alignItems:'center',padding:'10px 14px',borderBottom:i<txn.splits.length-1?'1px solid var(--border)':'none',background:i%2===0?'var(--bg)':'var(--elevated)'}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{s.description||<span style={{fontStyle:'italic',color:'var(--text-muted)'}}>—</span>}</div>
+                      {s.category&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{s.category}</div>}
+                    </div>
+                    <span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:10}}>{s.action}</span>
+                    <span style={{fontWeight:500,fontSize:13,minWidth:70,textAlign:'right',color:'var(--text-primary)'}}>{s.amount<0?'–':'+' }{fmt(s.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Footer */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:6,borderTop:'1px solid var(--border)'}}>
+            <div style={{display:'flex',gap:8}}>
+              <button type="button" className="btn btn-sm btn-secondary"
+                onClick={()=>{setShowTxnInfo(false);onSplit(txn);}}
+                title={txn.is_split?'Edit existing splits':'Split this transaction into parts'}>
+                {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
+              </button>
+              <button type="button" className="btn btn-sm"
+                style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:12}}
+                onClick={()=>setCm({
+                  title:'Delete Transaction',
+                  body:`Permanently delete "${txn.description_display||txn.description_raw}" (${fmtDate(txn.date)} · ${fmt(Math.abs(txn.amount))})?\n\nThis cannot be undone.`,
+                  confirmLabel:'Delete',danger:true,
+                  onConfirm:async()=>{
+                    await apiFetch(`/transactions/${txn.id}`,{method:'DELETE'});
+                    setShowTxnInfo(false);
+                    toast&&toast('Transaction deleted');
+                    onSave(txn.id,{__deleted:true});
+                  }
+                })}
+                title="Permanently delete this transaction">
+                🗑 Delete
+              </button>
+            </div>
+            <button type="button" className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px'}} onClick={()=>setShowTxnInfo(false)}>Close</button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+    </React.Fragment>
+  );
+}
+
+/* Modal for creating manual value-change transactions (Section 2c) */
+function ManualTransactionModal({accounts,categories,onClose,onSaved,toast}){
+  const[date,setDate]=useState(todayStr());
+  const[desc,setDesc]=useState('');
+  const[amount,setAmount]=useState('');
+  const[action,setAction]=useState('Expense');
+  const[category,setCategory]=useState('');
+  const[accountId,setAccountId]=useState(accounts[0]?.id||'');
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+  const[dates,setDates]=useState([date]);
+  const[useSplits,setUseSplits]=useState(false);
+  const[splits,setSplits]=useState([
+    {amount:'',description:'',category:'',action:'Expense',is_gcb:false},
+    {amount:'',description:'',category:'',action:'Expense',is_gcb:false},
+  ]);
+  /* Use the same canonical list as the filter dropdown and everywhere else */
+  const actions=TXN_TYPES;
+  const addDate=()=>setDates(d=>[...d,'']);
+  const removeDate=i=>setDates(d=>d.filter((_,idx)=>idx!==i));
+  const updateDate=(i,v)=>setDates(d=>{const n=[...d];n[i]=v;return n;});
+  const addSplit=()=>setSplits(s=>[...s,{amount:'',description:'',category:'',action:'Expense',is_gcb:false}]);
+  const removeSplit=i=>setSplits(s=>s.filter((_,j)=>j!==i));
+  const updateSplit=(i,field,val)=>setSplits(s=>{const n=[...s];n[i]={...n[i],[field]:val};return n;});
+
+  const splitTotal=splits.reduce((s,r)=>s+parseFloat(r.amount||0),0);
+  const parsedAmount=parseFloat(amount||0);
+  const splitBalanced=useSplits&&Math.abs(Math.round(splitTotal*100)-Math.round(parsedAmount*100))===0;
+  const splitRemaining=Math.round((parsedAmount-splitTotal)*100)/100;
+
+  const handleSave=async()=>{
+    const validDates=dates.filter(d=>d);
+    if(!desc||!amount||!accountId){setError('Fill all required fields');return;}
+    if(!validDates.length){setError('At least one date is required');return;}
+    if(useSplits&&!splitBalanced){setError(`Splits sum to ${splitTotal.toFixed(2)}, need ${parsedAmount.toFixed(2)}`);return;}
+    setSaving(true);setError('');
+    try{
+      const body={
+        dates:validDates,description:desc,amount:parsedAmount,action,
+        account_id:parseInt(accountId),category:category||null,
+      };
+      if(useSplits){
+        body.splits=splits.map(s=>({
+          amount:parseFloat(s.amount),description:s.description||null,
+          category:s.category||null,action:s.action||action,is_gcb:!!s.is_gcb,
+        }));
+      }
+      await apiFetch('/transactions/manual',{method:'POST',body:JSON.stringify(body)});
+      toast(`${validDates.length} manual transaction${validDates.length>1?'s':''} added`);onSaved();onClose();
+    }catch(e){setError('Failed to save transaction');}
+    finally{setSaving(false);}
+  };
+  return(
+    <div className="review-overlay">
+      <div className="review-panel" style={{maxWidth:useSplits?700:480,width:'90vw'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+          <div style={{fontSize:16,fontWeight:500}}>Add Manual Transaction</div>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onClose} style={{fontSize:18,padding:'0 4px',lineHeight:1}}>×</button>
+        </div>
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+        <div className="review-field"><label>Account *</label>
+          <select value={accountId} onChange={e=>setAccountId(e.target.value)}>
+            {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.is_manual?' (Manual)':''}</option>)}
+          </select>
+        </div>
+        <div className="review-field">
+          <label>Date(s) <span style={{fontWeight:400,color:'var(--text-muted)',fontSize:12}}>— add multiple for recurring</span></label>
+          {dates.map((d,i)=>(
+            <div key={i} style={{display:'flex',gap:6,alignItems:'center',marginBottom:i<dates.length-1?6:0}}>
+              <input type="date" value={d} onChange={e=>updateDate(i,e.target.value)} style={{flex:1}}/>
+              {dates.length>1&&<button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)',padding:'2px 6px',fontSize:14}} onClick={()=>removeDate(i)}>×</button>}
+            </div>
+          ))}
+          <button type="button" className="btn btn-sm btn-ghost" style={{marginTop:6,fontSize:12,color:'var(--blue)'}} onClick={addDate}>+ Add date</button>
+        </div>
+        <div className="review-field"><label>Description *</label><input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="e.g. Home value update, Loan payment"/></div>
+        <div className="review-field"><label>Amount * (negative = outflow)</label><input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="-500.00 or 1000.00"/></div>
+        <div style={{display:'flex',gap:12}}>
+          <div className="review-field" style={{flex:1}}><label>Type</label>
+            <select value={action} onChange={e=>{setAction(e.target.value);if(!showCategoryForType(e.target.value))setCategory('');}}>
+              {actions.map(a=><option key={a}>{a}</option>)}
+            </select>
+          </div>
+          {!useSplits&&showCategoryForType(action)&&<div className="review-field" style={{flex:1}}><label>Category</label>
+            <select value={category} onChange={e=>setCategory(e.target.value)}>
+              <option value="">Unclassified</option>
+              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>}
+        </div>
+
+        {/* Split toggle */}
+        <div style={{marginTop:8,marginBottom:useSplits?8:0}}>
+          <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer',color:'var(--text-secondary)'}}>
+            <input type="checkbox" checked={useSplits} onChange={e=>setUseSplits(e.target.checked)}/>
+            Split into multiple categories
+          </label>
+        </div>
+
+        {/* Split rows */}
+        {useSplits&&<div style={{marginTop:8}}>
+          <table style={{width:'100%',fontSize:13,marginBottom:8}}><thead><tr>
+            <th style={{textAlign:'left',padding:'6px 8px'}}>Amount</th>
+            <th style={{textAlign:'left',padding:'6px 8px'}}>Description</th>
+            <th style={{textAlign:'left',padding:'6px 8px'}}>Type</th>
+            <th style={{textAlign:'left',padding:'6px 8px'}}>Category</th>
+            <th style={{textAlign:'center',padding:'6px 8px'}}>GCB</th>
+            <th style={{width:32}}></th>
+          </tr></thead><tbody>{splits.map((s,i)=>(
+            <tr key={i}>
+              <td style={{padding:'4px 8px'}}><input type="number" step="0.01" value={s.amount} onChange={e=>updateSplit(i,'amount',e.target.value)} style={{width:90,fontSize:13,padding:'4px 6px'}}/></td>
+              <td style={{padding:'4px 8px'}}><input value={s.description||''} onChange={e=>updateSplit(i,'description',e.target.value)} style={{width:'100%',fontSize:13,padding:'4px 6px'}} placeholder="Optional"/></td>
+              <td style={{padding:'4px 8px'}}><select value={s.action||'Expense'} onChange={e=>{updateSplit(i,'action',e.target.value);if(!showCategoryForType(e.target.value))updateSplit(i,'category','');}} style={{fontSize:12,padding:'4px'}}>
+                {TXN_TYPES.map(t=><option key={t}>{t}</option>)}
+              </select></td>
+              <td style={{padding:'4px 8px'}}>{showCategoryForType(s.action||'Expense')
+                ?<select value={s.category||''} onChange={e=>updateSplit(i,'category',e.target.value)} style={{fontSize:12,padding:'4px'}}>
+                  <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
+              </td>
+              <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateSplit(i,'is_gcb',e.target.checked)}/></td>
+              <td style={{padding:'4px'}}>{splits.length>1&&<button type="button" className="btn btn-sm btn-ghost" onClick={()=>removeSplit(i)} style={{padding:'2px 6px',fontSize:13}}>×</button>}</td>
+            </tr>
+          ))}</tbody></table>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={addSplit}>+ Add Row</button>
+              {!splitBalanced&&splits.length>0&&amount&&<button type="button" className="btn btn-sm btn-ghost"
+                style={{fontSize:11,color:'var(--blue)',border:'1px solid rgba(96,165,250,0.25)',padding:'3px 9px'}}
+                title={`Adjust last row to cover the ${splitRemaining>0?'unallocated':'excess'} ${fmt(Math.abs(splitRemaining))}`}
+                onClick={()=>{
+                  const s=[...splits];
+                  const last=parseFloat(s[s.length-1].amount||0);
+                  s[s.length-1]={...s[s.length-1],amount:Math.round((last+splitRemaining)*100)/100};
+                  setSplits(s);
+                }}>↓ Fill Last</button>}
+            </div>
+            <div style={{textAlign:'right'}}>
+              {!amount?<span style={{fontSize:13,color:'var(--text-muted)'}}>Enter total amount</span>
+                :splitBalanced
+                  ?<span style={{fontSize:13,fontWeight:500,color:'var(--green)'}}>✓ Balanced</span>
+                  :splitRemaining>0
+                    ?<span style={{fontSize:13,fontWeight:500,color:'var(--amber)'}}>{fmt(splitRemaining)} remaining</span>
+                    :<span style={{fontSize:13,fontWeight:500,color:'var(--red)'}}>{fmt(Math.abs(splitRemaining))} over</span>
+              }
+            </div>
+          </div>
+        </div>}
+
+        <div className="review-actions">
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-sm btn-success" onClick={handleSave} disabled={saving||(useSplits&&!splitBalanced)}>{saving?'…':`✓ Save${dates.length>1?` (${dates.filter(d=>d).length})`:''}`}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Inline split editor modal (Section 2E) */
+function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
+  const[splits,setSplits]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+
+  useEffect(()=>{
+    (async()=>{
+      try{const s=await apiFetch(`/transactions/${txn.id}/splits`);
+        setSplits(s.length?s:[{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
+      }catch(e){setSplits([{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);}
+      finally{setLoading(false);}
+    })();
+  },[txn.id]);
+
+  const addRow=()=>setSplits([...splits,{amount:0,description:'',category:'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
+  const removeRow=(i)=>{if(splits.length>1)setSplits(splits.filter((_,j)=>j!==i));};
+  const updateRow=(i,field,val)=>{const s=[...splits];s[i]={...s[i],[field]:val};setSplits(s);};
+
+  const total=splits.reduce((s,r)=>s+parseFloat(r.amount||0),0);
+  const balanced=Math.abs(Math.round(total*100)-Math.round(txn.amount*100))===0;
+  const remaining=Math.round((txn.amount-total)*100)/100;
+
+  const handleSave=async()=>{
+    if(!balanced){setError(`Splits sum to ${total.toFixed(2)}, need ${txn.amount.toFixed(2)}`);return;}
+    setSaving(true);setError('');
+    try{
+      await apiFetch(`/transactions/${txn.id}/splits`,{method:'POST',body:JSON.stringify({splits:splits.map(s=>({
+        amount:parseFloat(s.amount),description:s.description,category:s.category,action:s.action||null,is_gcb:!!s.is_gcb,notes:s.notes
+      }))})});
+      toast('Splits saved');onSaved();onClose();
+    }catch(e){setError(e.message||'Failed to save splits');}
+    finally{setSaving(false);}
+  };
+
+  const handleUnsplit=async()=>{
+    try{await apiFetch(`/transactions/${txn.id}/splits`,{method:'DELETE'});toast('Splits removed');onSaved();onClose();}
+    catch(e){toast('Failed to remove splits','error');}
+  };
+
+  if(loading)return<div className="review-overlay" style={{zIndex:6000}}><div className="review-panel" style={{maxWidth:100,textAlign:'center'}}><div className="spinner"/></div></div>;
+
+  return(
+    <div className="review-overlay" style={{zIndex: 6000}}>
+      <div className="review-panel" style={{maxWidth:800, width:'95vw'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}}>
+          <div>
+            <h3 style={{fontSize:18,fontWeight:600,fontFamily:'Outfit'}}>Split Transaction</h3>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>{txn.description_display||txn.description_raw} · <span className={txn.amount<0?'amount-neg':'amount-pos'}>{fmt(Math.abs(txn.amount))}</span></p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} style={{padding:4, minHeight: 0}}>✕</button>
+        </div>
+
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:16,padding:'10px 14px',background:'rgba(239, 68, 68, 0.1)',borderRadius:10,fontWeight:600}}>⚠️ {error}</div>}
+
+        <div className="table-wrap" style={{marginBottom: 20, maxHeight: '50vh', overflowY:'auto'}}>
+          <table>
+            <thead><tr>
+              <th>Amount</th>
+              <th>Description</th>
+              <th>Type</th>
+              <th>Category</th>
+              <th style={{textAlign:'center'}}>GCB</th>
+              <th style={{width:40}}></th>
+            </tr></thead>
+            <tbody>{splits.map((s,i)=>(
+              <tr key={i}>
+                <td><input type="number" step="0.01" value={s.amount} onChange={e=>updateRow(i,'amount',e.target.value)} className="search-input" style={{width:100, padding:'6px 10px'}}/></td>
+                <td><input value={s.description||''} onChange={e=>updateRow(i,'description',e.target.value)} className="search-input" style={{width:'100%', padding:'6px 10px'}} placeholder="Optional note…"/></td>
+                <td>
+                  <select className="filter-select" value={s.action||'Expense'} onChange={e=>{updateRow(i,'action',e.target.value);if(!showCategoryForType(e.target.value))updateRow(i,'category','');}}>
+                    {TXN_TYPES.map(t=><option key={t}>{t}</option>)}
+                  </select>
+                </td>
+                <td>
+                  {showCategoryForType(s.action||'Expense')
+                    ?<select className="filter-select" value={s.category||''} onChange={e=>updateRow(i,'category',e.target.value)}>
+                      <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                    :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
+                </td>
+                <td style={{textAlign:'center'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateRow(i,'is_gcb',e.target.checked)} style={{width:16, height:16}}/></td>
+                <td><button type="button" className="btn btn-ghost btn-sm" onClick={()=>removeRow(i)} style={{color:'var(--red)'}}>✕</button></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:24}}>
+          <div style={{display:'flex',gap:12,alignItems:'center'}}>
+            <button type="button" className="btn btn-secondary" onClick={addRow}>+ Add Row</button>
+            {!balanced&&splits.length>0&&<button type="button" className="btn btn-ghost btn-sm"
+              style={{color:'var(--blue-primary)',fontWeight:700}}
+              title={`Adjust last row to cover the ${remaining>0?'unallocated':'excess'} ${fmt(Math.abs(remaining))}`}
+              onClick={()=>{
+                const s=[...splits];
+                const last=parseFloat(s[s.length-1].amount||0);
+                s[s.length-1]={...s[s.length-1],amount:Math.round((last+remaining)*100)/100};
+                setSplits(s);
+              }}>↓ Auto-balance</button>}
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
+            {balanced
+              ?<span className="badge badge-income" style={{fontSize:13}}>✓ BALANCED</span>
+              :remaining>0
+                ?<span className="badge" style={{background:'rgba(245,158,11,0.1)',color:'var(--amber)',fontSize:13}}>{fmt(remaining)} REMAINING</span>
+                :<span className="badge badge-expense" style={{fontSize:13}}>{fmt(Math.abs(remaining))} OVER</span>
+            }
+            <div style={{display:'flex',gap:12}}>
+              {txn.is_split&&<button type="button" className="btn btn-ghost" onClick={handleUnsplit} style={{color:'var(--red)'}}>Unsplit</button>}
+              <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving||!balanced}>{saving?'Saving…':'Save Splits'}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── CSV/OFX Import Modal ──────────────────────────────────────────────────── */
+function ImportModal({accounts,onClose,onImported,toast}){
+  const[accountId,setAccountId]=useState('');
+  const[signConvention,setSignConvention]=useState('auto');
+  const[file,setFile]=useState(null);
+  const[stage,setStage]=useState('upload');   // 'upload' | 'preview' | 'importing' | 'done'
+  const[preview,setPreview]=useState(null);
+  const[result,setResult]=useState(null);
+  const[error,setError]=useState('');
+
+  const runPreview=async()=>{
+    if(!file||!accountId){setError('Please select an account and a file.');return;}
+    setError('');setStage('preview');setPreview(null);
+    const fd=new FormData();
+    fd.append('file',file);
+    try{
+      const res=await fetch(`/api/transactions/import?account_id=${accountId}&sign_convention=${signConvention}&preview_only=true`,{method:'POST',body:fd});
+      if(!res.ok){const d=await res.json();throw new Error(d.detail||'Preview failed');}
+      setPreview(await res.json());
+    }catch(e){setError(e.message);setStage('upload');}
+  };
+
+  const runImport=async()=>{
+    setStage('importing');setError('');
+    const fd=new FormData();
+    fd.append('file',file);
+    try{
+      const res=await fetch(`/api/transactions/import?account_id=${accountId}&sign_convention=${signConvention}&preview_only=false`,{method:'POST',body:fd});
+      if(!res.ok){const d=await res.json();throw new Error(d.detail||'Import failed');}
+      const r=await res.json();
+      setResult(r);setStage('done');
+      toast(`Imported ${r.imported} transactions (${r.skipped_duplicates} duplicates skipped)`);
+      onImported();
+    }catch(e){setError(e.message);setStage('preview');}
+  };
+
+  return(
+    <div className="modal-overlay">
+      <div className="modal" style={{maxWidth:640,width:'100%'}}>
+        <div className="modal-header">
+          <div className="modal-title">Import Transactions</div>
+          <button type="button" className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div style={{padding:'20px 24px'}}>
+          {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12,padding:'8px 12px',background:'rgba(248,113,113,0.08)',borderRadius:6}}>{error}</div>}
+
+          {/* ── UPLOAD STAGE ── */}
+          {(stage==='upload'||stage==='preview')&&<>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-muted)',display:'block',marginBottom:4}}>Account</label>
+                <select className="filter-select" style={{width:'100%'}} value={accountId} onChange={e=>setAccountId(e.target.value)}>
+                  <option value="">— Select account —</option>
+                  {accounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.mask?` ···${a.mask}`:''}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-muted)',display:'block',marginBottom:4}}>Amount sign</label>
+                <select className="filter-select" style={{width:'100%'}} value={signConvention} onChange={e=>setSignConvention(e.target.value)}>
+                  <option value="auto">Auto-detect (recommended)</option>
+                  <option value="bank">Bank CSV (debits positive)</option>
+                  <option value="plaid">Plaid-style (expenses negative)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={{fontSize:12,fontWeight:500,color:'var(--text-muted)',display:'block',marginBottom:4}}>File (CSV or OFX/QFX)</label>
+              <input type="file" accept=".csv,.ofx,.qfx" onChange={e=>setFile(e.target.files?.[0]||null)}
+                style={{fontSize:13,width:'100%',padding:'6px 0'}}/>
+            </div>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:8,lineHeight:1.5}}>
+              CSV columns auto-detected. Supported: Date, Amount (or Debit/Credit), Description / Name / Memo.<br/>
+              OFX/QFX files from most US banks work natively.
+            </div>
+          </>}
+
+          {/* ── PREVIEW STAGE ── */}
+          {stage==='preview'&&!preview&&<div className="loading" style={{padding:24}}><div className="spinner"/><span>Analysing file…</span></div>}
+          {stage==='preview'&&preview&&<>
+            <div className="grid-3" style={{gap:10,margin:'16px 0'}}>
+              <div style={{textAlign:'center',padding:'12px 8px',background:'var(--bg)',borderRadius:8}}>
+                <div style={{fontSize:22,fontWeight:400}}>{preview.total_rows}</div>
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>Total rows</div>
+              </div>
+              <div style={{textAlign:'center',padding:'12px 8px',background:'rgba(52,211,153,0.1)',borderRadius:8}}>
+                <div style={{fontSize:22,fontWeight:400,color:'var(--green)'}}>{preview.to_import}</div>
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>New to import</div>
+              </div>
+              <div style={{textAlign:'center',padding:'12px 8px',background:'var(--elevated)',borderRadius:8}}>
+                <div style={{fontSize:22,fontWeight:400,color:'var(--text-muted)'}}>{preview.duplicates}</div>
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>Duplicates (skip)</div>
+              </div>
+            </div>
+            {preview.sample_rows?.length>0&&<>
+              <div style={{fontSize:12,fontWeight:500,color:'var(--text-muted)',marginBottom:6}}>
+                Preview (first {Math.min(preview.sample_rows.length,10)} rows)
+              </div>
+              <div style={{maxHeight:220,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:'var(--bg)'}}>
+                    <th style={{padding:'6px 8px',textAlign:'left',fontWeight:500}}>Date</th>
+                    <th style={{padding:'6px 8px',textAlign:'left',fontWeight:500}}>Description</th>
+                    <th style={{padding:'6px 8px',textAlign:'right',fontWeight:500}}>Amount</th>
+                    <th style={{padding:'6px 8px',textAlign:'center',fontWeight:500}}>Status</th>
+                  </tr></thead>
+                  <tbody>{preview.sample_rows.slice(0,10).map((r,i)=>(
+                    <tr key={i} style={{borderTop:'1px solid var(--border)',opacity:r.duplicate?0.45:1}}>
+                      <td style={{padding:'5px 8px',color:'var(--text-secondary)'}}>{r.date}</td>
+                      <td style={{padding:'5px 8px',maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.description}</td>
+                      <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'Plus Jakarta Sans',color:r.amount<0?'var(--red)':'var(--green)'}}>{r.amount<0?'-':'+'}{fmt(Math.abs(r.amount))}</td>
+                      <td style={{padding:'5px 8px',textAlign:'center'}}>
+                        {r.duplicate
+                          ?<span style={{fontSize:10,color:'var(--text-muted)',background:'var(--elevated)',borderRadius:4,padding:'2px 6px'}}>skip</span>
+                          :<span style={{fontSize:10,color:'var(--green)',background:'rgba(52,211,153,0.1)',borderRadius:4,padding:'2px 6px'}}>new</span>}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </>}
+            {preview.to_import===0&&<div style={{color:'var(--amber)',fontSize:13,marginTop:8}}>⚠ All rows are duplicates — nothing will be imported.</div>}
+          </>}
+
+          {/* ── IMPORTING ── */}
+          {stage==='importing'&&<div className="loading" style={{padding:24}}><div className="spinner"/><span>Importing and categorising…</span></div>}
+
+          {/* ── DONE ── */}
+          {stage==='done'&&result&&<div style={{textAlign:'center',padding:'20px 0'}}>
+            <div style={{fontSize:32,marginBottom:8}}>✓</div>
+            <div style={{fontSize:18,fontWeight:400,color:'var(--green)',marginBottom:4}}>{result.imported} transactions imported</div>
+            <div style={{fontSize:13,color:'var(--text-muted)'}}>{result.skipped_duplicates} duplicates skipped · {result.llm_calls} LLM enrichments</div>
+          </div>}
+        </div>
+
+        {/* Footer buttons */}
+        <div style={{padding:'12px 24px',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'flex-end',gap:8}}>
+          {stage==='upload'&&<>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={runPreview} disabled={!file||!accountId}>Preview →</button>
+          </>}
+          {stage==='preview'&&preview&&<>
+            <button type="button" className="btn btn-ghost" onClick={()=>setStage('upload')}>← Back</button>
+            <button type="button" className="btn btn-primary" onClick={runImport} disabled={preview.to_import===0}>
+              Import {preview.to_import} transactions
+            </button>
+          </>}
+          {stage==='done'&&<button type="button" className="btn btn-primary" onClick={onClose}>Done</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Batch Edit Modal ────────────────────────────────────────────────────────
+   Allows editing Type + Category (and optionally "mark reviewed") across all
+   selected transactions in one shot. Leave a field at "— keep —" to skip it. */
+function BatchEditModal({count,categories,onSave,onClose}){
+  const[action,setAction]=useState('');      // '' = keep existing
+  const[category,setCategory]=useState(''); // '' = keep existing
+  const[gcbAction,setGcbAction]=useState(''); // '' | 'tag' | 'untag'
+  const[markReviewed,setMarkReviewed]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const save=async()=>{
+    const updates={};
+    if(action) updates.action=action;
+    if(category) updates.category=category;
+    if(gcbAction==='tag') updates.is_gcb=true;
+    if(gcbAction==='untag') updates.is_gcb=false;
+    if(markReviewed) updates.needs_review=false;
+    if(!Object.keys(updates).length){toast('No changes selected','error');return;}
+    setSaving(true);
+    try{await onSave(updates);}
+    catch(e){}
+    finally{setSaving(false);}
+  };
+  const label={fontSize:12,fontWeight:500,color:'var(--text-secondary)',marginBottom:4,display:'block'};
+  return(
+    <div className="modal-overlay">
+      <div className="modal-content" style={{maxWidth:420}}>
+        <div className="modal-header">
+          <h3 style={{margin:0}}>Edit {count} Transaction{count!==1?'s':''}</h3>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:14,padding:'16px 20px'}}>
+          <p style={{margin:0,color:'var(--text-muted)',fontSize:13}}>Leave a field at <em>— keep —</em> to leave existing values unchanged.</p>
+          <div>
+            <label style={label}>Type</label>
+            <select value={action} onChange={e=>setAction(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={label}>Category</label>
+            <select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              <option value="Unclassified">Unclassified</option>
+              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={label}>GCB Tag</label>
+            <select value={gcbAction} onChange={e=>setGcbAction(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— keep existing —</option>
+              <option value="tag">🟡 Tag as GCB</option>
+              <option value="untag">Remove GCB tag</option>
+            </select>
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>
+            <input type="checkbox" checked={markReviewed} onChange={e=>setMarkReviewed(e.target.checked)}/>
+            Mark all as reviewed
+          </label>
+        </div>
+        <div className="modal-footer" style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving?'Saving…':`Apply to ${count} transaction${count!==1?'s':''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Mobile edit modal: bottom-sheet for editing a transaction on mobile ─── */
+function MobileTxnModal({txn,categories,onSave,onClose,toast}){
+  const[category,setCategory]=useState(txn.category_final||'');
+  const[action,setAction]=useState(txn.action||'Expense');
+  const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||'');
+  const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[saving,setSaving]=useState(false);
+  const[ruleCreating,setRuleCreating]=useState(false);
+  const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
+  const handleSave=async()=>{
+    setSaving(true);
+    try{
+      const updates={action,needs_review:false,category,is_gcb:gcb};
+      if(descClean!==(txn.description_clean||txn.description_display||''))updates.description_clean=descClean;
+      await onSave(txn.id,updates);
+      onClose();
+    }catch(e){toast&&toast('Save failed','error');}
+    finally{setSaving(false);}
+  };
+  const createRule=async()=>{
+    setRuleCreating(true);
+    try{
+      await apiFetch(`/llm/create-rule-from-transaction/${txn.id}`,{method:'POST'});
+      toast&&toast('Rule created');
+      await onSave(txn.id,{});
+    }catch(e){toast&&toast('Failed to create rule','error');}
+    finally{setRuleCreating(false);onClose();}
+  };
+  const inpStyle={width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:14,color:'var(--text)',background:'var(--elevated)',boxSizing:'border-box',appearance:'none'};
+  const lblStyle={fontSize:11.5,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:6};
+  return ReactDOM.createPortal(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:2000,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={{background:'var(--elevated)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',border:'1px solid var(--border-strong)',borderRadius:'16px 16px 0 0',width:'100%',maxWidth:640,padding:'12px 16px 36px',maxHeight:'92vh',overflowY:'auto',boxShadow:'0 -4px 24px rgba(0,0,0,0.18)'}}>
+        <div style={{width:40,height:4,borderRadius:2,background:'var(--border)',margin:'0 auto 16px'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:500,fontSize:15,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{txn.description_display||txn.description_raw}</div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>
+              {fmtDate(txn.date)} · <span style={{color:txn.action==='Expense'?'var(--red)':txn.action==='Income'?'var(--green)':'var(--text-muted)',fontWeight:500}}>{txn.amount<0?'–':'+'}{fmt(txn.amount)}</span>
+              {txn.account_name&&<span> · {txn.account_name}</span>}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{background:'none',border:'none',fontSize:22,color:'var(--text-muted)',cursor:'pointer',padding:'0 0 0 12px',lineHeight:1}}>✕</button>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>Display Name</label>
+          <input value={descClean} onChange={e=>setDescClean(e.target.value)} placeholder="Edit display name…" style={inpStyle}/>
+          {txn.description_raw&&txn.description_raw!==descClean&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>Raw: {txn.description_raw}</div>}
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>Type</label>
+          <select value={action} onChange={e=>handleTypeChange(e.target.value)} style={inpStyle}>
+            {TXN_TYPES.map(a=><option key={a}>{a}</option>)}
+          </select>
+        </div>
+        {showCategoryForType(action)&&<div style={{marginBottom:14}}>
+          <label style={lblStyle}>Category</label>
+          <select value={category} onChange={e=>setCategory(e.target.value)} style={inpStyle}>
+            <option value="">Unclassified</option>
+            {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>}
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>GCB Tag</label>
+          <button type="button" onClick={()=>setGcb(g=>!g)}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
+              border:`1px solid ${gcb?'rgba(251,191,36,0.5)':'var(--border)'}`,borderRadius:8,
+              background:gcb?'rgba(251,191,36,0.08)':'var(--elevated)',cursor:'pointer',
+              color:gcb?'var(--amber)':'var(--text-muted)',fontSize:14,fontFamily:'inherit'}}>
+            <span>{gcb?'⭐':'☆'}</span>
+            <span>{gcb?'GCB Tagged':'Not GCB'}</span>
+          </button>
+        </div>
+        <div style={{display:'flex',gap:10,marginTop:20}}>
+          <button type="button" onClick={createRule} disabled={ruleCreating}
+            style={{flex:1,padding:'11px 0',border:'1px solid var(--border)',borderRadius:10,fontSize:13,fontWeight:500,color:'var(--text-secondary)',background:'var(--elevated)',cursor:'pointer'}}>
+            {ruleCreating?'…':'📐 Rule'}
+          </button>
+          <button type="button" onClick={handleSave} disabled={saving}
+            style={{flex:2,padding:'11px 0',border:'none',borderRadius:10,fontSize:14,fontWeight:500,color:'#fff',background:'var(--primary)',cursor:'pointer'}}>
+            {saving?'…':'Save'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ── Swipeable row for mobile — reveals action buttons behind the card ── */
+function SwipeRow({children,leftActions,rightActions,isOpen,onOpen,onClose}){
+  const ref=useRef(null);
+  const startX=useRef(0);const startY=useRef(0);const dx=useRef(0);const swiping=useRef(false);const dirLocked=useRef(null);
+  const rightW=rightActions?144:0;const leftW=leftActions?72:0;
+  const[offset,setOffset]=useState(0);
+  useEffect(()=>{if(!isOpen)setOffset(0);},[isOpen]);
+  const onStart=e=>{const touch=e.touches[0];startX.current=touch.clientX;startY.current=touch.clientY;dx.current=0;swiping.current=true;dirLocked.current=null;};
+  const onMove=e=>{
+    if(!swiping.current)return;
+    const touch=e.touches[0];const deltaX=touch.clientX-startX.current;const deltaY=touch.clientY-startY.current;
+    if(dirLocked.current===null){
+      if(Math.abs(deltaX)>8||Math.abs(deltaY)>8){
+        dirLocked.current=Math.abs(deltaX)>Math.abs(deltaY)?'h':'v';
+      }
+      return;
+    }
+    if(dirLocked.current==='v'){swiping.current=false;return;}
+    e.preventDefault();
+    dx.current=deltaX;
+    const base=isOpen?(dx.current>0?0:-rightW):0;
+    const raw=base+deltaX;
+    const clamped=Math.max(-rightW,Math.min(leftW,raw));
+    setOffset(clamped);
+  };
+  const onEnd=()=>{
+    if(!swiping.current&&dirLocked.current!=='h')return;swiping.current=false;
+    const threshold=40;
+    if(offset<-threshold){setOffset(-rightW);onOpen();}
+    else if(offset>threshold){setOffset(leftW);onOpen();}
+    else{setOffset(0);onClose();}
+  };
+  return(
+    <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--border)'}}>
+      {/* Left actions (revealed on swipe right) */}
+      {leftActions&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:leftW,display:'flex'}}>{leftActions}</div>}
+      {/* Right actions (revealed on swipe left) */}
+      {rightActions&&<div style={{position:'absolute',right:0,top:0,bottom:0,width:rightW,display:'flex',justifyContent:'flex-end'}}>{rightActions}</div>}
+      {/* Foreground card */}
+      <div ref={ref}
+        onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+        style={{transform:`translateX(${offset}px)`,transition:swiping.current?'none':'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)',
+          position:'relative',zIndex:2,background:'var(--elevated)'}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ── Virtual scroll hook — renders only visible items + buffer ───────── */
+function useVirtualScroll(containerRef,itemCount,itemHeight,overscan=8){
+  const[range,setRange]=useState({start:0,end:40});
+  useEffect(()=>{
+    const el=containerRef.current;if(!el)return;
+    const onScroll=()=>{
+      const scrollTop=el.scrollTop;const viewH=el.clientHeight;
+      const start=Math.max(0,Math.floor(scrollTop/itemHeight)-overscan);
+      const end=Math.min(itemCount,Math.ceil((scrollTop+viewH)/itemHeight)+overscan);
+      setRange(r=>(r.start===start&&r.end===end)?r:{start,end});
+    };
+    onScroll();
+    el.addEventListener('scroll',onScroll,{passive:true});
+    return()=>el.removeEventListener('scroll',onScroll);
+  },[containerRef,itemCount,itemHeight,overscan]);
+  return{start:range.start,end:range.end,totalHeight:itemCount*itemHeight,offsetY:range.start*itemHeight};
+}
+
+/* ── Mobile transaction list: replaces full table on narrow screens ─────── */
+function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
+  const isMobile=useIsMobile();
+  // Desktop: full table with virtual scroll for large lists
+  const desktopScrollRef=useRef(null);
+  const ROW_H=56;
+  const virt=useVirtualScroll(desktopScrollRef,visible.length,ROW_H);
+  if(!isMobile){
+    const useVirt=visible.length>80;
+    const rows=useVirt?visible.slice(virt.start,virt.end):visible;
+    return(
+      <div className="table-wrap" ref={desktopScrollRef} style={useVirt?{maxHeight:'75vh',overflowY:'auto'}:undefined}>
+        <table>
+          <thead><tr>
+            <th style={{width:48,paddingLeft:24}}>
+              <input type="checkbox" title="Select / deselect all visible"
+                checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
+                onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
+                style={{cursor:'pointer'}}/>
+            </th>
+            {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
+              <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
+                {lbl}<span style={{marginLeft:6,opacity:sortCol===col?1:0.3,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
+              </th>
+            ))}
+            <th style={{textAlign:'right', paddingRight:24}}>Actions</th>
+          </tr></thead>
+          <tbody>
+            {useVirt&&<tr style={{height:virt.offsetY}}><td colSpan="8"/></tr>}
+            {rows.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}
+            {useVirt&&<tr style={{height:Math.max(0,virt.totalHeight-virt.end*ROW_H)}}><td colSpan="8"/></tr>}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  // Mobile: card list with swipe-to-reveal actions
+  const[editTxn,setEditTxn]=useState(null);
+  const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
+  return(
+    <div>
+      {editTxn&&<MobileTxnModal txn={editTxn} categories={categories} onSave={onSave} onClose={()=>setEditTxn(null)} toast={toast}/>}
+      {visible.map(t=>{
+        const isExpense=t.action==='Expense';
+        const isIncome=t.action==='Income';
+        const needsRev=t.needs_review&&!t.is_locked;
+        const catLabel=t.action==='Transfer'?'Transfer':(t.category_final||'Unclassified');
+        const isOpen=swipedId===t.id;
+        return(
+          <SwipeRow key={t.id} isOpen={isOpen} onOpen={()=>setSwipedId(t.id)} onClose={()=>setSwipedId(null)}
+            rightActions={
+              <div style={{display:'flex',height:'100%'}}>
+                <button type="button" onClick={e=>{e.stopPropagation();setEditTxn(t);setSwipedId(null);}}
+                  style={{width:72,border:'none',background:'var(--blue)',color:'#fff',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3}}>
+                  <span style={{fontSize:16}}>✎</span>Edit
+                </button>
+                {needsRev&&<button type="button" onClick={e=>{e.stopPropagation();onReview(t);setSwipedId(null);}}
+                  style={{width:72,border:'none',background:'var(--amber)',color:'#1a1a2e',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3}}>
+                  <span style={{fontSize:16}}>✓</span>Review
+                </button>}
+              </div>
+            }
+            leftActions={
+              <button type="button" onClick={e=>{e.stopPropagation();onSave(t.id,{is_excluded:!t.is_excluded});setSwipedId(null);toast(t.is_excluded?'Included':'Excluded');}}
+                style={{width:72,border:'none',background:t.is_excluded?'var(--green)':'var(--red)',color:'#fff',fontSize:11,fontWeight:500,fontFamily:'inherit',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:3,height:'100%'}}>
+                <span style={{fontSize:16}}>{t.is_excluded?'↩':'⊘'}</span>{t.is_excluded?'Include':'Exclude'}
+              </button>
+            }>
+            <div onClick={()=>setEditTxn(t)}
+              style={{padding:'11px 14px',
+                background:needsRev?'rgba(251,191,36,0.06)':t.is_locked?'rgba(96,165,250,0.06)':'var(--elevated)',
+                display:'flex',flexDirection:'column',gap:5,cursor:'pointer',WebkitTapHighlightColor:'transparent'}}>
+              {/* Top row: description + amount */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                <div style={{fontWeight:300,fontSize:13,color:'var(--text-primary)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {t.description_clean||t.description_display||t.description_raw}
+                </div>
+                <span style={{fontFamily:'Plus Jakarta Sans',fontWeight:300,fontSize:13,flexShrink:0,
+                  color:isExpense?'var(--red)':isIncome?'var(--green)':'var(--text-secondary)'}}>
+                  {t.amount<0?'–':'+'}{fmt(t.amount)}
+                </span>
+              </div>
+              {/* Bottom row: date · account · category badge */}
+              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{fmtDate(t.date)}</span>
+                {t.account_name&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300,overflow:'hidden',textOverflow:'ellipsis',maxWidth:90,whiteSpace:'nowrap'}}>{t.account_name}</span>}
+                <span style={{fontSize:10,padding:'1px 7px',borderRadius:4,
+                  background:t.action==='Transfer'?'var(--elevated)':(t.category_final?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)'),
+                  color:t.action==='Transfer'?'var(--text-muted)':(t.category_final?'var(--blue-primary)':'var(--text-muted)'),fontWeight:400}}>
+                  {catLabel}
+                </span>
+                {needsRev&&<span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(251,191,36,0.12)',color:'var(--amber)',fontWeight:400}}>Review</span>}
+                {t.is_locked&&<span style={{fontSize:11}}>🔒</span>}
+              </div>
+            </div>
+          </SwipeRow>
+        );
+      })}
+    </div>
+  );
+}
+
+function TransactionsPage({categories,toast,refreshKey}){
+  const[txns,setTxns]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[search,setSearch]=useState('');
+  const[needsReview,setNeedsReview]=useState(false);
+  const[startDate,setStartDate]=useState('');
+  const[endDate,setEndDate]=useState('');
+  const[minAmount,setMinAmount]=useState('');
+  const[maxAmount,setMaxAmount]=useState('');
+  const[catFilter,setCatFilter]=useState(null);       // null=all, Set=specific
+  const[actionFilter,setActionFilter]=useState(null);  // null=all, Set=specific
+  /* Draft copies for the type/category/account dropdowns — only take effect (copied into
+     the applied state above) when the user clicks Apply, so toggling checkboxes doesn't
+     re-filter/re-fetch on every click. */
+  const[draftCatFilter,setDraftCatFilter]=useState(null);
+  const[draftActionFilter,setDraftActionFilter]=useState(null);
+  const[reviewTxn,setReviewTxn]=useState(null);
+  const[showManual,setShowManual]=useState(false);
+  const[splitTxn,setSplitTxn]=useState(null);
+  const[accounts,setAccounts]=useState([]);
+  const[accountFilter,setAccountFilter]=useState(null); // null=all, Set=specific
+  const[draftAccountFilter,setDraftAccountFilter]=useState(null);
+  const[showImport,setShowImport]=useState(false);
+  const[enrichJob,setEnrichJob]=useState(null); // {job_id,status,processed,total,llm_calls,override_hits,errors}
+  const[showMoreMenu,setShowMoreMenu]=useState(false);
+  const[selectedIds,setSelectedIds]=useState(new Set());
+  const[showBatchEdit,setShowBatchEdit]=useState(false);
+  const[showDupes,setShowDupes]=useState(false);
+  const[showExcluded,setShowExcluded]=useState(false);
+  const[quickYear,setQuickYear]=useState('');
+  const[quickMonth,setQuickMonth]=useState('');
+  const[sortCol,setSortCol]=useState(null); // null|'date'|'description'|'amount'|'type'|'category'|'account'
+  const[sortDir,setSortDir]=useState('asc');
+  const toggleSort=col=>{if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortCol(col);setSortDir('asc');}};
+
+  const[tableLoading,setTableLoading]=useState(false);
+  const _acctKey=useMemo(()=>accountFilter===null?'__all__':[...accountFilter].sort().join(','),[accountFilter]);
+  const _catKey=useMemo(()=>catFilter===null?'__all__':[...catFilter].sort().join(','),[catFilter]);
+  const _actionKey=useMemo(()=>actionFilter===null?'__all__':[...actionFilter].sort().join(','),[actionFilter]);
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent)setLoading(true);
+    setTableLoading(true);
+    try{
+      let q='?limit=500';
+      if(needsReview)q+='&needs_review=true';
+      if(startDate)q+=`&start_date=${startDate}`;
+      if(endDate)q+=`&end_date=${endDate}`;
+      if(accountFilter&&accountFilter.size===1)q+=`&account_id=${[...accountFilter][0]}`;
+      if(catFilter&&catFilter.size===1)q+=`&category=${encodeURIComponent([...catFilter][0])}`;
+      const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
+      setTxns(t);setAccounts(a);
+    }catch(e){toast('Failed to load','error');}
+    finally{if(!silent)setLoading(false);setTableLoading(false);}
+  },[needsReview,startDate,endDate,_acctKey,_catKey]);
+
+  useEffect(()=>{load();},[load,refreshKey]);
+
+  const handleSave=async(id,updates)=>{
+    if(updates.__deleted){await load();return;}
+    try{
+      await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+      await load({silent:true});
+      toast('Saved');
+    }
+    catch(e){toast('Failed to save','error');}
+  };
+  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});toast('Ignored');};
+
+  /* ── Multi-select helpers ─────────────────────────────────────── */
+  const toggleSelect=(id)=>setSelectedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const selectAll=()=>setSelectedIds(new Set(visible.map(t=>t.id)));
+  const handleBatchSave=async(updates)=>{
+    const count=selectedIds.size;
+    try{
+      await apiFetch('/transactions/batch-update',{method:'POST',body:JSON.stringify({ids:[...selectedIds],updates})});
+      await load();
+      setSelectedIds(new Set());setShowBatchEdit(false);
+      toast(`Updated ${count} transaction${count!==1?'s':''}`);
+    }catch(e){toast('Batch update failed: '+e.message,'error');}
+  };
+  /* Clear selection whenever the visible set changes (filter applied) */
+  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,minAmount,maxAmount,showDupes,showExcluded]);
+
+  /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
+     A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
+     positive credit on the credit card account (hide by default — it's the duplicate).
+     Refunds/credits from merchants are typically Expense-type so they pass through unaffected.
+     We catch both Transfer-action payments AND Income-action payments whose description
+     contains payment keywords (catches CC payments mis-categorized as Income). */
+  const CC_PAY_WORDS=['PAYMENT','AUTOPAY','PMT','PYMT','TRANSFER'];
+  const isCCPaymentDuplicate=(t)=>{
+    if(t.amount<=0)return false;
+    const type=(t.account_type||'').toLowerCase();
+    if(type!=='credit'&&type!=='credit card')return false;
+    if(t.action==='Transfer')return true;
+    if(t.action==='Income'){
+      const d=(t.description_raw||'').toUpperCase();
+      return CC_PAY_WORDS.some(w=>d.includes(w));
+    }
+    return false;
+  };
+
+  let visible=txns;
+  if(!showDupes)visible=visible.filter(t=>!isCCPaymentDuplicate(t));
+  if(!showExcluded)visible=visible.filter(t=>!t.is_excluded);
+  if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
+  if(catFilter!==null)visible=visible.filter(t=>catFilter.has(t.category_final));
+  if(actionFilter!==null)visible=visible.filter(t=>actionFilter.has(t.action));
+  if(accountFilter!==null)visible=visible.filter(t=>accountFilter.has(String(t.account_id)));
+  const _minAmt=minAmount!==''?Math.abs(parseFloat(minAmount)):null;
+  const _maxAmt=maxAmount!==''?Math.abs(parseFloat(maxAmount)):null;
+  if(_minAmt!==null&&!isNaN(_minAmt))visible=visible.filter(t=>Math.abs(t.amount)>=_minAmt);
+  if(_maxAmt!==null&&!isNaN(_maxAmt))visible=visible.filter(t=>Math.abs(t.amount)<=_maxAmt);
+  if(sortCol){
+    const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?(t.category_final||'').toLowerCase():(t.account_name||'').toLowerCase();
+    visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
+  }
+
+  const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
+  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
+  const visibleExpenses=_budgetVisible.filter(t=>t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(t.category_final))).reduce((s,t)=>s+(-t.amount),0);
+  const visibleIncome=_budgetVisible.filter(t=>t.action==='Income'&&!_expCatSet.has(t.category_final)).reduce((s,t)=>s+t.amount,0);
+  const visibleNet=visibleIncome-visibleExpenses;
+
+  const exportCSV=()=>{
+    const h=['Date','Description','Amount','Type','Category','Account'];
+    const rows=visible.map(t=>[fmtDate(t.date),t.description_display||t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
+    const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='transactions.csv';a.click();
+  };
+
+  /* Batch LLM enrichment — starts a background job, polls until done */
+  const startEnrich=async()=>{
+    try{
+      const r=await apiFetch('/llm/enrich-transactions',{method:'POST',body:JSON.stringify({limit:300,overwrite_existing:false})});
+      setEnrichJob({job_id:r.job_id,status:'running',processed:0,total:0,llm_calls:0,override_hits:0,errors:0,startedAt:Date.now()});
+    }catch(e){toast('Failed to start enrichment: '+e.message,'error');}
+  };
+
+  /* Poll job status every 2s while running — preserve client-only startedAt across updates */
+  useEffect(()=>{
+    if(!enrichJob||enrichJob.status!=='running')return;
+    const id=setInterval(async()=>{
+      try{
+        const s=await apiFetch(`/llm/enrich-status/${enrichJob.job_id}`);
+        setEnrichJob(prev=>({...s,startedAt:prev?.startedAt}));
+        if(s.status==='done'||s.status==='error'){
+          clearInterval(id);
+          if(s.status==='done'){load();toast(`Enriched ${s.processed} transactions`);}
+          else toast('Enrichment failed: '+(s.error||'unknown error'),'error');
+        }
+      }catch(e){clearInterval(id);}
+    },2000);
+    return()=>clearInterval(id);
+  },[enrichJob?.job_id,enrichJob?.status]);
+
+  return(
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
+      {showManual&&<ManualTransactionModal accounts={accounts} categories={categories} onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
+      {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
+      {showImport&&<ImportModal accounts={accounts} onClose={()=>setShowImport(false)} onImported={load} toast={toast}/>}
+      {showBatchEdit&&<BatchEditModal count={selectedIds.size} categories={categories} onSave={handleBatchSave} onClose={()=>setShowBatchEdit(false)}/>}
+      
+      <div className="card" style={{padding:0, overflow:'hidden'}}>
+        {/* ── Row 1: search + primary filters ── */}
+        <div className="filters" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <input className="search-input" placeholder="Search transactions…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <MultiSelectFilter label="All types" options={TXN_TYPES.map(a=>({value:a,label:a}))}
+              selected={draftActionFilter} onChange={setDraftActionFilter} onApply={()=>setActionFilter(draftActionFilter)}/>
+            <MultiSelectFilter label="All categories" options={sortedCats(categories).map(c=>({value:c.name,label:c.name}))}
+              selected={draftCatFilter} onChange={setDraftCatFilter} onApply={()=>setCatFilter(draftCatFilter)}/>
+            <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name}))}
+              selected={draftAccountFilter} onChange={setDraftAccountFilter} onApply={()=>setAccountFilter(draftAccountFilter)}/>
+            <button type="button" className="btn btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
+            <button type="button" className="btn btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
+          </div>
+        </div>
+
+        {/* ── Row 2: Secondary filters & Dates ── */}
+        <div className="filters" style={{ padding: '12px 24px', background: 'rgba(var(--blue-vibrant-rgb), 0.03)', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select className="filter-select" value={quickYear} onChange={e=>{
+              const y=e.target.value; setQuickYear(y); setQuickMonth('');
+              if(!y){setStartDate('');setEndDate('');}
+              else{const isCurY=y===String(new Date().getFullYear());setStartDate(`${y}-01-01`);setEndDate(isCurY?todayStr():`${y}-12-31`);}
+            }}>
+              <option value="">All years</option>
+              {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+            {quickYear&&<select className="filter-select" value={quickMonth} onChange={e=>{
+              const m=e.target.value;setQuickMonth(m);
+              if(!m){const isCurY=quickYear===String(new Date().getFullYear());setStartDate(`${quickYear}-01-01`);setEndDate(isCurY?todayStr():`${quickYear}-12-31`);}
+              else{const mP=String(m).padStart(2,'0');const ld=new Date(parseInt(quickYear),parseInt(m),0).getDate();setStartDate(`${quickYear}-${mP}-01`);setEndDate(`${quickYear}-${mP}-${String(ld).padStart(2,'0')}`);}
+            }}>
+              <option value="">All months</option>
+              {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((lbl,i)=><option key={i+1} value={i+1}>{lbl}</option>)}
+            </select>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="date" className="date-input" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+              <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
+              <input type="date" className="date-input" value={endDate} onChange={e=>setEndDate(e.target.value)}/>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} title="Filters by dollar magnitude, regardless of expense/income direction">
+              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="Min $" className="date-input" style={{width:90}}
+                value={minAmount} onChange={e=>setMinAmount(e.target.value)}/>
+              <span style={{color:'var(--text-muted)',fontSize:13}}>→</span>
+              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="Max $" className="date-input" style={{width:90}}
+                value={maxAmount} onChange={e=>setMaxAmount(e.target.value)}/>
+            </div>
+            <label className="filter-label"><input type="checkbox" checked={needsReview} onChange={e=>setNeedsReview(e.target.checked)}/> Needs review</label>
+          </div>
+          
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null)&&
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
+            {showMoreMenu&&<div style={{position:'absolute',right:24,top:'100%',marginTop:4,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:8,zIndex:20,boxShadow:'var(--card-shadow)',minWidth:180}}
+              onMouseLeave={()=>setShowMoreMenu(false)}>
+              <button type="button" className="nav-item" onClick={()=>{exportCSV();setShowMoreMenu(false);}}>↓ Export CSV</button>
+              <button type="button" className="nav-item" disabled={enrichJob?.status==='running'} onClick={()=>{startEnrich();setShowMoreMenu(false);}}>✨ {enrichJob?.status==='running'?'Enriching…':'AI Enrich'}</button>
+            </div>}
+          </div>
+        </div>
+
+        {/* ── Info Bar ── */}
+        <div style={{padding:'10px 24px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:24,fontSize:12,color:'var(--text-muted)',fontWeight:600}}>
+          <span><b style={{color:'var(--text-primary)'}}>{visible.length}</b> TRANSACTIONS</span>
+          {visibleExpenses!==0&&<span>EXPENSES: <b style={{color:visibleExpenses>0?'var(--red)':'var(--green)'}}>{fmt(visibleExpenses)}</b></span>}
+          {visibleIncome>0&&<span>INCOME: <b style={{color:'var(--green)'}}>{fmt(visibleIncome)}</b></span>}
+        </div>
+        {enrichJob&&(()=>{
+          const elapsed=enrichJob.startedAt?Math.round((Date.now()-enrichJob.startedAt)/1000):0;
+          const timedOut=enrichJob.status==='running'&&elapsed>90;
+          const bgColor=timedOut?'rgba(251,191,36,0.08)':enrichJob.status==='done'?'rgba(52,211,153,0.08)':enrichJob.status==='error'?'rgba(248,113,113,0.08)':'rgba(var(--blue-primary-rgb), 0.12)';
+          return(
+          <div style={{padding:'8px 16px',background:bgColor,borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:300}}>
+            {enrichJob.status==='running'&&<div className="spinner" style={{width:14,height:14,flexShrink:0}}/>}
+            {enrichJob.status==='done'&&<span style={{color:'var(--green)',fontWeight:400}}>✓</span>}
+            {enrichJob.status==='error'&&<span style={{color:'var(--red)',fontWeight:400}}>✗</span>}
+            <span>
+              {enrichJob.status==='running'&&`Enriching… ${enrichJob.processed}/${enrichJob.total||'?'} transactions`}
+              {enrichJob.status==='done'&&`Enrichment complete — ${enrichJob.processed} enriched · ${enrichJob.llm_calls} AI calls · ${enrichJob.override_hits} from saved rules`}
+              {enrichJob.status==='error'&&`Enrichment failed: ${enrichJob.error||'unknown error'}`}
+            </span>
+            {enrichJob.status==='running'&&enrichJob.last&&<span style={{color:'var(--text-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200,fontWeight:300}}>last: {enrichJob.last.merchant||enrichJob.last.raw}</span>}
+            {timedOut&&<span style={{color:'var(--amber)',fontSize:12,fontWeight:400,flexShrink:0}}>Taking longer than usual ({elapsed}s)</span>}
+            <button type="button" className="btn btn-sm btn-ghost" style={{marginLeft:'auto',fontSize:11,flexShrink:0}} onClick={()=>setEnrichJob(null)}>
+              {enrichJob.status==='running'?'Hide':'Dismiss'}
+            </button>
+          </div>
+          );
+        })()}
+        {selectedIds.size>0&&(
+          <div style={{padding:'8px 16px',background:'rgba(var(--blue-primary-rgb), 0.12)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+            <span style={{fontWeight:400,color:'var(--blue-primary)'}}>{selectedIds.size} selected</span>
+            <button type="button" className="btn btn-sm btn-primary" onClick={()=>setShowBatchEdit(true)}>✎ Edit Selected</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setSelectedIds(new Set())}>✕ Deselect All</button>
+          </div>
+        )}
+        <div style={{position:'relative'}}>
+        {tableLoading&&<div style={{position:'absolute',inset:0,background:'rgba(var(--bg-rgb,12,12,16),0.6)',zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(2px)',borderRadius:14}}>
+          <div className="spinner"/>
+        </div>}
+        {loading&&txns.length===0?<SkeletonTable rows={10}/>
+          :visible.length===0&&!tableLoading?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
+          :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
+        }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SimpleLineChart({lines,height=180,fmtY}){
+  if(!lines||lines.length===0||lines.every(l=>!l.points||l.points.length===0))
+    return<div style={{padding:'32px 0',textAlign:'center',color:'var(--text-muted)',fontSize:12}}>No data yet — run Balance Sync first</div>;
+  const yFmt=fmtY||(v=>{const abs=Math.abs(v);const s=v<0?'-':'';return s+(abs>=1000000?`$${(abs/1000000).toFixed(2)}M`:abs>=1000?`$${(abs/1000).toFixed(2)}k`:`$${abs.toFixed(2)}`);});
+  const allY=lines.flatMap(l=>l.points.map(p=>p.y));
+  const minY=Math.min(...allY);const maxY=Math.max(...allY);
+  const rangeY=maxY-minY||1;
+  const xs=lines[0].points.map(p=>p.x);
+  const W=600,H=height;
+  const pad={top:12,right:12,bottom:28,left:64};
+  const cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom;
+  const xPos=i=>pad.left+(xs.length<2?cW/2:i/(xs.length-1)*cW);
+  const yPos=v=>pad.top+cH-((v-minY)/rangeY)*cH;
+  const yTicks=[0,1,2,3,4].map(i=>minY+rangeY*i/4);
+  const step=xs.length>18?6:xs.length>9?3:1;
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:height,display:'block'}}>
+      {yTicks.map((v,i)=>(
+        <g key={i}>
+          <line x1={pad.left} y1={yPos(v)} x2={pad.left+cW} y2={yPos(v)} stroke="#f3f4f6" strokeWidth="1"/>
+          <text x={pad.left-6} y={yPos(v)+4} textAnchor="end" fontSize="10" fill="#9ca3af">{yFmt(v)}</text>
+        </g>
+      ))}
+      {minY<0&&maxY>0&&<line x1={pad.left} y1={yPos(0)} x2={pad.left+cW} y2={yPos(0)} stroke="#e5e7eb" strokeWidth="1.5" strokeDasharray="4,2"/>}
+      {lines.map((line,li)=>{
+        const pts=line.points.map((p,i)=>`${xPos(i)},${yPos(p.y)}`).join(' ');
+        return<polyline key={li} points={pts} fill="none" stroke={line.color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>;
+      })}
+      {xs.map((x,i)=>i%step===0&&<text key={i} x={xPos(i)} y={H-6} textAnchor="middle" fontSize="9" fill="#9ca3af">{x}</text>)}
+    </svg>
+  );
+}
+
+/* ── Spending Breakdown: interactive donut + ranked category list ──────────── */
+function SpendingBreakdownCard({topCats,onCategoryClick,selectedCat}){
+  const[hovCat,setHovCat]=useState(null);
+  if(!topCats||topCats.length===0)return(
+    <div className="card" style={{display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',minHeight:120,gap:6}}>
+      <div className="section-header" style={{width:'100%'}}><div className="section-title">Spending Breakdown</div></div>
+      <div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'12px 0 8px'}}>No spending recorded yet this month.</div>
+    </div>
+  );
+  const total=topCats.reduce((s,[,a])=>s+a,0);
+  const data=topCats.map(([cat,amount],i)=>({cat,amount,color:CHART_COLORS[i%CHART_COLORS.length]}));
+  /* SVG donut via arc paths */
+  const cx=85,cy=85,R=64,r=44,GAP=2.5;
+  const polar=(radius,deg)=>{const a=(deg-90)*Math.PI/180;return[cx+radius*Math.cos(a),cy+radius*Math.sin(a)];};
+  const segPath=(s,e)=>{
+    const lg=e-s>180?1:0;
+    const[x1,y1]=polar(R,s);const[x2,y2]=polar(R,e);const[x3,y3]=polar(r,e);const[x4,y4]=polar(r,s);
+    return`M${x1},${y1} A${R},${R} 0 ${lg},1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 ${lg},0 ${x4},${y4} Z`;
+  };
+  let cum=0;
+  const segs=data.map(({cat,amount,color})=>{
+    const deg=(amount/total)*360;
+    const seg={cat,color,path:segPath(cum+GAP/2,cum+deg-GAP/2)};
+    cum+=deg;return seg;
+  });
+  const hd=hovCat?data.find(d=>d.cat===hovCat):null;
+  return(
+    <div className="card">
+      <div className="section-header">
+        <div className="section-title">Spending Breakdown</div>
+        {selectedCat&&<span style={{fontSize:11,color:'var(--blue)',fontWeight:500}}>Click a category to toggle detail ↓</span>}
+      </div>
+      <div style={{display:'flex',alignItems:'center',padding:'8px 0 12px'}}>
+        {/* Donut */}
+        <svg width={170} height={170} style={{flexShrink:0,overflow:'visible',cursor:'default'}}>
+          {segs.map(({cat,color,path})=>{
+            const isSel=selectedCat===cat;
+            return(
+              <path key={cat} d={path} fill={color}
+                opacity={hovCat&&hovCat!==cat&&!isSel?0.2:1}
+                stroke={isSel?'#1d4ed8':'none'} strokeWidth={isSel?2.5:0}
+                style={{cursor:'pointer',transition:'opacity 0.15s'}}
+                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}
+                onClick={()=>onCategoryClick&&onCategoryClick(cat)}/>
+            );
+          })}
+          <text x={cx} y={hd?cy-13:cy-9} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{hd?hd.cat:'Total Spend'}</text>
+          <text x={cx} y={hd?cy+5:cy+9} textAnchor="middle" fontSize={hd?13:14} fontWeight={400} fill="var(--text-primary)" fontFamily="Plus Jakarta Sans">{fmt(hd?hd.amount:total)}</text>
+          {hd&&<text x={cx} y={cy+22} textAnchor="middle" fontSize={9.5} fill="#9ca3af">{Math.round(hd.amount/total*100)}% of spend</text>}
+        </svg>
+        {/* Category list — hover syncs with donut */}
+        <div style={{flex:1,paddingRight:16}}>
+          {data.map(({cat,amount,color})=>{
+            const pct=Math.round(amount/total*100);
+            const isHov=hovCat===cat;
+            const isSel=selectedCat===cat;
+            return(
+              <div key={cat}
+                style={{display:'flex',alignItems:'center',gap:8,padding:'5px 6px',borderRadius:6,
+                  background:isSel?'#dbeafe':isHov?'#f0f6ff':'transparent',
+                  cursor:'pointer',transition:'background 0.1s',
+                  outline:isSel?'1.5px solid #93c5fd':'none'}}
+                onMouseEnter={()=>setHovCat(cat)} onMouseLeave={()=>setHovCat(null)}
+                onClick={()=>onCategoryClick&&onCategoryClick(cat)}>
+                <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
+                <span style={{flex:1,fontSize:12,fontWeight:isSel||isHov?600:400,color:'var(--text-primary)'}}>{cat}</span>
+                <span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,color:'var(--red)'}}>{fmt(amount)}</span>
+                <span style={{fontFamily:'Plus Jakarta Sans',fontSize:10,color:'var(--text-muted)',minWidth:28,textAlign:'right'}}>{pct}%</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Budget vs Actual: 12-month bar chart with target markers ─────────────── */
+function BudgetBarChart({actuals,targets,actualsPrior,targetsPrior,expenseCats}){
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();const curM=now.getMonth()+1,curY=now.getFullYear();
+  /* Build last 12 calendar months */
+  const months12=Array.from({length:12},(_,i)=>{
+    const d=new Date(curY,curM-1-(11-i),1);
+    return{year:d.getFullYear(),month:d.getMonth()+1,isCur:i===11};
+  });
+  const getA=(year,month)=>{
+    const src=year===curY?actuals:actualsPrior;
+    return expenseCats.reduce((s,cat)=>s+(src[cat]?.[String(month)]||0),0);
+  };
+  const getB=(year,month)=>{
+    const src=year===curY?targets:targetsPrior;
+    return expenseCats.reduce((s,cat)=>s+(src[cat]?.[String(month)]?.amount||0),0);
+  };
+  const data=months12.map(({year,month,isCur},i)=>({
+    label:MO[month-1]+(month===1?` '${String(year).slice(2)}`:''),
+    actual:getA(year,month),budget:getB(year,month),isCur,isFuture:false,
+  }));
+  const maxVal=Math.max(...data.map(d=>Math.max(d.actual,d.budget)),100);
+  const W=560,H=190;
+  const pad={top:20,right:12,bottom:28,left:58};
+  const cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom;
+  const colW=cW/12,barW=colW*0.55;
+  const xMid=i=>pad.left+i*colW+colW/2;
+  const yV=v=>pad.top+cH-(v/maxVal)*cH;
+  const yTicks=[0,0.25,0.5,0.75,1].map(p=>maxVal*p);
+  const cs=typeof window!=='undefined'?getComputedStyle(document.documentElement):null;
+  const gv=p=>cs?cs.getPropertyValue(p).trim():'';
+  const gridC=gv('--border')||'rgba(255,255,255,0.06)';
+  const labelC=gv('--text-muted')||'#707080';
+  const curC=gv('--blue-primary')||'#2563EB';
+  const greenC=gv('--green')||'#34d399';
+  const amberC=gv('--amber')||'#fbbf24';
+  const redC=gv('--red')||'#f87171';
+  const txtC=gv('--text-primary')||'#e8e8ed';
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
+      {/* Y grid + labels */}
+      {yTicks.map((v,i)=>(
+        <g key={i}>
+          <line x1={pad.left} y1={yV(v)} x2={pad.left+cW} y2={yV(v)} stroke={gridC} strokeWidth={1}/>
+          <text x={pad.left-6} y={yV(v)+4} textAnchor="end" fontSize={9} fill={labelC}>{v>=1000?`$${(v/1000).toFixed(0)}k`:`$${Math.round(v)}`}</text>
+        </g>
+      ))}
+      {/* Bars + budget target ticks */}
+      {data.map(({label,actual,budget,isCur},i)=>{
+        const over=budget>0&&actual>budget;
+        const close=budget>0&&!over&&actual>budget*0.85;
+        const barColor=over?redC:close?amberC:greenC;
+        const bH=Math.max((actual/maxVal)*cH,actual>0?2:0);
+        const x=xMid(i)-barW/2;
+        return(
+          <g key={i}>
+            {isCur&&<rect x={pad.left+i*colW} y={pad.top} width={colW} height={cH} fill={curC} opacity={0.06} rx={2}/>}
+            {actual>0&&<rect x={x} y={yV(actual)} width={barW} height={bH} fill={barColor} opacity={0.82} rx={2}/>}
+            {budget>0&&<line x1={x-3} y1={yV(budget)} x2={x+barW+3} y2={yV(budget)} stroke={labelC} strokeWidth={2} strokeLinecap="round"/>}
+            <text x={xMid(i)} y={H-6} textAnchor="middle" fontSize={9} fill={isCur?txtC:labelC} fontWeight={isCur?500:300}>{label}</text>
+          </g>
+        );
+      })}
+      {/* Legend */}
+      <rect x={pad.left} y={3} width={8} height={8} fill={greenC} rx={1} opacity={0.82}/>
+      <text x={pad.left+11} y={10} fontSize={8.5} fill={labelC}>Under budget</text>
+      <rect x={pad.left+85} y={3} width={8} height={8} fill={amberC} rx={1} opacity={0.82}/>
+      <text x={pad.left+96} y={10} fontSize={8.5} fill={labelC}>Near limit</text>
+      <rect x={pad.left+158} y={3} width={8} height={8} fill={redC} rx={1} opacity={0.82}/>
+      <text x={pad.left+169} y={10} fontSize={8.5} fill={labelC}>Over budget</text>
+      <line x1={pad.left+230} y1={7} x2={pad.left+244} y2={7} stroke={labelC} strokeWidth={2} strokeLinecap="round"/>
+      <text x={pad.left+247} y={10} fontSize={8.5} fill={labelC}>Budget target</text>
+    </svg>
+  );
+}
+
+function BudgetScorecardCard({targets,actuals,view='month',ytdActuals={},viewMonth,viewYear}){
+  const now=new Date();
+  const yr=viewYear||now.getFullYear();
+  const mo=viewMonth||(now.getMonth()+1);
+  const mStr=String(mo);
+  const monthLabel=new Date(yr,mo-1,1).toLocaleString('default',{month:'long'});
+  const SKIP=new Set(['Transfer','Work']);
+  const isAnnual=view==='annual';
+  const title=isAnnual?`Budget vs. Actual — ${yr} YTD`:`Budget vs. Actual — ${monthLabel} ${yr}`;
+
+  // Annual mode: use ytdActuals from /stats (expense-only, credits netted).
+  // Monthly mode: use budgetActuals per-month slice.
+  const allCats=new Set([
+    ...Object.keys(targets),
+    ...(isAnnual?Object.keys(ytdActuals):Object.keys(actuals)),
+  ]);
+  const rows=[];
+  allCats.forEach(cat=>{
+    if(SKIP.has(cat))return;
+    let budget,actual;
+    if(isAnnual){
+      budget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=(targets[cat]?.[String(m)]?.amount||0);return s;})();
+      actual=ytdActuals[cat]||0; // expense-only from /stats, already nets credits
+    }else{
+      budget=targets[cat]?.[mStr]?.amount||0;
+      actual=actuals[cat]?.[mStr]||0;
+    }
+    if(budget===0&&actual===0)return;
+    rows.push({cat,budget,actual});
+  });
+  rows.sort((a,b)=>{
+    const hA=a.budget>0,hB=b.budget>0;
+    if(hA&&hB)return(b.actual/b.budget)-(a.actual/a.budget);
+    if(hA&&!hB)return -1;
+    if(!hA&&hB)return 1;
+    return b.actual-a.actual;
+  });
+  if(rows.length===0)return(
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,display:'flex',flexDirection:'column',gap:6,padding:20}}>
+      <div style={{fontSize:11,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>{title}</div>
+      <div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'12px 0 8px'}}>
+        {isAnnual?'No budget or spending data for this year yet.':'No budget or spending data for this month yet.'}
+      </div>
+    </div>
+  );
+  const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
+  const totalActual=rows.reduce((s,r)=>s+r.actual,0);
+  const fmtSigned=(n)=>n<0?`-${fmt(n)}`:fmt(n);
+  const totalPct=totalBudget>0?totalActual/totalBudget:null;
+  const totalOver=totalBudget>0&&totalActual>totalBudget;
+  const totalDotColor=totalPct===null?'var(--text-muted)':totalPct>=1?'var(--red)':totalPct>=0.8?'var(--amber)':'var(--green)';
+  const totalFill=totalPct===null?'transparent':totalPct>=1?'rgba(239,68,68,0.15)':totalPct>=0.8?'rgba(245,158,11,0.15)':'rgba(16,185,129,0.15)';
+  const totalBarPct=totalBudget>0?Math.min(totalActual/totalBudget*100,100):0;
+
+  const PillRow=({cat,budget,actual,isTotal=false})=>{
+    const isCredit=actual<0;
+    const pct=(!isCredit&&budget>0)?actual/budget:null;
+    const over=budget>0&&actual>budget;
+    const overAmt=over?actual-budget:0;
+    const dotColor=isCredit?'var(--green)':pct===null?'var(--text-muted)':over?'var(--red)':pct>=0.8?'var(--amber)':'var(--green)';
+    const pillFill=isCredit?'rgba(52,211,153,0.12)':pct===null?'transparent':over?'rgba(248,113,113,0.12)':pct>=0.8?'rgba(251,191,36,0.12)':'rgba(52,211,153,0.12)';
+    const barPct=(!isCredit&&budget>0)?Math.min(actual/budget*100,100):0;
+    return(
+      <div style={{padding:'5px 14px',borderBottom:isTotal?'2px solid var(--border)':'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
+        <div style={{flex:1,position:'relative',borderRadius:8,overflow:'hidden',background:'var(--elevated)',height:32,border:'1px solid var(--border)'}}>
+          {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,background:pillFill,transition:'width 0.35s ease'}}/>}
+          <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',height:'100%',gap:8}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:dotColor,flexShrink:0}}/>
+              <span style={{fontSize:isTotal?12.5:12,fontWeight:isTotal?500:400,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cat}</span>
+            </div>
+            {!isCredit&&pct!==null&&<span style={{fontSize:11,fontWeight:500,color:dotColor,flexShrink:0}}>{Math.round(pct*100)}%</span>}
+            {isCredit&&<span style={{fontSize:11,fontWeight:500,color:'var(--green)',flexShrink:0}}>credit</span>}
+          </div>
+        </div>
+        <div style={{fontSize:12,minWidth:90,textAlign:'right',whiteSpace:'nowrap',flexShrink:0,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif'}}>
+          {isCredit
+            ?<span style={{color:'var(--green)',fontWeight:400}}>{fmtSigned(actual)}</span>
+            :budget>0
+              ?<span style={{fontWeight:isTotal?500:400}}>{fmt(actual)}<span style={{color:'var(--text-muted)',fontWeight:300}}> / {fmt(budget)}</span>{over&&<span style={{color:'var(--red)',fontWeight:300}}> +{fmt(overAmt)}</span>}</span>
+              :<span style={{color:'var(--text-muted)'}}>{fmt(actual)}</span>}
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+      <div style={{padding:'16px 20px 8px',fontSize:11,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>{title}</div>
+      <div style={{padding:'4px 0 8px'}}>
+        <PillRow cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
+        {rows.map(({cat,budget,actual})=>(
+          <PillRow key={cat} cat={cat} budget={budget} actual={actual}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Budget vs. Actual + Spending combined table ─────────────────────────── */
+function BudgetAndSpendingCard({targets,actuals,view,ytdActuals,viewMonth,viewYear,onSetView,onSetYear,onSetMonth,onCatClick,activeCat}){
+  const[sortBy,setSortBy]=React.useState('pct');
+  const[sortDir,setSortDir]=React.useState('desc');
+  const now=new Date();
+  const yr=viewYear||now.getFullYear();
+  const mo=viewMonth||(now.getMonth()+1);
+  const mStr=String(mo);
+  const SKIP=new Set(['Transfer','Work']);
+  const isAnnual=view==='annual';
+  const fmt0=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(Math.abs(n??0));
+  const BLUE='var(--sidebar-active-color)';
+  const BLUE_BG='var(--sidebar-active-bg)';
+
+  // Build rows, merging any keys that normalize to the same display name (fixes duplicate "Other")
+  const allCats=new Set([...Object.keys(targets),...(isAnnual?Object.keys(ytdActuals):Object.keys(actuals))]);
+  const catMap=new Map();
+  allCats.forEach(cat=>{
+    if(SKIP.has(cat))return;
+    const dCat=normalizeCat(cat);
+    let budget,actual;
+    if(isAnnual){
+      // Budget: sum Jan through selected month (not full year)
+      budget=(()=>{let s=0;for(let m=1;m<=mo;m++)s+=(targets[cat]?.[String(m)]?.amount||0);return s;})();
+      actual=ytdActuals[cat]||0;
+    }else{
+      budget=targets[cat]?.[mStr]?.amount||0;
+      actual=actuals[cat]?.[mStr]||0;
+    }
+    if(budget===0&&actual===0)return;
+    if(catMap.has(dCat)){const e=catMap.get(dCat);catMap.set(dCat,{cat:dCat,budget:e.budget+budget,actual:e.actual+actual});}
+    else catMap.set(dCat,{cat:dCat,budget,actual});
+  });
+  const rows=[...catMap.values()];
+
+  const totalBudget=rows.reduce((s,r)=>s+r.budget,0);
+  const totalActual=rows.reduce((s,r)=>s+r.actual,0);
+
+  const handleSort=col=>{
+    if(sortBy===col)setSortDir(d=>d==='desc'?'asc':'desc');
+    else{setSortBy(col);setSortDir('desc');}
+  };
+
+  const sortedRows=[...rows].sort((a,b)=>{
+    const aBot=a.cat==='Other';
+    const bBot=b.cat==='Other';
+    if(aBot&&!bBot)return 1;if(!aBot&&bBot)return -1;
+    // Unbudgeted rows have no % to rank on. They used to sort as Infinity,
+    // which pinned them above genuinely over-budget categories and made the
+    // order look arbitrary — a $270 no-budget row outranking Travel at 458%.
+    // They now sink below every budgeted row, ordered among themselves by
+    // amount, so "worst overrun first" actually holds at the top of the table.
+    if(sortBy==='pct'){
+      const aNo=!(a.budget>0),bNo=!(b.budget>0);
+      if(aNo!==bNo)return aNo?1:-1;
+      if(aNo&&bNo)return b.actual-a.actual;
+    }
+    let aV,bV;
+    if(sortBy==='pct'){aV=a.actual/a.budget;bV=b.actual/b.budget;}
+    else if(sortBy==='actual'){aV=a.actual;bV=b.actual;}
+    else{aV=a.budget;bV=b.budget;}
+    return sortDir==='desc'?bV-aV:aV-bV;
+  });
+
+  const SortBtn=({col,label,align='right'})=>(
+    <button type="button" onClick={()=>handleSort(col)} style={{background:'none',border:'none',cursor:'pointer',padding:0,
+      display:'flex',alignItems:'center',justifyContent:align==='left'?'flex-start':'flex-end',gap:3,
+      fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',
+      color:sortBy===col?'var(--text-primary)':'var(--text-muted)'}}>
+      {label}<span style={{fontSize:9,opacity:sortBy===col?1:0.35}}>{sortBy===col?(sortDir==='desc'?'↓':'↑'):'↕'}</span>
+    </button>
+  );
+
+  const COLS='150px 1fr 100px 80px';
+
+  const RowEl=({cat,budget,actual,isTotal=false})=>{
+    const isCredit=actual<0;
+    const hasBudget=budget>0;
+    const hasActual=actual>0;
+    const pct=hasBudget?actual/budget:0;
+    const over=hasBudget&&pct>=1;
+    const near=hasBudget&&!over&&pct>=0.8;
+    const noBudget=!hasBudget&&hasActual;
+    // Every track runs 0–100% of that row's own budget, so a given position
+    // means the same thing on every row and the 25/50/75 markers are readable
+    // at a glance. Over-budget rows fill the track and carry their true figure
+    // in the label (458% fills the same as 101% — the number disambiguates).
+    const barPct=hasBudget?Math.min(pct*100,100):0;
+    // Over/near fills are weighted *heavier* than under-budget ones. At a 100%
+    // scale every over-budget row fills the whole track, so if the alarm colors
+    // were the faintest the rows needing attention would read as the calmest
+    // ones on screen — the opposite of the point.
+    const fillBg=over?'var(--red)':near?'var(--amber)':'var(--blue-primary)';
+    const fillOpacity=over?0.42:near?0.38:0.30;
+    // The label is right-aligned to the *track*, so on anything under 100% it
+    // sits on empty track rather than on the fill — and --blue-soft/--amber on
+    // a near-white track fails contrast in light theme. Only over-budget rows
+    // (fill reaches the label) keep a status color; the rest use body text and
+    // let the bar carry the status.
+    const pctColor=over?'var(--red)':'var(--text-secondary)';
+    // Credit rows get no % either: "-17% of budget" for a net refund is noise,
+    // and the green +$732.61 in the Actual column already says what happened.
+    const pctLabel=(hasBudget&&!isCredit)?`${Math.round(pct*100)}%`:null;
+    const isActive=!isTotal&&activeCat===cat;
+    const clickable=!isTotal&&onCatClick;
+    return(
+      <div onClick={clickable?()=>onCatClick(cat):undefined}
+        style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'10px 24px',gap:14,
+        borderBottom:isTotal?'2px solid var(--border)':'1px solid var(--border)',
+        background:isActive?'rgba(var(--blue-primary-rgb), 0.1)':isTotal?'var(--elevated)':'transparent',
+        cursor:clickable?'pointer':'default',transition:'all 0.2s ease'}}
+        className={clickable?'row-hover':''}>
+        <span style={{fontSize:14,fontWeight:isTotal?600:500,color:'var(--text-primary)',
+          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          {isTotal?'Total':cat}
+        </span>
+        <div style={{position:'relative',height:24,borderRadius:6,overflow:'hidden',
+          background:'var(--border)',border:'1px solid var(--border)'}}>
+          {barPct>0&&<div style={{position:'absolute',left:0,top:0,bottom:0,width:`${barPct}%`,
+            background:fillBg,opacity:fillOpacity,transition:'width 0.4s ease'}}/>}
+          {/* Quarter markers, drawn over the fill so they stay legible on a
+              filled track. Credit rows get an empty track — no bar, no label —
+              since "% of budget spent" is meaningless for a net refund. */}
+          {!isCredit&&[25,50,75].map(m=>(
+            <div key={m} style={{position:'absolute',left:`${m}%`,top:0,bottom:0,width:1,
+              background:'var(--border-strong)'}}/>
+          ))}
+          <div style={{position:'relative',height:'100%',display:'flex',alignItems:'center',
+            justifyContent:'flex-end',padding:'0 8px'}}>
+            {pctLabel&&<span style={{fontSize:10.5,fontWeight:700,color:pctColor,
+              fontVariantNumeric:'tabular-nums'}}>{pctLabel}</span>}
+            {noBudget&&<span style={{fontSize:9.5,fontWeight:500,color:'var(--text-muted)'}}>no budget set</span>}
+          </div>
+        </div>
+        {/* Just the number — the % moved into the bar, so this column stays a
+            clean, sortable column of dollar amounts. */}
+        <span style={{textAlign:'right',fontSize:14,fontWeight:isTotal?700:600,fontVariantNumeric:'tabular-nums',
+          color:isCredit?'var(--green)':over?'var(--red)':'var(--text-primary)'}}>
+          {isCredit?`+${fmt(Math.abs(actual))}`:fmt(actual)}
+        </span>
+        <span style={{textAlign:'right',fontSize:13,fontWeight:isTotal?600:400,
+          color:'var(--text-secondary)'}}>
+          {hasBudget?fmt(budget):'—'}
+        </span>
+      </div>
+    );
+  };
+
+  return(
+    <div className="card" style={{padding:0, overflow:'hidden'}}>
+      <div style={{padding:'20px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
+        <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Budget Performance</div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{display:'flex',gap:16}}>
+            {[['month','Monthly'],['annual','YTD']].map(([v,label])=>(
+              <button type="button" key={v} onClick={()=>onSetView(v)}
+                style={{padding:'4px 0',border:'none',borderBottom:view===v?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:view===v?600:400,letterSpacing:'0.2px',
+                  background:'transparent',color:view===v?'var(--blue-primary)':'var(--text-muted)',
+                  transition:'all 0.2s ease'}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <select className="filter-select" value={yr} onChange={e=>onSetYear(+e.target.value)}>
+            {Array.from({length:3},(_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          <select className="filter-select" value={mo} onChange={e=>onSetMonth(+e.target.value)}>
+            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i)=>(
+              <option key={i+1} value={i+1}>{m}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:COLS,alignItems:'center',padding:'10px 24px',gap:14,borderBottom:'1px solid var(--border)',background:'var(--elevated)'}}>
+        <span style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Category</span>
+        <SortBtn col="pct" label="Progress" align="left"/>
+        <SortBtn col="actual" label="Actual"/>
+        <SortBtn col="budget" label="Budget"/>
+      </div>
+      <RowEl cat="Total" budget={totalBudget} actual={totalActual} isTotal={true}/>
+      {sortedRows.length===0
+        ?<div style={{color:'var(--text-muted)',fontSize:13,textAlign:'center',padding:'40px 0'}}>No activity found for this period.</div>
+        :sortedRows.map(({cat,budget,actual})=><RowEl key={cat} cat={cat} budget={budget} actual={actual}/>)}
+      {sortedRows.length>0&&<div style={{display:'flex',gap:16,flexWrap:'wrap',padding:'12px 24px 16px',fontSize:10.5,color:'var(--text-muted)'}}>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--blue-primary)',display:'inline-block'}}/>Under budget</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--amber)',display:'inline-block'}}/>Near limit</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--red)',display:'inline-block'}}/>Over budget</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:7,height:7,borderRadius:'50%',background:'var(--text-muted)',display:'inline-block'}}/>No budget set</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:5}}><i style={{width:1,height:9,background:'var(--border-strong)',display:'inline-block'}}/>25 / 50 / 75% of budget</span>
+      </div>}
+    </div>
+  );
+}
+
+function CategoryDetailPanel({detail,onClose}){
+  const{cat,loading,rows,total}=detail;
+  return(
+    <div className="card" style={{padding:0, overflow:'hidden'}}>
+      <div style={{padding:'20px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:12}}>
+          <span style={{fontSize:16,fontWeight:600,color:'var(--text-primary)'}}>{cat}</span>
+          {!loading&&<span className="amount-neg" style={{fontSize:14}}>{fmt(total)}</span>}
+          {!loading&&<span style={{fontSize:12,color:'var(--text-muted)',fontWeight:500}}>{rows.length} transactions</span>}
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} style={{padding:4, minHeight: 0}}>✕</button>
+      </div>
+      {loading
+        ?<div className="loading" style={{padding:'40px 0'}}><div className="spinner"/></div>
+        :rows.length===0
+          ?<div style={{padding:'32px',color:'var(--text-muted)',fontSize:14,textAlign:'center'}}>No transactions found.</div>
+          :<div style={{maxHeight:400,overflowY:'auto'}}>
+            <div className="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th style={{textAlign:'right'}}>Amount</th>
+                </tr></thead>
+                <tbody>{rows.map((r,i)=>(
+                  <tr key={i}>
+                    <td style={{fontSize:13,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{r.date}</td>
+                    <td style={{fontSize:13,fontWeight:500}}>
+                      {r.is_split
+                        ?<span>{r.description} <span className="badge" style={{background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',marginLeft:4}}>split{r.split_description?': '+r.split_description:''}</span></span>
+                        :r.description}
+                    </td>
+                    <td style={{textAlign:'right',fontSize:13,fontWeight:600,color:r.contrib>=0?'var(--red)':'var(--green)'}}>{r.contrib>=0?'-':'+'}{fmt(Math.abs(r.contrib))}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+      }
+    </div>
+  );
+}
+
+/* Half-width companion to the Spending Trend chart. Shows the five most recent
+   transactions; "See more" fades in on hover over the card rather than sitting
+   there permanently, so the card reads as content first and navigation second.
+   Kept touch-reachable by also revealing on focus-within and on tap (see the
+   coarse-pointer note below). */
+function RecentTransactionsCard({recent,onSeeMore,onRowClick}){
+  const[hover,setHover]=useState(false);
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  /* Credit-card payment transfers are noise here — the same filter the old
+     full-width table used. Applied before the slice so we always land on five
+     real rows rather than five-minus-however-many-got-filtered. */
+  const rows=(recent||[])
+    .filter(t=>!(t.action==='Transfer'&&(t.account_type||'').toLowerCase()==='credit card'))
+    .slice(0,5);
+  /* On touch there's no hover, so the button would never appear. Pin it visible
+     when the device can't hover at all. */
+  const coarse=typeof window!=='undefined'&&window.matchMedia&&window.matchMedia('(hover: none)').matches;
+  const showBtn=hover||coarse;
+  return(
+    <div className="card" style={{margin:0,display:'flex',flexDirection:'column'}}
+      onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      onFocus={()=>setHover(true)} onBlur={()=>setHover(false)}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:16,minHeight:24}}>
+        <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Recent Transactions</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onSeeMore}
+          tabIndex={showBtn?0:-1} aria-hidden={!showBtn}
+          style={{opacity:showBtn?1:0,pointerEvents:showBtn?'auto':'none',
+            transition:'opacity 0.18s ease',whiteSpace:'nowrap'}}>
+          See more →
+        </button>
+      </div>
+      {rows.length===0
+        ?<div className="empty" style={{flex:1}}><div className="empty-icon">◎</div><span>No transactions yet</span></div>
+        :<div style={{display:'flex',flexDirection:'column'}}>
+          {rows.map((t,i)=>{
+            const dt=new Date((t.date||'').substring(0,10)+'T12:00:00');
+            const shortDate=`${MO[dt.getMonth()]} ${dt.getDate()}`;
+            const amtDisplay=t.amount<0?`-${fmt(Math.abs(t.amount))}`:`+${fmt(t.amount)}`;
+            return(
+              <div key={t.id} onClick={()=>onRowClick(t)} className="row-hover"
+                style={{display:'grid',gridTemplateColumns:'52px 1fr auto',alignItems:'center',gap:12,
+                  padding:'11px 4px',cursor:'pointer',
+                  borderTop:i===0?'none':'1px solid var(--border)'}}>
+                <span style={{color:'var(--text-muted)',fontSize:12.5,fontWeight:400,whiteSpace:'nowrap'}}>{shortDate}</span>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13.5,fontWeight:500,color:'var(--text-primary)',
+                    overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {t.description_display||t.description_raw}
+                  </div>
+                  {showCategoryForType(t.action)&&
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {normalizeCat(t.category_final)}
+                    </div>}
+                </div>
+                <span style={{textAlign:'right',whiteSpace:'nowrap',fontSize:13.5,fontWeight:600,
+                  fontVariantNumeric:'tabular-nums',
+                  color:t.amount<0?'var(--red)':t.amount>0?'var(--green)':'var(--text-primary)'}}>{amtDisplay}</span>
+              </div>
+            );
+          })}
+        </div>}
+    </div>
+  );
+}
+
+function DashboardPage({categories,toast,setPage,refreshKey}){
+  const[recent,setRecent]=useState([]);
+  const[netWorth,setNetWorth]=useState(null);
+  const[reviewTxn,setReviewTxn]=useState(null);
+  // Subscribes to resize, unlike the bare window.innerWidth read this replaced —
+  // that was sampled during render with nothing listening, so crossing the
+  // breakpoint (device rotation, most realistically) left the stale value in
+  // place until some unrelated state change forced a re-render.
+  const isMob=useIsMobile();
+  const[splitTxn,setSplitTxn]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const hasLoaded=React.useRef(false);
+  const[spendHoverIdx,setSpendHoverIdx]=useState(null);
+  const[budgetTargets,setBudgetTargets]=useState({});
+  const[budgetActuals,setBudgetActuals]=useState({});
+  // Prior-year *actuals* only. The matching prior-year targets call was dropped:
+  // nothing rendered it. Actuals are read by the Spending Trend, whose 6-month
+  // window can reach back into viewYear-1.
+  const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
+  const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'month');
+  const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
+  const[catDetail,setCatDetail]=useState(null);       // null | {cat, loading, rows, total}
+  const[viewYear,_setViewYear]=useState(()=>parseInt(parseHash().params.get('year'))||new Date().getFullYear());
+  const[viewMonth,_setViewMonth]=useState(()=>parseInt(parseHash().params.get('month'))||new Date().getMonth()+1);
+  const setBudgetView=useCallback(v=>{_setBudgetView(v);syncHashParams({view:v,year:viewYear,month:viewMonth});},[viewYear,viewMonth]);
+  const setViewYear=useCallback(y=>{_setViewYear(y);syncHashParams({view:budgetView,year:y,month:viewMonth});},[budgetView,viewMonth]);
+  const setViewMonth=useCallback(m=>{_setViewMonth(m);syncHashParams({view:budgetView,year:viewYear,month:m});},[budgetView,viewYear]);
+  const[kpiStats,setKpiStats]=useState(null);
+  const[kpiPriorStats,setKpiPriorStats]=useState(null);
+  const[kpiLabel,setKpiLabel]=useState('');
+
+  // Returns date range for the KPI cards (MTD for current month, full period for past)
+  // and the comparison label like "vs Feb 6"
+  const getKpiDates=()=>{
+    const now=new Date();
+    const cy=now.getFullYear(),cm=now.getMonth()+1,cd=now.getDate();
+    const pad=n=>String(n).padStart(2,'0');
+    const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if(budgetView==='annual'){
+      const yr=viewYear,pYr=yr-1;
+      const isCY=yr===cy;
+      const kpiEnd=isCY?todayStr():`${yr}-12-31`;
+      const kpiStart=`${yr}-01-01`;
+      const pEnd=isCY?`${pYr}-${pad(cm)}-${pad(cd)}`:`${pYr}-12-31`;
+      const pStart=`${pYr}-01-01`;
+      return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:'vs. Last Year'};
+    }
+    const yr=viewYear,mo=viewMonth;
+    const isCM=yr===cy&&mo===cm;
+    const endDay=isCM?cd:new Date(yr,mo,0).getDate();
+    const kpiEnd=`${yr}-${pad(mo)}-${pad(endDay)}`;
+    const kpiStart=`${yr}-${pad(mo)}-01`;
+    const pYr=mo===1?yr-1:yr,pMo=mo===1?12:mo-1;
+    const pMaxDay=new Date(pYr,pMo,0).getDate();
+    const pDay=Math.min(endDay,pMaxDay);
+    const pEnd=`${pYr}-${pad(pMo)}-${pad(pDay)}`;
+    const pStart=`${pYr}-${pad(pMo)}-01`;
+    return{kpiStart,kpiEnd,priorKpiStart:pStart,priorKpiEnd:pEnd,kpiLabel:'vs. Last Month'};
+  };
+
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent)setLoading(true);
+    try{
+      const yr=viewYear;
+      const curY=new Date().getFullYear();
+      // YTD stats: Jan 1 → end of viewMonth (capped at today so future months don't show zeros)
+      const ytdMoEndDay=new Date(yr,viewMonth,0).getDate();
+      const ytdMoEnd=`${yr}-${String(viewMonth).padStart(2,'0')}-${String(ytdMoEndDay).padStart(2,'0')}`;
+      const ytdEnd=ytdMoEnd<todayStr()?ytdMoEnd:todayStr();
+      const ytdQ=`/stats?start_date=${yr}-01-01&end_date=${ytdEnd}`;
+      // KPI card stats: MTD vs same day last period
+      const{kpiStart,kpiEnd,priorKpiStart,priorKpiEnd,kpiLabel:kLabel}=getKpiDates();
+      const kpiQ=`/stats?start_date=${kpiStart}&end_date=${kpiEnd}`;
+      const kpiPriorQ=`/stats?start_date=${priorKpiStart}&end_date=${priorKpiEnd}`;
+      /* Three requests were dropped from this list because nothing rendered
+         their results: the selected-range /stats call (fed `stats`/`topCats`),
+         /transactions?needs_review=true&limit=50 (fed the Needs Review section,
+         which was removed), and the prior-year /budget/targets call. The KPI
+         cards use their own kpiQ/kpiPriorQ /stats calls and the category table
+         uses ytdQ, so nothing on screen lost a data source. */
+      const[r,nw,bt,ba,ba2,ytdS,kpiS,kpiPS]=await Promise.all([
+        apiFetch('/transactions?limit=12'),
+        apiFetch('/net-worth').catch(e=>{console.warn('Net worth fetch failed:',e);return null;}),
+        apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
+        apiFetch(`/budget/actuals?year=${yr}`).catch(()=>({categories:{}})),
+        apiFetch(`/budget/actuals?year=${yr-1}`).catch(()=>({categories:{}})),
+        apiFetch(ytdQ).catch(()=>({by_category:{}})),
+        apiFetch(kpiQ).catch(()=>null),
+        apiFetch(kpiPriorQ).catch(()=>null),
+      ]);
+      setRecent(r);setNetWorth(nw);
+      setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
+      setBudgetActualsPrior(ba2.categories||{});
+      setYtdByCat(ytdS.by_category||{});
+      setKpiStats(kpiS);setKpiPriorStats(kpiPS);setKpiLabel(kLabel);
+    }catch(e){toast('Failed to load','error');}
+    finally{if(!silent)setLoading(false);}
+  },[budgetView,viewYear,viewMonth]);
+
+  useEffect(()=>{
+    const isFirst=!hasLoaded.current;
+    hasLoaded.current=true;
+    load({silent:!isFirst});
+  },[load,refreshKey]);
+
+  const handleSave=async(id,updates)=>{
+    if(updates.__deleted){await load();return;}
+    try{
+      await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+      if(updates.needs_review===false)toast('✓ Reviewed — transaction moved to Transactions page');
+      else if(Object.keys(updates).length>0)toast('✓ Saved');
+      await load({silent:true});
+    }
+    catch(e){toast('Failed to save','error');}
+  };
+  const handleIgnore=async(id)=>{await handleSave(id,{needs_review:false});};
+
+  // Generation counter prevents stale async responses from overwriting newer state
+  const catDetailGen=React.useRef(0);
+  const loadCatDetail=async(cat,view,yr,mo)=>{
+    const gen=++catDetailGen.current;
+    const moStr=String(mo).padStart(2,'0');
+    const lastDay=new Date(yr,mo,0).getDate();
+    const{start,end}=view==='annual'
+      ?{start:`${yr}-01-01`,end:todayStr()}
+      :{start:`${yr}-${moStr}-01`,end:`${yr}-${moStr}-${String(lastDay).padStart(2,'0')}`};
+    setCatDetail({cat,loading:true,rows:[],total:0});
+    try{
+      const d=await apiFetch(`/stats/detail?category=${encodeURIComponent(cat)}&start_date=${start}&end_date=${end}`);
+      if(gen===catDetailGen.current)setCatDetail({cat,loading:false,rows:d.rows||[],total:d.total||0});
+    }catch(e){
+      if(gen===catDetailGen.current){setCatDetail(null);toast('Failed to load detail','error');}
+    }
+  };
+  const openCatDetail=(cat)=>{
+    if(catDetail?.cat===cat){setCatDetail(null);return;}
+    loadCatDetail(cat,budgetView,viewYear,viewMonth);
+  };
+
+  if(loading)return<SkeletonDashboard/>;
+
+  const hr=new Date().getHours();
+  const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
+  // KPI card values
+  const kpiIncome=kpiStats?.total_income??0;
+  const kpiExpenses=kpiStats?.total_expenses??0;
+  const kpiNet=kpiIncome-kpiExpenses;
+  const priorIncome=kpiPriorStats?.total_income??null;
+  const priorExpenses=kpiPriorStats?.total_expenses??null;
+  const priorNet=(priorIncome!==null&&priorExpenses!==null)?priorIncome-priorExpenses:null;
+  const kpiCalcPct=(curr,prior)=>(prior===null||Math.abs(prior)<0.01)?null:Math.round(((curr-prior)/Math.abs(prior))*100);
+  const incomePct=kpiCalcPct(kpiIncome,priorIncome);
+  const expensesPct=kpiCalcPct(kpiExpenses,priorExpenses);
+  const netPct=kpiCalcPct(kpiNet,priorNet);
+  const _bSum=key=>netWorth?.buckets?.[key]?.accounts?.reduce((s,a)=>s+a.balance,0)??0;
+  const csBal=netWorth?_bSum('Cash & Savings'):null;
+  // No % badge on Checking & Savings: it's a point-in-time balance and we have
+  // no historical one to compare it against. The estimate that used to sit here
+  // (prior balance = current − net cash flow) wasn't a real prior balance — net
+  // cash flow spans every account, including card spend that never touched
+  // checking — and it went absurd once the estimate crossed zero, rendering
+  // "+583%" in Annual YTD. A real figure needs a per-bucket historical balance
+  // from the backend; until that exists, show nothing rather than a fake.
+  const netValue=kpiNet<0?`(${fmt(Math.abs(kpiNet))})`:fmt(kpiNet);
+
+  return(
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+      {reviewTxn&&<ReviewModal txn={reviewTxn} categories={categories} onSave={handleSave} onDiscard={()=>setReviewTxn(null)} onIgnore={handleIgnore} onClose={()=>setReviewTxn(null)}/>}
+      {splitTxn&&<SplitEditorModal txn={splitTxn} categories={categories} onClose={()=>setSplitTxn(null)} onSaved={load} toast={toast}/>}
+
+      {/* Header */}
+      <header className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', marginBottom: 0, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h2 style={{fontSize: 28, fontWeight: 600, letterSpacing: '-0.5px'}}>Good {greeting}, Omer</h2>
+          <p style={{fontSize: 14, color: 'var(--text-secondary)', marginTop: 4}}>Here's your financial overview today.</p>
+        </div>
+        <div className="sel-pill">
+          {['month','annual'].map(v=>(
+            <button type="button" key={v} onClick={()=>setBudgetView(v)} data-active={budgetView===v} style={{
+              background: budgetView===v?'var(--blue-primary)':'none',
+              color: budgetView===v?'white':'var(--text-secondary)',
+              boxShadow: budgetView===v?'0 4px 12px rgba(var(--blue-primary-rgb), 0.2)':'none'
+            }}>{v==='month'?'Monthly':'Annual YTD'}</button>
+          ))}
+        </div>
+      </header>
+
+      {/* KPI row — 5 cards */}
+      {(()=>{
+        const PctBadge=({pct,invert=false})=>{
+          if(pct===null)return<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>—</span>;
+          const good=invert?pct<=0:pct>=0;
+          return<span style={{background:good?'rgba(16,185,129,0.12)':'rgba(239,68,68,0.12)',color:good?'var(--green)':'var(--red)',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:600}}>{pct>0?'+':''}{pct}%</span>;
+        };
+        const cards=[
+          {label:'Checking & Savings',value:csBal!==null?fmt(csBal):'—',pct:null,invert:false},
+          {label:'Net Worth',value:netWorth?.net_worth!=null?fmt(netWorth.net_worth):'—',pct:null,invert:false, highlight: true},
+          {label:'Income',value:fmt(kpiIncome),pct:incomePct,invert:false},
+          {label:'Expenses',value:fmt(kpiExpenses),pct:expensesPct,invert:true},
+          {label:'Net Cash Flow',value:netValue,pct:netPct,invert:false},
+        ];
+        return(
+          <div className="metric-grid">
+            {cards.map(c=>(
+              <div key={c.label} className="card metric-card">
+                <div className="metric-label">{c.label}</div>
+                <div className="metric-value" style={c.highlight ? { color: 'var(--blue-neon)' } : undefined}>{c.value}</div>
+                <div className="metric-sub">
+                  <PctBadge pct={c.pct} invert={c.invert}/>
+                  <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{kpiLabel}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* ── Spending Trend (full-width on desktop) + Budget Overview (mobile only) ── */}
+      {(()=>{
+        /* Non-spending buckets. 'Work' is income and 'Transfer' is money moving
+           between accounts — summing them into a "spending" line plots spend +
+           income, which overstates every month and can invert the trend
+           entirely. Same set BudgetAndSpendingCard and the mobile bars use. */
+        const SKIP=new Set(['Transfer','Work']);
+        /* Derive monthly spending totals from budgetActuals + budgetActualsPrior */
+        const MO_LABELS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const curY=new Date().getFullYear();
+        const curM=new Date().getMonth()+1;
+        /* The window ends on the *selected* month, not on today. budgetActuals
+           is fetched for viewYear (and budgetActualsPrior for viewYear-1), so
+           anchoring on today would read the selected year's payload under
+           current-year labels — picking 2025 silently plotted 2025 figures
+           against Feb…Jul 2026. Clamped so we never trail into future months. */
+        const endY=viewYear;
+        const endM=viewYear<curY?12:Math.min(viewMonth,curM);
+        const months6=Array.from({length:6},(_,i)=>{
+          const d=new Date(endY,endM-1-(5-i),1);
+          return{year:d.getFullYear(),month:d.getMonth()+1,label:MO_LABELS[d.getMonth()]};
+        });
+        /* months6 spans at most viewYear and viewYear-1, which is exactly the
+           pair of payloads we hold — so this lookup can't cross into a year we
+           didn't fetch. */
+        const getMonthTotal=(yr,mo)=>{
+          const src=yr===viewYear?budgetActuals:budgetActualsPrior;
+          return Object.entries(src).reduce((s,[cat,catMonths])=>
+            SKIP.has(cat)?s:s+(catMonths?.[String(mo)]||0),0);
+        };
+        const spanYears=months6[0].year!==months6[5].year;
+        const rangeLabel=spanYears
+          ?`${months6[0].label} ${months6[0].year} – ${months6[5].label} ${months6[5].year}`
+          :`${months6[0].label} – ${months6[5].label} ${months6[5].year}`;
+        const spendData=months6.map(m=>({...m,amount:getMonthTotal(m.year,m.month)}));
+        const maxSpend=Math.max(...spendData.map(d=>d.amount),100);
+        /* Add 10% headroom so the top of the chart doesn't get clipped */
+        const yMax=maxSpend*1.1;
+        /* SVG dimensions */
+        /* Left padding dropped from 44 to 24 now that the y-axis labels are
+           gone — 24 is just enough for the first/last point's direct value
+           label to sit centered without clipping at the viewBox edge. */
+        const W=500,H=160,pad={t:14,r:24,b:28,l:24};
+        const cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;
+        const pts=spendData.map((d,i)=>[
+          pad.l+(i/(spendData.length-1))*cW,
+          pad.t+cH-(d.amount/yMax)*cH
+        ]);
+        /* Monotone cubic (Fritsch-Carlson) — smooth like Catmull-Rom, but the
+           tangent limiter keeps the curve from overshooting past whichever
+           neighboring point is higher/lower, so it never implies a spike or
+           dip the underlying monthly totals don't have. */
+        const smoothPath=(points)=>{
+          const n=points.length;
+          if(n<2)return'';
+          if(n===2)return`M${points[0][0]},${points[0][1]} L${points[1][0]},${points[1][1]}`;
+          const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+          const d=[];for(let i=0;i<n-1;i++)d.push((ys[i+1]-ys[i])/(xs[i+1]-xs[i]));
+          const m=new Array(n);
+          m[0]=d[0];m[n-1]=d[n-2];
+          for(let i=1;i<n-1;i++)m[i]=(d[i-1]*d[i]<=0)?0:(d[i-1]+d[i])/2;
+          for(let i=0;i<n-1;i++){
+            if(d[i]===0){m[i]=0;m[i+1]=0;}
+            else{
+              const a=m[i]/d[i],b=m[i+1]/d[i],h=Math.hypot(a,b);
+              if(h>3){const t=3/h;m[i]=t*a*d[i];m[i+1]=t*b*d[i];}
+            }
+          }
+          let path=`M${xs[0]},${ys[0]}`;
+          for(let i=0;i<n-1;i++){
+            const dx=(xs[i+1]-xs[i])/3;
+            const cp1x=xs[i]+dx,cp1y=ys[i]+m[i]*dx;
+            const cp2x=xs[i+1]-dx,cp2y=ys[i+1]-m[i+1]*dx;
+            path+=` C${cp1x},${cp1y} ${cp2x},${cp2y} ${xs[i+1]},${ys[i+1]}`;
+          }
+          return path;
+        };
+        const pathD=smoothPath(pts);
+        const areaD=pts.length>=2?pathD+` L${pts[pts.length-1][0]},${pad.t+cH} L${pts[0][0]},${pad.t+cH} Z`:'';
+
+        /* Budget overview bars (mobile only) — top 6 categories for current month */
+        const mo=viewMonth||(new Date().getMonth()+1);
+        const mStr=String(mo);
+        const budgetRows=[];
+        const allCats=new Set([...Object.keys(budgetTargets),...Object.keys(budgetActuals)]);
+        allCats.forEach(cat=>{
+          if(SKIP.has(cat))return;
+          const budget=budgetTargets[cat]?.[mStr]?.amount||0;
+          const actual=budgetActuals[cat]?.[mStr]||0;
+          if(budget<=0&&actual<=0)return;
+          /* Mirrors the desktop RowEl's flags. An unbudgeted category used to
+             get pct=100 and remaining=0−actual, and since `over` was pct>100
+             (strictly greater) it fell through to the "left" branch — so a
+             category with no budget at all and $4,060.50 spent rendered as
+             "$4,060.50 left", the exact opposite of the truth. Credit rows
+             (net refund) likewise have no meaningful "% of budget spent".
+             `over` is >=100 here to match desktop, where exactly 100% is
+             already treated as over. */
+          const hasBudget=budget>0;
+          const isCredit=actual<0;
+          const noBudget=!hasBudget&&actual>0;
+          const pct=hasBudget?Math.round((actual/budget)*100):0;
+          const over=hasBudget&&!isCredit&&pct>=100;
+          const remaining=budget-actual;
+          budgetRows.push({cat:normalizeCat(cat),budget,actual,pct,remaining,hasBudget,isCredit,noBudget,over});
+        });
+        budgetRows.sort((a,b)=>b.actual-a.actual);
+        const topBudgetRows=budgetRows.slice(0,6);
+
+        return(
+          <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
+            {/* Spending Trend (left 50%) + Recent Transactions (right 50%) */}
+            <div className="dash-split">
+            <div className="card" style={{margin:0,display:'flex',flexDirection:'column'}}>
+              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:12,flexWrap:'wrap',marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Spending Trend</div>
+                <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>{rangeLabel}</div>
+              </div>
+              <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:240}}>
+                <defs>
+                  <linearGradient id="spendAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--blue-primary)" stopOpacity="0.15"/>
+                    <stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/>
+                  </linearGradient>
+                </defs>
+                {/* Grid lines. No y-axis value labels — every point is already
+                    directly labeled with its own figure, so the axis scale was
+                    duplicating information while eating horizontal space this
+                    card no longer has at half width. */}
+                {[0,0.25,0.5,0.75,1].map((p,i)=>{
+                  const y=pad.t+(1-p)*cH;
+                  return <line key={i} x1={pad.l} y1={y} x2={W-pad.r} y2={y} stroke="var(--border)" strokeWidth={1}/>;
+                })}
+                {/* X labels */}
+                {spendData.map((d,i)=>(
+                  <text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontWeight={500}>{d.label}</text>
+                ))}
+                {/* Area fill */}
+                {areaD&&<path d={areaD} fill="url(#spendAreaGrad)" style={{ transition: 'all 0.5s ease' }}/>}
+                {/* Line */}
+                {pathD&&<path d={pathD} fill="none" stroke="var(--blue-primary)" strokeWidth={2.5} strokeLinecap="round" style={{ transition: 'all 0.5s ease' }}/>}
+                {/* Dots + hover labels */}
+                {pts.map((p,i)=>(
+                  <g key={i}>
+                    <rect x={p[0] - (cW / (spendData.length - 1)) / 2} y={pad.t} width={cW / (spendData.length - 1)} height={cH} fill="transparent" style={{cursor:'pointer'}}
+                      onMouseEnter={()=>setSpendHoverIdx(i)} onMouseLeave={()=>setSpendHoverIdx(null)}
+                      onClick={()=>setSpendHoverIdx(spendHoverIdx===i?null:i)} />
+                    <circle cx={p[0]} cy={p[1]} r={spendHoverIdx===i?6:4} fill="var(--blue-vibrant)" style={{pointerEvents:'none',transition:'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'}} />
+                    {spendHoverIdx===i?(
+                      <>
+                        <rect x={p[0]-40} y={p[1]-26} width={80} height={20} rx={10} fill="var(--blue-primary)" style={{pointerEvents:'none'}} />
+                        <text x={p[0]} y={p[1]-13} textAnchor="middle" fontSize={10} fill="white" fontWeight={700} style={{pointerEvents:'none'}}>
+                          {fmt(spendData[i].amount)}
+                        </text>
+                      </>
+                    ):(
+                      /* Direct-label every point — with only 6 points, reading exact
+                         values shouldn't require finding and hovering each dot. */
+                      <text x={p[0]} y={p[1]<pad.t+20?p[1]+16:p[1]-10} textAnchor="middle" fontSize={9.5} fill="var(--text-secondary)" fontWeight={600} style={{pointerEvents:'none'}}>
+                        {spendData[i].amount>=1000?`${(spendData[i].amount/1000).toFixed(1)}k`:`${Math.round(spendData[i].amount)}`}
+                      </text>
+                    )}
+                  </g>
+                ))}
+              </svg>
+            </div>
+
+            <RecentTransactionsCard recent={recent} onSeeMore={()=>setPage('transactions')} onRowClick={setReviewTxn}/>
+            </div>
+
+            {/* Budget Overview — mobile only */}
+            {isMob&&<div className="card">
+              <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Top Budgets</div>
+              <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                {topBudgetRows.map(r=>{
+                  const over=r.over;
+                  /* No budget → say so, and show what was spent, rather than
+                     inventing a remaining figure. Credit rows show the refund.
+                     Only a real budget gets "left"/"over". */
+                  const dollarLabel=r.noBudget?`${fmt(r.actual)} spent · no budget set`
+                    :r.isCredit?`${fmt(Math.abs(r.actual))} refunded`
+                    :over?`${fmt(Math.abs(r.remaining))} over`
+                    :`${fmt(r.remaining)} left`;
+                  /* An empty track for rows with no budget or a net credit —
+                     a filled bar would imply a proportion of something that
+                     doesn't exist. Same treatment as the desktop table. */
+                  const barPct=r.hasBudget&&!r.isCredit?Math.min(r.pct,100):0;
+                  return(
+                    <div key={r.cat}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                        <span style={{fontSize:14,fontWeight:500}}>{r.cat}</span>
+                        {r.hasBudget&&!r.isCredit
+                          ?<span style={{fontSize:12,fontWeight:600,color:over?'var(--red)':'var(--text-secondary)'}}>{r.pct}%</span>
+                          :<span style={{fontSize:10,fontWeight:500,color:'var(--text-muted)'}}>{r.noBudget?'no budget':''}</span>}
+                      </div>
+                      <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                        {barPct>0&&<div style={{height:'100%',borderRadius:3,width:`${barPct}%`,
+                          background:over?'var(--red)':'var(--blue-primary)',transition:'width 0.6s ease'}}/>}
+                      </div>
+                      <div style={{fontSize:10,color:'var(--text-muted)',marginTop:4,textAlign:'right'}}>{dollarLabel}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>}
+          </div>
+        );
+      })()}
+
+      {/* ── Full-width Budget & Spending Detail ──────────────────────────── */}
+      <div style={{marginTop:0}}>
+        <BudgetAndSpendingCard
+          targets={budgetTargets} actuals={budgetActuals}
+          view={budgetView} ytdActuals={ytdByCat}
+          viewMonth={viewMonth} viewYear={viewYear}
+          onCatClick={openCatDetail}
+          activeCat={catDetail?.cat||null}
+          onSetView={v=>{setBudgetView(v);if(catDetail)loadCatDetail(catDetail.cat,v,viewYear,viewMonth);}}
+          onSetYear={v=>{setViewYear(v);if(catDetail)loadCatDetail(catDetail.cat,budgetView,v,viewMonth);}}
+          onSetMonth={v=>{setViewMonth(v);if(catDetail)loadCatDetail(catDetail.cat,budgetView,viewYear,v);}}/>
+      </div>
+
+      {/* Category Detail Panel — slides in below the budget table when a row is clicked */}
+      {catDetail&&<div style={{marginTop:12}}>
+        <CategoryDetailPanel detail={catDetail} onClose={()=>setCatDetail(null)}/>
+      </div>}
+
+      {/* Budget vs. Actual and Needs Review removed — use Budgets page and Transactions page respectively.
+          The full-width Recent Activity table that used to sit here is gone too — recent
+          transactions now live in the half-width card beside the Spending Trend. */}
+    </div>
+  );
+}
+
+/* Modal for creating a manual account (Section 2b) */
+function ManualAccountModal({onClose,onSaved,toast}){
+  const[name,setName]=useState('');
+  const[type,setType]=useState('Checking');
+  const[balance,setBalance]=useState('0');
+  const[startDate,setStartDate]=useState(todayStr());
+  const[notes,setNotes]=useState('');
+  const[saving,setSaving]=useState(false);
+  const[error,setError]=useState('');
+  const handleSave=async()=>{
+    if(!name){setError('Account name is required');return;}
+    setSaving(true);setError('');
+    try{
+      /* POST /api/accounts — creates manual account with starting balance */
+      await apiFetch('/accounts',{method:'POST',body:JSON.stringify({name,account_type:type,starting_balance:parseFloat(balance)||0,start_date:startDate,notes:notes||null})});
+      toast('Manual account created');onSaved();onClose();
+    }catch(e){setError('Failed to create account');}
+    finally{setSaving(false);}
+  };
+  return(
+    <div className="review-overlay" style={{zIndex: 5000}}>
+      <div className="review-panel" style={{maxWidth: 480}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}}>
+          <div>
+            <h3 style={{fontSize:18,fontWeight:600,fontFamily:'Outfit'}}>Add Manual Account</h3>
+            <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>Create an account not linked to a bank.</p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} style={{padding:4, minHeight: 0}}>✕</button>
+        </div>
+
+        {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:16,padding:'10px 14px',background:'rgba(239, 68, 68, 0.1)',borderRadius:10,fontWeight:600}}>⚠️ {error}</div>}
+
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          <div className="review-field">
+            <label>Account Name *</label>
+            <input className="search-input" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Home, Vehicle, Cash"/>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1.5fr 1fr',gap:16}}>
+            <div className="review-field">
+              <label>Account Type</label>
+              <select className="filter-select" style={{width:'100%'}} value={type} onChange={e=>setType(e.target.value)}>
+                {[
+                  ['Checking','Checking'],['Savings','Savings'],['HSA','HSA'],['FSA','FSA'],['Cash','Cash'],['Gift Card','Gift Card'],
+                  ['Investment','Investment'],['Real Estate','Real Estate'],['Vehicle','Vehicle'],
+                  ['Business','Business'],['Credit Card','Credit Card'],['Loan','Loan'],['Other','Other']
+                ].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div className="review-field">
+              <label>Start Date</label>
+              <input type="date" className="date-input" style={{width:'100%'}} value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+            </div>
+          </div>
+
+          <div className="review-field">
+            <label>Starting Balance ($)</label>
+            <input className="search-input" type="number" step="0.01" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0.00"/>
+          </div>
+
+          <div className="review-field">
+            <label>Notes (Optional)</label>
+            <input className="search-input" value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Extra details…"/>
+          </div>
+        </div>
+
+        <div className="review-actions" style={{marginTop:32}}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Creating…':'✓ Create Account'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Merge Account Modal ─────────────────────────────────────────────────────
+   Reassigns all transactions from the source account into a chosen target,
+   then deletes the source. Used to clean up duplicate accounts. */
+function MergeAccountModal({source,allAccounts,onDone,onClose}){
+  const others=allAccounts.filter(a=>a.id!==source.id);
+  const[targetId,setTargetId]=useState('');
+  const[busy,setBusy]=useState(false);
+  const target=others.find(a=>a.id===parseInt(targetId));
+  const doMerge=async()=>{
+    if(!targetId)return;
+    setBusy(true);
+    try{
+      const r=await apiFetch(`/accounts/${source.id}/merge-into/${targetId}`,{method:'POST'});
+      onDone(`Merged — ${r.transactions_moved} transactions moved to "${target?.account_name}"`);
+    }catch(e){onDone(null,'Merge failed: '+(e.message||'error'));}
+    finally{setBusy(false);}
+  };
+  return(
+    <div className="modal-overlay">
+      <div className="modal-content" style={{maxWidth:440}}>
+        <div className="modal-header">
+          <h3 style={{margin:0}}>Merge Account</h3>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:14}}>
+          <p style={{margin:0,fontSize:13,color:'var(--text-muted)'}}>
+            All transactions from <strong>{source.account_name}</strong> ({source.transaction_count} txns) will be moved to the account you select below. The source account will then be deleted.
+          </p>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',marginBottom:4,display:'block'}}>Move into</label>
+            <select value={targetId} onChange={e=>setTargetId(e.target.value)} className="filter-select" style={{width:'100%'}}>
+              <option value="">— select target account —</option>
+              {others.map(a=><option key={a.id} value={a.id}>{a.account_name} ({a.transaction_count} txns)</option>)}
+            </select>
+          </div>
+          {target&&<p style={{margin:0,fontSize:12,background:'rgba(251,191,36,0.1)',border:'1px solid rgba(251,191,36,0.3)',borderRadius:6,padding:'8px 12px',color:'var(--amber)'}}>
+            ⚠ <strong>{source.account_name}</strong> will be permanently deleted after the merge.
+          </p>}
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={doMerge} disabled={!targetId||busy}>{busy?'Merging…':'Merge & Delete Source'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Delete Account Modal ────────────────────────────────────────────────────
+   Permanently deletes an account and all its transactions. */
+function DeleteAccountModal({account,onDone,onClose}){
+  const[busy,setBusy]=useState(false);
+  const doDelete=async()=>{
+    setBusy(true);
+    try{
+      const r=await apiFetch(`/accounts/${account.id}`,{method:'DELETE'});
+      onDone(`Deleted "${account.account_name}" and ${r.transactions_deleted} transactions`);
+    }catch(e){onDone(null,'Delete failed: '+(e.message||'error'));}
+    finally{setBusy(false);}
+  };
+  return(
+    <div className="modal-overlay">
+      <div className="modal-content" style={{maxWidth:420}}>
+        <div className="modal-header">
+          <h3 style={{margin:0,color:'var(--red)'}}>Delete Account</h3>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <div style={{padding:'16px 20px'}}>
+          <p style={{margin:'0 0 12px',fontSize:13}}>This will permanently delete:</p>
+          <ul style={{margin:'0 0 16px',paddingLeft:20,fontSize:13,lineHeight:1.7}}>
+            <li><strong>{account.account_name}</strong></li>
+            <li><strong>{account.transaction_count} transaction{account.transaction_count!==1?'s':''}</strong></li>
+          </ul>
+          <p style={{margin:0,fontSize:13,color:'var(--red)',fontWeight:500}}>This cannot be undone.</p>
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'1px solid rgba(248,113,113,0.4)',padding:'6px 14px'}} onClick={doDelete} disabled={busy}>{busy?'Deleting…':'Delete Permanently'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* AccountRow is a top-level component so React never remounts it on parent
+   re-renders (same fix as LoanForm — defining it inside AccountsPage would
+   create a new function reference each render, causing React to unmount/remount
+   the row and swallow click events before modals can open). */
+const INST_COLORS={'ins_3':'#003087','ins_4':'#003087','ins_56':'#003087',/*Chase*/'ins_5':'#016fd0','ins_10':'#016fd0',/*Amex*/'ins_13':'#1b3c6b',/*Citi*/'ins_127989':'#c41230',/*BofA*/'ins_12':'#cc0000','ins_15':'#d22e2e',/*Wells*/'ins_21':'#ff5f00',/*Discover*/'ins_22':'#f7931a',/*Cap1*/'ins_6':'#ef3829',/*HSBC*/'ins_11':'#e31837',/*USB*/'ins_19':'#1a8c39',/*TD*/};
+const instColor=(a)=>{
+  const iid=a.institution_id||a.plaid_item_id||'';
+  if(INST_COLORS[iid])return INST_COLORS[iid];
+  // Deterministic color from institution name hash
+  const s=a.account_name||'';let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);
+  const hues=[210,160,30,340,120,270,50];
+  return `hsl(${hues[Math.abs(h)%hues.length]},45%,45%)`;
+};
+const BUCKET_STYLE={'Checking & Savings':{bg:'rgba(52,211,153,0.10)',color:'var(--green)'},'Investments':{bg:'rgba(96,165,250,0.10)',color:'#60a5fa'},'Credit Cards':{bg:'rgba(251,191,36,0.10)',color:'var(--amber)'},'Loans':{bg:'rgba(248,113,113,0.10)',color:'var(--red)'}};
+
+function AccountRow({a,showPlaidActions,editingId,editVals,setEditVals,onSave,onCancel,onStartEdit,onSever,onMerge,onDelete}){
+  const isEditing=editingId===a.id;
+  const color=instColor(a);
+  const bucketS=BUCKET_STYLE[a.bucket]||{bg:'var(--elevated)',color:'var(--text-muted)'};
+  const bal=a.balance!=null?a.balance:(a.starting_balance||0);
+  return(
+    <div className="card" style={{padding:0, overflow:'hidden', position:'relative', transition:'transform 0.2s', cursor:'default'}}>
+      <div style={{height:4, background:color}}/>
+      <div style={{padding:'20px'}}>
+        {/* Top row: name + balance */}
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12}}>
+          <div style={{flex:1, minWidth:0}}>
+            {isEditing ? (
+              <div style={{display:'flex', flexDirection:'column', gap:8}}>
+                <input value={editVals.account_name} onChange={e=>setEditVals(v=>({...v,account_name:e.target.value}))} className="search-input" style={{fontSize:14, fontWeight:600}} placeholder="Account Name"/>
+                <select value={editVals.account_type||''} onChange={e=>setEditVals(v=>({...v,account_type:e.target.value}))} className="filter-select" style={{width:'100%'}}>
+                  <option value="">— type —</option>
+                  {['checking','savings','cash','money market','cd','hsa','fsa','investment','brokerage','401k','ira','credit card','mortgage','loan','student','auto','other'].map(t=>
+                    <option key={t} value={t}>{fmtAcctType(t)}</option>)}
+                </select>
+                <input value={editVals.notes} onChange={e=>setEditVals(v=>({...v,notes:e.target.value}))} className="search-input" style={{fontSize:12}} placeholder="Notes (optional)"/>
+              </div>
+            ) : (
+              <>
+                <div style={{fontSize:16, fontWeight:700, color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{a.account_name}</div>
+                {a.notes && <div style={{fontSize:12, color:'var(--text-secondary)', marginTop:4, fontWeight:450}}>{a.notes}</div>}
+              </>
+            )}
+          </div>
+          <div style={{textAlign:'right', flexShrink:0, marginLeft:16}}>
+            <div style={{fontFamily:'Outfit, sans-serif', fontSize:18, fontWeight:700, color:a.is_liability?'var(--red)':'var(--blue-vibrant)'}}>
+              {a.is_liability?'(':''}{fmt(Math.abs(bal))}{a.is_liability?')':''}
+            </div>
+            <div style={{fontSize:11, color:'var(--text-muted)', marginTop:2, fontWeight:500}}>{a.transaction_count.toLocaleString()} txns</div>
+          </div>
+        </div>
+        {/* Badges row */}
+        <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:isEditing?12:0}}>
+          <span className="badge" style={{background:bucketS.bg, color:bucketS.color, padding:'3px 10px', borderRadius:20}}>{fmtAcctType(a.account_type)}</span>
+          {a.mask && <span className="badge badge-transfer" style={{padding:'3px 10px', borderRadius:20}}>····{a.mask}</span>}
+          {!a.is_manual && <span className="badge badge-income" style={{background:'rgba(16,185,129,0.08)', padding:'3px 10px', borderRadius:20}}>● Plaid</span>}
+          {a.is_manual && <span className="badge" style={{background:'rgba(245,158,11,0.08)', color:'var(--amber)', padding:'3px 10px', borderRadius:20}}>Manual</span>}
+        </div>
+        {/* Actions */}
+        <div style={{display:'flex', gap:8, marginTop:16, flexWrap:'wrap'}}>
+          {isEditing ? (
+            <>
+              <button type="button" className="btn btn-sm" style={{background:'var(--green)'}} onClick={(e)=>{e.preventDefault();onSave(a.id)}}>Save</button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();onCancel()}}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();onStartEdit(a)}}>Edit</button>
+              {showPlaidActions && <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--amber)', border:'1px solid rgba(245,158,11,0.2)'}} onClick={(e)=>{e.preventDefault();onSever(a)}}>Sever</button>}
+              <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--blue-vibrant)', border:'1px solid rgba(59,130,246,0.2)'}} onClick={(e)=>{e.preventDefault();onMerge(a)}}>Merge</button>
+              <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)', border:'1px solid rgba(239,68,68,0.2)'}} onClick={(e)=>{e.preventDefault();onDelete(a)}}>Delete</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountsPage({banks,onConnectBank,onSync,toast,refreshKey}){
+  const[accounts,setAccounts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[showManual,setShowManual]=useState(false);
+  const[editingId,setEditingId]=useState(null);
+  const[editVals,setEditVals]=useState({});
+  const[mergeAccount,setMergeAccount]=useState(null);
+  const[deleteAccount,setDeleteAccount]=useState(null);
+  const[cm,setCm]=useState(null);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{setAccounts(await apiFetch('/accounts'));}catch(e){}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load();},[load,refreshKey]);
+
+  const startEdit=(a)=>{setEditingId(a.id);setEditVals({account_name:a.account_name||'',notes:a.notes||'',account_type:a.account_type||''});};
+  const cancelEdit=()=>{setEditingId(null);setEditVals({});};
+  const saveEdit=async(id)=>{
+    try{await apiFetch(`/accounts/${id}`,{method:'PATCH',body:JSON.stringify(editVals)});toast('Account updated');setEditingId(null);await load();}
+    catch(e){toast('Failed to save','error');}
+  };
+  const severPlaid=(a)=>{
+    setCm({
+      title:'Sever Plaid Connection',
+      body:`Disconnect Plaid from "${a.account_name}"? Your transactions will be kept, but this account will no longer sync automatically.`,
+      confirmLabel:'Sever Connection',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/accounts/${a.id}/sever-plaid`,{method:'POST'});toast('Plaid connection severed');await load();}
+        catch(e){toast('Failed: '+(e.message||'error'),'error');}
+      }
+    });
+  };
+  const handleMergeDone=(msg,err)=>{setMergeAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
+  const handleDeleteDone=(msg,err)=>{setDeleteAccount(null);if(err)toast(err,'error');else{toast(msg);load();}};
+
+  const rowProps={editingId,editVals,setEditVals,onSave:saveEdit,onCancel:cancelEdit,onStartEdit:startEdit,onSever:severPlaid,onMerge:setMergeAccount,onDelete:setDeleteAccount};
+
+  const totalAssets=accounts.filter(a=>a.is_asset).reduce((s,a)=>s+(a.balance!=null?a.balance:(a.starting_balance||0)),0);
+  const totalLiab=accounts.filter(a=>a.is_liability).reduce((s,a)=>s+Math.abs(a.balance!=null?a.balance:(a.starting_balance||0)),0);
+  const netWorth=totalAssets-totalLiab;
+
+  return(
+    <div className="accounts-container">
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+      {showManual&&<ManualAccountModal onClose={()=>setShowManual(false)} onSaved={load} toast={toast}/>}
+      {mergeAccount&&<MergeAccountModal source={mergeAccount} allAccounts={accounts} onDone={handleMergeDone} onClose={()=>setMergeAccount(null)}/>}
+      {deleteAccount&&<DeleteAccountModal account={deleteAccount} onDone={handleDeleteDone} onClose={()=>setDeleteAccount(null)}/>}
+
+      {/* Page Header */}
+      <div className="card" style={{display:'flex', justifyContent:'flex-end', alignItems:'center', padding:'16px 24px', marginBottom:24}}>
+        <div style={{display:'flex', gap:10}}>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();onSync()}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:6}}><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            Sync All
+          </button>
+          <button type="button" className="btn btn-sm" onClick={(e)=>{e.preventDefault();onConnectBank()}}>+ Connect Bank</button>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();setShowManual(true)}}>+ Manual</button>
+        </div>
+      </div>
+
+      {/* KPI Grid */}
+      <div className="metric-grid" style={{marginBottom:32}}>
+        <div className="card metric-card">
+          <div className="metric-label">Total Assets</div>
+          <div className="metric-value" style={{color:'var(--green)'}}>{fmt(totalAssets)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Total Liabilities</div>
+          <div className="metric-value" style={{color:'var(--red)'}}>{fmt(totalLiab)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Worth</div>
+          <div className="metric-value" style={{color:netWorth>=0?'var(--blue-vibrant)':'var(--red)'}}>{fmt(netWorth)}</div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Accounts</div>
+          <div className="metric-value">{accounts.length}</div>
+        </div>
+      </div>
+
+      {/* Grouped Accounts */}
+      {(()=>{
+        const typeOrder=[
+          {key:'checking',label:'Checking',isAsset:true},
+          {key:'savings',label:'Savings',isAsset:true},
+          {key:'investment',label:'Investments',isAsset:true},
+          {key:'other_asset',label:'Other Assets',isAsset:true},
+          {key:'credit card',label:'Credit Cards',isAsset:false},
+          {key:'loan',label:'Loans',isAsset:false},
+          {key:'other_liability',label:'Other Liabilities',isAsset:false},
+        ];
+        const normalize=t=>{
+          const s=(t||'').toLowerCase();
+          if(s.includes('check'))return'checking';
+          if(s.includes('saving'))return'savings';
+          if(s.includes('invest')||s.includes('brokerage')||s.includes('401')||s.includes('ira'))return'investment';
+          if(s.includes('credit'))return'credit card';
+          if(s.includes('loan')||s.includes('mortgage')||s.includes('student'))return'loan';
+          if(s.includes('other')&&(s.includes('liab')||s.includes('debt')))return'other_liability';
+          return'other_asset';
+        };
+        const grouped={};
+        accounts.forEach(a=>{const k=normalize(a.account_type);(grouped[k]=grouped[k]||[]).push(a);});
+        let lastIsAsset=null;
+        return typeOrder.filter(g=>(grouped[g.key]||[]).length>0).map(g=>{
+          const showSectionLabel=lastIsAsset!==null&&lastIsAsset!==g.isAsset;
+          lastIsAsset=g.isAsset;
+          return(
+            <React.Fragment key={g.key}>
+              {showSectionLabel && (
+                <div style={{margin:'40px 0 20px', display:'flex', alignItems:'center', gap:16}}>
+                  <span style={{fontSize:12, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'2px', whiteSpace:'nowrap'}}>Liabilities</span>
+                  <div style={{height:1, background:'var(--border-strong)', width:'100%'}}/>
+                </div>
+              )}
+              <div style={{marginBottom:32}}>
+                <div style={{fontSize:11, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'1.5px', marginBottom:12, display:'flex', alignItems:'center', gap:8}}>
+                  {g.label}
+                  <span style={{fontSize:10, opacity:0.6}}>({grouped[g.key].length})</span>
+                </div>
+                <div className="grid-auto-sm" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:20}}>
+                  {grouped[g.key].map(a=><AccountRow key={a.id} a={a} showPlaidActions={!a.is_manual} {...rowProps}/>)}
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        });
+      })()}
+    </div>
+  );
+}
+
+function ResetResyncButton({toast,onDone}){
+  const[busy,setBusy]=useState(false);
+  const[cm,setCm]=useState(null);
+  const run=()=>{
+    setCm({
+      title:'Reset & Full Resync',
+      body:'This will delete ALL Plaid-synced transactions and re-fetch everything from scratch.\n\nManually entered transactions are kept.',
+      confirmLabel:'Reset & Resync',danger:true,
+      onConfirm:async()=>{
+        setBusy(true);
+        try{
+          const r=await apiFetch('/plaid/reset-and-resync',{method:'POST'});
+          toast(`${r.message} — refreshing in 15s`);
+          setTimeout(()=>onDone&&onDone(),15000);
+        }catch(e){toast('Reset failed: '+(e.message||e),'error');}
+        finally{setBusy(false);}
+      }
+    });
+  };
+  return<React.Fragment>
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+    <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:11}} onClick={run} disabled={busy}>{busy?'Resetting…':'⟳ Reset & Full Resync'}</button>
+  </React.Fragment>;
+}
+
+function SyncLiabilitiesButton({toast,onDone}){
+  const[busy,setBusy]=useState(false);
+  const run=async()=>{
+    setBusy(true);
+    try{
+      const r=await apiFetch('/plaid/sync-liabilities',{method:'POST'});
+      const msg=`Liability sync done — ${r.accounts_updated} account${r.accounts_updated!==1?'s':''} updated`;
+      toast(r.errors&&r.errors.length?msg+` (${r.errors.length} skipped)`:msg);
+      onDone&&onDone();
+    }catch(e){toast('Liability sync failed: '+(e.message||e),'error');}
+    finally{setBusy(false);}
+  };
+  return<button type="button" className="btn btn-sm btn-secondary" style={{fontSize:11}} onClick={run} disabled={busy} title="Pull minimum payments, due dates, and APRs from Plaid">{busy?'Syncing…':'💳 Sync Liabilities'}</button>;
+}
+
+function BankAccountRow({a,institutionName,toast,onSynced}){
+  const[busy,setBusy]=useState(false);
+  const[rebuilding,setRebuilding]=useState(false);
+  const[cm,setCm]=useState(null);
+  const redownload=()=>{
+    setCm({
+      title:`Re-download "${a.name}"`,
+      body:`Resets the sync cursor so all transactions re-download from Plaid.\n\nExisting transactions are preserved and matched by content hash — no data lost.\n\nNote: cursor reset affects ALL accounts at ${institutionName}.`,
+      confirmLabel:'Re-download',danger:false,
+      onConfirm:async()=>{
+        setBusy(true);
+        try{
+          await apiFetch(`/accounts/${a.id}/reset-and-resync`,{method:'POST'});
+          toast(`⟳ Re-download started for ${a.name} — refresh in ~30s`);
+          setTimeout(()=>onSynced&&onSynced(),30000);
+        }catch(e){toast('Re-download failed: '+(e.message||e),'error');}
+        finally{setBusy(false);}
+      }
+    });
+  };
+  const rebuildSnapshots=async()=>{
+    setRebuilding(true);
+    try{
+      const r=await apiFetch(`/accounts/${a.id}/rebuild-snapshots`,{method:'POST'});
+      toast(`↺ ${a.name}: rebuilt ${r.months_built} month snapshot${r.months_built!==1?'s':''}`);
+      onSynced&&onSynced();
+    }catch(e){toast('Snapshot rebuild failed: '+(e.message||e),'error');}
+    finally{setRebuilding(false);}
+  };
+  return(
+    <React.Fragment>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+      <div className="card" style={{padding:'16px 20px', background:'var(--surface-hover)', marginBottom:12, borderRadius:16}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between', flexWrap:'wrap', gap:12}}>
+          <div style={{display:'flex',gap:12,fontSize:14,alignItems:'center'}}>
+            <span style={{fontWeight:700,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{a.name}</span>
+            <span style={{textTransform:'capitalize',color:'var(--text-secondary)', fontSize:12}}>{a.type}</span>
+            {a.mask&&<span style={{color:'var(--text-muted)', fontSize:12}}>····{a.mask}</span>}
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button type="button" className="btn btn-sm btn-secondary" style={{fontSize:11,padding:'6px 12px'}} disabled={rebuilding} onClick={(e)=>{e.preventDefault();rebuildSnapshots()}} title="Rebuild monthly balance snapshots for this account">
+              {rebuilding?'…':'↺ Snapshots'}
+            </button>
+            <button type="button" className="btn btn-sm btn-secondary" style={{fontSize:11,padding:'6px 12px'}} disabled={busy} onClick={(e)=>{e.preventDefault();redownload()}} title="Re-download all transactions from Plaid (non-destructive)">
+              {busy?'…':'⟳ Re-download'}
+            </button>
+          </div>
+        </div>
+        {/* Balance anchor row */}
+        {(()=>{
+          const ageDays=a.anchor_age_days;
+          if(ageDays==null)return null;
+          const stale=ageDays>180;
+          const warn=ageDays>90&&ageDays<=180;
+          const color=stale?'var(--red)':warn?'var(--amber)':'var(--text-muted)';
+          return(
+            <div style={{display:'flex',gap:16,flexWrap:'wrap',marginTop:8,fontSize:12,color:'var(--text-secondary)'}}>
+              <span>Balance anchor: <strong style={{color, fontWeight:600}}>{a.start_date}</strong>
+                <span style={{color,marginLeft:6, opacity:0.8}}>({ageDays}d ago{stale?' — stale, consider Force Resync':warn?' — getting old':''})</span>
+              </span>
+              {a.starting_balance!=null&&<span>Anchor value: <strong style={{color:'var(--text-primary)', fontWeight:600}}>{a.starting_balance<0?'-':''}{fmt(Math.abs(a.starting_balance))}</strong></span>}
+            </div>
+          );
+        })()}
+        {/* Liability details row — shown for credit/loan accounts with Plaid data */}
+        {a.is_liability&&(a.liability_min_payment!=null||a.liability_next_due_date)&&(
+          <div style={{display:'flex',gap:16,flexWrap:'wrap',marginTop:8,fontSize:12,color:'var(--text-secondary)'}}>
+            {a.liability_min_payment!=null&&<span style={{color:a.liability_next_due_date&&new Date(a.liability_next_due_date)<new Date()?'var(--red)':'var(--text-secondary)'}}>
+              Min due: <strong style={{color:'var(--text-primary)', fontWeight:600}}>${a.liability_min_payment.toFixed(2)}</strong>
+            </span>}
+            {a.liability_next_due_date&&<span>
+              Due: <strong style={{color:'var(--text-primary)', fontWeight:600}}>{new Date(a.liability_next_due_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</strong>
+            </span>}
+            {a.liability_last_statement_bal!=null&&<span>
+              Stmt bal: <strong style={{color:'var(--text-primary)', fontWeight:600}}>${Math.abs(a.liability_last_statement_bal).toFixed(2)}</strong>
+            </span>}
+            {a.liability_purchase_apr!=null&&<span>APR: <strong style={{color:'var(--text-primary)', fontWeight:600}}>{a.liability_purchase_apr}%</strong></span>}
+          </div>
+        )}
+      </div>
+    </React.Fragment>
+  );
+}
+
+function BankRow({item,toast,onRenamed,onSynced}){
+  const[editing,setEditing]=useState(false);
+  const[nameVal,setNameVal]=useState(item.institution_name);
+  const[resyncing,setResyncing]=useState(false);
+  const[reconnecting,setReconnecting]=useState(false);
+  const[expanded,setExpanded]=useState(false);
+  const[confirmingRemove,setConfirmingRemove]=useState(false);
+  const[cm,setCm]=useState(null);
+  const openReconnect=async()=>{
+    setReconnecting(true);
+    try{
+      const{link_token}=await apiFetch(`/plaid/update-link-token/${item.item_id}`);
+      const handler=window.Plaid.create({
+        token:link_token,
+        onSuccess:async()=>{
+          try{
+            await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
+            toast(`✓ ${item.institution_name} — syncing accounts…`);
+            setTimeout(()=>onSynced&&onSynced(),15000);
+          }catch(e){toast('Linked, but sync failed to start','error');}
+          finally{setReconnecting(false);}
+        },
+        onExit:()=>setReconnecting(false),
+      });
+      handler.open();
+    }catch(e){toast('Failed to open Plaid: '+(e.message||e),'error');setReconnecting(false);}
+  };
+  const save=async()=>{
+    try{
+      const r=await apiFetch(`/plaid/items/${item.item_id}`,{method:'PATCH',body:JSON.stringify({institution_name:nameVal})});
+      onRenamed(item.item_id,r.institution_name);
+      setEditing(false);
+      toast('Name updated');
+    }catch(e){toast('Failed to update: '+(e.message||e),'error');}
+  };
+  const forceResync=async()=>{
+    setResyncing(true);
+    try{
+      await apiFetch(`/plaid/items/${item.item_id}/force-resync`,{method:'POST'});
+      toast(`${item.institution_name}: sync started — refreshing in 15s`);
+      setTimeout(()=>onSynced&&onSynced(),15000);
+    }catch(e){toast(`Resync failed: ${e.message||e}`,'error');}
+    finally{setResyncing(false);}
+  };
+  const envColor={'production':'var(--green)','development':'var(--amber)','sandbox':'var(--violet)'}[item.environment]||'var(--text-muted)';
+  return(
+    <React.Fragment>
+    {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+    <div className="card" style={{padding:'24px', marginBottom:16}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between', flexWrap:'wrap', gap:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:16}}>
+          <div className="logo-icon-box" style={{width:40, height:40, borderRadius:12, fontSize:20}}>
+            {item.institution_name ? item.institution_name[0] : 'B'}
+          </div>
+          <div>
+            {editing
+              ?<div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input className="search-input" style={{padding:'6px 12px',fontSize:14,width:200}} value={nameVal} onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();if(e.key==='Escape')setEditing(false);}} autoFocus/>
+                  <button type="button" className="btn btn-sm" onClick={(e)=>{e.preventDefault();save()}}>Save</button>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();setNameVal(item.institution_name);setEditing(false);}}>Cancel</button>
+                </div>
+              :<div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{fontSize:18, fontWeight:700, fontFamily:'Outfit, sans-serif', color:'var(--text-primary)'}}>{item.institution_name}</div>
+                  <button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px'}} onClick={(e)=>{e.preventDefault();setNameVal(item.institution_name);setEditing(true);}}>Edit</button>
+                </div>
+            }
+            <div style={{display:'flex',gap:16,marginTop:6,flexWrap:'wrap'}}>
+              <span style={{fontSize:12, color:'var(--text-secondary)'}}>{item.account_count} account{item.account_count!==1?'s':''}</span>
+              <span style={{fontSize:12, color:'var(--text-secondary)'}}>{item.transaction_count.toLocaleString()} txns</span>
+              <span style={{fontSize:12, color:'var(--text-secondary)'}}>{item.last_synced_at?`Last sync: ${fmtDate(item.last_synced_at)}`:'Never synced'}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:envColor,background:`${envColor}15`,borderRadius:20,padding:'4px 10px'}}>{item.environment}</span>
+          {item.last_error_code
+            ?<span style={{fontSize:11,fontWeight:600,color:'var(--red)',background:'rgba(239, 68, 68, 0.1)',borderRadius:20,padding:'4px 10px'}} title={item.last_error_message||''}>🔴 {item.last_error_code}</span>
+            :item.is_active
+              ?<span className="badge badge-income" style={{padding:'4px 10px'}}>Active</span>
+              :<span style={{fontSize:11,fontWeight:600,color:'var(--amber)',background:'rgba(245, 158, 11, 0.1)',borderRadius:20,padding:'4px 10px'}}>Stale</span>
+          }
+          <button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'4px 10px'}} onClick={(e)=>{e.preventDefault();setExpanded(x=>!x)}}>{expanded?'▲':'▼'}</button>
+          {item.is_active&&<button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();forceResync()}} disabled={resyncing}>{resyncing?'Syncing…':'↺ Sync'}</button>}
+          {item.is_active&&!item.last_error_code&&<button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();openReconnect()}} disabled={reconnecting}>{reconnecting?'Opening…':'+ Add Account'}</button>}
+          <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)', border:'1px solid rgba(239, 68, 68, 0.2)'}} onClick={(e)=>{
+            e.preventDefault();
+            if(item.transaction_count===0){
+              setCm({
+                title:`Remove "${item.institution_name}"`,
+                body:`This institution has 0 transactions — its ${item.account_count} empty account${item.account_count!==1?'s':''} will be deleted.`,
+                confirmLabel:'Remove',danger:true,
+                onConfirm:async()=>{
+                  try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Removed');}
+                  catch(e){toast('Failed: '+(e.message||e),'error');}
+                }
+              });
+            }else{
+              setConfirmingRemove(true);
+            }
+          }}>Remove</button>
+        </div>
+      </div>
+      {item.last_error_code&&(
+        <div style={{marginTop:16,background:'rgba(239, 68, 68, 0.05)',border:'1px solid rgba(239, 68, 68, 0.2)',borderRadius:16,padding:'16px'}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:16}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,color:'var(--red)',fontSize:14,marginBottom:6, fontFamily:'Outfit, sans-serif'}}>
+                ⚠️ Sync error: {item.last_error_code}
+                {item.last_error_at&&<span style={{fontWeight:400,fontSize:12,color:'var(--red)',opacity:0.7,marginLeft:12}}>since {item.last_error_at.slice(0,10)}</span>}
+              </div>
+              <div style={{fontSize:13,color:'var(--text-secondary)', lineHeight:1.5}}>
+                {item.last_error_code==='ITEM_LOGIN_REQUIRED'
+                  ?`${item.institution_name}'s OAuth consent expired (~90-day limit). Click Reconnect to re-authenticate in place — no data is lost.`
+                  :item.last_error_message||'Plaid returned an error during the last sync attempt.'
+                }
+              </div>
+            </div>
+            {item.last_error_code==='ITEM_LOGIN_REQUIRED'&&(
+              <button type="button" className="btn btn-sm" style={{flexShrink:0,background:'var(--red)'}} onClick={(e)=>{e.preventDefault();openReconnect()}} disabled={reconnecting}>
+                {reconnecting?'Opening…':'🔗 Reconnect'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {confirmingRemove&&(
+        <div style={{marginTop:16,background:'rgba(239, 68, 68, 0.05)',border:'1px solid rgba(239, 68, 68, 0.2)',borderRadius:16,padding:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}}>
+          <div>
+            <div style={{fontWeight:700,color:'var(--red)',fontSize:14,marginBottom:4, fontFamily:'Outfit, sans-serif'}}>⚠️ Remove "{item.institution_name}"?</div>
+            <div style={{fontSize:12,color:'var(--text-secondary)', lineHeight:1.5}}>This will deactivate the connection — Plaid will stop syncing. Its <strong>{item.account_count} account{item.account_count!==1?'s':''}</strong> and <strong>{item.transaction_count.toLocaleString()} transaction{item.transaction_count!==1?'s':''}</strong> will be kept but no longer updated.</div>
+          </div>
+          <div style={{display:'flex',gap:10,flexShrink:0}}>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();setConfirmingRemove(false)}}>Cancel</button>
+            <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff'}} onClick={async(e)=>{
+              e.preventDefault();
+              setConfirmingRemove(false);
+              try{await apiFetch(`/plaid/items/${item.item_id}`,{method:'DELETE'});onSynced&&onSynced();toast('Connection removed');}
+              catch(e){toast('Failed: '+(e.message||e),'error');}
+            }}>Yes, Remove</button>
+          </div>
+        </div>
+      )}
+      {expanded&&item.accounts&&item.accounts.length>0&&(
+        <div style={{marginTop:20,marginLeft:24,display:'flex',flexDirection:'column',gap:8}}>
+          {item.accounts.map((a,i)=>(
+            <BankAccountRow key={a.id||i} a={a} institutionName={item.institution_name} toast={toast} onSynced={onSynced}/>
+          ))}
+        </div>
+      )}
+    </div>
+    </React.Fragment>
+  );
+}
+
+function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoScan,onAutoScanDone}){
+  const[tab,setTab]=useState('data');
+  const[busy,setBusy]=useState(false);
+  const[cm,setCm]=useState(null);
+  const[items,setItems]=useState([]);
+  /* Rules tab state */
+  const[rules,setRules]=useState([]);
+  const[rulesLoading,setRulesLoading]=useState(false);
+  const[ruleSearch,setRuleSearch]=useState('');
+  const[debouncedSearch,setDebouncedSearch]=useState('');
+  const[ruleEditing,setRuleEditing]=useState(null);
+  const[ruleEditVals,setRuleEditVals]=useState({});
+  const[showAddRule,setShowAddRule]=useState(false);
+  const[reapplying,setReapplying]=useState(false);
+
+  const[balanceSyncing,setBalanceSyncing]=useState(false);
+  const[balanceSyncResult,setBalanceSyncResult]=useState(null);
+  const[healthChecking,setHealthChecking]=useState(false);
+  const[healthResults,setHealthResults]=useState(null);
+  const checkPlaidHealth=async()=>{
+    setHealthChecking(true);
+    try{const r=await apiFetch('/plaid/item-status');setHealthResults(r);}
+    catch(e){toast('Health check failed: '+(e.message||e),'error');}
+    finally{setHealthChecking(false);}
+  };
+  const syncBalances=async(force=false)=>{
+    setBalanceSyncing(true);
+    try{
+      const url='/accounts/sync-balances'+(force?'?force=true':'');
+      const r=await apiFetch(url,{method:'POST'});
+      setBalanceSyncResult({...r,force});
+      const anchored=r.accounts.filter(a=>a.anchor_updated).length;
+      const snaps=r.accounts.reduce((s,a)=>s+a.months_built,0);
+      if(force){
+        toast(`Force resync complete — ${anchored} anchor${anchored!==1?'s':''} updated, ${snaps} month snapshots rebuilt`);
+      }else{
+        toast(`Balance sync complete — ${snaps} month snapshots rebuilt${anchored>0?` (${anchored} new anchor${anchored!==1?'s':''} set)`:''}`);
+      }
+    }catch(e){toast('Balance sync failed: '+(e.message||e),'error');}
+    finally{setBalanceSyncing(false);}
+  };
+  const[dupResult,setDupResult]=useState(null); // {duplicates, ignored}
+  const[dupScanning,setDupScanning]=useState(false);
+  const dupGroups=dupResult?.duplicates||null;
+  const dupIgnored=dupResult?.ignored||[];
+  const scanDuplicates=async()=>{
+    setDupScanning(true);
+    try{
+      const r=await apiFetch('/accounts/detect-duplicates');
+      setDupResult(r);
+      if(r.count===0)toast('No duplicate accounts found ✓');
+    }catch(e){toast('Duplicate scan failed: '+(e.message||e),'error');}
+    finally{setDupScanning(false);}
+  };
+
+  /* Auto-scan: triggered after a bank link that created new accounts */
+  useEffect(()=>{
+    if(!autoScan)return;
+    setTab('bank');
+    scanDuplicates();
+    onAutoScanDone&&onAutoScanDone();
+  },[autoScan]);
+
+  const mergeOnePair=async(keepId,discardId)=>{
+    try{
+      const r=await apiFetch('/accounts/merge-pair',{method:'POST',body:JSON.stringify({keep_id:keepId,discard_id:discardId})});
+      toast(`Merged: ${r.kept?.name} kept, ${r.discarded?.name} removed (${r.transactions_moved} txns moved)`);
+      // Remove just this pair from local state — other pairs unaffected
+      setDupResult(prev=>{
+        if(!prev)return prev;
+        const newGroups=prev.duplicates.map(g=>{
+          if(g.keep_id!==keepId)return g;
+          const newDiscards=g.discard_ids.filter(id=>id!==discardId);
+          return newDiscards.length>0?{...g,discard_ids:newDiscards}:null;
+        }).filter(Boolean);
+        return{...prev,duplicates:newGroups,count:newGroups.length};
+      });
+      onBanksChanged&&onBanksChanged();
+    }catch(e){toast('Merge failed: '+(e.message||e),'error');}
+  };
+  const ignoreDuplicatePair=async(idA,idB)=>{
+    try{
+      await apiFetch('/accounts/ignore-duplicate-pair',{method:'POST',body:JSON.stringify({account_id_a:idA,account_id_b:idB})});
+      // Remove from groups, add to ignored in local state
+      setDupResult(prev=>{
+        if(!prev)return prev;
+        const removedGroup=prev.duplicates.find(g=>g.keep_id===Math.min(idA,idB)||g.discard_ids.includes(Math.max(idA,idB)));
+        const newGroups=prev.duplicates.filter(g=>!(g.keep_id===idA&&g.discard_ids.includes(idB))&&!(g.keep_id===idB&&g.discard_ids.includes(idA)));
+        const newIgnored=[...prev.ignored];
+        if(removedGroup)newIgnored.push(removedGroup);
+        return{...prev,duplicates:newGroups,count:newGroups.length,ignored:newIgnored};
+      });
+      toast('Pair ignored — it won\'t appear in future scans');
+    }catch(e){toast('Failed to ignore: '+(e.message||e),'error');}
+  };
+  const unignorePair=async(idA,idB)=>{
+    try{
+      await apiFetch('/accounts/ignore-duplicate-pair',{method:'DELETE',body:JSON.stringify({account_id_a:idA,account_id_b:idB})});
+      await scanDuplicates(); // re-scan to move it back
+    }catch(e){toast('Failed to unignore: '+(e.message||e),'error');}
+  };
+  const refreshItems=useCallback(()=>{apiFetch('/plaid/items').then(r=>{setItems(r);onBanksChanged&&onBanksChanged();}).catch(()=>{});},[onBanksChanged]);
+  useEffect(()=>{refreshItems();},[]);
+
+  const run=async(path,msg)=>{setBusy(true);try{const r=await apiFetch(path,{method:'POST'});toast(msg);return r;}catch(e){toast('Failed: '+(e.message||'unknown error'),'error');}finally{setBusy(false);}};
+
+  /* Debounce ruleSearch → debouncedSearch (350ms) to avoid an API call per keystroke */
+  useEffect(()=>{
+    const id=setTimeout(()=>setDebouncedSearch(ruleSearch),350);
+    return()=>clearTimeout(id);
+  },[ruleSearch]);
+
+  /* Load rules — keyed on debouncedSearch so the API is only called after typing pauses */
+  const loadRules=useCallback(async()=>{
+    setRulesLoading(true);
+    try{setRules(await apiFetch(`/rules?limit=200${debouncedSearch?`&search=${encodeURIComponent(debouncedSearch)}`:''}`));}
+    catch(e){toast('Failed to load rules','error');}
+    finally{setRulesLoading(false);}
+  },[debouncedSearch]);
+  useEffect(()=>{if(tab==='rules')loadRules();},[tab,loadRules]);
+
+  const startRuleEdit=(r)=>{setRuleEditing(r.id);setRuleEditVals({priority:r.priority,match_type:r.match_type,pattern:r.pattern,set_action:r.set_action||'',set_category:r.set_category||'',set_description:r.set_description||'',clean_description:r.clean_description||'',notes:r.notes||''});};
+  const _reapplyMsg=r=>r?.reapplied?.updated>0?` — ${r.reapplied.updated} transaction${r.reapplied.updated!==1?'s':''} refreshed`:'';
+  const saveRuleEdit=async(id)=>{
+    try{const r=await apiFetch(`/rules/${id}`,{method:'PATCH',body:JSON.stringify(ruleEditVals)});toast(`Rule updated${_reapplyMsg(r)}`);setRuleEditing(null);await loadRules();}
+    catch(e){toast('Failed to save','error');}
+  };
+  const deleteRule=(id)=>{
+    setCm({
+      title:'Deactivate Rule',
+      body:'This rule will be deactivated and will no longer apply to new transactions.',
+      confirmLabel:'Deactivate',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/rules/${id}`,{method:'DELETE'});toast('Rule deactivated');await loadRules();}
+        catch(e){toast('Failed','error');}
+      }
+    });
+  };
+  const addRule=async()=>{
+    try{const r=await apiFetch('/rules',{method:'POST',body:JSON.stringify(ruleEditVals)});toast(`Rule created${_reapplyMsg(r)}`);setShowAddRule(false);setRuleEditVals({});await loadRules();}
+    catch(e){toast('Failed to create','error');}
+  };
+  const applyRules=async()=>{
+    setReapplying(true);
+    try{const r=await apiFetch('/rules/reapply',{method:'POST'});toast(r.updated>0?`${r.updated} transaction${r.updated!==1?'s':''} refreshed (${r.total} checked)`:'No changes needed — all transactions already up to date');}
+    catch(e){toast('Failed: '+(e.message||e),'error');}
+    finally{setReapplying(false);}
+  };
+  const[cleaningDescs,setCleaningDescs]=useState(false);
+  const cleanDescriptions=async()=>{
+    setCleaningDescs(true);
+    try{
+      const r=await apiFetch('/rules/clean-descriptions',{method:'POST'});
+      toast(r.updated>0?`Updated ${r.updated} display name${r.updated!==1?'s':''} across ${r.total} transactions`:'All display names already match their rules — nothing to update');
+    }catch(e){toast('Failed: '+(e.message||e),'error');}
+    finally{setCleaningDescs(false);}
+  };
+
+  /* Cards file upload */
+  const uploadCards=async(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    setBusy(true);
+    try{
+      const form=new FormData();form.append('file',file);
+      const r=await fetch('/api/cards/upload-and-import',{method:'POST',body:form}).then(r=>r.json());
+      toast(r.message||`Imported ${r.imported} cards`);
+    }catch(err){toast('Upload failed','error');}
+    finally{setBusy(false);e.target.value='';}
+  };
+
+  /* Preferences state — persisted in localStorage */
+  const[prefs,setPrefs]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem('user-prefs'))||{};}catch(e){return{};}
+  });
+  const setPref=(k,v)=>{setPrefs(p=>{const n={...p,[k]:v};localStorage.setItem('user-prefs',JSON.stringify(n));return n;});};
+
+  const tabs=[
+    {id:'prefs',label:'Preferences'},
+    {id:'data',label:'Data Management'},
+    {id:'rules',label:'Rules'},
+    {id:'bank',label:'Bank Links'},
+    {id:'about',label:'About'},
+  ];
+
+  return(
+    <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+      <div className="card" style={{display:'flex',gap:24,marginBottom:24,padding:'12px 24px'}}>
+        {tabs.map(t=>(<button type="button" key={t.id} onClick={()=>setTab(t.id)}
+          style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,
+            background:'transparent',color:tab===t.id?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s',marginBottom:'-1px'}}>{t.label}</button>))}
+      </div>
+
+      {tab==='prefs'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Display</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Currency</div><div className="settings-desc">Currency symbol used throughout the app</div></div>
+            <select className="sel-drop" value={prefs.currency||'USD'} onChange={e=>setPref('currency',e.target.value)} style={{width:120}}>
+              {[['USD','$ USD'],['EUR','€ EUR'],['GBP','£ GBP'],['ILS','₪ ILS'],['CAD','$ CAD'],['AUD','$ AUD'],['JPY','¥ JPY']].map(([v,l])=>(
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Date Format</div><div className="settings-desc">How dates are displayed in tables and charts</div></div>
+            <select className="sel-drop" value={prefs.dateFormat||'MM/DD/YYYY'} onChange={e=>setPref('dateFormat',e.target.value)} style={{width:140}}>
+              {['MM/DD/YYYY','DD/MM/YYYY','YYYY-MM-DD'].map(f=><option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Number Format</div><div className="settings-desc">How amounts are formatted (thousands separator)</div></div>
+            <select className="sel-drop" value={prefs.numFormat||'1,234.56'} onChange={e=>setPref('numFormat',e.target.value)} style={{width:140}}>
+              {['1,234.56','1.234,56','1 234.56'].map(f=><option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Behavior</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Default Transaction View</div><div className="settings-desc">Which month loads first on the Transactions page</div></div>
+            <select className="sel-drop" value={prefs.defaultTxnView||'current'} onChange={e=>setPref('defaultTxnView',e.target.value)} style={{width:140}}>
+              <option value="current">Current Month</option>
+              <option value="previous">Previous Month</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Compact Tables</div><div className="settings-desc">Reduce row height in transaction and balance tables</div></div>
+            <button type="button" className="btn btn-sm" onClick={()=>setPref('compact',!prefs.compact)}
+              style={{minWidth:56,background:prefs.compact?'var(--green)':'var(--elevated)',color:prefs.compact?'#fff':'var(--text-muted)',border:prefs.compact?'none':'1px solid var(--border)',fontWeight:500,fontSize:12,transition:'all 0.15s'}}>
+              {prefs.compact?'On':'Off'}
+            </button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Show Cents</div><div className="settings-desc">Display decimal places in amounts (e.g. $1,234.56 vs $1,235)</div></div>
+            <button type="button" className="btn btn-sm" onClick={()=>setPref('showCents',prefs.showCents===false?true:!(prefs.showCents!==false))}
+              style={{minWidth:56,background:(prefs.showCents!==false)?'var(--green)':'var(--elevated)',color:(prefs.showCents!==false)?'#fff':'var(--text-muted)',border:(prefs.showCents!==false)?'none':'1px solid var(--border)',fontWeight:500,fontSize:12,transition:'all 0.15s'}}>
+              {prefs.showCents!==false?'On':'Off'}
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <div className="section-header"><div className="section-title">Data</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Export All Transactions</div><div className="settings-desc">Download a CSV file of all transactions for external analysis</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={async()=>{
+              try{
+                const resp=await fetch('/api/transactions?limit=999999');
+                const txns=await resp.json();
+                const headers=['date','description_clean','description_raw','amount','category_final','action','account_name','is_excluded'];
+                const rows=txns.map(t=>headers.map(h=>JSON.stringify(t[h]??'')).join(','));
+                const csv=[headers.join(','),...rows].join('\n');
+                const blob=new Blob([csv],{type:'text/csv'});
+                const url=URL.createObjectURL(blob);
+                const link=document.createElement('a');link.href=url;link.download=`transactions-${todayStr()}.csv`;link.click();
+                URL.revokeObjectURL(url);
+                toast(`Exported ${txns.length} transactions`);
+              }catch(e){toast('Export failed','error');}
+            }}>↓ Export CSV</button>
+          </div>
+        </div>
+      </div>}
+
+      {tab==='data'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Categorization</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Re-categorize All Transactions</div><div className="settings-desc">Re-runs all rules on unlocked transactions</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>run('/init/recategorize','Re-categorized!')} disabled={busy}>{busy?'…':'Run'}</button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Re-import Rules from Excel</div><div className="settings-desc">Reloads categorization rules from your Excel file</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>run('/init/import-rules','Rules imported!')} disabled={busy}>{busy?'…':'Import'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Data Fixes</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Fix Transaction Signs</div><div className="settings-desc">Corrects sign convention (expenses negative, income positive)</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>run('/init/fix-signs','Signs fixed!')} disabled={busy}>{busy?'…':'Fix'}</button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">📊 Rebuild All Balance Snapshots</div><div className="settings-desc">Recalculates monthly opening/closing balances for every account. Safe to run any time — use if Daily Balances looks wrong after a sync or merge.</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{const r=await apiFetch('/accounts/rebuild-all-snapshots',{method:'POST'});toast(`📊 Rebuilt snapshots for ${r.accounts_rebuilt} account${r.accounts_rebuilt!==1?'s':''}`);}
+              catch(e){toast('Rebuild failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Rebuild'}</button>
+          </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">🔑 Backfill Persistent Account IDs</div>
+              <div className="settings-desc">One-time migration: fetches Plaid's stable account identifiers for all connected banks and stores them locally. Run once — enables reliable re-link matching in future. Safe to run multiple times.</div>
+            </div>
+            <button type="button" className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/plaid/backfill-persistent-ids',{method:'POST'});
+                const noSupport=r.items.filter(i=>i.no_pid>0).map(i=>i.institution);
+                let msg=`🔑 Backfilled ${r.total_updated} account${r.total_updated!==1?'s':''}`;
+                if(noSupport.length>0)msg+=` (${noSupport.join(', ')}: no persistent IDs — institution limitation)`;
+                toast(msg);
+                // Show per-institution detail in console for debugging
+                console.table(r.items);
+              }catch(e){toast('Backfill failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Run Backfill'}</button>
+          </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">#️⃣ Backfill Transaction Content Hashes</div>
+              <div className="settings-desc">One-time migration: assigns a stable content hash to every existing transaction. Required before "Re-download" can preserve your classifications across Plaid re-links. Safe to run multiple times — only unprocessed rows are updated.</div>
+            </div>
+            <button type="button" className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/transactions/backfill-content-hashes',{method:'POST'});
+                toast(`#️⃣ Hashed ${r.backfilled} transaction${r.backfilled!==1?'s':''}`);
+              }catch(e){toast('Backfill failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Run Backfill'}</button>
+          </div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">💰 Fix Account Balances</div>
+              <div className="settings-desc">Fetches the current balance for every linked account from Plaid and sets it as the balance anchor, then rebuilds monthly snapshots. Run this once after re-linking all banks to correct any $0 balances. Safe to run multiple times.</div>
+            </div>
+            <button type="button" className="btn btn-sm btn-secondary" disabled={busy} onClick={async()=>{
+              setBusy(true);
+              try{
+                const r=await apiFetch('/accounts/backfill-balances',{method:'POST'});
+                const errs=r.errors&&r.errors.length?` (${r.errors.length} warning${r.errors.length!==1?'s':''})`:''
+                toast(`💰 Updated ${r.accounts_updated} account${r.accounts_updated!==1?'s':''}, rebuilt ${r.snapshots_rebuilt} snapshot${r.snapshots_rebuilt!==1?'s':''}${errs}`);
+              }catch(e){toast('Balance fix failed: '+(e.message||e),'error');}
+              finally{setBusy(false);}
+            }}>{busy?'…':'Fix Balances'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">⚠️ Danger Zone</div></div>
+          <div className="settings-row">
+            <div>
+              <div className="settings-label">🔄 Fresh Start</div>
+              <div className="settings-desc">Wipes all Plaid-sourced transactions, removes ghost accounts, clears sync cursors, triggers a full re-download. Account records, categories, and rules are preserved.</div>
+            </div>
+            <button type="button" className="btn btn-sm" style={{background:'var(--amber)',color:'#0c0c10',border:'1px solid rgba(251,191,36,0.4)',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+              title:'Fresh Start',
+              body:'This will delete ALL Plaid-synced transactions and re-download everything from scratch.\n\nAccount records, categories, and rules are kept.',
+              confirmLabel:'Fresh Start',danger:true,
+              onConfirm:async()=>{
+                setBusy(true);
+                try{const r=await apiFetch('/reset-all',{method:'POST'});toast(`🔄 ${r.status}`);}
+                catch(e){toast('Fresh Start failed: '+(e.message||e),'error');}
+                finally{setBusy(false);}
+              }
+            })}>{busy?'…':'Fresh Start'}</button>
+          </div>
+          <div className="settings-row" style={{borderTop:'1px solid rgba(248,113,113,0.3)',marginTop:8,paddingTop:12}}>
+            <div>
+              <div className="settings-label">💣 Nuke Everything</div>
+              <div className="settings-desc">Deletes ALL transactions, ALL accounts, and ALL bank connections. The app is left completely empty. Reconnect your banks from scratch via + Connect Bank. Categories and rules are preserved.</div>
+            </div>
+            <button type="button" className="btn btn-sm" style={{background:'var(--red)',color:'#fff',border:'1px solid rgba(248,113,113,0.4)',whiteSpace:'nowrap'}} disabled={busy} onClick={()=>setCm({
+              title:'⚠️ Nuke Everything',
+              body:'This will permanently delete:\n• All transactions\n• All accounts\n• All bank connections\n\nCategories and rules are kept. This cannot be undone.',
+              confirmLabel:'💣 Nuke Everything',danger:true,requiredInput:'NUKE',
+              onConfirm:async()=>{
+                setBusy(true);
+                try{const r=await apiFetch('/nuke',{method:'POST'});toast(`💣 ${r.status}`);}
+                catch(e){toast('Nuke failed: '+(e.message||e),'error');}
+                finally{setBusy(false);}
+              }
+            })}>{busy?'…':'💣 Nuke Everything'}</button>
+          </div>
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header"><div className="section-title">Cards Import</div></div>
+          <div className="settings-row">
+            <div><div className="settings-label">Import Cards from local file</div><div className="settings-desc">Loads card data from cards.xlsx on server</div></div>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={()=>run('/init/import-cards','Cards imported!')} disabled={busy}>{busy?'…':'Import'}</button>
+          </div>
+          <div className="settings-row">
+            <div><div className="settings-label">Upload cards.xlsx</div><div className="settings-desc">Upload a new cards.xlsx file and import</div></div>
+            <label className="btn btn-sm btn-primary" style={{cursor:'pointer'}}>{busy?'…':'Upload'}<input type="file" accept=".xlsx,.xls" onChange={uploadCards} style={{display:'none'}}/></label>
+          </div>
+        </div>
+      </div>}
+
+      {tab==='rules'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div className="section-title">Categorization Rules ({rules.length})</div>
+            <div style={{display:'flex',gap:8}}>
+              <input className="search-input" placeholder="Search patterns…" value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)} style={{width:200}}/>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={cleanDescriptions} disabled={cleaningDescs} title="Fill in missing display names for transactions that still show raw bank text">{cleaningDescs?'Cleaning…':'✦ Fix Descriptions'}</button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={applyRules} disabled={reapplying} title="Re-apply all rules to existing non-locked transactions">{reapplying?'Applying…':'↺ Apply Rules'}</button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={()=>{setShowAddRule(true);setRuleEditVals({priority:100,match_type:'contains',pattern:'',set_action:'',set_category:'',set_description:'',clean_description:'',notes:''});}}>+ Add Rule</button>
+            </div>
+          </div>
+          {/* Add Rule modal */}
+          {showAddRule&&<div style={{padding:'16px 20px',background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:10,margin:'0 16px 16px'}}>
+            <div style={{fontSize:13,fontWeight:400,marginBottom:8,color:'var(--text-primary)'}}>New Rule</div>
+            <div style={{display:'grid',gridTemplateColumns:'80px 100px 1fr 100px 100px',gap:8,fontSize:12,marginBottom:8}}>
+              <input type="number" value={ruleEditVals.priority||100} onChange={e=>setRuleEditVals(v=>({...v,priority:parseInt(e.target.value)}))} placeholder="Priority" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <select value={ruleEditVals.match_type||'contains'} onChange={e=>setRuleEditVals(v=>({...v,match_type:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                {[['contains','Contains'],['contains_any','Contains Any'],['contains_all','Contains All'],['equals','Equals'],['starts_with','Starts With'],['regex','Regex']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+              </select>
+              <input value={ruleEditVals.pattern||''} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} placeholder="Pattern" style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <select value={ruleEditVals.set_action||''} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                <option value="">— Action —</option>
+                {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+              </select>
+              <select value={ruleEditVals.set_category||''} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
+                <option value="">— Category —</option>
+                {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <input value={ruleEditVals.set_description||''} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} placeholder="Set Description" style={{flex:1,border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <input value={ruleEditVals.notes||''} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} placeholder="Notes" style={{flex:1,border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}/>
+              <button type="button" className="btn btn-sm btn-success" onClick={addRule}>Create</button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowAddRule(false)}>Cancel</button>
+            </div>
+          </div>}
+          {rulesLoading?<div className="loading"><div className="spinner"/></div>
+            :<div className="table-wrap" style={{maxHeight:500,overflowY:'auto'}}><table style={{fontSize:12}}>
+              <thead><tr><th>Pri</th><th>Match</th><th>Pattern</th><th>Action</th><th>Category</th><th>Description</th><th>Notes</th><th>Stats</th><th></th></tr></thead>
+              <tbody>{rules.map(r=>(
+                ruleEditing===r.id?<tr key={r.id} style={{background:'rgba(251,191,36,0.1)'}}>
+                  <td><input type="number" value={ruleEditVals.priority} onChange={e=>setRuleEditVals(v=>({...v,priority:parseInt(e.target.value)}))} style={{width:50,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><select value={ruleEditVals.match_type} onChange={e=>setRuleEditVals(v=>({...v,match_type:e.target.value}))} style={{fontSize:11}}>
+                    {[['contains','Contains'],['contains_any','Contains Any'],['contains_all','Contains All'],['equals','Equals'],['starts_with','Starts With'],['regex','Regex']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select></td>
+                  <td><input value={ruleEditVals.pattern} onChange={e=>setRuleEditVals(v=>({...v,pattern:e.target.value}))} style={{width:'100%',fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><select value={ruleEditVals.set_action} onChange={e=>setRuleEditVals(v=>({...v,set_action:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}>
+                    <option value="">—</option>
+                    {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+                  </select></td>
+                  <td><select value={ruleEditVals.set_category} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{width:110,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}>
+                    <option value="">—</option>
+                    {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select></td>
+                  <td><input value={ruleEditVals.set_description} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} style={{width:100,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td><input value={ruleEditVals.notes} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
+                  <td></td>
+                  <td><div style={{display:'flex',gap:4}}><button type="button" className="btn btn-sm btn-success" onClick={()=>saveRuleEdit(r.id)} style={{fontSize:10,padding:'2px 6px'}}>Save</button><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setRuleEditing(null)} style={{fontSize:10,padding:'2px 6px'}}>×</button></div></td>
+                </tr>:<tr key={r.id}>
+                  <td style={{fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{r.priority}</td>
+                  <td style={{color:'var(--text-muted)'}}>{r.match_type}</td>
+                  <td style={{fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.pattern}>{r.pattern}</td>
+                  <td>{r.set_action&&<span className="badge badge-income" style={{fontSize:10}}>{r.set_action}</span>}</td>
+                  <td>{r.set_category&&<span className="badge badge-category" style={{fontSize:10}}>{r.set_category}</span>}</td>
+                  <td style={{color:'var(--text-muted)',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.set_description}>{r.set_description||'—'}</td>
+                  <td style={{fontSize:10,color:'var(--text-muted)',maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={r.notes}>{r.notes||''}</td>
+                  <td style={{fontSize:10,whiteSpace:'nowrap'}} title={r.times_matched>0?`Matched ${r.times_matched}× — ${r.times_accepted} accepted, ${r.times_rejected} rejected`:''}>
+                    {r.times_matched>0&&<span style={{color:r.times_rejected>r.times_accepted?'var(--red)':'var(--text-muted)'}}>
+                      {r.times_matched}m {r.times_accepted}a {r.times_rejected}r{r.times_rejected>r.times_accepted?' ⚠':''}
+                    </span>}
+                  </td>
+                  <td><div style={{display:'flex',gap:4}}>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={()=>startRuleEdit(r)} style={{fontSize:10,padding:'2px 6px'}}>Edit</button>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={()=>deleteRule(r.id)} style={{fontSize:10,padding:'2px 6px',color:'var(--red)'}}>×</button>
+                  </div></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          }
+        </div>
+      </div>}
+
+      {tab==='bank'&&<div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header">
+            <div>
+              <div className="section-title">Balance Sync</div>
+              <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Rebuilds monthly balance snapshots from your transactions. Use <b>Force Resync</b> only when Plaid's balance is current (not right after a long weekend) — it re-anchors all accounts to today's Plaid balance.</div>
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={()=>syncBalances(false)} disabled={balanceSyncing}>{balanceSyncing?'Syncing…':'↺ Sync Balances'}</button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setCm({
+                title:'Force Balance Resync',
+                body:"Re-anchors all accounts to today's Plaid balance.\n\nOnly do this when Plaid's balance is fully up to date (not right after a long weekend when transactions may not have posted yet).",
+                confirmLabel:'Force Resync',danger:false,
+                onConfirm:async()=>syncBalances(true)
+              })} disabled={balanceSyncing} style={{borderColor:'var(--amber)',color:'var(--amber)'}}>⚡ Force Resync</button>
+            </div>
+          </div>
+          {balanceSyncResult&&<div style={{marginTop:12}}>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>
+              Last sync: {balanceSyncResult.synced} account{balanceSyncResult.synced!==1?'s':''} processed
+              {balanceSyncResult.force&&<span style={{marginLeft:8,fontWeight:500,color:'var(--amber)'}}>(force resync — anchors updated from Plaid)</span>}
+              {balanceSyncResult.skipped>0&&<span style={{marginLeft:8,color:'var(--amber)'}}>({balanceSyncResult.skipped} skipped)</span>}
+            </div>
+            {balanceSyncResult.accounts&&balanceSyncResult.accounts.length>0&&(()=>{
+              const fmtB=v=>{const neg=v<0;return (neg?'−':'')+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Math.abs(v));};
+              const anyDelta=balanceSyncResult.accounts.some(a=>a.delta!=null&&Math.abs(a.delta)>0.01);
+              return <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
+                    <th style={{textAlign:'left',padding:'4px 8px 4px 0',fontWeight:500}}>Account</th>
+                    <th style={{textAlign:'right',padding:'4px 8px',fontWeight:500}}>Plaid Balance</th>
+                    <th style={{textAlign:'right',padding:'4px 8px',fontWeight:500}}>System Balance</th>
+                    <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Difference</th>
+                  </tr></thead>
+                  <tbody>{balanceSyncResult.accounts.map((a,i)=>{
+                    const diff=a.delta;
+                    const absDiff=diff!=null?Math.abs(diff):null;
+                    const diffColor=diff==null?'var(--text-muted)':absDiff<0.01?'var(--text-muted)':absDiff<10?'var(--amber)':'var(--red)';
+                    const plaidUnavail=a.source==='plaid_unavailable';
+                    return <tr key={i} style={{borderBottom:'1px solid var(--border-light)'}}>
+                      <td style={{padding:'5px 8px 5px 0'}}>
+                        <span style={{fontWeight:500}}>{a.name}</span>
+                        {a.is_manual&&<span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>manual</span>}
+                        {plaidUnavail&&<span style={{marginLeft:6,fontSize:10,background:'rgba(248,113,113,0.12)',color:'var(--red)',borderRadius:3,padding:'1px 4px'}} title="Plaid returned no balance for this account">no Plaid data</span>}
+                        {a.anchor_updated&&<span style={{marginLeft:6,fontSize:10,background:'rgba(251,191,36,0.12)',color:'var(--amber)',borderRadius:3,padding:'1px 4px'}}>anchor reset</span>}
+                      </td>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace',color:(a.is_manual||plaidUnavail)?'var(--text-muted)':'inherit'}}>
+                        {a.plaid_balance!=null?fmtB(a.plaid_balance):'—'}
+                      </td>
+                      <td style={{textAlign:'right',padding:'5px 8px',fontFamily:'monospace'}}>{fmtB(a.computed_balance)}</td>
+                      <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'monospace',color:diffColor,fontWeight:absDiff!=null&&absDiff>0.01?600:400}}>
+                        {diff==null?'—':absDiff<0.01?'—':(diff>0?'+':'')+fmtB(diff)}
+                      </td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+                {anyDelta&&<div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
+                  A non-zero difference typically means Plaid's balance lags your transactions (e.g. after a weekend). If it persists once transactions have posted, use ⚡ Force Resync.
+                </div>}
+              </div>;
+            })()}
+          </div>}
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header">
+            <div>
+              <div className="section-title">Duplicate Accounts</div>
+              <div className="section-desc" style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>After re-linking a bank, Plaid sometimes creates duplicate accounts. Scan to detect them and merge with one click — your custom names, card links, and full history are preserved.</div>
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={scanDuplicates} disabled={dupScanning}>{dupScanning?'Scanning…':'🔍 Scan for Duplicates'}</button>
+            </div>
+          </div>
+          {dupResult&&(()=>{
+            const hasDups=dupGroups&&dupGroups.length>0;
+            const hasIgnored=dupIgnored&&dupIgnored.length>0;
+            if(!hasDups&&!hasIgnored)return<div style={{fontSize:12,color:'var(--text-muted)',marginTop:8}}>✓ No duplicate accounts found.</div>;
+            const DupTable=({rows,showMerge,showIgnore,showUnignore})=>(
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr style={{borderBottom:'1px solid var(--border)',color:'var(--text-muted)'}}>
+                  <th style={{textAlign:'left',padding:'4px 8px 4px 0',fontWeight:500}}>Keep (oldest)</th>
+                  <th style={{textAlign:'left',padding:'4px 8px',fontWeight:500}}>{showIgnore?'Flagged as duplicate':'Ignored (not a duplicate)'}</th>
+                  <th style={{textAlign:'right',padding:'4px 0 4px 8px',fontWeight:500}}>Actions</th>
+                </tr></thead>
+                <tbody>{rows.map((g,gi)=>g.discard_ids.map((did,di)=>{
+                  const keep=g.accounts.find(a=>a.id===g.keep_id);
+                  const discard=g.accounts.find(a=>a.id===did);
+                  return <tr key={`${gi}-${di}`} style={{borderBottom:'1px solid var(--border-light)'}}>
+                    <td style={{padding:'5px 8px 5px 0'}}>
+                      <span style={{fontWeight:500}}>{keep.name}</span>
+                      <span style={{marginLeft:6,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px'}}>…{keep.mask}</span>
+                      {keep.card_count>0&&<span style={{marginLeft:4,fontSize:10,background:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)',borderRadius:3,padding:'1px 4px'}}>{keep.card_count} card{keep.card_count!==1?'s':''}</span>}
+                      <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{keep.transaction_count} txn{keep.transaction_count!==1?'s':''}</div>
+                    </td>
+                    <td style={{padding:'5px 8px'}}>
+                      <span style={{color:'var(--text-muted)'}}>{discard.name}</span>
+                      <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{discard.transaction_count} txn{discard.transaction_count!==1?'s':''}</div>
+                      {showIgnore&&<span style={{marginLeft:0,fontSize:10,background:'rgba(248,113,113,0.12)',color:'var(--red)',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2}}>duplicate</span>}
+                      {showUnignore&&<span style={{marginLeft:0,fontSize:10,background:'var(--bg-subtle)',color:'var(--text-muted)',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2}}>ignored</span>}
+                      {g.warning&&<span title={g.warning} style={{marginLeft:4,fontSize:10,background:'rgba(251,191,36,0.12)',color:'var(--amber)',borderRadius:3,padding:'1px 4px',display:'inline-block',marginTop:2,cursor:'help'}}>⚠️ confirm</span>}
+                    </td>
+                    <td style={{textAlign:'right',padding:'5px 0 5px 8px',whiteSpace:'nowrap'}}>
+                      <div style={{display:'flex',gap:4,justifyContent:'flex-end',flexWrap:'nowrap'}}>
+                        {showMerge&&<button type="button" className="btn btn-xs btn-primary" style={{fontSize:10,padding:'2px 8px'}} onClick={()=>{if(g.warning){setCm({title:'Confirm Merge',body:`⚠️ ${g.warning}\n\nThis will keep "${keep.name}" and remove "${discard.name}".`,confirmLabel:'Merge Anyway',danger:true,onConfirm:async()=>mergeOnePair(keep.id,did)});}else mergeOnePair(keep.id,did);}}>Merge ▶</button>}
+                        {showIgnore&&<button type="button" className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>ignoreDuplicatePair(keep.id,did)} title="Mark as not a duplicate — won't appear in future scans">Ignore</button>}
+                        {showUnignore&&<button type="button" className="btn btn-xs btn-secondary" style={{fontSize:10,padding:'2px 6px'}} onClick={()=>unignorePair(keep.id,did)}>Unignore</button>}
+                      </div>
+                    </td>
+                  </tr>;
+                }))}</tbody>
+              </table>
+            );
+            return <div style={{marginTop:12}}>
+              {hasDups&&<>
+                <div style={{fontSize:12,color:'var(--amber)',marginBottom:8,fontWeight:500}}>{dupGroups.length} duplicate pair{dupGroups.length!==1?'s':''} found — use "Merge ▶" to fix each pair individually, or "Ignore" for false positives</div>
+                <DupTable rows={dupGroups} showMerge={true} showIgnore={true} showUnignore={false}/>
+                <div style={{marginTop:8,fontSize:11,color:'var(--text-muted)'}}>
+                  Each "Merge ▶" keeps the oldest account's name and card links, adopts the new Plaid connection so future syncs work, and moves any transactions across. Pairs marked ⚠️ have different product names — hover for details, and confirm before merging. Use "Ignore" if two accounts share the same last 4 digits but are genuinely different cards.
+                </div>
+              </>}
+              {hasIgnored&&<>
+                <div style={{fontSize:12,color:'var(--text-muted)',marginTop:hasDups?20:0,marginBottom:8}}>Ignored pairs (confirmed not duplicates)</div>
+                <DupTable rows={dupIgnored} showMerge={false} showIgnore={false} showUnignore={true}/>
+              </>}
+            </div>;
+          })()}
+        </div>
+        <div className="card" style={{marginBottom:20}}>
+          <div className="section-header">
+            <div className="section-title">Connected Banks ({items.length})</div>
+            <div style={{display:'flex',gap:8}}>
+              {items.length>0&&<button type="button" className="btn btn-sm btn-secondary" style={{fontSize:11}} onClick={checkPlaidHealth} disabled={healthChecking} title="Check Plaid connection health for all institutions">{healthChecking?'Checking…':'🔍 Check Health'}</button>}
+              {items.length>0&&<SyncLiabilitiesButton toast={toast} onDone={refreshItems}/>}
+              {items.length>0&&<ResetResyncButton toast={toast} onDone={refreshItems}/>}
+              <button type="button" className="btn btn-sm btn-primary" onClick={onConnectBank}>+ Connect Bank</button>
+            </div>
+          </div>
+          {healthResults&&(
+            <div style={{marginBottom:16,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 14px',background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
+                <div style={{fontSize:12,fontWeight:400,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Plaid Connection Health</div>
+                <button type="button" onClick={()=>setHealthResults(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--text-muted)',lineHeight:1}}>×</button>
+              </div>
+              {healthResults.map((r,i)=>{
+                const healthy=r.ok;
+                const errCode=r.error?.error_code;
+                const needsRelink=errCode==='ITEM_LOGIN_REQUIRED'||errCode==='ITEM_NOT_FOUND'||errCode==='INVALID_ACCESS_TOKEN';
+                const expiring=errCode==='PENDING_EXPIRATION';
+                const hasInternalErr=!!r.internal_error_code;
+                const isSyncErr=r.internal_error_code?.startsWith('SYNC_ERROR:');
+                const internalErrLabel=isSyncErr?r.internal_error_code.replace('SYNC_ERROR:',''):r.internal_error_code;
+                const bgColor=healthy?(hasInternalErr?'rgba(251,191,36,0.06)':'rgba(52,211,153,0.06)'):needsRelink||expiring?'rgba(251,191,36,0.06)':'rgba(248,113,113,0.06)';
+                const dot=healthy?(hasInternalErr?'🟡':'🟢'):needsRelink||expiring?'🟡':'🔴';
+                const fmtTs=ts=>ts?ts.replace('T',' ').slice(0,16)+' UTC':'—';
+                return(
+                  <div key={i} style={{padding:'10px 14px',background:bgColor,borderBottom:i<healthResults.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                      <span>{dot}</span>
+                      <span style={{fontWeight:500,fontSize:13}}>{r.institution_name}</span>
+                      {errCode&&<span style={{fontSize:11,fontWeight:400,padding:'1px 8px',borderRadius:20,background:needsRelink||expiring?'rgba(251,191,36,0.12)':'rgba(248,113,113,0.12)',color:needsRelink||expiring?'var(--amber)':'var(--red)'}}>{errCode}</span>}
+                      {hasInternalErr&&<span style={{fontSize:11,fontWeight:400,padding:'1px 8px',borderRadius:20,background:'rgba(251,146,36,0.08)',color:'var(--amber)'}} title={r.internal_error_message||''}>⚠️ {internalErrLabel}</span>}
+                    </div>
+                    <div style={{display:'flex',gap:24,fontSize:11,color:'var(--text-muted)',flexWrap:'wrap',marginLeft:24}}>
+                      <span>Last sync: <strong style={{color:'var(--text-primary)'}}>{fmtTs(r.last_synced_at)}</strong></span>
+                      <span>Last successful update: <strong style={{color:r.last_successful_update?'var(--green)':'var(--text-muted)'}}>{fmtTs(r.last_successful_update)}</strong></span>
+                      {r.last_failed_update&&<span>Last failed: <strong style={{color:'var(--red)'}}>{fmtTs(r.last_failed_update)}</strong></span>}
+                      {r.consent_expiration_time&&<span>Consent expires: <strong style={{color:'var(--amber)'}}>{fmtTs(r.consent_expiration_time)}</strong></span>}
+                      <span>Update type: <strong>{r.update_type||'—'}</strong></span>
+                    </div>
+                    {r.error?.display_message&&<div style={{marginTop:4,marginLeft:24,fontSize:11,color:'var(--red)'}}>{r.error.display_message}</div>}
+                    {hasInternalErr&&<div style={{marginTop:4,marginLeft:24,fontSize:11,color:'var(--amber)'}}>{r.internal_error_message}</div>}
+                    {needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ Reconnect required — use "+ Connect Bank" to re-link this institution.</div>}
+                    {expiring&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ OAuth consent is expiring soon — re-link soon to keep syncing.</div>}
+                    {hasInternalErr&&!needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ Our sync has a stored error for this account. A new sync attempt will clear it if Plaid is healthy.</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {items.length===0?<div className="empty" style={{padding:40}}><div className="empty-icon">◫</div><span>No banks connected</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Click "+ Connect Bank" to link via Plaid</span></div>
+            :items.map((item,i)=><BankRow key={item.item_id||i} item={item} toast={toast} onRenamed={(id,name)=>{setItems(prev=>prev.map(it=>it.item_id===id?{...it,institution_name:name}:it));onBanksChanged&&onBanksChanged();}} onSynced={refreshItems}/>)
+          }
+        </div>
+      </div>}
+
+      {tab==='about'&&<div>
+        <div className="card">
+          <div className="section-header"><div className="section-title">About</div></div>
+          <div style={{padding:'20px',fontSize:13,color:'var(--text-secondary)',lineHeight:1.8}}>
+            <p style={{fontWeight:500,color:'var(--text-primary)'}}>Moresheth v2.0</p>
+            <p>Plaid sync + rule-based categorization + manual accounts</p>
+            <p style={{marginTop:8}}>Stack: FastAPI + SQLAlchemy + SQLite + React</p>
+            <p>Features: Transactions, Budgets, Balance Timeline, Net Worth, Cards, GCB Tracking</p>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+function usePlaidLink(toast,onSuccess){
+  const[linkSummary,setLinkSummary]=useState(null); // {accounts:[{name,mask,status}], transactions_synced}
+
+  /* Shared handler called after successful exchange-token */
+  const handleLinkSuccess=async(public_token,afterOAuth)=>{
+    try{
+      const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});
+      setLinkSummary({accounts:r.accounts||[],transactions_synced:r.transactions_synced||0});
+      if(afterOAuth)window.history.replaceState({},'','/');
+    }catch(e){toast('Failed to link: '+(e.message||e),'error');}
+  };
+
+  /* Handle OAuth return — bank redirects back to /plaid/oauth-return */
+  React.useEffect(()=>{
+    if(!window.location.pathname.startsWith('/plaid/oauth-return'))return;
+    (async()=>{
+      try{
+        const{link_token}=await apiFetch('/plaid/link-token');
+        const handler=window.Plaid.create({
+          token:link_token,
+          receivedRedirectUri:window.location.href,
+          onSuccess:async(public_token)=>handleLinkSuccess(public_token,true),
+          onExit:()=>{window.history.replaceState({},'','/');},
+        });
+        handler.open();
+      }catch(e){toast('OAuth return failed: '+(e.message||e),'error');}
+    })();
+  },[]);
+
+  const openPlaid=async()=>{
+    try{
+      const{link_token}=await apiFetch('/plaid/link-token');
+      const handler=window.Plaid.create({
+        token:link_token,
+        onSuccess:async(public_token)=>handleLinkSuccess(public_token,false),
+        onExit:()=>{},
+      });
+      handler.open();
+    }catch(e){toast('Failed to start connection: '+(e.message||e),'error');}
+  };
+
+  /* Post-link summary modal */
+  const summaryModal=linkSummary&&(()=>{
+    const matchedCount=linkSummary.accounts.filter(a=>a.status==='matched').length;
+    const createdCount=linkSummary.accounts.length-matchedCount;
+    const hasNew=createdCount>0;
+    return(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:'var(--elevated)',backdropFilter:'var(--glass-blur)',WebkitBackdropFilter:'var(--glass-blur)',border:'1px solid var(--border-strong)',borderRadius:12,padding:'28px 32px',minWidth:360,maxWidth:500,boxShadow:'0 8px 40px rgba(0,0,0,0.22)'}}>
+          {/* Header */}
+          <div style={{fontWeight:400,fontSize:16,marginBottom:3,color:'var(--text)'}}>Bank Connected</div>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:20}}>
+            {matchedCount>0&&<span>{matchedCount} account{matchedCount!==1?'s':''} matched to existing history</span>}
+            {matchedCount>0&&hasNew&&<span style={{margin:'0 6px'}}>·</span>}
+            {hasNew&&<span>{createdCount} new account{createdCount!==1?'s':''} created</span>}
+          </div>
+          {/* Account list */}
+          {linkSummary.accounts.map((a,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 0',borderBottom:'1px solid var(--border)'}}>
+              <span style={{fontWeight:500,fontSize:13,color:'var(--text)'}}>{a.name}{a.mask?` ••${a.mask}`:''}</span>
+              {a.status==='matched'
+                ?<span style={{background:'rgba(52,211,153,0.12)',color:'var(--green)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>✓ History preserved</span>
+                :<span style={{background:'rgba(96,165,250,0.12)',color:'var(--blue)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>+ New</span>
+              }
+            </div>
+          ))}
+          {/* Transaction count */}
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:14}}>
+            {linkSummary.transactions_synced} transaction{linkSummary.transactions_synced!==1?'s':''} synced
+          </div>
+          {/* Duplicate scan prompt when new accounts were created */}
+          {hasNew&&<div style={{marginTop:12,padding:'10px 14px',background:'rgba(251,191,36,0.1)',border:'1px solid rgba(251,191,36,0.3)',borderRadius:8,fontSize:12,color:'var(--amber)',lineHeight:1.5}}>
+            {createdCount} new account{createdCount!==1?'s were':' was'} created. If you're re-linking an existing bank, use <strong>Settings → Bank Links → Scan for Duplicates</strong> to detect and merge any duplicate accounts.
+          </div>}
+          {/* Done */}
+          <button type="button" onClick={()=>{setLinkSummary(null);onSuccess(hasNew);}}
+            style={{marginTop:20,width:'100%',background:'var(--primary)',color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:500,fontSize:14,cursor:'pointer'}}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  })();
+
+  return[openPlaid,summaryModal];
+}
+
+
+class CardDetailErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={error:null};}
+  static getDerivedStateFromError(err){return{error:err};}
+  componentDidCatch(err,info){console.error('CardDetail render error:',err,info);}
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{padding:32,maxWidth:700,margin:'0 auto'}}>
+          <div style={{background:'rgba(248,113,113,0.08)',border:'1px solid rgba(248,113,113,0.3)',borderRadius:10,padding:20}}>
+            <div style={{fontSize:15,fontWeight:400,color:'var(--red)',marginBottom:8}}>⚠ Card detail failed to render</div>
+            <div style={{fontSize:12,color:'var(--red)',opacity:0.85,fontFamily:'monospace',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
+              {this.state.error?.message||String(this.state.error)}
+            </div>
+            <button type="button" className="btn btn-ghost" style={{marginTop:14,fontSize:13}}
+              onClick={()=>{this.setState({error:null});this.props.onBack&&this.props.onBack();}}>
+              ← Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
+  const[d,setD]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[spendPeriod,setSpendPeriod]=useState('qtd');
+  // Challenges
+  const[challenges,setChallenges]=useState([]);
+  const[challengesLoading,setChallengesLoading]=useState(false);
+  const[pointsCategories,setPointsCategories]=useState([]);
+  const[allCards,setAllCards]=useState([]);
+  const[showChallengeModal,setShowChallengeModal]=useState(false);
+  const[editingChallenge,setEditingChallenge]=useState(null);
+  const[challengeVals,setChallengeVals]=useState({});
+  const[confirmDeleteId,setConfirmDeleteId]=useState(null);
+  const[suggestions,setSuggestions]=useState([]);
+  const[spendRefreshing,setSpendRefreshing]=useState(false);
+  // Recent Transactions — independent month/year/quarter filter
+  const _now=new Date();
+  const[txnView,setTxnView]=useState('monthly');   // 'monthly' | 'qtd' | 'ytd' | 'custom'
+  const[txnYear,setTxnYear]=useState(_now.getFullYear());
+  const[txnMonth,setTxnMonth]=useState(_now.getMonth()+1);
+  const[txnQuarter,setTxnQuarter]=useState(Math.ceil((_now.getMonth()+1)/3));
+  const[customStart,setCustomStart]=useState('');
+  const[customEnd,setCustomEnd]=useState('');
+  const[challengeFilterName,setChallengeFilterName]=useState(null);   // set when a challenge card drove the custom range
+  const[txns,setTxns]=useState([]);
+  const[txnSummary,setTxnSummary]=useState(null);
+  const[availCscs,setAvailCscs]=useState([]);
+  const[cscFilter,setCscFilter]=useState('');   // '' = all, '__none__' = no CSC, or a category name
+  const[catFilter,setCatFilter]=useState('');   // general category filter (category_manual/category_auto), independent of CSC — e.g. 'Fees & Interest' for the annual-fee-vs-credits drill-down
+  const[descFilter,setDescFilter]=useState('');  // free-text description/merchant search
+  const[sortCol,setSortCol]=useState('date');    // 'date'|'description'|'amount'|'csc'|'pts'
+  const[sortDir,setSortDir]=useState('desc');    // 'asc'|'desc'
+  const[txnsLoading,setTxnsLoading]=useState(false);
+  // Inline CSC editing state
+  const[editingCscId,setEditingCscId]=useState(null);
+  const[editingCscVal,setEditingCscVal]=useState('');
+  // Inline Action-type editing state
+  const[editingActionId,setEditingActionId]=useState(null);
+  const[editingActionVal,setEditingActionVal]=useState('');
+  // Inline points-earn manual override state (see compute_points_earn in main.py)
+  const[editingPtsOverrideId,setEditingPtsOverrideId]=useState(null);
+  const[editingPtsOverrideVal,setEditingPtsOverrideVal]=useState('');
+  const[excludingId,setExcludingId]=useState(null);   // txn id currently being toggled (disables the button mid-request)
+  const[allCscs,setAllCscs]=useState([]);  // full list of categories for editing
+  // Inline Spender editing + bulk-select/tag state (who made the purchase —
+  // manual only, Plaid gives no cardholder signal on shared/employee-card accounts)
+  const[spenders,setSpenders]=useState([]);
+  const[editingSpenderId,setEditingSpenderId]=useState(null);
+  const[selectedTxnIds,setSelectedTxnIds]=useState(()=>new Set());
+  const[bulkTagging,setBulkTagging]=useState(false);
+  // Teach-merchant prompt (shown after inline CSC save when merchant_name is available)
+  const[teachPrompt,setTeachPrompt]=useState(null);  // {merchantName, csc} | null
+  const[teachLoading,setTeachLoading]=useState(false);
+  // Unclassified merchants grouped view (shown when cscFilter==='__none__')
+  const[unclassified,setUnclassified]=useState([]);
+  const[unclassifiedLoading,setUnclassifiedLoading]=useState(false);
+  const[assigningMerchant,setAssigningMerchant]=useState(null);
+  const[assignCscVal,setAssignCscVal]=useState('');
+  const[assignLoading,setAssignLoading]=useState(false);
+  // Benefits state
+  const[cardBenefits,setCardBenefits]=useState([]);
+  const[benefitsLoading,setBenefitsLoading]=useState(false);
+  const[showBenefitModal,setShowBenefitModal]=useState(false);
+  const[editingBenefitId,setEditingBenefitId]=useState(null);
+  const[benefitForm,setBenefitForm]=useState({benefit_name:'',amount:'',reset_frequency:'annual',tracking_type:'periodic',trigger_category:'',notes:''});
+  const[logUsageFor,setLogUsageFor]=useState(null);   // benefit id currently being logged
+  const[logUsageAmt,setLogUsageAmt]=useState('');
+  const[logUsageNotes,setLogUsageNotes]=useState('');
+  const[benefitSaving,setBenefitSaving]=useState(false);
+  const[togglingCycle,setTogglingCycle]=useState(null);   // benefit id currently mid-toggle (disables its grid)
+  // Card product change + history state
+  const[allCardProducts,setAllCardProducts]=useState([]);
+  const[productHistory,setProductHistory]=useState([]);
+  const[showHistory,setShowHistory]=useState(false);
+  const[showChangeProductModal,setShowChangeProductModal]=useState(false);
+  const[changeProductForm,setChangeProductForm]=useState({product_id:'',effective_date:new Date().toISOString().slice(0,10)});
+  const[changingProduct,setChangingProduct]=useState(false);
+  const txnSectionRef=useRef(null);   // Transactions card — scrolled into view when a challenge sets the custom filter
+  const loadTxns=async(yr,mo,view,qtr,csc,cStart,cEnd,silent,cat)=>{
+    // silent=true skips the loading flag — used for post-edit refreshes so the
+    // table doesn't unmount to a spinner and cause the page to jump; the full
+    // loading state stays for real period/filter changes (initial load feel).
+    if(!silent)setTxnsLoading(true);
+    try{
+      const y=yr??txnYear; const m=mo??txnMonth; const v=view||txnView; const q=qtr??txnQuarter;
+      const c=csc!==undefined?csc:cscFilter;
+      const cat2=cat!==undefined?cat:catFilter;
+      const cs=cStart!==undefined?cStart:customStart; const ce=cEnd!==undefined?cEnd:customEnd;
+      let qs;
+      if(v==='custom'&&cs&&ce) qs=`start_date=${cs}&end_date=${ce}&action=Expense`;
+      else if(v==='ytd') qs=`year=${y}&action=Expense`;
+      else if(v==='qtd') qs=`year=${y}&quarter=${q}&action=Expense`;
+      else qs=`year=${y}&month=${m}&action=Expense`;
+      if(c) qs+=`&csc=${encodeURIComponent(c)}`;
+      if(cat2) qs+=`&category=${encodeURIComponent(cat2)}`;
+      const r=await apiFetch(`/accounts/${accountId}/transactions?${qs}`);
+      setTxns(r.transactions||[]);
+      setTxnSummary(r.summary||null);
+      setAvailCscs(r.available_cscs||[]);
+    }catch(e){}
+    finally{if(!silent)setTxnsLoading(false);}
+  };
+  // Fetch full CSC list once for inline editing dropdown
+  useEffect(()=>{
+    apiFetch('/points-categories').then(r=>{setAllCscs((r||[]).filter(c=>c.is_active));}).catch(()=>{});
+  },[]);
+  // Fetch known spender names once for the tagging combobox
+  const loadSpenders=()=>{apiFetch('/transactions/spenders').then(setSpenders).catch(()=>{});};
+  useEffect(()=>{loadSpenders();},[]);
+  const saveSpenderEdit=async(txnId,newVal)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({spender:newVal||''})});
+      setEditingSpenderId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+      loadSpenders();
+    }catch(e){toast('Failed to save spender: '+(e?.message||''),'error');}
+  };
+  const toggleTxnSelected=(id)=>{
+    setSelectedTxnIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  };
+  const bulkTagSpender=async(val)=>{
+    if(!val||selectedTxnIds.size===0)return;
+    setBulkTagging(true);
+    try{
+      await apiFetch('/transactions/batch-update',{method:'POST',body:JSON.stringify({
+        ids:[...selectedTxnIds], updates:{spender:val},
+      })});
+      toast(`Tagged ${selectedTxnIds.size} transaction${selectedTxnIds.size!==1?'s':''} as ${val}`,'success');
+      setSelectedTxnIds(new Set());
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+      loadSpenders();
+    }catch(e){toast('Bulk tag failed: '+(e?.message||''),'error');}
+    finally{setBulkTagging(false);}
+  };
+  const saveCscEdit=async(txnId,newVal)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_category:newVal||null})});
+      // Find the transaction before updating state so we have merchant_name
+      const txn=txns.find(t=>t.id===txnId);
+      setEditingCscId(null);
+      // Silently reload txns so earn_rate updates to reflect the new CSC
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+      // Offer to teach this merchant for all past + future transactions
+      if(newVal&&txn?.merchant_name){
+        setTeachPrompt({merchantName:txn.merchant_name,csc:newVal});
+      }
+    }catch(e){toast('Failed to save CSC: '+(e?.message||''),'error');}
+  };
+  const saveActionEdit=async(txnId,newVal)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({action:newVal})});
+      setEditingActionId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+    }catch(e){toast('Failed to save type: '+(e?.message||''),'error');}
+  };
+  const toggleExcludeTxn=async(txn)=>{
+    setExcludingId(txn.id);
+    try{
+      await apiFetch(`/transactions/${txn.id}`,{method:'PATCH',body:JSON.stringify({is_excluded:!txn.is_excluded})});
+      toast(txn.is_excluded?'Included — earns points again':'Excluded — no points, no SUB spend credit','success');
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+    }catch(e){toast('Failed to update: '+(e?.message||''),'error');}
+    finally{setExcludingId(null);}
+  };
+  const savePtsOverride=async(txnId,val)=>{
+    if(val===''||isNaN(Number(val)))return;
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({points_earn_override:Number(val)})});
+      toast('Points override saved','success');
+      setEditingPtsOverrideId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+    }catch(e){toast('Failed to save override: '+(e?.message||''),'error');}
+  };
+  const resetPtsOverride=async(txnId)=>{
+    try{
+      await apiFetch(`/transactions/${txnId}`,{method:'PATCH',body:JSON.stringify({clear_points_earn_override:true})});
+      toast('Reset to auto-classification','success');
+      setEditingPtsOverrideId(null);
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+    }catch(e){toast('Failed to reset: '+(e?.message||''),'error');}
+  };
+  const teachMerchant=async(merchantName,csc)=>{
+    setTeachLoading(true);
+    try{
+      const r=await apiFetch('/merchant-csc',{method:'POST',body:JSON.stringify({
+        merchant_pattern:merchantName,
+        points_category:csc,
+        apply_to_existing:true,
+      })});
+      toast(`✓ Saved — ${r.transactions_updated} past transaction${r.transactions_updated!==1?'s':''} updated`,'success');
+      setTeachPrompt(null);
+      // Reload txns so backfilled rows reflect the change
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+      if(cscFilter==='__none__') loadUnclassified();
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setTeachLoading(false);}
+  };
+  const loadUnclassified=()=>{
+    setUnclassifiedLoading(true);
+    apiFetch(`/transactions/unclassified-merchants?account_id=${accountId}&limit=50`)
+      .then(r=>{setUnclassified(r.unclassified||[]);})
+      .catch(()=>{})
+      .finally(()=>setUnclassifiedLoading(false));
+  };
+  const assignMerchantCsc=async(merchantName,csc)=>{
+    setAssignLoading(true);
+    try{
+      const r=await apiFetch('/merchant-csc',{method:'POST',body:JSON.stringify({
+        merchant_pattern:merchantName,
+        points_category:csc,
+        apply_to_existing:true,
+      })});
+      toast(`✓ ${r.transactions_updated} transaction${r.transactions_updated!==1?'s':''} updated`,'success');
+      setAssigningMerchant(null);
+      setAssignCscVal('');
+      loadUnclassified();
+      loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,undefined,undefined,true);
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setAssignLoading(false);}
+  };
+  // Sort helper — toggles dir if same col, resets to sensible default for new col
+  const handleSort=(col)=>{
+    if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}
+    else{setSortCol(col);setSortDir(col==='amount'||col==='pts'?'desc':'asc');}
+  };
+  const sortArrow=(col)=>sortCol===col?(sortDir==='asc'?' ▲':' ▼'):'';
+  // Client-side filter + sort applied on top of API-loaded txns
+  const displayTxns=useMemo(()=>{
+    let r=txns;
+    if(descFilter.trim()){
+      const needle=descFilter.toLowerCase();
+      r=r.filter(t=>(t.description||'').toLowerCase().includes(needle)||(t.merchant_name||'').toLowerCase().includes(needle));
+    }
+    return [...r].sort((a,b)=>{
+      let av,bv;
+      if(sortCol==='date'){av=a.date;bv=b.date;}
+      else if(sortCol==='description'){av=(a.description||'').toLowerCase();bv=(b.description||'').toLowerCase();}
+      else if(sortCol==='amount'){av=Math.abs(a.amount||0);bv=Math.abs(b.amount||0);}
+      else if(sortCol==='csc'){av=a.points_category||'';bv=b.points_category||'';}
+      else if(sortCol==='pts'){av=a.points_earn||0;bv=b.points_earn||0;}
+      else return 0;
+      if(av<bv)return sortDir==='asc'?-1:1;
+      if(av>bv)return sortDir==='asc'?1:-1;
+      return 0;
+    });
+  },[txns,descFilter,sortCol,sortDir]);
+  const txnMonthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const prevTxnMonth=()=>{
+    if(txnMonth===1){setTxnYear(y=>y-1);setTxnMonth(12);}else{setTxnMonth(m=>m-1);}
+  };
+  const nextTxnMonth=()=>{
+    const _n=new Date();
+    if(txnYear===_n.getFullYear()&&txnMonth===_n.getMonth()+1)return;
+    if(txnMonth===12){setTxnYear(y=>y+1);setTxnMonth(1);}else{setTxnMonth(m=>m+1);}
+  };
+  const prevTxnQuarter=()=>{
+    if(txnQuarter===1){setTxnYear(y=>y-1);setTxnQuarter(4);}else{setTxnQuarter(q=>q-1);}
+  };
+  const nextTxnQuarter=()=>{
+    const _n=new Date();
+    const curQ=Math.ceil((_n.getMonth()+1)/3);
+    if(txnYear===_n.getFullYear()&&txnQuarter>=curQ)return;
+    if(txnQuarter===4){setTxnYear(y=>y+1);setTxnQuarter(1);}else{setTxnQuarter(q=>q+1);}
+  };
+  // Clicking a Spend Challenge card auto-filters the Transactions table to its
+  // date range — still fully editable afterward via the Custom date inputs.
+  const filterTxnsToChallenge=(ch)=>{
+    const start=(ch.start_date||'').slice(0,10);
+    const end=(ch.end_date||'').slice(0,10);
+    if(!start||!end)return;
+    setTxnView('custom');
+    setCustomStart(start);
+    setCustomEnd(end);
+    setChallengeFilterName(ch.name);
+    txnSectionRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  // Clicking the Annual Fee tile filters Transactions to the 'Fees & Interest'
+  // category for the current fee cycle (anniversary-anchored on the backend —
+  // see _annual_fee_cycle_window) — same drill-down pattern as challenges,
+  // but keyed on the general category field instead of the CSC/points-category.
+  const filterTxnsToFeesInterest=()=>{
+    if(!d?.annual_fee_summary)return;
+    const{cycle_start,cycle_end}=d.annual_fee_summary;
+    setTxnView('custom');
+    setCustomStart(cycle_start);
+    setCustomEnd(cycle_end);
+    setCatFilter('Fees & Interest');
+    setChallengeFilterName('Fees & Interest — this cycle');
+    txnSectionRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  // Same as filterTxnsToChallenge, but for a challenge clicked from the
+  // Portfolio page (before this component has its own `challenges` list
+  // loaded) — the Portfolio-level challenge object already carries
+  // start_date/end_date/name, so this applies on mount without waiting.
+  useEffect(()=>{
+    if(initialChallengeFilter?.start&&initialChallengeFilter?.end){
+      setTxnView('custom');
+      setCustomStart(initialChallengeFilter.start);
+      setCustomEnd(initialChallengeFilter.end);
+      setChallengeFilterName(initialChallengeFilter.name||null);
+    }
+    // eslint-disable-next-line
+  },[]);
+  // txnSectionRef isn't attached to the DOM yet during the initial
+  // loading-skeleton render (see `if(loading)return<SkeletonTable.../>`
+  // below), so the scroll-into-view has to wait for that to clear —
+  // can't just do it in the mount effect above. initialScrollDone guards
+  // against re-scrolling on later loading flips (e.g. changing spendPeriod).
+  const initialScrollDone=useRef(false);
+  useEffect(()=>{
+    if(!loading&&initialChallengeFilter?.start&&!initialScrollDone.current){
+      initialScrollDone.current=true;
+      // loadChallenges/loadBenefits/loadTxns all fire around this same
+      // loading→false transition and reflow the page shortly after (unlike
+      // filterTxnsToChallenge's same-page click above, which has no
+      // competing loads) — that concurrent reflow was starving a 'smooth'
+      // scrollIntoView's animation frames, leaving it stuck a few px in.
+      // 'auto' (instant) sidesteps that; deferred one tick so the ref's
+      // position reflects the post-reflow layout, not a stale one.
+      setTimeout(()=>{txnSectionRef.current?.scrollIntoView({behavior:'auto',block:'start'});},150);
+    }
+    // eslint-disable-next-line
+  },[loading]);
+  const load=async(p,silent)=>{
+    if(silent){setSpendRefreshing(true);}else{setLoading(true);}
+    try{setD(await apiFetch(`/accounts/${accountId}/card-detail?period=${p||spendPeriod}`));}
+    catch(e){if(!silent)toast('Failed to load card detail','error');}
+    finally{if(silent){setSpendRefreshing(false);}else{setLoading(false);}}
+  };
+  const loadChallenges=async(cardId)=>{
+    if(!cardId)return;
+    setChallengesLoading(true);
+    try{
+      const[ch,cardsAll]=await Promise.all([
+        apiFetch(`/challenges?card_id=${cardId}`),
+        apiFetch('/cards'),
+      ]);
+      setChallenges(ch);
+      setAllCards(cardsAll.filter(c=>c.is_active&&c.id!==cardId));
+    }catch(e){toast('Failed to load challenges','error');}
+    finally{setChallengesLoading(false);}
+  };
+  // Load points categories independently — needed for the challenge modal
+  // even when there's no card row linked
+  useEffect(()=>{
+    apiFetch('/points-categories').then(cats=>setPointsCategories(cats)).catch(()=>{});
+  },[]);
+
+  const loadBenefits=async(cardId)=>{
+    if(!cardId)return;
+    setBenefitsLoading(true);
+    try{const r=await apiFetch(`/cards/${cardId}/benefits`);setCardBenefits(r);}
+    catch(e){toast('Failed to load benefits','error');}
+    finally{setBenefitsLoading(false);}
+  };
+  // Card product change + history — lets a card's linked product be swapped
+  // (e.g. issuer product-changes Bonvoy Boundless → Ritz-Carlton) while
+  // keeping the same account/card and all its transaction history. Past
+  // transactions' points stay locked to whatever product was active when
+  // they posted (see _lock_points_for_transaction in main.py) — changing
+  // the product here only affects new/edited transactions going forward.
+  const loadProductHistory=async(cardId)=>{
+    if(!cardId)return;
+    try{setProductHistory(await apiFetch(`/cards/${cardId}/product-history`));}
+    catch(e){/* non-fatal — history is a display-only nicety */}
+  };
+  const openChangeProductModal=()=>{
+    setChangeProductForm({product_id:'',effective_date:new Date().toISOString().slice(0,10)});
+    setShowChangeProductModal(true);
+  };
+  const saveChangeProduct=async()=>{
+    if(!d?.card?.id){toast('No card linked to this account yet','error');return;}
+    if(!changeProductForm.product_id){toast('Choose a product','error');return;}
+    setChangingProduct(true);
+    try{
+      const r=await apiFetch(`/cards/${d.card.id}/change-product`,{method:'POST',body:JSON.stringify({
+        product_id:parseInt(changeProductForm.product_id,10),
+        effective_date:changeProductForm.effective_date,
+      })});
+      toast(`Changed to ${r.new_product_name}`);
+      setShowChangeProductModal(false);
+      await load();
+      loadProductHistory(d.card.id);
+    }catch(e){toast('Change failed: '+(e?.message||''),'error');}
+    finally{setChangingProduct(false);}
+  };
+  const saveBenefit=async()=>{
+    if(!benefitForm.benefit_name.trim()){toast('Benefit name required','error');return;}
+    if(!d?.product?.id){toast('No product linked to this card','error');return;}
+    setBenefitSaving(true);
+    try{
+      if(editingBenefitId){
+        await apiFetch(`/benefits/${editingBenefitId}`,{method:'PATCH',body:JSON.stringify({...benefitForm,amount:parseFloat(benefitForm.amount)||0})});
+      }else{
+        await apiFetch(`/card-products/${d.product.id}/benefits`,{method:'POST',body:JSON.stringify({...benefitForm,amount:parseFloat(benefitForm.amount)||0})});
+      }
+      setShowBenefitModal(false);
+      loadBenefits(d.card.id);
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setBenefitSaving(false);}
+  };
+  const deleteBenefit=async(id,name)=>{
+    if(!window.confirm(`Delete benefit "${name}"?`))return;
+    try{
+      await apiFetch(`/benefits/${id}`,{method:'DELETE'});
+      setCardBenefits(prev=>prev.filter(b=>b.id!==id));
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+  const logUsage=async(benefitId,amtStr,notes)=>{
+    const amt=parseFloat(amtStr);
+    if(isNaN(amt)||amt<0){toast('Enter a valid amount','error');return;}
+    setBenefitSaving(true);
+    try{
+      await apiFetch(`/benefits/${benefitId}/usage`,{method:'PUT',body:JSON.stringify({
+        card_id:d.card.id, amount_used:amt, confirmed:true, notes:notes||null,
+      })});
+      setLogUsageFor(null);setLogUsageAmt('');setLogUsageNotes('');
+      loadBenefits(d.card.id);
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setBenefitSaving(false);}
+  };
+  const clearUsage=async(usageId,benefitId)=>{
+    if(!window.confirm('Clear usage for this benefit?'))return;
+    try{
+      await apiFetch(`/benefit-usage/${usageId}`,{method:'DELETE'});
+      loadBenefits(d.card.id);
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+  };
+  // One-click toggle for a single period in a periodic benefit's usage grid —
+  // marks the full amount used, or un-marks by deleting the usage row.
+  const toggleBenefitCycle=async(b,cy)=>{
+    setTogglingCycle(`${b.id}`);
+    try{
+      if(cy.used&&cy.usage_id){
+        await apiFetch(`/benefit-usage/${cy.usage_id}`,{method:'DELETE'});
+      }else{
+        await apiFetch(`/benefits/${b.id}/usage`,{method:'PUT',body:JSON.stringify({
+          card_id:d.card.id, cycle:cy.cycle, amount_used:b.amount, confirmed:true,
+        })});
+      }
+      loadBenefits(d.card.id);
+    }catch(e){toast('Failed: '+(e?.message||''),'error');}
+    finally{setTogglingCycle(null);}
+  };
+  const nextResetLabel=(freq)=>{
+    const now=new Date();const y=now.getFullYear();const mo=now.getMonth()+1;
+    const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if(freq==='monthly'){const ld=new Date(y,mo,0).getDate();return`${mn[mo-1]} ${ld}`;}
+    if(freq==='quarterly'){const qe=Math.ceil(mo/3)*3;const ld=new Date(y,qe,0).getDate();return`${mn[qe-1]} ${ld}`;}
+    if(freq==='semi-annual'){return mo<=6?`Jun 30`:`Dec 31`;}
+    return`Dec 31, ${y}`;
+  };
+  const annualValue=(b)=>{
+    if(!b.amount)return 0;
+    const f=b.reset_frequency;
+    return f==='monthly'?b.amount*12:f==='quarterly'?b.amount*4:f==='semi-annual'?b.amount*2:b.amount;
+  };
+
+  useEffect(()=>{load();},[accountId]);
+  useEffect(()=>{if(d)load(spendPeriod,true);},[spendPeriod]);
+  // When card detail loads, load challenges + benefits for this card
+  useEffect(()=>{
+    if(d?.card?.id){loadChallenges(d.card.id);loadBenefits(d.card.id);loadProductHistory(d.card.id);}
+  },[d?.card?.id]);
+  // Full product catalog, for the Change Product picker
+  useEffect(()=>{
+    apiFetch('/card-products').then(setAllCardProducts).catch(()=>{});
+  },[]);
+  // Transactions filter — reload when year/month/quarter/view/cscFilter changes
+  useEffect(()=>{loadTxns(txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd,false,catFilter);setSelectedTxnIds(new Set());},[accountId,txnYear,txnMonth,txnView,txnQuarter,cscFilter,customStart,customEnd,catFilter]);
+  // Load grouped unclassified merchants when filter='__none__'
+  useEffect(()=>{if(cscFilter==='__none__')loadUnclassified();},[accountId,cscFilter]);
+
+  if(loading)return<SkeletonTable rows={8}/>;
+  if(!d)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>Account not found</div>;
+
+  const acct=d.account;
+  const c=d.card;
+  const p=d.product;
+  const eco=d.ecosystem;
+  const issuerGradient={
+    'chase':'linear-gradient(135deg,#003087 0%,#0060c7 100%)',
+    'amex':'linear-gradient(135deg,#006FCF 0%,#00A5E5 100%)',
+    'american express':'linear-gradient(135deg,#006FCF 0%,#00A5E5 100%)',
+    'citi':'linear-gradient(135deg,#003B70 0%,#005DAA 100%)',
+    'discover':'linear-gradient(135deg,#FF6600 0%,#FF8C00 100%)',
+    'capital one':'linear-gradient(135deg,#004879 0%,#0072B5 100%)',
+    'fidelity':'linear-gradient(135deg,#4A8C2A 0%,#6DB33F 100%)',
+    'hilton':'linear-gradient(135deg,#104C97 0%,#2E7BD5 100%)',
+    'hyatt':'linear-gradient(135deg,#8B6914 0%,#C49B1A 100%)',
+    'marriott':'linear-gradient(135deg,#8C1D40 0%,#BE2A5A 100%)',
+    'best buy':'linear-gradient(135deg,#003B64 0%,#0058A3 100%)',
+    'amazon':'linear-gradient(135deg,#232F3E 0%,#37475A 100%)',
+  };
+  const nameLower=(acct.name||'').toLowerCase();
+  const grad=Object.entries(issuerGradient).find(([k])=>nameLower.includes(k))?.[1]
+    ||(c?issuerGradient[(c.issuer||'').toLowerCase()]:null)
+    ||'linear-gradient(135deg,#374151 0%,#6B7280 100%)';
+  // Card image: /static/images/cards/{product_key}.png (or .jpg / .webp)
+  // Falls back silently to gradient if file not present
+  const cardImgSrc=p?.product_key?`/static/images/cards/${p.product_key}.png`:null;
+  const displayName=p?p.card_name:(c?c.card_name:acct.name);
+  const bal=acct.balance;
+  const utilPct=d.utilization;
+  const topCats=(d.spending_by_category||[]).slice(0,6);
+  const maxSpend=topCats.length?Math.max(...topCats.map(s=>s.amount)):1;
+
+  // Challenge helpers
+  const toggleArr=(arr,val)=>arr.includes(val)?arr.filter(x=>x!==val):[...arr,val];
+  const setV=(k,v)=>setChallengeVals(prev=>({...prev,[k]:v}));
+  const defaultVals=()=>({
+    card_id:c?.id||'',name:'',challenge_type:'sub',
+    start_date:'',end_date:'',activation_date:'',
+    bonus_type:'flat',bonus_amount:'',
+    spend_cap:'',spend_threshold:'',spender_filter:'',max_occurrences:'',
+    category_names:[],additional_card_ids:[],
+    is_active:true,notes:'',
+  });
+  const openNew=()=>{setChallengeVals(defaultVals());setEditingChallenge(null);setShowChallengeModal(true);};
+  const openEdit=(ch)=>{
+    setChallengeVals({
+      card_id:ch.card_id,name:ch.name,challenge_type:ch.challenge_type,
+      start_date:ch.start_date,end_date:ch.end_date,activation_date:ch.activation_date||'',
+      bonus_type:ch.bonus_type,bonus_amount:ch.bonus_amount,
+      spend_cap:ch.spend_cap||'',spend_threshold:ch.spend_threshold||'',spender_filter:ch.spender_filter||'',max_occurrences:ch.max_occurrences||'',
+      category_names:ch.category_names||[],additional_card_ids:ch.additional_card_ids||[],
+      is_active:ch.is_active,notes:ch.notes||'',
+    });
+    setEditingChallenge(ch.id);setShowChallengeModal(true);
+  };
+  const openFromTemplate=(tmpl)=>{
+    const yr=new Date().getFullYear();
+    setChallengeVals({
+      card_id:c?.id||'',name:tmpl.name,challenge_type:tmpl.challenge_type,
+      start_date:tmpl.start_date||`${yr}-01-01`,
+      end_date:tmpl.end_date||`${yr}-12-31`,
+      activation_date:'',
+      bonus_type:tmpl.bonus_type,bonus_amount:tmpl.bonus_amount,
+      spend_cap:tmpl.spend_cap||'',spend_threshold:tmpl.spend_threshold||'',spender_filter:'',max_occurrences:'',
+      category_names:tmpl.category_names||[],additional_card_ids:[],
+      is_active:true,notes:tmpl.notes||'',
+    });
+    setEditingChallenge(null);setShowChallengeModal(true);
+  };
+  const saveChallenge=async()=>{
+    const v=challengeVals;
+    if(!v.name||!v.challenge_type||!v.start_date||!v.end_date||!v.bonus_amount){
+      toast('Please fill in all required fields','error');return;
+    }
+    try{
+      const body={
+        card_id:v.card_id||c?.id,
+        name:v.name,challenge_type:v.challenge_type,
+        start_date:v.start_date,end_date:v.end_date,
+        activation_date:v.activation_date||null,
+        bonus_type:v.bonus_type,bonus_amount:parseFloat(v.bonus_amount),
+        spend_cap:v.spend_cap?parseFloat(v.spend_cap):null,
+        spend_threshold:v.spend_threshold?parseFloat(v.spend_threshold):null,
+        spender_filter:v.spender_filter||null,
+        max_occurrences:v.max_occurrences?parseInt(v.max_occurrences,10):null,
+        category_names:v.category_names||[],
+        additional_card_ids:(v.additional_card_ids||[]).map(Number),
+        is_active:v.is_active,notes:v.notes||null,
+      };
+      if(editingChallenge){
+        await apiFetch(`/challenges/${editingChallenge}`,{method:'PATCH',body:JSON.stringify(body)});
+      }else{
+        await apiFetch('/challenges',{method:'POST',body:JSON.stringify(body)});
+      }
+      setShowChallengeModal(false);
+      await loadChallenges(c.id);
+      toast(editingChallenge?'Challenge updated':'Challenge created');
+    }catch(e){
+      // Show actual server error so we can diagnose — truncate if very long
+      const msg=e?.message||'Unknown error';
+      toast('Save failed: '+(msg.length>120?msg.slice(0,120)+'…':msg),'error');
+    }
+  };
+  const doDelete=async()=>{
+    if(!confirmDeleteId)return;
+    try{
+      await apiFetch(`/challenges/${confirmDeleteId}`,{method:'DELETE'});
+      setConfirmDeleteId(null);
+      await loadChallenges(c.id);
+      toast('Challenge deleted');
+    }catch(e){toast('Failed to delete','error');}
+  };
+
+  // Challenge modal
+  const ChallengeModal=showChallengeModal&&(()=>{
+    const v=challengeVals;
+    const showSpendCap=['rate_cap','category_rate_cap'].includes(v.challenge_type);
+    const showThreshold=['threshold_bonus','sub','annual_threshold'].includes(v.challenge_type);
+    const showCategory=true; // categories are optional for all challenge types
+    return(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div className="card" style={{width:540,maxHeight:'90vh',overflowY:'auto',padding:0}}>
+          <div style={{padding:'20px 24px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{fontSize:16,fontWeight:400}}>{editingChallenge?'Edit Challenge':'New Challenge'}</div>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowChallengeModal(false)}>&#x2715;</button>
+          </div>
+          <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:14}}>
+            <div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Challenge Name *</label>
+              <input value={v.name} onChange={e=>setV('name',e.target.value)}
+                placeholder="e.g. Signup Bonus, Q1 5x Groceries..."
+                style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Challenge Type *</label>
+              <select value={v.challenge_type} onChange={e=>{
+                const t=e.target.value;
+                setV('challenge_type',t);
+                setV('bonus_type',['sub','annual_threshold'].includes(t)?'flat':'per_dollar');
+              }} style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                <option value="sub">SUB (Sign-Up Bonus)</option>
+                <option value="rate_cap">Rate Cap (e.g. 5x up to $1,500)</option>
+                <option value="threshold_bonus">Threshold Bonus (spend $X, earn Y&#xD7;)</option>
+                <option value="category_rate_cap">Category Rate Cap (rotating category)</option>
+                <option value="annual_threshold">Annual Threshold (e.g. free night cert)</option>
+              </select>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Start Date *</label>
+                <input type="date" value={v.start_date} onChange={e=>setV('start_date',e.target.value)}
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>End Date *</label>
+                <input type="date" value={v.end_date} onChange={e=>setV('end_date',e.target.value)}
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4,display:'flex',alignItems:'center',gap:4}}>
+                  Activation Date
+                  <span style={{fontSize:10,fontWeight:400,color:'var(--text-muted)',cursor:'help'}} title="Spend tracking starts at max(start_date, activation_date). Set this if you got the card after the challenge period started.">&#9432;</span>
+                </label>
+                <input type="date" value={v.activation_date} onChange={e=>setV('activation_date',e.target.value)}
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:12}}>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Bonus Type</label>
+                <select value={v.bonus_type} onChange={e=>setV('bonus_type',e.target.value)}
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,background:'var(--bg)',color:'var(--text-primary)'}}>
+                  <option value="flat">Flat (total points)</option>
+                  <option value="per_dollar">Per Dollar (pts/$)</option>
+                  <option value="statement_credit">Statement Credit ($)</option>
+                  <option value="benefit">Benefit (free night, status, etc.)</option>
+                </select>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>
+                  {v.bonus_type==='flat'?'Bonus Points *':v.bonus_type==='statement_credit'?'Credit Amount ($) *':v.bonus_type==='benefit'?'# of Rewards *':'Pts per Dollar *'}
+                </label>
+                <input type="number" step="any" value={v.bonus_amount} onChange={e=>setV('bonus_amount',e.target.value)}
+                  placeholder={v.bonus_type==='flat'?'e.g. 60000':v.bonus_type==='statement_credit'?'e.g. 325':v.bonus_type==='benefit'?'e.g. 1':'e.g. 5'}
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+            </div>
+            {showSpendCap&&<div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spend Cap ($)</label>
+              <input type="number" step="any" value={v.spend_cap} onChange={e=>setV('spend_cap',e.target.value)}
+                placeholder="e.g. 1500"
+                style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+            </div>}
+            {showThreshold&&<div style={{display:'flex',gap:12}}>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spend Threshold ($)</label>
+                <input type="number" step="any" value={v.spend_threshold} onChange={e=>setV('spend_threshold',e.target.value)}
+                  placeholder="e.g. 4000"
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Repeat Up To <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <input type="number" step="1" min="1" value={v.max_occurrences} onChange={e=>setV('max_occurrences',e.target.value)}
+                  placeholder="e.g. 3 times"
+                  style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+              </div>
+            </div>}
+            {showCategory&&<div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:6}}>Limit to Categories <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional — leave blank to count all spend)</span></label>
+              <div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:160,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:4}}>
+                {pointsCategories.map(pc=>(
+                  <label key={pc.id} style={{fontSize:12,display:'flex',alignItems:'center',gap:6,cursor:'pointer',paddingLeft:pc.parent_key?14:0}}>
+                    <input type="checkbox"
+                      checked={(v.category_names||[]).includes(pc.name)}
+                      onChange={e=>setV('category_names',e.target.checked?[...(v.category_names||[]),pc.name]:(v.category_names||[]).filter(n=>n!==pc.name))}/>
+                    {pc.name}
+                    {pc.parent_key&&<span style={{fontSize:10,color:'var(--text-muted)'}}>({pc.parent_key})</span>}
+                  </label>
+                ))}
+              </div>
+            </div>}
+            {allCards.length>0&&<div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:6}}>Apply to Additional Cards</label>
+              <div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:120,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:4}}>
+                {allCards.map(ac=>(
+                  <label key={ac.id} style={{fontSize:12,display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                    <input type="checkbox"
+                      checked={(v.additional_card_ids||[]).map(Number).includes(ac.id)}
+                      onChange={()=>setV('additional_card_ids',toggleArr((v.additional_card_ids||[]).map(Number),ac.id))}/>
+                    {ac.card_name||`Card #${ac.id}`}{ac.last_four?` ···${ac.last_four}`:''}
+                  </label>
+                ))}
+              </div>
+            </div>}
+            <div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Spender Filter <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional — for shared/employee-card accounts</span></label>
+              <SearchCreateSelect value={v.spender_filter||''} options={spenders} placeholder="Anyone (no filter)"
+                emptyLabel="Anyone (no filter)" onChange={val=>setV('spender_filter',val)}/>
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                {v.spender_filter?`Only counts spend tagged "${v.spender_filter}" toward this challenge's threshold.`:'Counts spend from anyone on the linked card(s) — the default.'}
+              </div>
+            </div>
+            <div>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Notes</label>
+              <input value={v.notes} onChange={e=>setV('notes',e.target.value)}
+                style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,fontSize:13,boxSizing:'border-box'}}/>
+            </div>
+            <label style={{fontSize:13,display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
+              <input type="checkbox" checked={v.is_active} onChange={e=>setV('is_active',e.target.checked)}/> Active
+            </label>
+          </div>
+          <div style={{padding:'12px 24px 20px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+            <button type="button" className="btn btn-ghost" onClick={()=>setShowChallengeModal(false)}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={saveChallenge}>{editingChallenge?'Save Changes':'Create Challenge'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+
+  const DeleteConfirm=confirmDeleteId&&(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="card" style={{width:360,padding:0}}>
+        <div style={{padding:'20px 24px 16px',borderBottom:'1px solid var(--border)'}}>
+          <div style={{fontSize:16,fontWeight:400}}>Delete Challenge?</div>
+        </div>
+        <div style={{padding:'20px 24px',fontSize:14,color:'var(--text-secondary)'}}>
+          This will permanently delete the challenge and all its progress data.
+        </div>
+        <div style={{padding:'12px 24px 20px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={()=>setConfirmDeleteId(null)}>Cancel</button>
+          <button type="button" className="btn btn-primary" style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={doDelete}>Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const BenefitModal=showBenefitModal&&(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="card" style={{width:440,maxWidth:'94vw',padding:0}}>
+        <div style={{padding:'18px 24px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:16,fontWeight:400}}>{editingBenefitId?'Edit Benefit':'Add Benefit'}</div>
+          <button type="button" onClick={()=>setShowBenefitModal(false)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'var(--text-muted)'}}>×</button>
+        </div>
+        <div style={{padding:'18px 24px',display:'flex',flexDirection:'column',gap:12}}>
+          {[
+            {label:'Benefit Name *',key:'benefit_name',type:'text',placeholder:'e.g. Airline Credit'},
+            {label:'Amount ($)',key:'amount',type:'number',placeholder:'0 for non-monetary perks'},
+          ].map(({label,key,type,placeholder})=>(
+            <div key={key}>
+              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>{label}</label>
+              <input type={type} value={benefitForm[key]} onChange={e=>setBenefitForm(f=>({...f,[key]:e.target.value}))}
+                placeholder={placeholder}
+                style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',boxSizing:'border-box'}}/>
+            </div>
+          ))}
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Reset Frequency</label>
+            <select value={benefitForm.reset_frequency} onChange={e=>setBenefitForm(f=>({...f,reset_frequency:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+              <option value='annual'>Annual (Jan 1 – Dec 31)</option>
+              <option value='calendar_year'>Calendar Year (same as annual)</option>
+              <option value='semi-annual'>Semi-Annual (Jan–Jun / Jul–Dec)</option>
+              <option value='quarterly'>Quarterly</option>
+              <option value='monthly'>Monthly</option>
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Tracking Type</label>
+            <select value={benefitForm.tracking_type} onChange={e=>setBenefitForm(f=>({...f,tracking_type:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+              <option value='periodic'>Periodic — use-it-or-lose-it each cycle (gets a usage tracker)</option>
+              <option value='by_use'>By Use — doesn't expire on a cadence (e.g. Global Entry, per-stay credit)</option>
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Trigger Category <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+            <select value={benefitForm.trigger_category} onChange={e=>setBenefitForm(f=>({...f,trigger_category:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+              <option value=''>None — any spend / manual</option>
+              {allCscs.map(c=><option key={c.name||c} value={c.name||c}>{c.name||c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+            <textarea value={benefitForm.notes} onChange={e=>setBenefitForm(f=>({...f,notes:e.target.value}))}
+              rows={2} placeholder='e.g. Book via Amex Travel portal'
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',resize:'vertical',boxSizing:'border-box'}}/>
+          </div>
+        </div>
+        <div style={{padding:'12px 24px 18px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={()=>setShowBenefitModal(false)}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={saveBenefit} disabled={benefitSaving}>
+            {benefitSaving?'Saving…':editingBenefitId?'Save Changes':'Add Benefit'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ChangeProductModal=showChangeProductModal&&(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="card" style={{width:440,maxWidth:'94vw',padding:0}}>
+        <div style={{padding:'18px 24px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:16,fontWeight:400}}>{p?'Change Card Product':'Link Card Product'}</div>
+          <button type="button" onClick={()=>setShowChangeProductModal(false)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'var(--text-muted)'}}>×</button>
+        </div>
+        <div style={{padding:'18px 24px',display:'flex',flexDirection:'column',gap:12}}>
+          {p&&<div style={{fontSize:12.5,color:'var(--text-muted)'}}>
+            Currently <strong style={{color:'var(--text-primary)'}}>{p.card_name}</strong>. Past transactions keep earning at {p.card_name}'s rates — only new spend (and the date below onward) uses the new product.
+          </div>}
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>New Product *</label>
+            <select value={changeProductForm.product_id} onChange={e=>setChangeProductForm(f=>({...f,product_id:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+              <option value=''>Select a product…</option>
+              {[...allCardProducts].sort((a,b)=>(a.card_name||'').localeCompare(b.card_name||'')).map(cp=>(
+                <option key={cp.id} value={cp.id}>{cp.card_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Effective Date</label>
+            <input type='date' value={changeProductForm.effective_date}
+              onChange={e=>setChangeProductForm(f=>({...f,effective_date:e.target.value}))}
+              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',boxSizing:'border-box'}}/>
+          </div>
+        </div>
+        <div style={{padding:'12px 24px 18px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
+          <button type="button" className="btn btn-ghost" onClick={()=>setShowChangeProductModal(false)}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={saveChangeProduct} disabled={changingProduct}>
+            {changingProduct?'Saving…':p?'Change Product':'Link Product'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{width:'100%'}}>
+      {ChallengeModal}
+      {BenefitModal}
+      {ChangeProductModal}
+      {DeleteConfirm}
+      {/* Hero */}
+      <div style={{background:grad,borderRadius:16,padding:'28px 32px',color:'#fff',marginBottom:24,position:'relative',overflow:'hidden'}}>
+        <div style={{position:'absolute',top:0,right:0,bottom:0,width:'40%',opacity:0.07,background:'radial-gradient(circle at 70% 30%, #fff 0%, transparent 70%)'}}/>
+        {/* Card artwork — floated in the bottom-right corner of the hero */}
+        {cardImgSrc&&<img src={cardImgSrc} alt="" onError={e=>{e.target.style.display='none';}}
+          style={{position:'absolute',bottom:16,right:24,height:90,borderRadius:6,boxShadow:'0 4px 20px rgba(0,0,0,0.35)',opacity:0.92,pointerEvents:'none'}}/>}
+        <button type="button" onClick={onBack} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'#fff',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,marginBottom:16,backdropFilter:'blur(4px)'}}>&#8592; Back</button>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div>
+            <div style={{fontSize:28,fontWeight:400,letterSpacing:'-0.5px',lineHeight:1.2}}>{displayName}</div>
+            <div style={{fontSize:14,opacity:0.8,marginTop:4}}>{acct.name}{acct.mask?` \u00B7 \u00B7\u00B7\u00B7${acct.mask}`:''}</div>
+            <div style={{display:'flex',gap:10,marginTop:14}}>
+              {eco&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:500,backdropFilter:'blur(4px)'}}>{eco.currency_name}</span>}
+              {c&&c.network&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:500,backdropFilter:'blur(4px)'}}>{c.network}</span>}
+              {p&&<span style={{background:'rgba(255,255,255,0.2)',borderRadius:6,padding:'3px 10px',fontSize:12,fontWeight:500,backdropFilter:'blur(4px)'}}>{p.status}</span>}
+            </div>
+          </div>
+          <div style={{textAlign:'right'}}>
+            {bal!=null&&<>
+              <div style={{fontSize:11,opacity:0.7,textTransform:'uppercase',fontWeight:500}}>Current Balance</div>
+              <div style={{fontSize:32,fontWeight:400,fontFamily:'Plus Jakarta Sans',letterSpacing:'-1px'}}>{bal<0?'-':''}${Math.abs(bal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            </>}
+          </div>
+        </div>
+        {utilPct!=null&&c&&c.credit_limit&&<div style={{marginTop:18}}>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:11,opacity:0.8,marginBottom:4}}>
+            <span>Utilization</span>
+            <span>{utilPct}% of ${c.credit_limit.toLocaleString()}</span>
+          </div>
+          <div style={{height:6,background:'rgba(255,255,255,0.2)',borderRadius:3,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${Math.min(utilPct,100)}%`,background:utilPct>80?'#ef4444':utilPct>50?'#f59e0b':'#22c55e',borderRadius:3,transition:'width 0.5s ease'}}/>
+          </div>
+        </div>}
+      </div>
+
+      {c&&<div className="card" style={{marginBottom:24,padding:'14px 20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Card Product</div>
+            <div style={{fontSize:15,fontWeight:400,marginTop:2}}>{p?p.card_name:'Not linked'}</div>
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {productHistory.length>1&&
+              <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setShowHistory(s=>!s)}>{showHistory?'Hide History':'Product History'}</button>}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={openChangeProductModal}>{p?'Change Product':'Link Product'}</button>
+          </div>
+        </div>
+        {showHistory&&productHistory.length>0&&<div style={{marginTop:12,borderTop:'1px solid var(--border)',paddingTop:10}}>
+          {productHistory.map(h=>(
+            <div key={h.id} style={{display:'flex',justifyContent:'space-between',fontSize:12.5,padding:'4px 0',color:h.is_current?'var(--text-primary)':'var(--text-muted)'}}>
+              <span>{h.product_name||'(unknown product)'}</span>
+              <span>{fmtDate(h.effective_from)} &ndash; {h.is_current?'present':fmtDate(h.effective_to)}</span>
+            </div>
+          ))}
+        </div>}
+      </div>}
+
+      {!p&&<div className="card" style={{marginBottom:24,padding:20,border:'2px solid var(--amber)',background:'rgba(251,191,36,0.1)'}}>
+        <div style={{fontSize:14,fontWeight:500,color:'var(--amber)',marginBottom:4}}>No Card Product Linked</div>
+        <div style={{fontSize:13,color:'var(--amber)'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Use the "Link Product" button above, or go back and use the product dropdown.</div>
+      </div>}
+
+      {(c||p)&&<div className="grid-4" style={{marginBottom:24}}>
+        {/* Annual Fee — nets against 'Fees & Interest'-categorized credits for the
+            current anniversary-anchored cycle (see _annual_fee_cycle_window in
+            main.py), so it's not just displaying the sticker fee but answering
+            "is this fee worth it." Clickable when there's fee-cycle activity to
+            drill into; falls back to the plain sticker-fee display otherwise. */}
+        {(()=>{
+          const afs=d.annual_fee_summary;
+          const hasActivity=afs&&(afs.fee_charged>0||afs.credits_received>0);
+          return(
+            <div className="card" onClick={hasActivity?filterTxnsToFeesInterest:undefined}
+              title={hasActivity?`Click to view this cycle's Fees & Interest transactions (${fmtDate(afs.cycle_start)} – ${fmtDate(afs.cycle_end)})`:undefined}
+              style={{padding:'14px 16px',textAlign:'center',cursor:hasActivity?'pointer':'default'}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Annual Fee</div>
+              {hasActivity?(
+                <>
+                  <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:afs.net_cost>0?'var(--red)':'var(--green)'}}>
+                    ${afs.net_cost.toFixed(0)} net
+                  </div>
+                  <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>
+                    ${afs.fee_charged.toFixed(0)} fee &middot; ${afs.credits_received.toFixed(0)} credits
+                  </div>
+                </>
+              ):(
+                <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:c&&c.annual_fee?'var(--red)':'var(--green)'}}>
+                  {c&&c.annual_fee?`$${c.annual_fee}`:(p&&p.notes&&p.notes.includes('$')?p.notes.replace('Annual fee: ',''):'$0')}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        {[
+          {label:'Credit Limit',value:c&&c.credit_limit?`$${c.credit_limit.toLocaleString()}`:'--'},
+          {label:'Stmt Close',value:c&&c.statement_close_day?`Day ${c.statement_close_day}`:'--'},
+          {label:'Payment Due',value:c&&c.payment_due_day?`Day ${c.payment_due_day}`:'--'},
+        ].map((s,i)=>(
+          <div key={i} className="card" style={{padding:'14px 16px',textAlign:'center'}}>
+            <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>{s.label}</div>
+            <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',marginTop:4,color:s.color||'var(--text-primary)'}}>{s.value}</div>
+          </div>
+        ))}
+      </div>}
+
+      {p&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
+        <div className="card" style={{padding:20}}>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:500}}>Earning Structure</div>
+            {eco&&<div style={{fontSize:11,color:'var(--text-muted)'}}>{eco.currency_name}{eco.is_cash_back?' · Cash Back':''}</div>}
+          </div>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',paddingBottom:6,borderBottom:'1px solid var(--border)',marginBottom:2}}>
+            <span>Category</span>
+            <span style={{textAlign:'center'}}>Rate</span>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'7px 0',borderBottom:'1px solid var(--border)',background:'var(--elevated)'}}>
+            <span style={{fontSize:12,fontWeight:500,paddingLeft:4}}>All Purchases (Base)</span>
+            <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--blue)',fontFamily:'Plus Jakarta Sans'}}>{d.base_rate}x</span>
+          </div>
+          <div style={{maxHeight:320,overflowY:'auto'}}>
+            {(d.earning_structure||[]).filter(e=>e.bonus>0).map((e,i)=>(
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 50px',gap:'0 8px',padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
+                <span style={{fontSize:12,paddingLeft:4}}>{e.category}</span>
+                <span style={{textAlign:'center',fontSize:13,fontWeight:400,color:'var(--green)',fontFamily:'Plus Jakarta Sans'}}>{e.total}x</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Earn Summary */}
+        <div className="card" style={{padding:20}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+            <div style={{fontSize:15,fontWeight:500}}>Earn Summary 🏆</div>
+            <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
+              {['mtd','qtd','ytd'].map(p=>(
+                <button type="button" key={p} onClick={()=>setSpendPeriod(p)}
+                  style={{padding:'3px 10px',borderRadius:4,border:'none',cursor:'pointer',fontSize:11,fontWeight:spendPeriod===p?700:400,
+                    background:spendPeriod===p?'var(--bg)':'transparent',
+                    color:spendPeriod===p?'var(--text-primary)':'var(--text-muted)',
+                    boxShadow:spendPeriod===p?'0 1px 2px rgba(0,0,0,0.08)':'none',textTransform:'uppercase'}}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:14,opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            {spendPeriod==='mtd'?'Month to date':spendPeriod==='qtd'?'Quarter to date':'Year to date'} · points earned by category
+          </div>
+          {topCats.length===0
+            ?<div style={{padding:30,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No spending data yet.</div>
+            :<div style={{display:'flex',flexDirection:'column',gap:8,opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+              {topCats.map((s,i)=>{
+                const catLabel=s.category==='Other'?'General (Non-Category)':s.category;
+                const pts=Math.round(s.points_earned);
+                return(
+                  <div key={i}>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}>
+                      <span style={{fontWeight:500}}>{catLabel} <span style={{fontWeight:400,color:'var(--blue)'}}>{s.earn_rate}x</span></span>
+                      <span style={{fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--green)'}}>{pts.toLocaleString()} pts</span>
+                    </div>
+                    <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{height:'100%',width:`${(s.amount/maxSpend*100)}%`,background:'var(--blue)',borderRadius:3,transition:'width 0.4s ease'}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          }
+          {/* Base points total */}
+          {d.points_earned&&d.points_earned.total>0&&<div style={{marginTop:16,padding:'12px 14px',background:'rgba(52,211,153,0.1)',borderRadius:10,border:'1px solid rgba(52,211,153,0.3)',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--green)',textTransform:'uppercase'}}>
+              Base {eco?.currency_name||'Points'} Earned · {spendPeriod.toUpperCase()}
+            </div>
+            <div style={{fontSize:24,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)',marginTop:4}}>
+              {Math.round(d.points_earned.total).toLocaleString()}
+            </div>
+          </div>}
+          {/* Challenge bonus points */}
+          {(d.challenge_points||[]).length>0&&<div style={{marginTop:12,padding:'12px 14px',background:'var(--violet-soft)',borderRadius:10,border:'1px solid var(--violet-border)',opacity:spendRefreshing?0.5:1,transition:'opacity 0.2s'}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--violet)',textTransform:'uppercase',marginBottom:8}}>
+              ⚡ Bonus from Challenges
+            </div>
+            {d.challenge_points.map(ch=>{
+              const earned=Math.round(ch.bonus_pts);
+              const locked=['flat','statement_credit','benefit'].includes(ch.bonus_type)&&!ch.threshold_met;
+              const isUsd=ch.bonus_currency==='usd';
+              const isBenefit=ch.bonus_currency==='benefit';
+              const handleDeleteChallenge=async(e)=>{
+                e.stopPropagation();
+                if(!window.confirm(`Delete challenge "${ch.name}"?`)) return;
+                try{
+                  await apiFetch(`/challenges/${ch.id}`,{method:'DELETE'});
+                  toast('Challenge deleted','success');
+                  load();
+                }catch(err){toast('Delete failed: '+(err?.message||''),'error');}
+              };
+              const chFullName=ch.name&&ch.name.length>40?ch.name:ch.name;
+              return(
+                <div key={ch.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',fontSize:12,marginBottom:6,paddingBottom:6,borderBottom:'1px solid var(--violet-border)',gap:6}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:1}}>
+                      <div style={{fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}} title={ch.name}>{ch.name}</div>
+                      <button type="button" onClick={()=>openEdit(ch)} title="Edit"
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid var(--violet-border)',background:'none',color:'var(--violet)',fontSize:10,cursor:'pointer',lineHeight:1.4}}>✎</button>
+                      <button type="button" onClick={handleDeleteChallenge} title="Delete"
+                        style={{flexShrink:0,padding:'1px 5px',borderRadius:3,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',fontSize:10,cursor:'pointer',lineHeight:1.4}}>×</button>
+                    </div>
+                    {ch.category_names&&ch.category_names.length>0&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.8}}>{ch.category_names.join(', ')}</div>}
+                    {ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
+                      ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString()} spent
+                      {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
+                    </div>}
+                    {ch.spend_threshold&&!ch.spend_cap&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>
+                      ${(ch.lap_spend??ch.current_spend??0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_threshold.toLocaleString()} threshold
+                      {ch.progress_pct!=null&&<span style={{marginLeft:6,color:ch.progress_pct>=100?'#059669':'var(--text-muted)'}}>{ch.progress_pct}%</span>}
+                    </div>}
+                    {locked&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>Threshold not yet met</div>}
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0,marginLeft:4}}>
+                    {isBenefit
+                      ?<div style={{fontSize:11,color:ch.threshold_met?'var(--violet)':'var(--text-muted)'}}>{ch.threshold_met?'Unlocked!':locked?'Locked':'—'}</div>
+                      :earned>0
+                        ?<div style={{fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--violet)',fontSize:14}}>{isUsd?'+$':'+'}{earned.toLocaleString()}</div>
+                        :<div style={{fontSize:11,color:'var(--text-muted)'}}>{locked?'Locked':'—'}</div>}
+                    {ch.bonus_type==='per_dollar'&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>+{ch.bonus_amount}x bonus</div>}
+                    {ch.max_occurrences&&<div style={{fontSize:10,color:'var(--violet)',opacity:0.7}}>{ch.occurrences_earned||0} of {ch.max_occurrences}</div>}
+                  </div>
+                </div>
+              );
+            })}
+            {d.challenge_pts_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
+              <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Challenge Bonus</div>
+              <div style={{fontSize:18,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--violet)'}}>{Math.round(d.challenge_pts_total).toLocaleString()}</div>
+            </div>}
+            {d.challenge_credit_total>0&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:4,paddingTop:4}}>
+              <div style={{fontSize:11,color:'var(--violet)',fontWeight:500}}>Total Statement Credits</div>
+              <div style={{fontSize:18,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--violet)'}}>${d.challenge_credit_total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            </div>}
+          </div>}
+        </div>
+      </div>}
+
+      {/* Benefits & Credits — dollar-value credits and certificates only.
+           Earn-rate bonuses (e.g. "5x Rotating") and items with no dollar value
+           are excluded here; they belong in Spend Challenges instead. */}
+      <div className="card" style={{padding:20,marginBottom:24}}>
+        {(()=>{
+          // Filter to actual dollar credits: must have a $1+ amount and must not
+          // look like an earn-rate multiplier (e.g. "5x", "3x on Dining").
+          const isCreditBenefit=b=>(b.amount||0)>=1&&!/^\d+(\.\d+)?x\b/i.test(b.benefit_name||'');
+          const creditBenefits=cardBenefits.filter(isCreditBenefit);
+          return(<>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:500}}>Benefits &amp; Credits</div>
+            {creditBenefits.length>0&&(()=>{
+              const totalAnnual=creditBenefits.reduce((s,b)=>s+annualValue(b),0);
+              const totalUsed=creditBenefits.reduce((s,b)=>s+(b.amount_used||0),0);
+              const totalRemaining=creditBenefits.reduce((s,b)=>s+(b.remaining>0?b.remaining:0),0);
+              return<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                ${totalAnnual.toLocaleString()} annual value · <span style={{color:'var(--green)',fontWeight:500}}>${totalUsed.toLocaleString(undefined,{maximumFractionDigits:0})} used</span> · ${totalRemaining.toLocaleString(undefined,{maximumFractionDigits:0})} remaining
+              </div>;
+            })()}
+          </div>
+          {d?.product?.id&&<button type="button" className="btn btn-ghost" style={{fontSize:12}}
+            onClick={()=>{setEditingBenefitId(null);setBenefitForm({benefit_name:'',amount:'',reset_frequency:'annual',tracking_type:'periodic',trigger_category:'',notes:''});setShowBenefitModal(true);}}>
+            + Add Benefit
+          </button>}
+        </div>
+        {benefitsLoading
+          ?<div style={{padding:20,textAlign:'center'}}><div className="spinner"/></div>
+          :creditBenefits.length===0
+            ?<div style={{padding:'12px 0',color:'var(--text-muted)',fontSize:13,textAlign:'center'}}>
+                No benefits configured.{d?.product?.id&&<span> Click <strong>+ Add Benefit</strong> to add one.</span>}
+              </div>
+            :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {creditBenefits.map(b=>{
+                const isLogging=logUsageFor===b.id;
+                const fullyUsed=b.amount>0&&b.amount_used>=b.amount;
+                const hasUsage=b.amount_used>0;
+                const statusColor=fullyUsed?'#15803d':hasUsage?'#b45309':'var(--text-muted)';
+                const statusIcon=fullyUsed?'✅':hasUsage?'🟡':'⬜';
+                const freqLabel={annual:'/ year',calendar_year:'/ year','semi-annual':'/ half-year',quarterly:'/ quarter',monthly:'/ month'}[b.reset_frequency]||'/ year';
+                return(
+                  <div key={b.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',background:fullyUsed?'rgba(52,211,153,0.06)':'var(--surface)'}}>
+                    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8,marginBottom:8}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                          <span style={{fontWeight:500,fontSize:14}}>{b.benefit_name}</span>
+                          {b.amount>0&&<span style={{fontSize:13,fontFamily:'Plus Jakarta Sans',color:'var(--green)',fontWeight:400}}>${b.amount.toLocaleString()}</span>}
+                          <span style={{fontSize:11,color:'var(--text-muted)'}}>{freqLabel}</span>
+                          {b.trigger_category&&<span style={{fontSize:10,padding:'1px 6px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4}}>{b.trigger_category}</span>}
+                        </div>
+                        {b.notes&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{b.notes}</div>}
+                      </div>
+                      <div style={{display:'flex',gap:4,flexShrink:0}}>
+                        <button type="button" onClick={()=>{setEditingBenefitId(b.id);setBenefitForm({benefit_name:b.benefit_name,amount:String(b.amount),reset_frequency:b.reset_frequency,tracking_type:b.tracking_type||'periodic',trigger_category:b.trigger_category||'',notes:b.notes||''});setShowBenefitModal(true);}}
+                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✎</button>
+                        <button type="button" onClick={()=>deleteBenefit(b.id,b.benefit_name)}
+                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>×</button>
+                      </div>
+                    </div>
+                    {b.amount>0&&b.cycles&&(()=>{
+                      const cycleLabels=b.reset_frequency==='monthly'
+                        ?['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                        :b.reset_frequency==='quarterly'?['Q1','Q2','Q3','Q4']:['H1','H2'];
+                      const usedCount=b.cycles.filter(c=>c.used).length;
+                      const isToggling=togglingCycle===`${b.id}`;
+                      return(
+                        <div style={{marginBottom:8}}>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:5}}>
+                            <span style={{color:'var(--text-muted)',fontWeight:500}}>{usedCount} of {b.cycles.length} used this year</span>
+                          </div>
+                          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                            {b.cycles.map((cy,i)=>(
+                              <button key={cy.cycle} type="button" disabled={isToggling}
+                                onClick={()=>toggleBenefitCycle(b,cy)}
+                                title={cy.used?`Used — click to un-mark`:`Click to mark used ($${b.amount})`}
+                                style={{fontSize:10,fontWeight:500,padding:'4px 0',width:32,borderRadius:5,cursor:isToggling?'wait':'pointer',
+                                  border:cy.used?'1px solid #16a34a':'1px solid var(--border)',
+                                  background:cy.used?'rgba(52,211,153,0.15)':'var(--bg)',
+                                  color:cy.used?'#15803d':'var(--text-muted)'}}>
+                                {cy.used?'✓':cycleLabels[i]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {b.amount>0&&!b.cycles&&(
+                      <div style={{marginBottom:8}}>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
+                          <span style={{color:statusColor,fontWeight:500}}>{statusIcon} {hasUsage?`$${b.amount_used.toLocaleString(undefined,{maximumFractionDigits:0})} used`:'Unused'}</span>
+                          {b.tracking_type!=='by_use'&&<span style={{color:'var(--text-muted)'}}>Resets {nextResetLabel(b.reset_frequency)}</span>}
+                        </div>
+                        <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                          <div style={{height:'100%',width:`${Math.min(100,b.pct_used)}%`,background:fullyUsed?'#16a34a':'var(--blue-primary)',borderRadius:3,transition:'width 0.4s ease'}}/>
+                        </div>
+                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,textAlign:'right'}}>
+                          {b.pct_used}% of ${b.amount.toLocaleString()} · {b.remaining>0?`$${b.remaining.toLocaleString(undefined,{maximumFractionDigits:0})} remaining`:'Fully used 🎉'}
+                        </div>
+                      </div>
+                    )}
+                    {!b.cycles&&(isLogging?(
+                      <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',marginTop:4}}>
+                        <span style={{fontSize:12,color:'var(--text-muted)'}}>$</span>
+                        <input autoFocus type="number" min="0" step="0.01" value={logUsageAmt} onChange={e=>setLogUsageAmt(e.target.value)}
+                          placeholder="Amount used" style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:110}}/>
+                        <input type="text" value={logUsageNotes} onChange={e=>setLogUsageNotes(e.target.value)}
+                          placeholder="Notes (optional)" style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',flex:1,minWidth:120}}/>
+                        <button type="button" onClick={()=>logUsage(b.id,logUsageAmt,logUsageNotes)} disabled={benefitSaving}
+                          style={{fontSize:12,padding:'4px 10px',borderRadius:5,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer',fontWeight:500}}>
+                          {benefitSaving?'…':'Save'}
+                        </button>
+                        <button type="button" onClick={()=>{setLogUsageFor(null);setLogUsageAmt('');setLogUsageNotes('');}}
+                          style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>Cancel</button>
+                      </div>
+                    ):(
+                      <div style={{display:'flex',gap:6,marginTop:4}}>
+                        <button type="button" onClick={()=>{setLogUsageFor(b.id);setLogUsageAmt(b.amount>0?String(b.amount_used||''):'');setLogUsageNotes('');}}
+                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-primary)',cursor:'pointer',fontWeight:500}}>
+                          {hasUsage?'Update Usage':'Log Usage'}
+                        </button>
+                        {b.usage_id&&<button type="button" onClick={()=>clearUsage(b.usage_id,b.id)}
+                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>
+                          Clear
+                        </button>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+        }
+          </>);
+        })()}
+      </div>
+
+      {/* Spend Challenges */}
+      {c&&<div className="card" style={{padding:20,marginBottom:24}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:500}}>Spend Challenges</div>
+            <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>SUBs, rotating categories, annual thresholds</div>
+          </div>
+          <button type="button" className="btn btn-primary btn-sm" style={{fontSize:12,padding:'5px 14px'}} onClick={openNew}>+ New</button>
+        </div>
+        {suggestions.length>0&&<div style={{marginBottom:16,padding:'12px 14px',background:'rgba(96,165,250,0.08)',borderRadius:10,border:'1px solid rgba(96,165,250,0.25)'}}>
+          <div style={{fontSize:12,fontWeight:500,color:'var(--blue)',marginBottom:8}}>&#128161; Suggested for this card</div>
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {suggestions.map((s,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:12}}>
+                <div>
+                  <span style={{fontWeight:500}}>{s.name}</span>
+                  <span style={{color:'var(--text-muted)',marginLeft:8}}>{s.spend_threshold?`$${s.spend_threshold.toLocaleString()} spend \u2192`:''} {s.bonus_type==='flat'?`${s.bonus_amount?.toLocaleString()} pts`:`${s.bonus_amount}x/$`}</span>
+                </div>
+                <button type="button" className="btn btn-sm btn-secondary" style={{fontSize:11,padding:'3px 12px'}} onClick={()=>openFromTemplate(s)}>Add</button>
+              </div>
+            ))}
+          </div>
+        </div>}
+        {challengesLoading
+          ?<div style={{padding:20,textAlign:'center'}}><div className="spinner"/></div>
+          :challenges.length===0
+            ?<div style={{padding:'20px 0',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No challenges yet. Click + New to add one.</div>
+            :challenges.map(ch=>{
+              const statusColor={upcoming:'var(--text-muted)',active:'var(--blue-primary)',unlocked:'var(--green)',expired:'var(--text-muted)'}[ch.status]||'var(--text-muted)';
+              const barColor={upcoming:'var(--border)',active:'var(--blue-primary)',unlocked:'var(--green)',expired:'var(--border)'}[ch.status]||'var(--border)';
+              const estVal=null; // valuation display removed per design decision
+              return(
+                <div key={ch.id} onClick={()=>filterTxnsToChallenge(ch)} title="Click to filter Transactions to this challenge's date range"
+                  style={{padding:'14px 0',borderBottom:'1px solid var(--border)',opacity:ch.is_active?1:0.55,cursor:'pointer'}}>
+                  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <span style={{fontSize:14,fontWeight:400}}>{ch.name}</span>
+                        <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:barColor+'22',color:statusColor,fontWeight:500,textTransform:'uppercase'}}>{ch.status}</span>
+                        <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--border)',color:'var(--text-muted)'}}>{ch.challenge_type.replace(/_/g,' ')}</span>
+                        {ch.max_occurrences&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)',fontWeight:500}}>{ch.occurrences_earned||0} of {ch.max_occurrences} earned</span>}
+                        {ch.spender_filter&&<span style={{fontSize:11,padding:'2px 7px',borderRadius:10,background:'var(--violet-soft)',color:'var(--violet)',fontWeight:500}}>{ch.spender_filter} only</span>}
+                        {ch.category_names&&ch.category_names.length>0&&<span style={{fontSize:11,color:'var(--text-muted)'}}>&#183; {ch.category_names.join(', ')}</span>}
+                      </div>
+                      <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                        {ch.start_date} &#8212; {ch.end_date}
+                        {ch.activation_date&&<span style={{marginLeft:8,color:'var(--blue)'}}>activated {ch.activation_date}</span>}
+                        {ch.additional_card_ids&&ch.additional_card_ids.length>0&&<span style={{marginLeft:8}}>+{ch.additional_card_ids.length} more card{ch.additional_card_ids.length>1?'s':''}</span>}
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:6,flexShrink:0,marginLeft:12}}>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={e=>{e.stopPropagation();openEdit(ch);}}>Edit</button>
+                      <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={e=>{e.stopPropagation();setConfirmDeleteId(ch.id);}}>Delete</button>
+                    </div>
+                  </div>
+                  {ch.progress_target!=null&&<div style={{marginBottom:8}}>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
+                      <span style={{color:'var(--text-muted)'}}>Progress{ch.max_occurrences?` (lap ${Math.min((ch.occurrences_earned||0)+1,ch.max_occurrences)} of ${ch.max_occurrences})`:''}</span>
+                      <span style={{fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>${(ch.lap_spend??ch.current_spend).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} / ${ch.progress_target.toLocaleString()}</span>
+                    </div>
+                    <div style={{height:7,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{height:'100%',width:`${ch.progress_pct||0}%`,background:barColor,borderRadius:3,transition:'width 0.4s'}}/>
+                    </div>
+                    {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>${ch.remaining_spend.toLocaleString()} more to {ch.spend_cap?'hit cap':ch.max_occurrences?'unlock next':'unlock'}</div>}
+                  </div>}
+                  <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
+                    <span>
+                      <span style={{color:'var(--text-muted)'}}>Bonus: </span>
+                      <span style={{fontWeight:400,color:ch.bonus_pts_earned>0?'#059669':'var(--text-muted)'}}>
+                        {ch.bonus_currency==='benefit'
+                          ?(ch.bonus_unlocked?'Unlocked!':ch.status==='unlocked'?'Unlocked!':'Not yet earned')
+                          :ch.bonus_pts_earned>0?`${ch.bonus_currency==='usd'?'$':''}${ch.bonus_pts_earned.toLocaleString()}${ch.bonus_currency==='usd'?'':' '+(ch.currency||'pts')}`:ch.status==='unlocked'?'Unlocked!':'Not yet earned'}
+                      </span>
+                    </span>
+                    {estVal&&parseFloat(estVal)>0&&<span>
+                      <span style={{color:'var(--text-muted)'}}>Est. value: </span>
+                      <span style={{fontWeight:500,color:'var(--green)'}}>${estVal}</span>
+                    </span>}
+                    <span>
+                      <span style={{color:'var(--text-muted)'}}>Rate: </span>
+                      <span style={{fontFamily:'Plus Jakarta Sans'}}>
+                        {ch.bonus_type==='statement_credit'?`$${ch.bonus_amount?.toLocaleString()} credit flat`
+                          :ch.bonus_type==='benefit'?`${ch.bonus_amount?.toLocaleString()} reward${ch.bonus_amount===1?'':'s'}`
+                          :ch.bonus_type==='flat'?`${ch.bonus_amount?.toLocaleString()} pts flat`
+                          :`${ch.bonus_amount}x per $`}
+                        {ch.max_occurrences?`, up to ${ch.max_occurrences}x`:''}
+                        {ch.spend_cap?` (up to $${ch.spend_cap.toLocaleString()})`:ch.spend_threshold?` after $${ch.spend_threshold.toLocaleString()}`:''}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+        }
+      </div>}
+
+      {/* Recent Transactions */}
+      <div className="card" style={{padding:20}} ref={txnSectionRef}>
+        {/* Header row: title + Monthly/QTD/YTD/Custom toggle + period nav */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:8}}>
+          <div style={{fontSize:15,fontWeight:500}}>Transactions</div>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            {/* Monthly / QTD / YTD / Custom toggle */}
+            <div style={{display:'flex',gap:2,background:'var(--border)',borderRadius:6,padding:2}}>
+              {[['monthly','Monthly'],['qtd','QTD'],['ytd','YTD'],['custom','Custom']].map(([v,label])=>(
+                <button type="button" key={v} onClick={()=>{setTxnView(v);if(v!=='custom'){setChallengeFilterName(null);setCatFilter('');}}}
+                  style={{padding:'3px 10px',borderRadius:4,border:'none',cursor:'pointer',fontSize:11,fontWeight:txnView===v?700:400,
+                    background:txnView===v?'var(--bg)':'transparent',
+                    color:txnView===v?'var(--text-primary)':'var(--text-muted)',
+                    boxShadow:txnView===v?'0 1px 2px rgba(0,0,0,0.08)':'none'}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Month nav */}
+            {txnView==='monthly'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button type="button" onClick={prevTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:500,minWidth:72,textAlign:'center'}}>{txnMonthNames[txnMonth-1]} {txnYear}</span>
+              <button type="button" onClick={nextTxnMonth} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
+            {/* Quarter nav */}
+            {txnView==='qtd'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button type="button" onClick={prevTxnQuarter} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:500,minWidth:64,textAlign:'center'}}>Q{txnQuarter} {txnYear}</span>
+              <button type="button" onClick={nextTxnQuarter} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
+            {/* Year nav */}
+            {txnView==='ytd'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <button type="button" onClick={()=>setTxnYear(y=>y-1)} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8249;</button>
+              <span style={{fontSize:12,fontWeight:500,minWidth:40,textAlign:'center'}}>{txnYear}</span>
+              <button type="button" onClick={()=>setTxnYear(y=>Math.min(y+1,new Date().getFullYear()))} style={{background:'none',border:'1px solid var(--border)',borderRadius:4,padding:'2px 7px',cursor:'pointer',fontSize:13,color:'var(--text-muted)'}}>&#8250;</button>
+            </div>}
+            {/* Custom range */}
+            {txnView==='custom'&&<div style={{display:'flex',alignItems:'center',gap:4}}>
+              <input type="date" value={customStart} onChange={e=>{setChallengeFilterName(null);setCatFilter('');setCustomStart(e.target.value);}}
+                style={{fontSize:12,padding:'3px 6px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+              <span style={{fontSize:12,color:'var(--text-muted)'}}>&#8212;</span>
+              <input type="date" value={customEnd} onChange={e=>{setChallengeFilterName(null);setCatFilter('');setCustomEnd(e.target.value);}}
+                style={{fontSize:12,padding:'3px 6px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+            </div>}
+          </div>
+        </div>
+        {/* Custom-filter chip — set by clicking a challenge card or the Annual Fee tile */}
+        {challengeFilterName&&txnView==='custom'&&(
+          <div style={{marginBottom:10}}>
+            <span style={{fontSize:11,padding:'3px 10px',borderRadius:12,background:'var(--violet-soft)',color:'var(--violet)',display:'inline-flex',alignItems:'center',gap:6}}>
+              Filtered: {challengeFilterName}
+              <button type="button" onClick={()=>{setChallengeFilterName(null);setCatFilter('');setTxnView('monthly');}}
+                style={{background:'none',border:'none',cursor:'pointer',color:'inherit',fontSize:12,padding:0,lineHeight:1}}>&#10005;</button>
+            </span>
+          </div>
+        )}
+        {/* Filter row */}
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:500,textTransform:'uppercase',letterSpacing:'0.4px'}}>Filter:</span>
+          <input value={descFilter} onChange={e=>setDescFilter(e.target.value)} placeholder="Search description…"
+            style={{fontSize:12,padding:'3px 10px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:190,outline:'none'}}/>
+          <select value={cscFilter} onChange={e=>setCscFilter(e.target.value)}
+            style={{fontSize:12,padding:'3px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',cursor:'pointer'}}>
+            <option value=''>All categories</option>
+            <option value='__none__'>⚠ No CSC assigned</option>
+            {availCscs.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+          {(cscFilter||descFilter)&&<button type="button" onClick={()=>{setCscFilter('');setDescFilter('');}}
+            style={{fontSize:11,padding:'2px 8px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕ Clear all</button>}
+        </div>
+        {/* Points summary bar */}
+        {txnSummary&&txnSummary.total_spend>0&&(
+          <div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap',padding:'8px 12px',background:'var(--border)',borderRadius:8,marginBottom:12,fontSize:12}}>
+            <span><span style={{color:'var(--text-muted)'}}>Total spend: </span><strong>{fmt(txnSummary.total_spend)}</strong></span>
+            <span><span style={{color:'var(--text-muted)'}}>Est. points: </span><strong style={{color:'var(--green)'}}>{(txnSummary.total_pts||0).toLocaleString()}</strong></span>
+            {cscFilter&&cscFilter!=='__none__'&&txnSummary.by_csc[cscFilter]&&(
+              <span style={{color:'var(--text-muted)',fontSize:11}}>{txnSummary.by_csc[cscFilter].count} txns</span>
+            )}
+            {cscFilter==='__none__'&&txnSummary.by_csc['__none__']&&(
+              <span style={{color:'var(--amber)',fontSize:11}}>⚠ {txnSummary.by_csc['__none__'].count} txns with no CSC — {fmt(txnSummary.by_csc['__none__'].spend)} unoptimized</span>
+            )}
+          </div>
+        )}
+        {/* Teach-merchant prompt — shown after inline CSC save */}
+        {teachPrompt&&(
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,
+            padding:'10px 14px',marginBottom:10,background:'rgba(96,165,250,0.08)',border:'1px solid rgba(96,165,250,0.25)',borderRadius:8,fontSize:13}}>
+            <span>📌 Apply <strong>{teachPrompt.csc}</strong> to all past &amp; future transactions from <strong>{teachPrompt.merchantName}</strong>?</span>
+            <div style={{display:'flex',gap:6}}>
+              <button type="button" onClick={()=>teachMerchant(teachPrompt.merchantName,teachPrompt.csc)} disabled={teachLoading}
+                style={{padding:'4px 12px',borderRadius:5,border:'none',background:'var(--blue)',color:'#fff',fontSize:12,fontWeight:500,cursor:'pointer'}}>
+                {teachLoading?'Saving…':'Yes, apply to all'}
+              </button>
+              <button type="button" onClick={()=>setTeachPrompt(null)}
+                style={{padding:'4px 10px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',fontSize:12,cursor:'pointer'}}>
+                Just this one
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Grouped merchant view — shown when filter=__none__ */}
+        {cscFilter==='__none__'&&(
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:500,color:'var(--amber)',marginBottom:8}}>
+              🎓 Teach merchants — assign a CSC to fix all past &amp; future transactions at once
+            </div>
+            {unclassifiedLoading
+              ?<div style={{padding:16,textAlign:'center'}}><div className="spinner"/></div>
+              :unclassified.length===0
+                ?<div style={{fontSize:12,color:'var(--text-muted)',padding:'8px 0'}}>No unclassified merchants for this account.</div>
+                :<div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead>
+                      <tr style={{borderBottom:'2px solid var(--border)'}}>
+                        <th style={{padding:'5px 8px',textAlign:'left',color:'var(--text-muted)',fontWeight:500,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Merchant</th>
+                        <th style={{padding:'5px 8px',textAlign:'right',color:'var(--text-muted)',fontWeight:500,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Spend</th>
+                        <th style={{padding:'5px 8px',textAlign:'right',color:'var(--text-muted)',fontWeight:500,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Txns</th>
+                        <th style={{padding:'5px 8px',textAlign:'left',color:'var(--text-muted)',fontWeight:500,textTransform:'uppercase',letterSpacing:'0.4px',fontSize:10}}>Assign CSC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unclassified.map(u=>(
+                        <tr key={u.merchant} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'6px 8px',fontWeight:500}}>{u.merchant}</td>
+                          <td style={{padding:'6px 8px',textAlign:'right',fontFamily:'Plus Jakarta Sans',color:'var(--red)',fontWeight:500}}>{fmt(u.total_spend)}</td>
+                          <td style={{padding:'6px 8px',textAlign:'right',color:'var(--text-muted)'}}>{u.count}</td>
+                          <td style={{padding:'6px 8px'}}>
+                            {assigningMerchant===u.merchant?(
+                              <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                                <select autoFocus value={assignCscVal} onChange={e=>setAssignCscVal(e.target.value)}
+                                  style={{fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
+                                  <option value=''>— select —</option>
+                                  {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                                </select>
+                                <button type="button" onClick={()=>assignCscVal&&assignMerchantCsc(u.merchant,assignCscVal)} disabled={!assignCscVal||assignLoading}
+                                  style={{padding:'2px 8px',borderRadius:4,border:'none',background:'var(--green)',color:'#fff',fontSize:11,cursor:'pointer',fontWeight:500}}>
+                                  {assignLoading?'…':'✓'}
+                                </button>
+                                <button type="button" onClick={()=>setAssigningMerchant(null)}
+                                  style={{padding:'2px 7px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',fontSize:11,cursor:'pointer'}}>✕</button>
+                              </div>
+                            ):(
+                              <button type="button" onClick={()=>{setAssigningMerchant(u.merchant);setAssignCscVal('');}}
+                                style={{padding:'2px 10px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-primary)',fontSize:11,cursor:'pointer',fontWeight:500}}>
+                                Assign →
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+            }
+            <div style={{borderTop:'1px solid var(--border)',marginTop:12,paddingTop:10,fontSize:11,color:'var(--text-muted)',fontStyle:'italic'}}>
+              ↓ Individual unclassified transactions:
+            </div>
+          </div>
+        )}
+        {txnsLoading
+          ?<div style={{padding:30,textAlign:'center'}}><div className="spinner"/></div>
+          :txns.length===0
+            ?<div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>No transactions for this period.</div>
+            :<div style={{overflowX:'auto'}}>
+              {selectedTxnIds.size>0&&(
+                <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',marginBottom:8,background:'var(--violet-soft)',borderRadius:8,flexWrap:'wrap'}}>
+                  <span style={{fontSize:12,color:'var(--violet)',fontWeight:500}}>{selectedTxnIds.size} selected</span>
+                  <span style={{fontSize:12,color:'var(--text-muted)'}}>Tag as:</span>
+                  <div style={{width:160}}>
+                    <SearchCreateSelect value='' options={spenders} placeholder="Who spent this?"
+                      onChange={v=>bulkTagSpender(v)}/>
+                  </div>
+                  {bulkTagging&&<span style={{fontSize:12,color:'var(--text-muted)'}}>Saving…</span>}
+                  <button type="button" onClick={()=>setSelectedTxnIds(new Set())}
+                    style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer',marginLeft:'auto'}}>
+                    Clear selection
+                  </button>
+                </div>
+              )}
+              {displayTxns.length===0&&<div style={{padding:'10px 0 6px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No matches for "{descFilter}".</div>}
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  {(()=>{
+                    const _th=(col,label,align='left',extra={})=>{
+                      const active=sortCol===col;
+                      return(
+                        <th key={col} onClick={()=>handleSort(col)}
+                          style={{padding:'6px 10px 8px',textAlign:align,fontSize:11,fontWeight:500,
+                            color:active?'var(--text-primary)':'var(--text-muted)',
+                            textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap',
+                            cursor:'pointer',userSelect:'none',...extra}}>
+                          {label}{sortArrow(col)}
+                        </th>
+                      );
+                    };
+                    const allSelected=displayTxns.length>0&&displayTxns.every(t=>selectedTxnIds.has(t.id));
+                    return(
+                      <tr style={{borderBottom:'2px solid var(--border)'}}>
+                        <th style={{padding:'6px 6px 8px',textAlign:'center'}}>
+                          <input type="checkbox" checked={allSelected}
+                            onChange={()=>setSelectedTxnIds(allSelected?new Set():new Set(displayTxns.map(t=>t.id)))}/>
+                        </th>
+                        {_th('date','Date')}
+                        {_th('description','Description','left',{})}
+                        {_th('csc','CSC')}
+                        <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Spender</th>
+                        <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Type</th>
+                        {_th('amount','Amount','right')}
+                        {_th('pts','Est. Pts','right')}
+                        <th style={{padding:'6px 10px 8px',textAlign:'center',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Exclude</th>
+                      </tr>
+                    );
+                  })()}
+                </thead>
+                <tbody>
+                  {displayTxns.map(t=>{
+                    const mm=t.date.slice(5,7).replace(/^0/,'');
+                    const dd=t.date.slice(8,10).replace(/^0/,'');
+                    const isEditing=editingCscId===t.id;
+                    const isEditingAction=editingActionId===t.id;
+                    const ptsClass={earn:'var(--green)',clawback:'var(--red)',manual_override:'var(--amber)',excluded:'var(--text-muted)'}[t.points_earn_classification]||'var(--text-muted)';
+                    const isEditingSpender=editingSpenderId===t.id;
+                    return(
+                      <tr key={t.id} className={t.is_excluded?'row-excluded':''}
+                        style={{borderBottom:'1px solid var(--border)',background:!t.is_excluded&&!t.points_category&&t.amount<0?'rgba(234,179,8,0.04)':''}}>
+                        <td style={{padding:'8px 6px',textAlign:'center'}}>
+                          <input type="checkbox" checked={selectedTxnIds.has(t.id)} onChange={()=>toggleTxnSelected(t.id)}/>
+                        </td>
+                        <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
+                        <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                        <td style={{padding:'8px 10px',minWidth:140}}>
+                          {isEditing?(
+                            <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                              <select autoFocus value={editingCscVal}
+                                onChange={e=>setEditingCscVal(e.target.value)}
+                                style={{fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',maxWidth:130}}>
+                                <option value=''>— none —</option>
+                                {allCscs.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                              </select>
+                              <button type="button" onClick={()=>saveCscEdit(t.id,editingCscVal)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                              <button type="button" onClick={()=>setEditingCscId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                            </div>
+                          ):(
+                            <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                              onClick={()=>{setEditingCscId(t.id);setEditingCscVal(t.points_category||'');}}>
+                              {t.points_category
+                                ?<span style={{fontSize:11,padding:'2px 7px',background:'rgba(52,211,153,0.15)',color:'var(--green)',borderRadius:4,whiteSpace:'nowrap'}}>{t.points_category}</span>
+                                :<span style={{fontSize:11,padding:'2px 7px',background:'rgba(251,191,36,0.12)',color:'var(--amber)',borderRadius:4,whiteSpace:'nowrap',fontStyle:'italic'}}>⚠ unset</span>}
+                              <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',minWidth:110}}>
+                          {isEditingSpender?(
+                            <div style={{display:'flex',gap:4,alignItems:'flex-start',minWidth:120}}>
+                              <div style={{flex:1}}>
+                                <SearchCreateSelect autoFocus value={t.spender||''} options={spenders}
+                                  placeholder="Who spent this?" emptyLabel="— unset —"
+                                  onChange={v=>saveSpenderEdit(t.id,v)}/>
+                              </div>
+                              <button type="button" onClick={()=>setEditingSpenderId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                            </div>
+                          ):(
+                            <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                              onClick={()=>setEditingSpenderId(t.id)}>
+                              {t.spender
+                                ?<span style={{fontSize:11,padding:'2px 7px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4,whiteSpace:'nowrap'}}>{t.spender}</span>
+                                :<span style={{fontSize:11,color:'var(--text-muted)',fontStyle:'italic'}}>— unset —</span>}
+                              <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',minWidth:110}}>
+                          {isEditingAction?(
+                            <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                              <select autoFocus value={editingActionVal}
+                                onChange={e=>setEditingActionVal(e.target.value)}
+                                style={{fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',maxWidth:120}}>
+                                {TXN_TYPES.map(a=><option key={a} value={a}>{a}</option>)}
+                              </select>
+                              <button type="button" onClick={()=>saveActionEdit(t.id,editingActionVal)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                              <button type="button" onClick={()=>setEditingActionId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                            </div>
+                          ):(
+                            <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                              onClick={()=>{setEditingActionId(t.id);setEditingActionVal(t.action||'Expense');}}>
+                              <span className={`badge badge-${t.action==='Income'?'income':t.action==='Transfer'?'transfer':'expense'}`}>{t.action}</span>
+                              <span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:t.amount<0?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>{t.amount<0?'-':'+'}{fmt(Math.abs(t.amount))}</td>
+                        <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,color:ptsClass,whiteSpace:'nowrap'}}>
+                          {editingPtsOverrideId===t.id?(
+                            <div style={{display:'flex',gap:4,alignItems:'center',justifyContent:'flex-end'}}>
+                              <input type="number" step="1" autoFocus value={editingPtsOverrideVal}
+                                onChange={e=>setEditingPtsOverrideVal(e.target.value)}
+                                placeholder="Points" style={{width:70,fontSize:11,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}/>
+                              <button type="button" onClick={()=>savePtsOverride(t.id,editingPtsOverrideVal)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid rgba(16,185,129,0.4)',background:'var(--green)',color:'#fff',cursor:'pointer'}}>✓</button>
+                              <button type="button" onClick={()=>setEditingPtsOverrideId(null)}
+                                style={{fontSize:11,padding:'2px 6px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✕</button>
+                              {t.points_earn_classification==='manual_override'&&
+                                <button type="button" onClick={()=>resetPtsOverride(t.id)}
+                                  style={{fontSize:10,padding:'2px 5px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>Reset</button>}
+                            </div>
+                          ):(
+                            <span style={{cursor:'pointer'}}
+                              onClick={()=>{setEditingPtsOverrideId(t.id);setEditingPtsOverrideVal(t.points_earn_classification==='manual_override'?String(t.points_earn):'');}}
+                              title="Click to manually override this transaction's points">
+                              {t.points_earn?`${t.points_earn>0?'':'−'}${Math.abs(t.points_earn).toLocaleString()}${t.earn_rate?` (${t.earn_rate}x)`:''}`:t.points_earn_classification==='excluded'?'excluded':'—'}
+                              {' '}<span style={{fontSize:10,color:'var(--text-muted)',opacity:0.5}}>✏</span>
+                            </span>
+                          )}
+                        </td>
+                        <td style={{padding:'8px 10px',textAlign:'center'}}>
+                          <button type="button" onClick={()=>toggleExcludeTxn(t)} disabled={excludingId===t.id}
+                            title={t.is_excluded?'Include — resume earning points and SUB spend credit':'Exclude — zero points, no SUB spend credit'}
+                            style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid '+(t.is_excluded?'var(--green)':'var(--border)'),
+                              background:t.is_excluded?'rgba(52,211,153,0.1)':'none',color:t.is_excluded?'var(--green)':'var(--text-muted)',
+                              cursor:excludingId===t.id?'default':'pointer',opacity:excludingId===t.id?0.5:1,fontWeight:500}}>
+                            {excludingId===t.id?'…':t.is_excluded?'↩ Include':'⊘ Exclude'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </div>
+
+      {/* Monthly Spending — moved to bottom as context/reference */}
+      {(d.monthly_spend||[]).length>1&&<div className="card" style={{padding:20,marginBottom:24}}>
+        <div style={{fontSize:15,fontWeight:500,marginBottom:12}}>Monthly Spending</div>
+        <div style={{display:'flex',alignItems:'flex-end',gap:6,height:120}}>
+          {(()=>{const mx=Math.max(...d.monthly_spend.map(m=>m.amount),1);return d.monthly_spend.map((m,i)=>(
+            <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+              <span style={{fontSize:11,fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{fmt(m.amount)}</span>
+              <div style={{width:'100%',maxWidth:60,height:`${(m.amount/mx*80)}px`,background:'var(--blue)',borderRadius:'4px 4px 0 0',minHeight:4,transition:'height 0.4s ease'}}/>
+              <span style={{fontSize:10,color:'var(--text-muted)'}}>{m.month.slice(5)}/{m.month.slice(2,4)}</span>
+            </div>
+          ));})()}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+
+function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectAccount,toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[period,setPeriod]=useState(initPeriod||'qtd');
+  const[year,setYear]=useState(initYear||new Date().getFullYear());
+  const years=useMemo(()=>{const y=new Date().getFullYear();return[y,y-1,y-2];},[]);
+  const ecoColor=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n==='cash back')return'#d97706';
+    if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
+    if(n.includes('amex')||n.includes('membership'))return'#059669';
+    if(n.includes('hilton'))return'#7c3aed';
+    if(n.includes('citi'))return'#0891b2';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'#b45309';
+    if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+    if(n.includes('hyatt'))return'#9f1239';
+    if(n.includes('united')||n.includes('mileageplus'))return'#374151';
+    if(n.includes('capital one'))return'#dc2626';
+    if(n.includes('alaska'))return'#065f46';
+    if(n.includes('southwest'))return'#b45309';
+    if(n.includes('jetblue'))return'#0369a1';
+    if(n.includes('discover'))return'#ea580c';
+    if(n.includes('bilt'))return'#15803d';
+    return'var(--blue)';
+  },[ecoName]);
+
+  const isCashBack=ecoId==='cash-back';
+  const load=useCallback(async(p,y)=>{
+    setLoading(true);
+    try{
+      const url=isCashBack
+        ?`/ecosystems/cash-back/earn-detail?period=${p}&year=${y}`
+        :`/ecosystems/${ecoId}/earn-detail?period=${p}&year=${y}`;
+      setData(await apiFetch(url));
+    }
+    catch(e){toast('Failed to load ecosystem data','error');}
+    finally{setLoading(false);}
+  },[ecoId,isCashBack]);
+
+  /* ── Balance snapshots — "Starting Balance" is the earliest one (editable,
+       with its date); any later ones are "Corrections". The most recent one
+       is still what current_balance anchors off of server-side (unchanged) —
+       these are just two different labels over the same list, chronologically. */
+  const emptyBalanceForm={balance:'',snapshot_date:'',notes:'',person:''};
+  const[showBalanceModal,setShowBalanceModal]=useState(false);
+  const[editingSnapshotId,setEditingSnapshotId]=useState(null);
+  const[balanceForm,setBalanceForm]=useState(emptyBalanceForm);
+  const[balanceSaving,setBalanceSaving]=useState(false);
+  const[snapshots,setSnapshots]=useState([]);
+  const loadSnapshots=()=>{
+    if(isCashBack)return;
+    apiFetch(`/ecosystems/${ecoId}/balance-snapshots`).then(setSnapshots).catch(()=>{});
+  };
+  useEffect(()=>{loadSnapshots();},[ecoId]);
+  // People known for this ecosystem — Omer/Daniella baseline plus anyone
+  // else already tagged somewhere in this ecosystem's ledger (server-computed
+  // so it's the single source of truth for who has a bucket at all).
+  const people=useMemo(()=>data?.known_people||['Omer','Daniella'],[data]);
+  // Snapshots grouped by person (untagged/'' folds into 'Shared') — within
+  // each group, sorted newest-first by the server, so the oldest (last in
+  // the group) is that person's Starting Balance and the rest are Corrections.
+  const snapsByPerson=useMemo(()=>{
+    const groups={};
+    for(const s of snapshots){
+      const key=s.person||'Shared';
+      (groups[key]=groups[key]||[]).push(s);
+    }
+    return groups;
+  },[snapshots]);
+  const startingSnapFor=person=>{
+    const list=snapsByPerson[person]||[];
+    return list.length?list[list.length-1]:null;
+  };
+  const correctionSnapsFor=person=>{
+    const list=snapsByPerson[person]||[];
+    return list.length>1?list.slice(0,-1):[];
+  };
+  const openBalanceModal=(snap,forPerson)=>{
+    if(snap){
+      setEditingSnapshotId(snap.id);
+      setBalanceForm({balance:snap.balance,snapshot_date:snap.snapshot_date,notes:snap.notes||'',person:snap.person||''});
+    }else{
+      const today=new Date().toISOString().slice(0,10);
+      setEditingSnapshotId(null);
+      const bucket=forPerson&&forPerson!=='Shared'?data?.balance_by_person?.[forPerson]:null;
+      setBalanceForm({balance:bucket?.current_balance??'',snapshot_date:today,notes:'',person:forPerson&&forPerson!=='Shared'?forPerson:''});
+    }
+    setShowBalanceModal(true);
+  };
+  const saveBalanceSnapshot=async()=>{
+    if(balanceForm.balance===''||!balanceForm.snapshot_date){toast('Balance and date are required','error');return;}
+    setBalanceSaving(true);
+    try{
+      const body={
+        balance:parseFloat(balanceForm.balance),
+        snapshot_date:balanceForm.snapshot_date,
+        notes:balanceForm.notes||null,
+        person:balanceForm.person||null,
+      };
+      if(editingSnapshotId) await apiFetch(`/balance-snapshots/${editingSnapshotId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/balance-snapshots`,{method:'POST',body:JSON.stringify(body)});
+      setShowBalanceModal(false);
+      load(period,year);
+      loadSnapshots();
+      toast(editingSnapshotId?'Balance entry updated':'Balance updated');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setBalanceSaving(false);}
+  };
+  const deleteBalanceSnapshot=async(id)=>{
+    if(!window.confirm('Delete this balance entry?'))return;
+    try{
+      await apiFetch(`/balance-snapshots/${id}`,{method:'DELETE'});
+      load(period,year);
+      loadSnapshots();
+      toast('Deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
+  /* ── Redemptions ──────────────────────────────────────────────────────── */
+  const[ecosystems,setEcosystems]=useState([]);
+  useEffect(()=>{apiFetch('/ecosystems').then(setEcosystems).catch(()=>{});},[]);
+
+  const emptyRedemptionForm={points_redeemed:'',redemption_date:'',description:'',cash_value_usd:'',notes:'',person:''};
+  const[showRedemptionModal,setShowRedemptionModal]=useState(false);
+  const[editingRedemptionId,setEditingRedemptionId]=useState(null);
+  const[redemptionForm,setRedemptionForm]=useState(emptyRedemptionForm);
+  const[redemptionSaving,setRedemptionSaving]=useState(false);
+
+  const openNewRedemption=()=>{setEditingRedemptionId(null);setRedemptionForm(emptyRedemptionForm);setShowRedemptionModal(true);};
+  const openEditRedemption=(r)=>{
+    setEditingRedemptionId(r.id);
+    setRedemptionForm({points_redeemed:r.points_redeemed,
+      redemption_date:r.redemption_date,description:r.description,cash_value_usd:r.cash_value_usd,notes:r.notes||'',person:r.person||''});
+    setShowRedemptionModal(true);
+  };
+  const saveRedemption=async()=>{
+    if(!redemptionForm.description.trim()){toast('Description required','error');return;}
+    if(!redemptionForm.points_redeemed||!redemptionForm.cash_value_usd||!redemptionForm.redemption_date){
+      toast('Points redeemed, cash value, and redemption date are required','error');return;
+    }
+    setRedemptionSaving(true);
+    try{
+      const body={
+        ecosystem_id:Number(ecoId),
+        points_redeemed:parseFloat(redemptionForm.points_redeemed),
+        redemption_date:redemptionForm.redemption_date,
+        description:redemptionForm.description,
+        person:redemptionForm.person||null,
+        cash_value_usd:parseFloat(redemptionForm.cash_value_usd),
+        notes:redemptionForm.notes||null,
+      };
+      if(editingRedemptionId) await apiFetch(`/redemptions/${editingRedemptionId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch('/redemptions',{method:'POST',body:JSON.stringify(body)});
+      setShowRedemptionModal(false);
+      load(period,year);
+      toast(editingRedemptionId?'Redemption updated':'Redemption added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setRedemptionSaving(false);}
+  };
+
+  /* ── Transfers (value-neutral point movement, separate from Redemptions) ── */
+  const emptyTransferForm={direction:'out',otherEcosystemId:'',points_sent:'',base_ratio_used:'',bonus_pct:'',transfer_date:'',notes:'',person:'',to_person:''};
+  const[showTransferModal,setShowTransferModal]=useState(false);
+  const[editingTransferId,setEditingTransferId]=useState(null);
+  const[transferForm,setTransferForm]=useState(emptyTransferForm);
+  const[transferSaving,setTransferSaving]=useState(false);
+  const[transferRatios,setTransferRatios]=useState([]);
+  useEffect(()=>{apiFetch('/transfer-ratios').then(setTransferRatios).catch(()=>{});},[]);
+
+  const currentRatioFor=(otherId,direction)=>{
+    const sourceId=direction==='out'?Number(ecoId):Number(otherId);
+    const destId=direction==='out'?Number(otherId):Number(ecoId);
+    return transferRatios.find(r=>r.source_ecosystem_id===sourceId&&r.destination_ecosystem_id===destId);
+  };
+  const openNewTransfer=(direction)=>{
+    setEditingTransferId(null);
+    setTransferForm({...emptyTransferForm,direction});
+    setShowTransferModal(true);
+  };
+  useEffect(()=>{
+    if(!transferForm.otherEcosystemId||editingTransferId)return;
+    const ratio=currentRatioFor(transferForm.otherEcosystemId,transferForm.direction);
+    if(ratio)setTransferForm(f=>({...f,base_ratio_used:ratio.base_ratio}));
+    // eslint-disable-next-line
+  },[transferForm.otherEcosystemId,transferForm.direction]);
+  const saveTransfer=async()=>{
+    if(!transferForm.otherEcosystemId||!transferForm.points_sent||!transferForm.base_ratio_used||!transferForm.transfer_date){
+      toast('Other ecosystem, points sent, ratio, and date are required','error');return;
+    }
+    setTransferSaving(true);
+    try{
+      const sourceId=transferForm.direction==='out'?Number(ecoId):Number(transferForm.otherEcosystemId);
+      const destId=transferForm.direction==='out'?Number(transferForm.otherEcosystemId):Number(ecoId);
+      const pointsSent=parseFloat(transferForm.points_sent);
+      const ratio=parseFloat(transferForm.base_ratio_used);
+      const bonusPct=transferForm.bonus_pct?parseFloat(transferForm.bonus_pct)/100:0;
+
+      // If this ratio is new or differs from what's on file for the pair,
+      // save it as the new standing ratio too — one step instead of a
+      // separate settings screen.
+      const existingRatio=currentRatioFor(transferForm.otherEcosystemId,transferForm.direction);
+      if(!existingRatio||existingRatio.base_ratio!==ratio){
+        await apiFetch('/transfer-ratios',{method:'POST',body:JSON.stringify({
+          source_ecosystem_id:sourceId,destination_ecosystem_id:destId,
+          base_ratio:ratio,effective_from:transferForm.transfer_date,
+        })});
+        apiFetch('/transfer-ratios').then(setTransferRatios).catch(()=>{});
+      }
+
+      const body={
+        source_ecosystem_id:sourceId,
+        destination_ecosystem_id:destId,
+        points_sent:pointsSent,
+        base_ratio_used:ratio,
+        bonus_pct:bonusPct||null,
+        points_received:pointsSent*ratio*(1+bonusPct),
+        transfer_date:transferForm.transfer_date,
+        notes:transferForm.notes||null,
+        person:transferForm.person||null,
+        to_person:transferForm.to_person||null,
+      };
+      if(editingTransferId) await apiFetch(`/transfers/${editingTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch('/transfers',{method:'POST',body:JSON.stringify(body)});
+      setShowTransferModal(false);
+      load(period,year);
+      toast(editingTransferId?'Transfer updated':'Transfer added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setTransferSaving(false);}
+  };
+  const deleteTransfer=async(id)=>{
+    if(!window.confirm('Delete this transfer?'))return;
+    try{
+      await apiFetch(`/transfers/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Transfer deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+  const deleteRedemption=async(id)=>{
+    if(!window.confirm('Delete this redemption?'))return;
+    try{
+      await apiFetch(`/redemptions/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Redemption deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
+  /* ── Adjustments — manual, dated +/- corrections for small unexplained
+       drift, without erasing/resetting history the way a balance snapshot does ── */
+  const emptyAdjustmentForm={points_delta:'',adjustment_date:'',description:'',notes:'',person:''};
+  const[showAdjustmentModal,setShowAdjustmentModal]=useState(false);
+  const[editingAdjustmentId,setEditingAdjustmentId]=useState(null);
+  const[adjustmentForm,setAdjustmentForm]=useState(emptyAdjustmentForm);
+  const[adjustmentSaving,setAdjustmentSaving]=useState(false);
+  const openNewAdjustment=()=>{setEditingAdjustmentId(null);setAdjustmentForm(emptyAdjustmentForm);setShowAdjustmentModal(true);};
+  const openEditAdjustment=(a)=>{
+    setEditingAdjustmentId(a.id);
+    setAdjustmentForm({points_delta:a.points_delta,adjustment_date:a.adjustment_date,description:a.description,notes:a.notes||'',person:a.person||''});
+    setShowAdjustmentModal(true);
+  };
+  const saveAdjustment=async()=>{
+    if(!adjustmentForm.description.trim()){toast('Description required','error');return;}
+    if(adjustmentForm.points_delta===''||!adjustmentForm.adjustment_date){toast('Amount and date are required','error');return;}
+    setAdjustmentSaving(true);
+    try{
+      const body={
+        points_delta:parseFloat(adjustmentForm.points_delta),
+        adjustment_date:adjustmentForm.adjustment_date,
+        description:adjustmentForm.description,
+        notes:adjustmentForm.notes||null,
+        person:adjustmentForm.person||null,
+      };
+      if(editingAdjustmentId) await apiFetch(`/points-adjustments/${editingAdjustmentId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/points-adjustments`,{method:'POST',body:JSON.stringify(body)});
+      setShowAdjustmentModal(false);
+      load(period,year);
+      toast(editingAdjustmentId?'Adjustment updated':'Adjustment added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setAdjustmentSaving(false);}
+  };
+  const deleteAdjustment=async(id)=>{
+    if(!window.confirm('Delete this adjustment?'))return;
+    try{
+      await apiFetch(`/points-adjustments/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Adjustment deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
+  /* ── Person-to-person transfers — same currency, same ecosystem, just
+       moving which of our two buckets the points count against (e.g. Omer
+       sends 20,000 Chase UR to Daniella). Distinct from the cross-currency
+       Transfer above. ── */
+  const emptyPersonTransferForm={from_person:'',to_person:'',points:'',transfer_date:'',notes:''};
+  const[showPersonTransferModal,setShowPersonTransferModal]=useState(false);
+  const[editingPersonTransferId,setEditingPersonTransferId]=useState(null);
+  const[personTransferForm,setPersonTransferForm]=useState(emptyPersonTransferForm);
+  const[personTransferSaving,setPersonTransferSaving]=useState(false);
+  const openNewPersonTransfer=()=>{
+    setEditingPersonTransferId(null);
+    const today=new Date().toISOString().slice(0,10);
+    setPersonTransferForm({...emptyPersonTransferForm,transfer_date:today,
+      from_person:people[0]||'',to_person:people[1]||''});
+    setShowPersonTransferModal(true);
+  };
+  const openEditPersonTransfer=(pt)=>{
+    setEditingPersonTransferId(pt.id);
+    setPersonTransferForm({from_person:pt.from_person,to_person:pt.to_person,points:pt.points,transfer_date:pt.transfer_date,notes:pt.notes||''});
+    setShowPersonTransferModal(true);
+  };
+  const savePersonTransfer=async()=>{
+    if(!personTransferForm.from_person||!personTransferForm.to_person){toast('Both people are required','error');return;}
+    if(personTransferForm.from_person===personTransferForm.to_person){toast('From and To must be different people','error');return;}
+    if(!personTransferForm.points||!personTransferForm.transfer_date){toast('Points and date are required','error');return;}
+    setPersonTransferSaving(true);
+    try{
+      const body={
+        from_person:personTransferForm.from_person,
+        to_person:personTransferForm.to_person,
+        points:parseFloat(personTransferForm.points),
+        transfer_date:personTransferForm.transfer_date,
+        notes:personTransferForm.notes||null,
+      };
+      if(editingPersonTransferId) await apiFetch(`/person-transfers/${editingPersonTransferId}`,{method:'PATCH',body:JSON.stringify(body)});
+      else await apiFetch(`/ecosystems/${ecoId}/person-transfers`,{method:'POST',body:JSON.stringify(body)});
+      setShowPersonTransferModal(false);
+      load(period,year);
+      toast(editingPersonTransferId?'Transfer updated':'Transfer added');
+    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
+    finally{setPersonTransferSaving(false);}
+  };
+  const deletePersonTransfer=async(id)=>{
+    if(!window.confirm('Delete this transfer?'))return;
+    try{
+      await apiFetch(`/person-transfers/${id}`,{method:'DELETE'});
+      load(period,year);
+      toast('Transfer deleted');
+    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
+  };
+
+  useEffect(()=>{load(period,year);},[period,year]);
+
+  const maxCatPts=useMemo(()=>data?.by_category?.[0]?.points||1,[data]);
+
+  const ecoGradient=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n==='cash back')return'linear-gradient(135deg,#b45309,#d97706)';
+    if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,var(--blue-primary))';
+    if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
+    if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
+    if(n.includes('citi'))return'linear-gradient(135deg,#155e75,#06b6d4)';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'linear-gradient(135deg,#92400e,#d97706)';
+    if(n.includes('delta')||n.includes('skymiles'))return'linear-gradient(135deg,#1e3a5f,var(--blue-primary))';
+    if(n.includes('hyatt'))return'linear-gradient(135deg,#7f1d1d,#dc2626)';
+    if(n.includes('united')||n.includes('mileageplus'))return'linear-gradient(135deg,#374151,#6b7280)';
+    if(n.includes('capital one'))return'linear-gradient(135deg,#991b1b,#ef4444)';
+    if(n.includes('alaska'))return'linear-gradient(135deg,#065f46,#34d399)';
+    if(n.includes('southwest'))return'linear-gradient(135deg,#92400e,#f59e0b)';
+    if(n.includes('jetblue'))return'linear-gradient(135deg,#0c4a6e,#38bdf8)';
+    if(n.includes('discover'))return'linear-gradient(135deg,#9a3412,#fb923c)';
+    if(n.includes('bilt'))return'linear-gradient(135deg,#14532d,#22c55e)';
+    return'linear-gradient(135deg,var(--blue-primary),#60a5fa)';
+  },[ecoName]);
+
+  const ecoImg=useMemo(()=>{
+    const n=(ecoName||'').toLowerCase();
+    if(n.includes('chase')||n.includes('ultimate'))return'/static/ecosystems/chase_ur.png';
+    if(n.includes('amex')||n.includes('membership'))return'/static/ecosystems/amex_mr.png';
+    if(n.includes('hilton'))return'/static/ecosystems/hilton_honors.png';
+    if(n.includes('citi'))return'/static/ecosystems/citi_thankyou.png';
+    if(n.includes('marriott')||n.includes('bonvoy'))return'/static/ecosystems/marriott_bonvoy.png';
+    if(n.includes('delta')||n.includes('skymiles'))return'/static/ecosystems/delta_skymiles.png';
+    if(n.includes('hyatt'))return'/static/ecosystems/hyatt.png';
+    if(n.includes('united')||n.includes('mileageplus'))return'/static/ecosystems/united_mileageplus.png';
+    if(n.includes('capital one'))return'/static/ecosystems/capital_one_miles.png';
+    if(n.includes('ihg'))return'/static/ecosystems/ihg_rewards.png';
+    if(n.includes('aadvantage')||n.includes('aa '))return'/static/ecosystems/aa_aadvantage.png';
+    if(n.includes('southwest'))return'/static/ecosystems/southwest_rr.png';
+    if(n.includes('jetblue'))return'/static/ecosystems/jetblue_trueblue.png';
+    if(n.includes('alaska'))return'/static/ecosystems/alaska_mileage_plan.png';
+    if(n.includes('atmos'))return'/static/ecosystems/atmos_rewards.png';
+    if(n.includes('discover'))return'/static/ecosystems/discover_cashback.png';
+    return null;
+  },[ecoName]);
+
+  // Keys must match CardProduct.product_key exactly (e.g. 'chase_freedom_flex',
+  // not 'freedom_flex') — a naming mismatch here silently drops both the
+  // gradient AND the /static/cards/{key}.png lookup below to the default
+  // gray fallback. Found and fixed 2026-07-24 while wiring in new card art:
+  // most of these were short/unprefixed and never actually matched anything.
+  const cardGrads={
+    chase_freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',chase_sapphire_preferred:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
+    chase_sapphire_reserve:'linear-gradient(135deg,#0f172a,#1e3a5f)',chase_freedom_unlimited:'linear-gradient(135deg,#0ea5e9,#0369a1)',
+    chase_freedom:'linear-gradient(135deg,#0369a1,#0ea5e9)',amex_gold:'linear-gradient(135deg,#b45309,#f59e0b)',
+    amex_platinum:'linear-gradient(135deg,#78716c,#d6d3d1)',amex_blue_business_plus:'linear-gradient(135deg,#1e40af,#60a5fa)',
+    hilton_aspire:'linear-gradient(135deg,#5b21b6,#a78bfa)',
+    united_quest:'linear-gradient(135deg,#374151,#9ca3af)',united_explorer:'linear-gradient(135deg,#1f2937,#6b7280)',
+    delta_gold:'linear-gradient(135deg,#92400e,#d97706)',citi_custom_cash:'linear-gradient(135deg,#155e75,#06b6d4)',
+    citi_double_cash:'linear-gradient(135deg,#0e7490,#22d3ee)',citi_strata:'linear-gradient(135deg,#164e63,#0891b2)',
+    citi_strata_premier:'linear-gradient(135deg,#0c4a6e,#0284c7)',citi_strata_elite:'linear-gradient(135deg,#1e1b4b,#4c1d95)',
+    marriott_bonvoy_brilliant:'linear-gradient(135deg,#7f1d1d,#dc2626)',marriott_bonvoy_boundless:'linear-gradient(135deg,#78350f,#d97706)',
+    hyatt_personal:'linear-gradient(135deg,#9f1239,#f43e5c)',us_bank_cash_plus:'linear-gradient(135deg,#1e3a5f,var(--blue-primary))',
+    atmos_ascent:'linear-gradient(135deg,#065f46,#34d399)',capital_one_venture:'linear-gradient(135deg,#991b1b,#dc2626)',
+    capital_one_venture_x:'linear-gradient(135deg,#450a0a,#7f1d1d)',
+  };
+
+  return(
+    <div>
+      {/* Back button */}
+      <button type="button" onClick={onBack}
+        style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--blue-primary)',
+          cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'Plus Jakarta Sans, sans-serif',
+          padding:0,transition:'opacity 0.2s'}}
+        onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
+        onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+        ← Portfolio
+      </button>
+
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:48,height:34,borderRadius:10,background:ecoGradient,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+            {ecoImg&&<img src={ecoImg} alt="" style={{width:30,height:30,objectFit:'contain',filter:'brightness(0) invert(1)',opacity:0.9}} onError={e=>{e.target.style.display='none'}}/>}
+          </div>
+          <div>
+            <div style={{fontSize:20,fontWeight:400,color:'var(--text-primary)',letterSpacing:'-0.3px'}}>{ecoName}</div>
+            {data&&!isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name}</div>}
+            {data&&isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>All cash-back cards</div>}
+          </div>
+        </div>
+        {/* Period selector */}
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <div style={{display:'flex',gap:16}}>
+            {['mtd','qtd','ytd'].map(p=>(
+              <button type="button" key={p} onClick={()=>setPeriod(p)}
+                style={{padding:'4px 0',border:'none',borderBottom:period===p?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:period===p?500:400,letterSpacing:'0.5px',
+                  background:'transparent',color:period===p?'var(--blue-primary)':'var(--text-muted)',
+                  transition:'all 0.15s',textTransform:'uppercase'}}>
+                {p}
+              </button>
+            ))}
+          </div>
+          <select value={year} onChange={e=>setYear(Number(e.target.value))}
+            style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
+            {years.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {loading?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>:data&&(
+        <>
+          {/* Hero stat */}
+          <div style={{textAlign:'center',padding:'28px 24px 32px',marginBottom:20,borderRadius:14,
+            background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
+            <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
+            <div style={{fontSize:42,fontWeight:300,fontFamily:'Plus Jakarta Sans',color:isCashBack?'var(--green)':'var(--blue-primary)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
+              {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
+            </div>
+            <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
+          </div>
+
+          {/* Balance Ledger — per-person (Omer/Daniella) balance tracking
+              with a "Shared" column. "Shared" is ALWAYS a computed sum of
+              every named person's bucket (plus any legacy untagged activity
+              folded in transparently) — it is never its own independently-
+              settable bucket, unlike Omer/Daniella below which each have
+              their own Starting Balance. Each person's own earliest
+              snapshot is their Starting Balance; Earned/Redeemed/
+              Transferred/Adjusted/Sent-Received layer on top to their
+              Current Balance. A "Sent to other"/"Received from other" pair
+              nets to zero in the Shared column since it never creates or
+              destroys points, just moves them between our two buckets. */}
+          {!isCashBack&&data.balance_by_person&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Balance Ledger</div>
+              {people.length>1&&<button type="button" className="btn btn-ghost btn-sm" onClick={openNewPersonTransfer}>+ Transfer between us</button>}
+            </div>
+
+            {(()=>{
+              const b=data.balance_by_person;
+              // Only named people get their own column — legacy untagged
+              // ("Shared" in the API response) is never rendered as its own
+              // column, only folded into the computed Shared-sum column below.
+              const cols=[...people];
+              const allBuckets=Object.keys(b);
+              const fmt=v=>Math.round(v||0).toLocaleString(undefined,{maximumFractionDigits:0});
+              const rows=[
+                {label:'+ Earned',get:p=>b[p].earned_since_baseline,color:'var(--green)'},
+              ];
+              // Points sit "pending" (earned but not yet posted to the
+              // loyalty account — this app's rule: statement close day + 1)
+              // until the day after the card's statement closes. Shown as a
+              // subtraction from Earned so Current Balance reconciles to
+              // posted-only; only surfaced when it's actually nonzero
+              // somewhere, same convention as the Adjusted/Sent-Received
+              // rows below.
+              if(allBuckets.some(p=>(b[p].pending_since_baseline||0)!==0))
+                rows.push({label:'− Pending (not yet posted)',get:p=>-(b[p].pending_since_baseline||0),color:'var(--amber)'});
+              rows.push(
+                {label:'− Redeemed',get:p=>-b[p].redeemed_since_baseline,color:'var(--red)'},
+                {label:'− Transferred Out',get:p=>-b[p].transferred_out_since_baseline,color:'var(--red)'},
+                {label:'+ Transferred In',get:p=>b[p].transferred_in_since_baseline,color:'var(--green)'},
+              );
+              if(allBuckets.some(p=>b[p].adjusted_since_baseline!==0))
+                rows.push({label:'± Adjusted',get:p=>b[p].adjusted_since_baseline,color:null});
+              if(allBuckets.some(p=>(b[p].person_transfer_out_since_baseline||0)!==0||(b[p].person_transfer_in_since_baseline||0)!==0)){
+                rows.push({label:'− Sent to other',get:p=>-(b[p].person_transfer_out_since_baseline||0),color:'var(--red)'});
+                rows.push({label:'+ Received from other',get:p=>(b[p].person_transfer_in_since_baseline||0),color:'var(--green)'});
+              }
+              const sharedFor=fn=>allBuckets.reduce((s,p)=>s+fn(p),0);
+              return(
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+                    <thead>
+                      <tr>
+                        <th style={{textAlign:'left',padding:'0 8px 8px 0'}}></th>
+                        {cols.map(p=><th key={p} style={{textAlign:'right',padding:'0 8px 8px',color:'var(--text-secondary)',fontWeight:500,minWidth:92,whiteSpace:'nowrap'}}>{p}</th>)}
+                        <th style={{textAlign:'right',padding:'0 0 8px 8px',color:'var(--text-primary)',fontWeight:600,minWidth:92,whiteSpace:'nowrap'}}>Shared</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{padding:'8px 8px 8px 0',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)',fontWeight:400}}>Starting Balance</td>
+                        {cols.map(p=>(
+                          <td key={p} style={{textAlign:'right',padding:'8px',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)'}}>
+                            <div style={{fontFamily:'Plus Jakarta Sans'}}>{fmt(b[p].starting_balance)}</div>
+                            <div style={{fontSize:10,color:'var(--text-muted)'}}>{b[p].balance_as_of?`as of ${b[p].balance_as_of}`:'not set'}</div>
+                          </td>
+                        ))}
+                        <td style={{textAlign:'right',padding:'8px 0 8px 8px',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:600}}>{fmt(sharedFor(p=>b[p].starting_balance))}</td>
+                      </tr>
+                      {rows.map(r=>(
+                        <tr key={r.label}>
+                          <td style={{padding:'5px 8px 5px 0',color:'var(--text-muted)'}}>{r.label}</td>
+                          {cols.map(p=>{
+                            const v=r.get(p);
+                            const color=r.color||(v>=0?'var(--green)':'var(--red)');
+                            return <td key={p} style={{textAlign:'right',padding:'5px 8px',fontFamily:'Plus Jakarta Sans',color}}>{fmt(v)}</td>;
+                          })}
+                          <td style={{textAlign:'right',padding:'5px 0 5px 8px',fontFamily:'Plus Jakarta Sans',color:'var(--text-muted)'}}>{fmt(sharedFor(r.get))}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={{padding:'10px 8px 0 0',borderTop:'1px solid var(--border)',fontWeight:500}}>Current Balance</td>
+                        {cols.map(p=>(
+                          <td key={p} style={{textAlign:'right',padding:'10px 8px 0',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:500,color:'var(--blue-primary)'}}>{fmt(b[p].current_balance)}</td>
+                        ))}
+                        <td style={{textAlign:'right',padding:'10px 0 0 8px',borderTop:'1px solid var(--border)',fontFamily:'Plus Jakarta Sans',fontWeight:700,color:'var(--blue-primary)',fontSize:14}}>{fmt(sharedFor(p=>b[p].current_balance))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+
+            {/* Per-person balance management — set/edit each named person's
+                own starting balance and later corrections independently.
+                "Shared" has no management block here — it's always a
+                computed sum (see the table above), never its own
+                settable bucket. */}
+            <div style={{marginTop:18,paddingTop:14,borderTop:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:14}}>
+              {people.map(person=>{
+                const startSnap=startingSnapFor(person);
+                const corrections=correctionSnapsFor(person);
+                return(
+                  <div key={person}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:6}}>
+                      <div style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)'}}>{person}</div>
+                      <div style={{display:'flex',gap:8}}>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(startSnap,person)}>{startSnap?'Edit Starting Balance':'Set Starting Balance'}</button>
+                        {startSnap&&<button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(startSnap.id)}>Remove</button>}
+                      </div>
+                    </div>
+                    {corrections.length>0&&<div style={{marginTop:6,paddingLeft:4}}>
+                      {corrections.map(s=>(
+                        <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',fontSize:12}}>
+                          <div style={{flex:1,minWidth:0,color:'var(--text-muted)'}}>
+                            Correction: {s.balance.toLocaleString()} pts as of {s.snapshot_date}{s.notes?` — ${s.notes}`:''}
+                          </div>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(s,person)}>Edit</button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(s.id)}>Delete</button>
+                        </div>
+                      ))}
+                    </div>}
+                    {startSnap&&<button type="button" className="btn btn-ghost btn-sm" style={{marginTop:4}} onClick={()=>openBalanceModal(null,person)}>+ Add Correction</button>}
+                  </div>
+                );
+              })}
+
+              {/* Legacy untagged balance entries (person=NULL), from before
+                  per-person tracking existed. Edit/delete only — no "Set
+                  Starting Balance" or "+ Add Correction" affordance, since
+                  new untagged entries can no longer be created; the Shared
+                  column is now always a derived sum, never a bucket you set
+                  directly. Only rendered at all if one already exists. */}
+              {data.balance_by_person.Shared&&(()=>{
+                const legacySnap=startingSnapFor('Shared');
+                const legacyCorrections=correctionSnapsFor('Shared');
+                if(!legacySnap&&legacyCorrections.length===0)return null;
+                return(
+                  <div>
+                    <div style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)'}}>Unattributed (legacy)</div>
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,marginBottom:6}}>
+                      Old entries with no person tag, folded into the Shared column above — edit or delete them here, or retag the underlying redemption/adjustment/transfer to Omer or Daniella.
+                    </div>
+                    {legacySnap&&<div style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',fontSize:12}}>
+                      <div style={{flex:1,minWidth:0,color:'var(--text-muted)'}}>
+                        Starting balance: {legacySnap.balance.toLocaleString()} pts as of {legacySnap.snapshot_date}{legacySnap.notes?` — ${legacySnap.notes}`:''}
+                      </div>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(legacySnap,'Shared')}>Edit</button>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(legacySnap.id)}>Delete</button>
+                    </div>}
+                    {legacyCorrections.map(s=>(
+                      <div key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',fontSize:12}}>
+                        <div style={{flex:1,minWidth:0,color:'var(--text-muted)'}}>
+                          Correction: {s.balance.toLocaleString()} pts as of {s.snapshot_date}{s.notes?` — ${s.notes}`:''}
+                        </div>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openBalanceModal(s,'Shared')}>Edit</button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteBalanceSnapshot(s.id)}>Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Person-to-person transfer history */}
+            {data.person_transfers&&data.person_transfers.length>0&&<div style={{marginTop:18,paddingTop:14,borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:8}}>Transfers Between Us</div>
+              {data.person_transfers.map(pt=>(
+                <div key={pt.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0'}}>
+                  <div style={{flex:1,minWidth:0,fontSize:12}}>
+                    {pt.from_person} → {pt.to_person}: {pt.points.toLocaleString()} pts · {new Date(pt.transfer_date).toLocaleDateString()}
+                    {pt.notes&&<span style={{color:'var(--text-muted)'}}> — {pt.notes}</span>}
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditPersonTransfer(pt)}>Edit</button>
+                  <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deletePersonTransfer(pt.id)}>Delete</button>
+                </div>
+              ))}
+            </div>}
+          </div>}
+
+          {/* Points by category */}
+          {data.by_category.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:16}}>{isCashBack?'Cash Back by Category':'Points by Category'}</div>
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              {data.by_category.map(cat=>(
+                <div key={cat.category} style={{display:'flex',alignItems:'center',gap:12}}>
+                  <span style={{fontSize:13,fontWeight:300,color:'var(--text-primary)',width:90,flexShrink:0}}>{cat.category||'Other'}</span>
+                  <div style={{flex:1,height:6,borderRadius:3,background:'var(--elevated)',overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:3,width:`${Math.round(cat.points/maxCatPts*100)}%`,
+                      background:'var(--accent-gradient)',transition:'width 0.4s ease'}}/>
+                  </div>
+                  <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)',width:60,textAlign:'right',flexShrink:0}}>{isCashBack?`$${(cat.points*0.01).toFixed(2)}`:cat.points.toLocaleString()}</span>
+                  <span style={{fontSize:11,fontWeight:300,color:'var(--text-muted)',width:40,textAlign:'right',flexShrink:0}}>{cat.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>}
+
+          {/* Cards */}
+          {data.by_card.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Your Cards</div>
+            <div>
+              {data.by_card.map((c,i)=>{
+                const pk=c.product_key||'';
+                const grad=cardGrads[pk]||'linear-gradient(135deg,#374151,#6b7280)';
+                return(
+                  <div key={c.account_id}
+                    style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                      borderBottom:i<data.by_card.length-1?'1px solid var(--border)':'none',
+                      cursor:'pointer',transition:'all 0.15s'}}
+                    onClick={()=>onSelectAccount(c.account_id)}
+                    onMouseEnter={e=>{e.currentTarget.style.background='var(--surface-hover)';e.currentTarget.style.margin='0 -8px';e.currentTarget.style.padding='10px 8px';e.currentTarget.style.borderRadius='8px';}}
+                    onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.margin='0';e.currentTarget.style.padding='10px 0';e.currentTarget.style.borderRadius='0';}}>
+                    <div style={{width:40,height:26,borderRadius:6,background:grad,flexShrink:0,overflow:'hidden',position:'relative'}}>
+                      <img src={`/static/cards/${pk}.png`} alt="" style={{width:'100%',height:'100%',objectFit:'cover',opacity:0.4}} onError={e=>{e.target.style.display='none'}}/>
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{c.account_name}</div>
+                      {c.mask&&<div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>···{c.mask}</div>}
+                    </div>
+                    <span style={{fontSize:14,fontWeight:300,color:isCashBack?'var(--green)':'var(--blue-primary)',flexShrink:0}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
+                    <span style={{color:'var(--text-muted)',fontSize:14,marginLeft:4,opacity:0.4}}>›</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>}
+
+          {/* Active challenges */}
+          {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Active Challenges</div>
+            <div className="grid-auto-sm">
+              {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
+            </div>
+          </div>}
+
+          {/* Redemptions */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Redemptions</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openNewRedemption}>+ Add Redemption</button>
+            </div>
+            {data.total_points_redeemed>0&&<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Realized cpp</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--blue-primary)'}}>{data.realized_cpp.toFixed(2)}¢</div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Points Redeemed</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--text-primary)'}}>{data.total_points_redeemed.toLocaleString()}</div>
+              </div>
+              <div style={{padding:'12px 14px',background:'var(--elevated)',borderRadius:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:4}}>Cash Value Realized</div>
+                <div style={{fontSize:18,fontWeight:400,color:'var(--text-primary)'}}>${data.total_cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+              </div>
+            </div>}
+            {data.redemptions.length===0?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No redemptions logged for {ecoName} yet.</div>:
+              <div>
+                {data.redemptions.map((r,i)=>(
+                  <div key={r.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:i<data.redemptions.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{r.description}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {r.points_redeemed.toLocaleString()} pts · ${r.cash_value_usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} · {r.realized_cpp.toFixed(2)}¢/pt · {new Date(r.redemption_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditRedemption(r)}>Edit</button>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteRedemption(r.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
+
+          {/* Transfers — value-neutral point movement, kept separate from Redemptions */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Transfers</div>
+              <div style={{display:'flex',gap:8}}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openNewTransfer('out')}>+ Transfer out</button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={()=>openNewTransfer('in')}>+ Transfer in</button>
+              </div>
+            </div>
+            {(data.transfers_out.length===0&&data.transfers_in.length===0)?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No transfers logged for {ecoName} yet.</div>:
+              <div>
+                {data.transfers_out.map((t)=>(
+                  <div key={`out-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:'1px solid var(--border)'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>→ {t.destination_ecosystem_name}{t.person&&t.to_person&&t.person!==t.to_person?` (${t.person} → ${t.to_person})`:t.person?` (${t.person})`:''}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteTransfer(t.id)}>Delete</button>
+                  </div>
+                ))}
+                {data.transfers_in.map((t)=>(
+                  <div key={`in-${t.id}`} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:'1px solid var(--border)'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>← {t.source_ecosystem_name}{t.person&&t.to_person&&t.person!==t.to_person?` (${t.person} → ${t.to_person})`:t.to_person?` (${t.to_person})`:''}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {t.points_sent.toLocaleString()} sent · {t.points_received.toLocaleString()} received · ratio {t.base_ratio_used}{t.bonus_pct?` +${(t.bonus_pct*100).toFixed(0)}% bonus`:''} · {new Date(t.transfer_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteTransfer(t.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
+
+          {/* Adjustments — manual +/- corrections, separate from Redemptions/
+              Transfers (which represent real events) and from a balance
+              snapshot (which resets the baseline). For small drift you don't
+              want to spend time tracing to a specific cause. */}
+          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Adjustments</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openNewAdjustment}>+ Add Adjustment</button>
+            </div>
+            {data.adjustments.length===0?
+              <div style={{fontSize:13,color:'var(--text-muted)',padding:'8px 0'}}>No adjustments logged for {ecoName} yet.</div>:
+              <div>
+                {data.adjustments.map((a,i)=>(
+                  <div key={a.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
+                    borderBottom:i<data.adjustments.length-1?'1px solid var(--border)':'none'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{a.description}</div>
+                      <div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>
+                        {new Date(a.adjustment_date).toLocaleDateString()}{a.notes?` · ${a.notes}`:''}
+                      </div>
+                    </div>
+                    <div style={{fontSize:14,fontFamily:'Plus Jakarta Sans',color:a.points_delta>=0?'var(--green)':'var(--red)'}}>
+                      {a.points_delta>=0?'+':''}{a.points_delta.toLocaleString()}
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={()=>openEditAdjustment(a)}>Edit</button>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={()=>deleteAdjustment(a.id)}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            }
+          </div>}
+        </>
+      )}
+
+      {showRedemptionModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:440}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingRedemptionId?'Edit Redemption':'Add Redemption'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowRedemptionModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12,maxHeight:'60vh',overflowY:'auto'}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Description</label>
+                <input className="search-input" value={redemptionForm.description} onChange={e=>setRedemptionForm(f=>({...f,description:e.target.value}))}
+                  placeholder="2 nights Conrad Maldives"/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Redeemed</label>
+                  <input className="search-input" type="number" value={redemptionForm.points_redeemed} onChange={e=>setRedemptionForm(f=>({...f,points_redeemed:e.target.value}))}
+                    placeholder="250000"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Cash Value Received ($)</label>
+                  <input className="search-input" type="number" value={redemptionForm.cash_value_usd} onChange={e=>setRedemptionForm(f=>({...f,cash_value_usd:e.target.value}))}
+                    placeholder="1800.00"/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Redemption Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={redemptionForm.redemption_date} onChange={e=>setRedemptionForm(f=>({...f,redemption_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={redemptionForm.person} options={people} placeholder="Unattributed"
+                  emptyLabel="Unattributed" onChange={v=>setRedemptionForm(f=>({...f,person:v}))}/>
+              </div>
+              {(()=>{
+                const wanted=parseFloat(redemptionForm.points_redeemed)||0;
+                if(!wanted)return null;
+                const available=redemptionForm.person
+                  ?(data.balance_by_person?.[redemptionForm.person]?.current_balance)
+                  :data.current_balance;
+                if(available==null||wanted<=available)return null;
+                const gap=Math.round(wanted-available);
+                return(
+                  <div style={{fontSize:12,color:'var(--amber)',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',borderRadius:8,padding:'8px 12px'}}>
+                    ⚠ This exceeds {redemptionForm.person||'the'} posted balance ({available.toLocaleString()} pts) by {gap.toLocaleString()} pts — some points may still be pending, or you may need to buy points to cover the gap. This won't block saving.
+                  </div>
+                );
+              })()}
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={redemptionForm.notes} onChange={e=>setRedemptionForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowRedemptionModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveRedemption} disabled={redemptionSaving}>
+                {redemptionSaving?'Saving…':editingRedemptionId?'Save Changes':'Add Redemption'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTransferModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:440}}>
+            <div className="modal-header">
+              <div className="modal-title">{transferForm.direction==='out'?`Transfer out of ${ecoName}`:`Transfer into ${ecoName}`}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowTransferModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12,maxHeight:'60vh',overflowY:'auto'}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>{transferForm.direction==='out'?'Transfer to':'Transfer from'}</label>
+                <select className="filter-select" style={{width:'100%'}} value={transferForm.otherEcosystemId} onChange={e=>setTransferForm(f=>({...f,otherEcosystemId:e.target.value}))}>
+                  <option value="">— select —</option>
+                  {ecosystems.filter(e=>String(e.id)!==String(ecoId)).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points Sent</label>
+                  <input className="search-input" type="number" value={transferForm.points_sent} onChange={e=>setTransferForm(f=>({...f,points_sent:e.target.value}))}
+                    placeholder="100000"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Ratio (received per 1 sent)</label>
+                  <input className="search-input" type="number" step="0.01" value={transferForm.base_ratio_used} onChange={e=>setTransferForm(f=>({...f,base_ratio_used:e.target.value}))}
+                    placeholder="e.g. 2.0"/>
+                  <div style={{fontSize:10,color:'var(--text-muted)',marginTop:3}}>Pre-filled from the current ratio on file — override for this transfer if needed.</div>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Bonus % <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <input className="search-input" type="number" step="1" value={transferForm.bonus_pct} onChange={e=>setTransferForm(f=>({...f,bonus_pct:e.target.value}))}
+                  placeholder="e.g. 40 for a 40% promo bonus"/>
+              </div>
+              {transferForm.points_sent&&transferForm.base_ratio_used&&
+                <div style={{fontSize:12,color:'var(--text-secondary)',background:'var(--elevated)',borderRadius:8,padding:'8px 12px'}}>
+                  Points received: <b>{Math.round(parseFloat(transferForm.points_sent)*parseFloat(transferForm.base_ratio_used)*(1+(transferForm.bonus_pct?parseFloat(transferForm.bonus_pct)/100:0))).toLocaleString()}</b>
+                </div>
+              }
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Transfer Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={transferForm.transfer_date} onChange={e=>setTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points — sending <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                  <SearchCreateSelect value={transferForm.person} options={people} placeholder="Unattributed"
+                    emptyLabel="Unattributed" onChange={v=>setTransferForm(f=>({...f,person:v}))}/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points — receiving <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                  <SearchCreateSelect value={transferForm.to_person} options={people} placeholder="Same as sending"
+                    emptyLabel="Same as sending" onChange={v=>setTransferForm(f=>({...f,to_person:v}))}/>
+                </div>
+              </div>
+              {transferForm.person&&transferForm.to_person&&transferForm.person!==transferForm.to_person&&
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>Cross-person transfer: {transferForm.person} → {transferForm.to_person}.</div>
+              }
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={transferForm.notes} onChange={e=>setTransferForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowTransferModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveTransfer} disabled={transferSaving}>
+                {transferSaving?'Saving…':'Add Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBalanceModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingSnapshotId?'Edit':balanceForm.person?`Set Starting Balance — ${balanceForm.person}`:'Set Starting Balance'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowBalanceModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                Enter the balance shown in your {ecoName} account as of the date below. Everything before this date is
+                assumed folded into this number — earn/redeem/transfer/adjustment activity after it is added on top.
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose balance <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={balanceForm.person} options={people} placeholder="Unattributed"
+                  emptyLabel="Unattributed" onChange={v=>setBalanceForm(f=>({...f,person:v}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Balance</label>
+                <input className="search-input" type="number" value={balanceForm.balance} onChange={e=>setBalanceForm(f=>({...f,balance:e.target.value}))}
+                  placeholder="40320"/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>As of</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={balanceForm.snapshot_date} onChange={e=>setBalanceForm(f=>({...f,snapshot_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={balanceForm.notes} onChange={e=>setBalanceForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowBalanceModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveBalanceSnapshot} disabled={balanceSaving}>
+                {balanceSaving?'Saving…':editingSnapshotId?'Save Changes':'Save Balance'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdjustmentModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingAdjustmentId?'Edit Adjustment':'Add Adjustment'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowAdjustmentModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                A manual +/- nudge to the running balance — for small drift you don't want to spend time tracing
+                to a specific transaction, transfer, or redemption. Positive adds points, negative removes them.
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Description</label>
+                <input className="search-input" value={adjustmentForm.description} onChange={e=>setAdjustmentForm(f=>({...f,description:e.target.value}))}
+                  placeholder="Unexplained drift vs. Amex app"/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points (+/-)</label>
+                  <input className="search-input" type="number" value={adjustmentForm.points_delta} onChange={e=>setAdjustmentForm(f=>({...f,points_delta:e.target.value}))}
+                    placeholder="-230"/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Date</label>
+                  <input className="date-input" type="date" style={{width:'100%'}} value={adjustmentForm.adjustment_date} onChange={e=>setAdjustmentForm(f=>({...f,adjustment_date:e.target.value}))}/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Whose points <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <SearchCreateSelect value={adjustmentForm.person} options={people} placeholder="Unattributed"
+                  emptyLabel="Unattributed" onChange={v=>setAdjustmentForm(f=>({...f,person:v}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={adjustmentForm.notes} onChange={e=>setAdjustmentForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowAdjustmentModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveAdjustment} disabled={adjustmentSaving}>
+                {adjustmentSaving?'Saving…':editingAdjustmentId?'Save Changes':'Add Adjustment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPersonTransferModal&&(
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:400}}>
+            <div className="modal-header">
+              <div className="modal-title">{editingPersonTransferId?'Edit Transfer Between Us':'Transfer Between Us'} — {ecoName}</div>
+              <button type="button" className="modal-close" onClick={()=>setShowPersonTransferModal(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:12}}>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>
+                Moves points from one person's {ecoName} balance to the other's — no ratio or bonus, since it's the
+                same currency. Whether {ecoName} actually allows this between accounts is on you to confirm.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>From</label>
+                  <SearchCreateSelect value={personTransferForm.from_person} options={people} placeholder="Who's sending"
+                    onChange={v=>setPersonTransferForm(f=>({...f,from_person:v}))}/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>To</label>
+                  <SearchCreateSelect value={personTransferForm.to_person} options={people} placeholder="Who's receiving"
+                    onChange={v=>setPersonTransferForm(f=>({...f,to_person:v}))}/>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Points</label>
+                <input className="search-input" type="number" value={personTransferForm.points} onChange={e=>setPersonTransferForm(f=>({...f,points:e.target.value}))}
+                  placeholder="20000"/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Date</label>
+                <input className="date-input" type="date" style={{width:'100%'}} value={personTransferForm.transfer_date} onChange={e=>setPersonTransferForm(f=>({...f,transfer_date:e.target.value}))}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
+                <textarea className="search-input" value={personTransferForm.notes} onChange={e=>setPersonTransferForm(f=>({...f,notes:e.target.value}))}
+                  rows={2} style={{resize:'vertical'}}/>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={()=>setShowPersonTransferModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={savePersonTransfer} disabled={personTransferSaving}>
+                {personTransferSaving?'Saving…':editingPersonTransferId?'Save Changes':'Add Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChallengeCard({ch,onClick}){
+  const progress=ch.progress_pct||0;
+  // Repeatable challenges stay "isThreshold" (still show the lap progress bar)
+  // even once the first occurrence is unlocked, as long as more can still be earned.
+  const isThreshold=ch.spend_threshold&&(!ch.bonus_unlocked||(ch.max_occurrences&&(ch.occurrences_earned||0)<ch.max_occurrences));
+  // A per_dollar challenge with a spend_cap (e.g. "5x Groceries, up to $1,000")
+  // gets the exact same spent/goal/to-go progress treatment as a threshold
+  // challenge — the backend's _challenge_progress() already computes
+  // progress_pct/progress_target/remaining_spend identically for both cases
+  // (B17, 2026-07-25) — this was previously threshold-only, so capped
+  // per_dollar challenges showed only a flat "+Nx" line with no progress bar.
+  const hasCapProgress=!isThreshold&&ch.bonus_type==='per_dollar'&&ch.spend_cap;
+  const showProgress=isThreshold||hasCapProgress;
+  return(
+    <div className="card" style={{padding:'16px 18px',cursor:onClick?'pointer':'default'}} onClick={onClick}
+      title={onClick?"View this card's transactions for this challenge's date range":undefined}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</div>
+          {/* Category names deliberately left out here — shown once, in the
+              "+Nx on [Categories]" line below, instead of duplicated in both
+              places (B17). */}
+          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+            {ch.card_name&&<span>{ch.card_name}{ch.last_four?` ···${ch.last_four}`:''}</span>}
+          </div>
+        </div>
+        <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,marginLeft:8,flexShrink:0,
+          background:ch.status==='unlocked'?'rgba(52,211,153,0.12)':ch.status==='active'?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)',
+          color:ch.status==='unlocked'?'var(--green)':ch.status==='active'?'var(--blue-primary)':'var(--text-muted)',
+          fontWeight:500,textTransform:'uppercase',letterSpacing:'0.5px'}}>
+          {ch.status}
+        </span>
+      </div>
+      {showProgress&&<>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text-muted)',marginBottom:4}}>
+          <span>${(ch.lap_spend??ch.current_spend??0).toLocaleString(undefined,{maximumFractionDigits:0})} spent{ch.max_occurrences?` (${ch.occurrences_earned||0}/${ch.max_occurrences})`:''}</span>
+          <span>${(ch.progress_target??ch.spend_threshold??ch.spend_cap).toLocaleString(undefined,{maximumFractionDigits:0})} goal</span>
+        </div>
+        <div style={{height:5,borderRadius:5,background:'var(--elevated)',overflow:'hidden',marginBottom:6}}>
+          <div style={{height:'100%',borderRadius:5,width:`${progress}%`,background:'linear-gradient(90deg,var(--blue-primary),#93c5fd)',transition:'width 0.5s ease'}}/>
+        </div>
+        {ch.remaining_spend>0&&<div style={{fontSize:11,color:'var(--text-muted)'}}>${ch.remaining_spend.toLocaleString(undefined,{maximumFractionDigits:0})} to go</div>}
+      </>}
+      {/* "+Nx on [Categories]" — shown for every per_dollar challenge (capped
+          or not) now that it's the only place categories appear; dollar
+          figures deliberately dropped from this line when a progress bar is
+          also showing (hasCapProgress) since it would just repeat the same
+          spent/goal numbers already shown above. */}
+      {ch.bonus_type==='per_dollar'&&<div style={{fontSize:12,color:'var(--text-secondary)',marginTop:4}}>
+        <span style={{fontWeight:400,fontFamily:'Plus Jakarta Sans',fontSize:16,color:'var(--blue-primary)'}}>+{ch.bonus_amount}x</span>
+        {ch.category_names?.length>0&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names.join(', ')}</span>}
+        {ch.spend_cap&&!hasCapProgress&&<span style={{color:'var(--text-muted)',marginLeft:6}}>· ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
+      </div>}
+    </div>
+  );
+}
+
+function CardsPage({toast,refreshKey}){
+  // Theme toggle mutates document.documentElement's data-theme attribute
+  // directly (colors update instantly via CSS, no React re-render needed
+  // for that) — but the ecosystem logo picker below needs to know the
+  // *current* theme at render time, and a stale read (e.g. via a plain
+  // document.documentElement.getAttribute() inline in the render) would
+  // only reflect whatever the theme was the last time this component
+  // happened to re-render for some other reason. Track it as real state.
+  const[pageTheme,setPageTheme]=useState(()=>document.documentElement.getAttribute('data-theme')||'dark');
+  useEffect(()=>{
+    const obs=new MutationObserver(()=>setPageTheme(document.documentElement.getAttribute('data-theme')||'dark'));
+    obs.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+    return()=>obs.disconnect();
+  },[]);
+  const[accounts,setAccounts]=useState([]);
+  const[allAccounts,setAllAccounts]=useState([]);
+  const[products,setProducts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[selectedAccount,setSelectedAccount]=useState(null);
+  const[pendingChallengeFilter,setPendingChallengeFilter]=useState(null); // {start,end,name} — set when navigating in via a challenge card
+  const[selectedEcosystem,setSelectedEcosystem]=useState(null); // {id,name}
+  const[suggestions,setSuggestions]=useState([]);
+  const[linking,setLinking]=useState({});
+  const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
+  const[swipeData,setSwipeData]=useState(null);
+  const[swipeLoading,setSwipeLoading]=useState(false);
+  // Earn summary state
+  const[earnData,setEarnData]=useState(null);
+  const[earnLoading,setEarnLoading]=useState(true);
+  const[earnPeriod,setEarnPeriod]=useState('qtd');
+  const[earnYear,setEarnYear]=useState(new Date().getFullYear());
+  const earnYears=useMemo(()=>{const y=new Date().getFullYear();return[y,y-1,y-2];},[]);
+  // Legacy card management state
+  const[cards,setCards]=useState([]);
+  const[editing,setEditing]=useState(null);
+  const[editVals,setEditVals]=useState({});
+  const[showInactive,setShowInactive]=useState(false);
+  // Primary Cardholder options — same baseline+discovered convention as
+  // spender tagging elsewhere (SearchCreateSelect on the ecosystem pages).
+  const[people,setPeople]=useState(['Omer','Daniella']);
+  useEffect(()=>{apiFetch('/transactions/spenders').then(s=>setPeople(p=>Array.from(new Set([...p,...s])))).catch(()=>{});},[]);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const[accts,prods,cards_]=await Promise.all([
+        apiFetch('/accounts'),apiFetch('/card-products'),apiFetch('/cards'),
+      ]);
+      // Filter to credit card accounts
+      const creditAccts=accts.filter(a=>a.account_type&&a.account_type.toLowerCase().includes('credit'));
+      setAccounts(creditAccts);
+      setAllAccounts(accts);
+      setProducts(prods);
+      setCards(cards_);
+    }catch(e){toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[]);
+
+  const loadEarnSummary=useCallback(async(p,y)=>{
+    setEarnLoading(true);
+    try{setEarnData(await apiFetch(`/cards/earn-summary?period=${p}&year=${y}`));}
+    catch(e){setEarnData(null);}
+    finally{setEarnLoading(false);}
+  },[]);
+
+  useEffect(()=>{loadEarnSummary(earnPeriod,earnYear);},[earnPeriod,earnYear,refreshKey]);
+
+  const loadSwipe=async()=>{
+    setSwipeLoading(true);
+    try{setSwipeData(await apiFetch('/cards/swipe-advisor'));}
+    catch(e){toast('Failed to load swipe data','error');}
+    finally{setSwipeLoading(false);}
+  };
+
+  const loadSuggestions=async()=>{
+    try{
+      const s=await apiFetch('/accounts/product-suggestions');
+      setSuggestions(s);
+    }catch(e){}
+  };
+
+  const linkProduct=async(accountId,productId)=>{
+    setLinking(l=>({...l,[accountId]:true}));
+    try{
+      const r=await apiFetch(`/accounts/${accountId}/link-product`,{method:'POST',body:JSON.stringify({product_id:productId})});
+      toast(`Linked to ${r.product_name}`);
+      await load();
+      setSuggestions(s=>s.filter(x=>x.account_id!==accountId));
+    }catch(e){toast('Link failed','error');}
+    finally{setLinking(l=>({...l,[accountId]:false}));}
+  };
+
+  const unlinkProduct=async(accountId)=>{
+    try{
+      await apiFetch(`/accounts/${accountId}/link-product`,{method:'POST',body:JSON.stringify({product_id:null})});
+      toast('Product unlinked');
+      await load();
+    }catch(e){toast('Unlink failed','error');}
+  };
+
+  useEffect(()=>{load().then(()=>loadSuggestions());},[load,refreshKey]);
+
+  // Legacy card management
+  const startEdit=(card)=>{setEditing(card.id);setEditVals({card_name:card.card_name||'',last_four:card.last_four??'',statement_close_day:card.statement_close_day??'',payment_due_day:card.payment_due_day??'',credit_limit:card.credit_limit??'',account_id:card.account_id||null,payment_account_id:card.payment_account_id||null,is_active:card.is_active,notes:card.notes||'',annual_fee:card.annual_fee??'',primary_user:card.primary_user||'',issue_date:card.issue_date?card.issue_date.slice(0,10):''});};
+  // Anniversary date doubles as the annual-fee due date — the fee posts
+  // each year on this date's month/day. Returns days until the next
+  // occurrence (handles Feb 29 in non-leap years by clamping to the 28th,
+  // same convention as the backend's statement/payment day math).
+  const daysToAnniversary=isoDate=>{
+    if(!isoDate)return null;
+    const d=new Date(isoDate+'T00:00:00');
+    const today=new Date();today.setHours(0,0,0,0);
+    const mkDate=(y,m,day)=>{const last=new Date(y,m+1,0).getDate();return new Date(y,m,Math.min(day,last));};
+    let next=mkDate(today.getFullYear(),d.getMonth(),d.getDate());
+    if(next<today)next=mkDate(today.getFullYear()+1,d.getMonth(),d.getDate());
+    return Math.round((next-today)/86400000);
+  };
+  const cancelEdit=()=>{setEditing(null);setEditVals({});};
+  const saveEdit=async(cardId)=>{
+    try{
+      await apiFetch(`/cards/${cardId}`,{method:'PATCH',body:JSON.stringify({...editVals,last_four:editVals.last_four?parseInt(editVals.last_four):null,statement_close_day:editVals.statement_close_day?parseInt(editVals.statement_close_day):null,payment_due_day:editVals.payment_due_day?parseInt(editVals.payment_due_day):null,credit_limit:editVals.credit_limit?parseFloat(editVals.credit_limit):null,annual_fee:editVals.annual_fee?parseFloat(editVals.annual_fee):null,payment_account_id:editVals.payment_account_id?parseInt(editVals.payment_account_id):null})});
+      await load();setEditing(null);toast('Card updated');
+    }catch(e){toast('Failed to save','error');}
+  };
+
+  const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
+
+  // Account detail takes highest priority
+  const closeAccountDetail=()=>{setSelectedAccount(null);setPendingChallengeFilter(null);};
+  if(selectedAccount)return<CardDetailErrorBoundary onBack={closeAccountDetail}><AccountCardDetailPage accountId={selectedAccount} onBack={closeAccountDetail} toast={toast} initialChallengeFilter={pendingChallengeFilter}/></CardDetailErrorBoundary>;
+
+  // Ecosystem detail page
+  if(selectedEcosystem)return(
+    <EcosystemDetailPage
+      ecoId={selectedEcosystem.id} ecoName={selectedEcosystem.name}
+      initPeriod={earnPeriod} initYear={earnYear}
+      onBack={()=>setSelectedEcosystem(null)}
+      onSelectAccount={(id)=>{setPendingChallengeFilter(null);setSelectedAccount(id);}}
+      toast={toast}/>
+  );
+
+  // Open a card's detail page pre-filtered to one of its challenges — used by
+  // ChallengeCard clicks on the Portfolio page.
+  const openChallenge=(ch)=>{
+    if(!ch.account_id)return;
+    setPendingChallengeFilter({start:(ch.start_date||'').slice(0,10),end:(ch.end_date||'').slice(0,10),name:ch.name});
+    setSelectedAccount(ch.account_id);
+  };
+
+  // Find linked product info for each account
+  const getProductForAccount=(acctId)=>{
+    const acct=accounts.find(a=>a.id===acctId);
+    if(acct&&acct.product_id)return products.find(p=>p.id===acct.product_id);
+    // Fallback: check if a card links this account to a product
+    const card=cards.find(c=>c.account_id===acctId&&c.product_id);
+    if(card)return products.find(p=>p.id===card.product_id);
+    return null;
+  };
+
+  const linkedCount=accounts.filter(a=>getProductForAccount(a.id)).length;
+  const unlinkedCount=accounts.length-linkedCount;
+  const visible=cards.filter(c=>showInactive||c.is_active);
+
+  return(
+    <div>
+      {/* Tab switcher — the MTD/QTD/YTD + year range selector lives inline
+          here (only relevant to the Portfolio tab) instead of its own row
+          below, to save vertical space. */}
+      <div className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12,marginBottom:24,padding:'12px 24px'}}>
+        <div style={{display:'flex',gap:24}}>
+          {[{id:'accounts',label:'Portfolio'},{id:'swipe',label:'Swipe Advisor'},{id:'cards',label:'Card Management'}].map(t=>(
+            <button type="button" key={t.id} onClick={()=>{setTab(t.id);if(t.id==='swipe'&&!swipeData)loadSwipe();}}
+              style={{padding:'8px 0',border:'none',borderBottom:tab===t.id?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:tab===t.id?500:400,letterSpacing:'0.2px',
+                background:'transparent',color:tab===t.id?'var(--blue-primary)':'var(--text-muted)',
+                transition:'all 0.15s',marginBottom:'-1px'}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {tab==='accounts'&&<div style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+          <div style={{display:'flex',gap:16}}>
+            {['mtd','qtd','ytd'].map(p=>(
+              <button type="button" key={p} onClick={()=>setEarnPeriod(p)}
+                style={{padding:'4px 0',border:'none',borderBottom:earnPeriod===p?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:earnPeriod===p?500:400,letterSpacing:'0.5px',
+                  background:'transparent',color:earnPeriod===p?'var(--blue-primary)':'var(--text-muted)',
+                  transition:'all 0.15s',textTransform:'uppercase'}}>
+                {p}
+              </button>
+            ))}
+          </div>
+          <select value={earnYear} onChange={e=>setEarnYear(Number(e.target.value))}
+            style={{fontSize:11,fontWeight:400,border:'1px solid var(--border)',borderRadius:8,padding:'6px 12px',background:'var(--elevated)',color:'var(--text-primary)'}}>
+            {earnYears.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>}
+      </div>
+
+      {tab==='swipe'?(
+        /* WHERE SHOULD I SWIPE */
+        <div>
+          <div style={{marginBottom:20}}>
+            <h2 style={{fontSize:18,fontWeight:400,margin:'0 0 4px'}}>Where Should I Swipe?</h2>
+            <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Best card for every spending category, ranked by your point valuations.</p>
+          </div>
+          {swipeLoading?<div style={{padding:40,textAlign:'center'}}><div className="spinner"/></div>
+            :swipeData?.categories?.map((cat,i)=>(
+              <div key={i} className="card" style={{marginBottom:10,padding:'14px 18px'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:500}}>{cat.category}</div>
+                  </div>
+                  {cat.best&&<div style={{display:'flex',alignItems:'center',gap:16}}>
+                    <div style={{textAlign:'right'}}>
+                      <div style={{fontSize:13,fontWeight:500}}>{cat.best.card_name}</div>
+                      <div style={{fontSize:11,color:'var(--text-muted)'}}>{cat.best.issuer} · {cat.best.ecosystem}</div>
+                    </div>
+                    <div style={{textAlign:'center',minWidth:55}}>
+                      <div style={{fontSize:20,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)'}}>{cat.best.earn_rate}x</div>
+                      <div style={{fontSize:10,color:'var(--text-muted)'}}>earn rate</div>
+                    </div>
+                    <div style={{textAlign:'center',minWidth:55}}>
+                      <div style={{fontSize:16,fontWeight:500,fontFamily:'Plus Jakarta Sans',color:'var(--blue)'}}>{cat.best.your_value}{'\u00A2'}</div>
+                      <div style={{fontSize:10,color:'var(--text-muted)'}}>per $1</div>
+                    </div>
+                    {cat.runner_up&&<div style={{fontSize:11,color:'var(--text-muted)',textAlign:'right',minWidth:100,paddingLeft:8,borderLeft:'1px solid var(--border)'}}>
+                      <div>Runner-up:</div>
+                      <div style={{fontWeight:500}}>{cat.runner_up.card_name}</div>
+                      <div>{cat.runner_up.earn_rate}x · {cat.runner_up.your_value}{'\u00A2'}/$</div>
+                    </div>}
+                  </div>}
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      ):tab==='cards'?(
+        /* LEGACY CARD MANAGEMENT */
+        <div>
+          {/* ── Auto-detected Product Matches ── */}
+          {suggestions.length>0&&<div className="card" style={{marginBottom:20,border:'1px solid var(--blue-primary)',borderLeft:'3px solid var(--blue-primary)'}}>
+            <div className="section-header" style={{paddingBottom:8}}>
+              <div className="section-title" style={{color:'var(--blue-primary)',fontSize:13}}>Auto-detected Product Matches</div>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setSuggestions([])}>Dismiss</button>
+            </div>
+            <div style={{padding:'0 20px 14px',display:'flex',flexDirection:'column',gap:8}}>
+              {suggestions.map(s=>(
+                <div key={s.account_id} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 12px',background:'var(--elevated)',borderRadius:8,border:'1px solid var(--border)'}}>
+                  <div style={{flex:1,fontSize:13,fontWeight:400}}>{s.account_name}{s.mask?` ···${s.mask}`:''} <span style={{fontWeight:300,color:'var(--text-muted)'}}>→ {s.suggested_product_name}</span></div>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,background:s.confidence==='high'?'rgba(52,211,153,0.12)':'rgba(var(--blue-primary-rgb), 0.12)',color:s.confidence==='high'?'var(--green)':'var(--blue-primary)',fontWeight:500}}>{s.confidence}</span>
+                  <button type="button" className="btn btn-sm btn-primary" disabled={linking[s.account_id]} onClick={()=>linkProduct(s.account_id,s.suggested_product_id)}>{linking[s.account_id]?'...':'Confirm'}</button>
+                </div>
+              ))}
+            </div>
+          </div>}
+          <div className="card">
+            <div className="section-header">
+              <div className="section-title">Cards ({visible.length})</div>
+              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                <label className="filter-label">
+                  <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/> Show inactive
+                </label>
+              </div>
+            </div>
+            {loading?<div className="loading"><div className="spinner"/></div>
+              :<div className="table-wrap"><table>
+                <thead><tr>
+                  <th>Card</th><th>Issuer</th><th>Network</th>
+                  <th style={{textAlign:'center'}}>Close Day</th><th style={{textAlign:'center'}}>Due Day</th>
+                  <th>Anniversary</th>
+                  <th style={{textAlign:'right'}}>Credit Limit</th><th style={{textAlign:'right'}}>Annual Fee</th>
+                  <th>Linked Account</th><th>Primary User</th><th>Actions</th>
+                </tr></thead>
+                <tbody>{visible.map(c=>(
+                  <tr key={c.id} style={{opacity:c.is_active?1:0.5}}>
+                    <td>
+                      <div style={{fontWeight:500,fontSize:13}}>{c.card_name||c.brand}</div>
+                      <div style={{fontSize:11,color:'var(--text-muted)'}}>{c.card_id}</div>
+                    </td>
+                    {editing===c.id?<>
+                      <td style={{fontSize:12}}>{c.issuer}</td>
+                      <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.statement_close_day} onChange={e=>setEditVals(v=>({...v,statement_close_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="number" min="1" max="31" value={editVals.payment_due_day} onChange={e=>setEditVals(v=>({...v,payment_due_day:e.target.value}))} style={{width:50,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="date" value={editVals.issue_date} onChange={e=>setEditVals(v=>({...v,issue_date:e.target.value}))} style={{width:130,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.credit_limit} onChange={e=>setEditVals(v=>({...v,credit_limit:e.target.value}))} style={{width:90,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}><input type="number" value={editVals.annual_fee} onChange={e=>setEditVals(v=>({...v,annual_fee:e.target.value}))} style={{width:70,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12}}/></td>
+                      <td onClick={e=>e.stopPropagation()}>
+                        <select value={editVals.account_id||''} onChange={e=>setEditVals(v=>({...v,account_id:e.target.value?parseInt(e.target.value):null}))} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',maxWidth:150}}>
+                          <option value="">-- Not linked --</option>
+                          {allAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+                        </select>
+                      </td>
+                      <td onClick={e=>e.stopPropagation()} style={{minWidth:120}}>
+                        <SearchCreateSelect value={editVals.primary_user||''} options={people} placeholder="Shared / unassigned"
+                          emptyLabel="Shared / unassigned" onChange={v=>setEditVals(vv=>({...vv,primary_user:v}))}/>
+                      </td>
+                      <td onClick={e=>e.stopPropagation()}><div style={{display:'flex',gap:4}}>
+                        <button type="button" className="btn btn-sm btn-success" onClick={()=>saveEdit(c.id)}>Save</button>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={cancelEdit}>X</button>
+                      </div></td>
+                    </>:<>
+                      <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.issuer}</td>
+                      <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,color:networkColor[c.network]||'var(--text-secondary)'}}>{c.network}</span></td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.statement_close_day||'--'}</td>
+                      <td style={{textAlign:'center',fontSize:12,fontFamily:'Plus Jakarta Sans'}}>{c.payment_due_day||'--'}</td>
+                      <td style={{fontSize:12}}>
+                        {c.issue_date
+                          ?<>
+                            <div style={{fontFamily:'Plus Jakarta Sans'}}>{new Date(c.issue_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}</div>
+                            {!!c.annual_fee&&<div style={{fontSize:10,color:'var(--text-muted)'}}>${c.annual_fee} in {daysToAnniversary(c.issue_date.slice(0,10))}d</div>}
+                          </>
+                          :<span style={{color:'var(--text-muted)'}}>--</span>}
+                      </td>
+                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans'}}>{c.credit_limit?`$${c.credit_limit.toLocaleString()}`:<span style={{color:'var(--text-muted)'}}>--</span>}</td>
+                      <td style={{textAlign:'right',fontSize:13,fontFamily:'Plus Jakarta Sans',color:c.annual_fee?'var(--red)':'var(--text-muted)'}}>{c.annual_fee?`$${c.annual_fee}`:'$0'}</td>
+                      <td style={{fontSize:12}}>
+                        {c.account_id
+                          ?<span style={{display:'flex',alignItems:'center',gap:4}}>
+                            <span style={{width:7,height:7,borderRadius:'50%',background:'var(--green)',display:'inline-block',flexShrink:0}}/>
+                            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}} title={c.linked_account_name}>{c.linked_account_name}</span>
+                          </span>
+                          :<span style={{color:'var(--text-muted)',fontSize:11}}>Not linked</span>}
+                      </td>
+                      <td style={{fontSize:12,color:c.primary_user?'var(--text-primary)':'var(--text-muted)'}}>{c.primary_user||'Shared'}</td>
+                      <td onClick={e=>e.stopPropagation()}><button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
+                    </>}
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            }
+          </div>
+        </div>
+      ):(
+        /* ACCOUNTS — Portfolio Overview */
+        <div>
+          {/* Heading + period selector moved into the tab-switcher row above
+              (2026-07-24) to save vertical space — no longer duplicated here. */}
+          {/* ── Ecosystem cards + challenges ── */}
+          {earnLoading
+            ?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>
+            :earnData?(()=>{
+              const ecoColor=(name)=>{
+                const n=(name||'').toLowerCase();
+                if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
+                if(n.includes('amex')||n.includes('membership'))return'#059669';
+                if(n.includes('hilton'))return'#7c3aed';
+                if(n.includes('citi'))return'#0891b2';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'#b45309';
+                if(n.includes('delta')||n.includes('skymiles'))return'#1e40af';
+                if(n.includes('hyatt'))return'#9f1239';
+                if(n.includes('united')||n.includes('mileageplus'))return'#374151';
+                if(n.includes('capital one'))return'#dc2626';
+                if(n.includes('atmos'))return'#0891b2';
+                if(n.includes('bilt'))return'#15803d';
+                return'var(--blue-primary)';
+              };
+              // Real vector-quality logos Omer supplied (assets/logos_color/,
+              // 2026-07-24) — replaces the old small monochrome-silhouette
+              // treatment. Files are per-theme (_t_dark/_t_light); some
+              // ecosystems only have one variant (chase=dark only, amex=light
+              // only — amex's mark has no dark-only elements so its light
+              // version reads fine on either theme), so this falls back to
+              // whichever exists rather than requiring both.
+              const logoVariants={hilton:['dark','light'],amex:['light'],citi:['dark','light'],chase:['dark','light'],
+                bonvoy:['dark','light'],delta:['dark','light'],hyatt:['dark','light'],united:['dark','light'],aa:['dark','light'],
+                atmos:['dark','light'],capitalone:['dark','light'],bilt:['dark','light']};
+              // Marks with their own solid-color backdrop (e.g. Amex's filled
+              // blue box) read fine against either theme, so it's safe to
+              // reuse their only variant on the "wrong" theme. Bare line-art
+              // marks (Chase's dark-only white text has no backdrop of its
+              // own) go invisible if forced onto the mismatched theme — for
+              // those, no available variant means no logo, not a broken one.
+              const selfContainedKeys=new Set(['amex']);
+              const logoKey=(name)=>{
+                const n=(name||'').toLowerCase();
+                if(n.includes('chase')||n.includes('ultimate'))return'chase';
+                if(n.includes('amex')||n.includes('membership'))return'amex';
+                if(n.includes('hilton'))return'hilton';
+                if(n.includes('citi'))return'citi';
+                if(n.includes('marriott')||n.includes('bonvoy'))return'bonvoy';
+                if(n.includes('delta')||n.includes('skymiles'))return'delta';
+                if(n.includes('hyatt'))return'hyatt';
+                if(n.includes('united')||n.includes('mileageplus'))return'united';
+                if(n.includes('aadvantage'))return'aa';
+                if(n.includes('atmos'))return'atmos';
+                if(n.includes('capital one'))return'capitalone';
+                if(n.includes('bilt'))return'bilt';
+                return null;
+              };
+              const ecoLogo=(name)=>{
+                const key=logoKey(name);
+                if(!key)return null;
+                const variants=logoVariants[key]||[];
+                const want=pageTheme==='light'?'light':'dark';
+                if(!variants.includes(want)&&!selfContainedKeys.has(key))return null;
+                const use=variants.includes(want)?want:variants[0];
+                return use?`/static/ecosystem-logos/${key}_t_${use}.png`:null;
+              };
+              const pointsEcos=earnData.ecosystems.filter(e=>!e.is_cash_back);
+              const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
+              return(
+                <>
+                  {/* ── Ecosystem Grid — logo-forward tiles, sized down (2026-07-26)
+                      so more fit per row/without vertical scroll now that Capital
+                      One/Atmos/Bilt bring the ecosystem count past what the old
+                      230px-min/220px-tall tiles comfortably fit on one screen. */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:10,marginBottom:24}}>
+                    {pointsEcos.map(eco=>{
+                      const col=ecoColor(eco.name);
+                      const logo=ecoLogo(eco.name);
+                      return(
+                        <div key={eco.id}
+                          style={{padding:'16px 14px 14px',borderRadius:14,minHeight:140,
+                            background:'var(--surface)',border:'1px solid var(--border)',cursor:'pointer',
+                            position:'relative',overflow:'hidden',display:'flex',flexDirection:'column',justifyContent:'space-between',
+                            transition:'all 0.2s ease'}}
+                          onClick={()=>setSelectedEcosystem({id:eco.id,name:eco.name})}
+                          onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor=`${col}44`;}}
+                          onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
+                          <div style={{position:'absolute',top:-36,right:-36,width:120,height:120,borderRadius:'50%',
+                            background:`radial-gradient(circle, ${col} 0%, transparent 70%)`,opacity:0.16,pointerEvents:'none'}}/>
+                          {logo
+                            ?<img src={logo} alt={eco.name} style={{height:56,maxWidth:'100%',objectFit:'contain',objectPosition:'left center',position:'relative',marginBottom:8}}
+                                onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block';}}/>
+                            :null}
+                          <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:8,display:logo?'none':'block'}}>{eco.name}</div>
+                          <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
+                            <div>
+                              <div style={{fontSize:21,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.4px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
+                              {eco.current_balance!=null&&<div style={{fontSize:10,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:4,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
+                              {!!eco.pending_balance&&<div style={{fontSize:10,color:'var(--amber)',marginTop:2,fontWeight:300}}>{Math.round(eco.pending_balance).toLocaleString()} pending</div>}
+                            </div>
+                            <div style={{color:'var(--text-muted)',fontSize:14,opacity:0.4}}>›</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* ── Cash Back (full width, clickable) ── */}
+                  {cashTotal>0&&(
+                    <div style={{display:'flex',alignItems:'center',gap:16,padding:'18px 20px',borderRadius:14,
+                      background:'var(--surface)',border:'1px solid var(--border)',marginBottom:24,cursor:'pointer',
+                      transition:'all 0.2s ease'}}
+                      onClick={()=>setSelectedEcosystem({id:'cash-back',name:'Cash Back'})}
+                      onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-md)';e.currentTarget.style.borderColor='rgba(217,119,6,0.3)';}}
+                      onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
+                      <div style={{width:44,height:30,borderRadius:8,background:'linear-gradient(135deg,#b45309,#d97706)',flexShrink:0}}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>Cash Back</div>
+                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>Earned this period</div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:26,fontWeight:300,fontFamily:'Plus Jakarta Sans',lineHeight:1,letterSpacing:'-1px',color:'var(--green)'}}>${cashTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                      </div>
+                      <div style={{color:'var(--text-muted)',fontSize:16,marginLeft:4,opacity:0.4}}>›</div>
+                    </div>
+                  )}
+
+                  {/* ── Empty state ── */}
+                  {pointsEcos.length===0&&cashTotal===0&&(
+                    <div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13,lineHeight:1.6,fontWeight:300}}>
+                      No earn data for this period.<br/>Make sure accounts are linked to card products.
+                    </div>
+                  )}
+
+                  {/* ── Your Cards (horizontal scroll) ── */}
+                  {accounts.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Your Cards</div>
+                      {/* paddingTop matches paddingBottom so the hover-lift transform
+                          (translateY(-3px) scale(1.02) below) has room to render without
+                          getting clipped — setting overflowX:auto implicitly computes
+                          overflowY to auto too (CSS spec), not visible, so a lifted tile
+                          would otherwise get its top edge cut off by the container. */}
+                      <div style={{display:'flex',gap:12,overflowX:'auto',paddingTop:8,paddingBottom:8}}>
+                        {accounts.map(acct=>{
+                          const prod=getProductForAccount(acct.id);
+                          const cardKey=prod?.product_key;
+                          const imgSrc=cardKey?`/static/cards/${cardKey}.png`:null;
+                          // Same key-naming fix as EcosystemDetailPage's cardGrads above —
+                          // must match CardProduct.product_key exactly (e.g.
+                          // 'chase_freedom_flex', not 'freedom_flex').
+                          const cardGrads={
+                            chase_freedom_flex:'linear-gradient(135deg,#0d9488,#115e59)',
+                            chase_freedom:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            chase_freedom_unlimited:'linear-gradient(135deg,#0369a1,#0c4a6e)',
+                            chase_sapphire_preferred:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            chase_sapphire_reserve:'linear-gradient(135deg,#0f172a,#020617)',
+                            hilton_aspire:'linear-gradient(135deg,#4c1d95,#2e1065)',
+                            united_quest:'linear-gradient(135deg,#374151,#111827)',
+                            united_explorer:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            delta_gold:'linear-gradient(135deg,#1e3a5f,#0f172a)',
+                            marriott_bonvoy_boundless:'linear-gradient(135deg,#78350f,#451a03)',
+                            hyatt_personal:'linear-gradient(135deg,#7f1d1d,#450a0a)',
+                            citi_custom_cash:'linear-gradient(135deg,#155e75,#0c4a5e)',
+                            citi_double_cash:'linear-gradient(135deg,#0e7490,#164e63)',
+                            citi_strata:'linear-gradient(135deg,#164e63,#0c4a5e)',
+                            citi_strata_premier:'linear-gradient(135deg,#0c4a6e,#082f49)',
+                            citi_strata_elite:'linear-gradient(135deg,#1e1b4b,#312e81)',
+                            us_bank_cash_plus:'linear-gradient(135deg,#6b21a8,#4c1d95)',
+                            amex_blue_business_plus:'linear-gradient(135deg,#1e40af,#1e3a5f)',
+                            amex_gold:'linear-gradient(135deg,#b8860b,#8b6914)',
+                            amex_platinum:'linear-gradient(135deg,#57534e,#292524)',
+                            capital_one_venture:'linear-gradient(135deg,#991b1b,#450a0a)',
+                            capital_one_venture_x:'linear-gradient(135deg,#450a0a,#1c0a0a)',
+                          };
+                          const bg=cardGrads[cardKey]||'linear-gradient(135deg,#374151,#1f2937)';
+                          return(
+                            <div key={acct.id} title={prod?.card_name||acct.account_name}
+                              onClick={()=>{setPendingChallengeFilter(null);setSelectedAccount(acct.id);}}
+                              style={{width:180,height:114,borderRadius:12,background:bg,padding:'14px 16px',
+                                flexShrink:0,cursor:'pointer',position:'relative',overflow:'hidden',
+                                boxShadow:'0 4px 12px rgba(0,0,0,0.3)',transition:'transform 0.2s ease',
+                                display:'flex',flexDirection:'column',justifyContent:'flex-end'}}
+                              onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-3px) scale(1.02)';}}
+                              onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0) scale(1)';}}>
+                              {/* Real card art shown near-full-strength (not the old 0.3 wash-out) —
+                                  a bottom-anchored scrim (not a flat opacity cut) keeps the mask
+                                  legible without dimming the art itself. Card name deliberately
+                                  dropped from the face (made the tile busy) — it's on the native
+                                  hover tooltip (title=) instead, same as ChallengeCard elsewhere. */}
+                              {imgSrc&&<img src={imgSrc} alt="" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:12,opacity:0.95}} onError={e=>{e.target.style.display='none'}}/>}
+                              {imgSrc&&<div style={{position:'absolute',inset:0,borderRadius:12,background:'linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 45%, transparent 68%)'}}/>}
+                              {/* Network-chip placeholder removed — it was a static
+                                  translucent box never wired to real network data, and
+                                  the card art itself already shows the real Visa/etc. logo. */}
+                              {/* Digits sit inside their own dark, mostly-opaque rounded badge
+                                  instead of directly on the art — sized to just the four digits
+                                  (not a wide bar) so the badge's own edge already reads as "this is
+                                  the number," making the "···" redaction prefix redundant, and the
+                                  dark backdrop keeps the digits from blending into busy/bright card
+                                  art underneath (F9, 2026-07-25; tightened + darkened 2026-07-26).
+                                  Inner span has a fixed minWidth (measured for "0000", the widest
+                                  4-digit combo at this font — "1111" is the narrowest at ~59% of
+                                  that) so every badge is the same size regardless of which digits
+                                  a given card happens to have, instead of hugging narrower digits
+                                  into a smaller box. */}
+                              {acct.mask&&<div style={{position:'relative',zIndex:1,display:'inline-block',padding:'2px 6px',borderRadius:5,background:'rgba(0,0,0,0.78)',border:'1px solid rgba(255,255,255,0.1)'}}>
+                                <span style={{fontSize:13,fontWeight:700,letterSpacing:'0.5px',color:'#fff',display:'inline-block',minWidth:39,textAlign:'center'}}>{acct.mask}</span>
+                              </div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Active Challenges ── */}
+                  {earnData.active_challenges.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
+                      <div className="grid-auto-sm" style={{gap:10}}>
+                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch} onClick={()=>openChallenge(ch)}/>)}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()
+            :<div style={{padding:48,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>Could not load portfolio data.</div>
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GCBPage({toast,refreshKey}){
+  const MO=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now=new Date();
+  const[txns,setTxns]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[year,setYear]=useState(now.getFullYear());
+  const[month,setMonth]=useState(0); // 0 = all months
+  const[error,setError]=useState('');
+
+  const load=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      let q=`/transactions?limit=500`;
+      if(month>0){
+        const start=`${year}-${String(month).padStart(2,'0')}-01`;
+        const endM=month===12?1:month+1;
+        const endY=month===12?year+1:year;
+        const end=`${endY}-${String(endM).padStart(2,'0')}-01`;
+        q+=`&start_date=${start}&end_date=${end}`;
+      }else{
+        q+=`&start_date=${year}-01-01&end_date=${year}-12-31`;
+      }
+      const data=await apiFetch(q);
+      setTxns(data.filter(t=>t.is_gcb));
+    }catch(e){setError('Failed to load');toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[year,month]);
+  useEffect(()=>{load();},[load,refreshKey]);
+
+  const revenue=txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const costs=txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const net=revenue-costs;
+  const txnCount=txns.length;
+  const margin=revenue>0?Math.round(net/revenue*100):0;
+
+  return(
+    <div>
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {/* Period selector */}
+      <div className="card" style={{display:'flex',alignItems:'center',gap:10,marginBottom:24,padding:'12px 24px'}}>
+        <select className="filter-select" value={year} onChange={e=>setYear(parseInt(e.target.value))}>
+          {[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+        <select className="filter-select" value={month} onChange={e=>setMonth(parseInt(e.target.value))}>
+          <option value={0}>All Months</option>
+          {[1,2,3,4,5,6,7,8,9,10,11,12].map(m=><option key={m} value={m}>{MO[m]}</option>)}
+        </select>
+        <span className="filter-count">{txnCount} GCB transactions</span>
+      </div>
+
+      {/* KPI cards */}
+      <div className="metric-grid" style={{marginBottom:20}}>
+        <div className="card metric-card"><div className="metric-label">GCB Revenue</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(revenue)}</div></div>
+        <div className="card metric-card"><div className="metric-label">GCB Costs</div><div className="metric-value" style={{color:'var(--red)'}}>{fmt(costs)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Net P&L</div><div className="metric-value" style={{color:net>=0?'var(--green)':'var(--red)'}}>{net>=0?'+':''}{fmt(net)}</div></div>
+        <div className="card metric-card"><div className="metric-label">Margin</div><div className="metric-value" style={{color:margin>=0?'var(--green)':'var(--red)'}}>{margin}%</div></div>
+      </div>
+
+      <div className="card">
+        <div className="section-header"><div className="section-title">GCB Transactions{month>0?` — ${MO[month]} ${year}`:` — ${year}`}</div></div>
+        {loading?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :txns.length===0?<div className="empty"><div className="empty-icon">$</div><span>No GCB-tagged transactions{month>0?` in ${MO[month]} ${year}`:` in ${year}`}</span><span style={{fontSize:12,color:'var(--text-muted)'}}>Tag transactions as GCB from the Transactions page</span></div>
+          :<div className="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Account</th></tr></thead>
+            <tbody>{txns.map(t=>(
+              <tr key={t.id}>
+                <td style={{color:'var(--text-secondary)',fontSize:12,whiteSpace:'nowrap'}}>{fmtDate(t.date)}</td>
+                <td style={{fontWeight:500,fontSize:13.5}}>{t.description_display||t.description_raw}</td>
+                <td><span className={t.amount<0?'amount-neg':'amount-pos'}>{t.amount<0?'–':'+'}{fmt(t.amount)}</span></td>
+                <td><span className={`badge badge-${t.action?.toLowerCase()==='income'?'income':t.action?.toLowerCase()==='transfer'?'transfer':'expense'}`}>{t.action}</span></td>
+                <td>{t.action!=='Transfer'&&<span className="badge badge-category">{t.category_final}</span>}</td>
+                <td style={{fontSize:12,color:'var(--text-muted)'}}>{t.account_name}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+function BudgetsPage({categories,toast,refreshKey}){
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const curYear=new Date().getFullYear();
+  const curMonth=new Date().getMonth()+1;
+  const isMob=useIsMobile();
+
+  /* ── State ─────────────────────────────────────────────────────────────── */
+  const[view,_setView]=useState(()=>parseHash().params.get('view')||'month');
+  const[year,_setYear]=useState(()=>parseInt(parseHash().params.get('year'))||curYear);
+  const[month,_setMonth]=useState(()=>parseInt(parseHash().params.get('month'))||curMonth);
+  const setView=useCallback(v=>{_setView(v);syncHashParams({view:v,year,month});},[year,month]);
+  const setYear=useCallback(y=>{_setYear(y);syncHashParams({view,year:y,month});},[view,month]);
+  const setMonth=useCallback(m=>{_setMonth(m);syncHashParams({view,year,month:m});},[view,year]);
+  
+  const[targets,setTargets]=useState({});
+  const[actuals,setActuals]=useState({});
+  const[editing,setEditing]=useState(false);
+  const[edits,setEdits]=useState({});
+  const[suggestions,setSuggestions]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState(false);
+  const[yearEdits,setYearEdits]=useState({});
+  const[inlineEdit,setInlineEdit]=useState(null);
+  const[inlineEditVal,setInlineEditVal]=useState('');
+  const[pasteModal,setPasteModal]=useState(false);
+  const[pasteText,setPasteText]=useState('');
+  const[parsedRows,setParsedRows]=useState(null);
+  const[parseErrors,setParseErrors]=useState([]);
+  const[pasteSaving,setPasteSaving]=useState(false);
+
+  /* ── Category sets ─────────────────────────────────────────────────────── */
+  const incomeCats=useMemo(()=>categories.filter(c=>c.category_type==='income').map(c=>c.name),[categories]);
+  const expenseCats=useMemo(()=>categories.filter(c=>c.category_type==='expense').map(c=>c.name),[categories]);
+
+  /* ── Load data ─────────────────────────────────────────────────────────── */
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const[t,a]=await Promise.all([
+        apiFetch(`/budget/targets?year=${year}`),
+        apiFetch(`/budget/actuals?year=${year}`),
+      ]);
+      setTargets(t.categories||{});
+      setActuals(a.categories||{});
+    }catch(e){toast('Failed to load budget','error');}
+    finally{setLoading(false);}
+  },[year, toast]);
+  useEffect(()=>{load();},[load,refreshKey]);
+
+  const loadSuggestions=async(yr,mo)=>{
+    try{
+      const s=await apiFetch(`/budget/suggestions?year=${yr}&month=${mo}`);
+      setSuggestions(s.suggestions||{});
+    }catch(e){setSuggestions({});}
+  };
+
+  /* ── Helpers ───────────────────────────────────────────────────────────── */
+  const getBudget=(cat,m)=>targets[cat]?.[String(m)]?.amount||0;
+  const getActual=(cat,m)=>actuals[cat]?.[String(m)]||0;
+
+  const alphaCats=useMemo(()=>(list)=>[...new Set(list)].sort((a,b)=>{
+    const BOTTOM=['Unclassified','Other','For Others'];
+    const aB=BOTTOM.includes(a),bB=BOTTOM.includes(b);
+    if(aB&&!bB)return 1;if(!aB&&bB)return -1;
+    return a.localeCompare(b);
+  }),[]);
+
+  const allIncomeCats=useMemo(()=>alphaCats([
+    ...incomeCats,
+    ...Object.keys(targets).filter(c=>incomeCats.includes(c)),
+    ...Object.keys(actuals).filter(c=>incomeCats.includes(c)),
+  ]),[incomeCats,targets,actuals,alphaCats]);
+
+  const allExpenseCats=useMemo(()=>alphaCats([
+    ...expenseCats,
+    ...Object.keys(targets).filter(c=>!incomeCats.includes(c)&&!['Transfer','Work','Unclassified'].includes(c)),
+    ...Object.keys(actuals).filter(c=>!incomeCats.includes(c)&&!['Transfer','Work','Unclassified'].includes(c)),
+  ]),[expenseCats,targets,actuals,alphaCats]);
+
+  const startEdit=async()=>{
+    const e={};
+    [...allIncomeCats,...allExpenseCats].forEach(cat=>{
+      e[cat]={[String(month)]:targets[cat]?.[String(month)]?.amount?.toString()||''};
+    });
+    setEdits(e);setEditing(true);await loadSuggestions(year,month);
+  };
+
+  const saveEdits=async()=>{
+    setSaving(true);
+    try{
+      const bulk=[];
+      Object.entries(edits).forEach(([cat,months])=>{
+        Object.entries(months).forEach(([m,val])=>{
+          const amt=parseFloat(val);if(!isNaN(amt)&&amt>=0)bulk.push({year,month:parseInt(m),category:cat,amount:amt});
+        });
+      });
+      if(bulk.length)await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});
+      toast('Targets saved');setEditing(false);setSuggestions({});await load();
+    }catch(e){toast('Failed to save','error');}finally{setSaving(false);}
+  };
+
+  const copyFromPrior=async()=>{
+    setSaving(true);
+    try{
+      const prior=await apiFetch(`/budget/targets?year=${year-1}`);
+      const priorCats=prior.categories||{};const bulk=[];
+      Object.entries(priorCats).forEach(([cat,months])=>{
+        Object.entries(months).forEach(([m,v])=>{if(v.amount>0)bulk.push({year,month:parseInt(m),category:cat,amount:v.amount});});
+      });
+      if(bulk.length){await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});toast(`Copied from ${year-1}`);await load();}
+      else toast('No targets found in '+ (year-1),'error');
+    }catch(e){toast('Copy failed','error');}finally{setSaving(false);}
+  };
+
+  const startYearEdit=()=>{
+    const e={};[...allIncomeCats,...allExpenseCats].forEach(cat=>{
+      e[cat]={};for(let m=1;m<=12;m++){const v=targets[cat]?.[String(m)]?.amount;e[cat][String(m)]=v!=null&&v>0?String(v):'';}
+    });
+    setYearEdits(e);setView('edit-year');
+  };
+
+  const saveYearEdits=async()=>{
+    setSaving(true);
+    try{
+      const bulk=[];
+      Object.entries(yearEdits).forEach(([cat,months])=>{
+        Object.entries(months).forEach(([m,val])=>{const amt=parseFloat(val);if(!isNaN(amt)&&amt>=0)bulk.push({year,month:parseInt(m),category:cat,amount:amt});});
+      });
+      if(bulk.length)await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});
+      toast('Annual targets saved');setView('annual');setYearEdits({});await load();
+    }catch(e){toast('Failed to save','error');}finally{setSaving(false);}
+  };
+
+  const startInlineEdit=(cat,m)=>{
+    const cur=targets[cat]?.[String(m)]?.amount;
+    setInlineEdit({cat,m});setInlineEditVal(cur!=null&&cur>0?String(cur):'');
+  };
+  const commitInlineEdit=async(catArg,mArg,valArg)=>{
+    const cat=catArg||inlineEdit?.cat;const m=mArg||inlineEdit?.m;const val=valArg!==undefined?valArg:inlineEditVal;
+    setInlineEdit(null);setInlineEditVal('');if(!cat||m==null)return;
+    const amt=parseFloat(val);if(isNaN(amt)||amt<0)return;
+    try{
+      await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:[{year,month:m,category:cat,amount:amt}]})});
+      setTargets(prev=>({...prev,[cat]:{...prev[cat],[String(m)]:{...(prev[cat]?.[String(m)]||{}),amount:amt}}}));
+    }catch(e){toast('Failed to save','error');}
+  };
+  const cancelInlineEdit=()=>{setInlineEdit(null);setInlineEditVal('');};
+
+  const parsePasteText=(text)=>{
+    const allCats=[...allIncomeCats,...allExpenseCats];const lines=text.trim().split('\n').filter(l=>l.trim());
+    if(!lines.length){setParsedRows(null);setParseErrors([]);return;}
+    const rows=[];const errs=[];const MO_NAMES=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    let startIdx=0;if(lines[0].split('\t')[0].toLowerCase()==='category'||MO_NAMES.includes(lines[0].split('\t')[1]?.toLowerCase()))startIdx=1;
+    for(let li=startIdx;li<lines.length;li++){
+      const cells=lines[li].split('\t').map(c=>c.trim());if(!cells[0])continue;
+      const matched=allCats.find(c=>c.toLowerCase()===cells[0].toLowerCase())||allCats.find(c=>c.toLowerCase().replace(/[^a-z]/g,'')===cells[0].toLowerCase().replace(/[^a-z]/g,''));
+      if(!matched){errs.push(`Unknown: "${cells[0]}"`);continue;}
+      const values=[];for(let vi=0;vi<12;vi++){const raw=(cells[vi+1]||'').replace(/[$,\s]/g,'');if(!raw||raw==='-'||raw==='—'){values.push(null);continue;}const n=parseFloat(raw);values.push(isNaN(n)?null:Math.abs(n));}
+      rows.push({cat:matched,values});
+    }
+    setParsedRows(rows);setParseErrors(errs);
+  };
+  const confirmPaste=async()=>{
+    if(!parsedRows||parsedRows.length===0)return;setPasteSaving(true);
+    try{
+      const bulk=[];parsedRows.forEach(({cat,values})=>{values.forEach((v,i)=>{if(v!=null)bulk.push({year,month:i+1,category:cat,amount:v});});});
+      await apiFetch('/budget/targets/bulk',{method:'POST',body:JSON.stringify({targets:bulk})});
+      toast(`Imported ${bulk.length} targets`);setPasteModal(false);setPasteText('');setParsedRows(null);setParseErrors([]);await load();
+    }catch(e){toast('Import failed','error');}finally{setPasteSaving(false);}
+  };
+  const closePasteModal=()=>{setPasteModal(false);setPasteText('');setParsedRows(null);setParseErrors([]);};
+
+  /* ── KPI values for selected month ───────────────────────────────────────── */
+  const monthIncomeBudget=allIncomeCats.reduce((s,c)=>s+getBudget(c,month),0);
+  const monthIncomeActual=allIncomeCats.reduce((s,c)=>s+getActual(c,month),0);
+  const monthExpenseBudget=allExpenseCats.reduce((s,c)=>s+getBudget(c,month),0);
+  const monthExpenseActual=allExpenseCats.reduce((s,c)=>s+getActual(c,month),0);
+  const monthNetBudget=monthIncomeBudget-monthExpenseBudget;
+  const monthNetActual=monthIncomeActual-monthExpenseActual;
+
+  /* ── Annual KPI ────────────────────────────────────────────────────────── */
+  const annualIncomeBudget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=allIncomeCats.reduce((a,c)=>a+getBudget(c,m),0);return s;})();
+  const annualIncomeActual=(()=>{let s=0;for(let m=1;m<=12;m++)s+=allIncomeCats.reduce((a,c)=>a+getActual(c,m),0);return s;})();
+  const annualExpenseBudget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=allExpenseCats.reduce((a,c)=>a+getBudget(c,m),0);return s;})();
+  const annualExpenseActual=(()=>{let s=0;for(let m=1;m<=12;m++)s+=allExpenseCats.reduce((a,c)=>a+getActual(c,m),0);return s;})();
+
+  /* ── Month View: P&L row renderer ─────────────────────────────────────── */
+  const renderPLRow=(cat,isIncome,isEditing)=>{
+    const budget=getBudget(cat,month);
+    const actual=getActual(cat,month);
+    const variance=isIncome?(actual-budget):(budget-actual); // positive = good
+    const pct=budget>0?Math.min(actual/budget,1):0;
+    const over=budget>0&&actual>budget;
+    const barColor=isIncome?'var(--green)':(over?'var(--red)':'var(--blue-vibrant)');
+    const varColor=variance>0?'var(--green)':(variance<0?'var(--red)':'var(--text-muted)');
+    const editVal=edits[cat]?.[String(month)]||'';
+    const suggestion=suggestions[cat];
+    const actualColor=over?'var(--red)':isIncome?'var(--green)':'var(--text-primary)';
+
+    if(!isEditing&&budget===0&&actual===0) return null;
+
+    if(isMob&&!isEditing) return(
+      <tr key={cat}>
+        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+        <td style={{textAlign:'right',fontSize:13,padding:'12px 8px',color:'var(--text-secondary)'}}>{budget>0?fmtRound(budget):'—'}</td>
+        <td style={{textAlign:'right',fontSize:13,padding:'12px 8px', color:actualColor, fontWeight:600}}>
+          {actual!==0?fmtRound(actual):'—'}
+        </td>
+        <td style={{textAlign:'right',fontSize:12,padding:'12px 16px',color:varColor, fontWeight:600}}>
+          {budget>0?((variance>0?'+':'')+fmtRound(variance)):'—'}
+        </td>
+      </tr>
+    );
+
+    return(
+      <tr key={cat}>
+        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px', color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+        <td style={{textAlign:'right',padding:'12px 8px'}}>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12}}>
+            {actual!==0&&<span style={{color:actualColor, fontWeight:600, fontSize:14}}>{fmtRound(actual)}</span>}
+            {budget>0&&!isMob&&(
+              <div style={{width:80, height:6, background:'var(--border)', borderRadius:3, overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${pct*100}%`,background:barColor,borderRadius:3,transition:'width 0.3s'}}/>
+              </div>
+            )}
+          </div>
+        </td>
+        <td style={{textAlign:'right',padding:'12px 8px',minWidth:100}}>
+          {isEditing?(
+            <div style={{position:'relative'}}>
+              <input type="number" step="1" min="0" value={editVal}
+                onChange={e=>setEdits(prev=>({...prev,[cat]:{...prev[cat],[String(month)]:e.target.value}}))}
+                className="search-input" style={{padding:'6px 8px', fontSize:13, textAlign:'right'}}
+                placeholder={suggestion?Math.round(suggestion).toString():'0'}/>
+              {suggestion&&!editVal&&<span style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--text-muted)',pointerEvents:'none'}}>{Math.round(suggestion)}</span>}
+            </div>
+          ):(
+            <span style={{color:budget>0?'var(--text-secondary)':'var(--text-muted)', fontSize:14}}>{budget>0?fmt(budget):'—'}</span>
+          )}
+        </td>
+        {!isEditing&&<td className="hide-mobile" style={{textAlign:'right',fontSize:13,padding:'12px 16px',color:varColor, fontWeight:600}}>
+          {variance!==0?(variance>0?'+':'')+fmtRound(variance):'—'}
+        </td>}
+        {isEditing&&<td/>}
+      </tr>
+    );
+  };
+
+  /* ── Month View: section separator ─────────────────────────────────────── */
+  const renderSectionHeader=(label)=>(
+    <tr style={{background:'var(--elevated)',borderTop:'2px solid var(--border)'}}>
+      <td colSpan={4} style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',paddingLeft:12,paddingTop:8,paddingBottom:4}}>{label}</td>
+    </tr>
+  );
+
+  const renderSectionTotal=(label,totalBudget,totalActual)=>{
+    const diff=totalBudget-totalActual;
+    if(isMob) return(
+      <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
+        <td style={{paddingLeft:10,fontSize:12.5,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,padding:'6px 5px',color:'var(--text-secondary)'}}>{totalBudget>0?fmtRound(totalBudget):'—'}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 5px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+      </tr>
+    );
+    return(
+      <tr style={{borderTop:'1px solid var(--border)',background:'var(--elevated)',fontWeight:400}}>
+        <td style={{paddingLeft:12,fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{label}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 4px',color:'var(--text-primary)'}}>{fmtRound(totalActual)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,padding:'6px 8px',color:'var(--text-secondary)'}}>{totalBudget>0?fmt(totalBudget):'—'}</td>
+        <td className="hide-mobile" style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:11,fontWeight:400,padding:'6px 8px',color:diff>0?'var(--green)':diff<0?'var(--red)':'var(--text-muted)'}}>{diff!==0?(diff>0?'+':'')+fmtRound(diff):'—'}</td>
+      </tr>
+    );
+  };
+
+  /* ── NET row ───────────────────────────────────────────────────────────── */
+  const renderNetRow=(budgetNet,actualNet)=>{
+    if(isMob) return(
+      <tr style={{borderTop:'3px solid var(--blue-primary)',background:'rgba(var(--blue-primary-rgb), 0.12)'}}>
+        <td style={{fontWeight:500,fontSize:13,paddingLeft:10,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 5px'}}>{budgetNet>=0?'+':''}{fmtRound(budgetNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 5px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
+        <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,padding:'6px 8px',color:(budgetNet-actualNet)>=0?'var(--green)':'var(--red)'}}>{((budgetNet-actualNet)>0?'+':'')+fmtRound(budgetNet-actualNet)}</td>
+      </tr>
+    );
+    return(
+    <tr style={{borderTop:'3px solid var(--blue-primary)',background:'rgba(var(--blue-primary-rgb), 0.12)'}}>
+      <td style={{fontWeight:500,fontSize:14,paddingLeft:12,paddingTop:8,paddingBottom:8,color:'var(--text-primary)'}}>NET</td>
+      <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:400,color:actualNet>=0?'var(--green)':'var(--red)',padding:'6px 4px'}}>{actualNet>=0?'+':''}{fmtRound(actualNet)}</td>
+      <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:400,color:'var(--text-secondary)',padding:'6px 8px'}}>{budgetNet>=0?'+':''}{fmt(budgetNet)}</td>
+      <td className="hide-mobile"/>
+    </tr>
+  );
+  };
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW A — MONTH VIEW
+  ═══════════════════════════════════════════════════════════════════════ */
+  const renderMonthView=()=>{
+    const prevMonth=()=>{if(month>1)setMonth(month-1);else{setYear(year-1);setMonth(12);}};
+    const nextMonth=()=>{if(month<12)setMonth(month+1);else{setYear(year+1);setMonth(1);}};
+    return(
+    <div style={{padding:0}}>
+      {/* Month selector + action buttons */}
+      <div style={{display:'flex',alignItems:'center',gap:12,padding:'16px 20px',flexWrap:'wrap',justifyContent:'space-between', background:'var(--surface-hover)', borderBottom:'1px solid var(--border)'}}>
+        <div className="hide-mobile" style={{display:'flex',gap:2}}>
+          {MO.map((label,i)=>(
+            <button type="button" key={i}
+              onClick={(e)=>{e.preventDefault();setMonth(i+1);if(editing){loadSuggestions(year,i+1);const e={};[...allIncomeCats,...allExpenseCats].forEach(cat=>{e[cat]={[String(i+1)]:targets[cat]?.[String(i+1)]?.amount?.toString()||''};});setEdits(e);}}}
+              style={{padding:'6px 10px',border:'none',borderBottom:month===i+1?'2px solid var(--blue-vibrant)':'2px solid transparent',cursor:'pointer',fontSize:13,fontWeight:month===i+1?700:500,fontFamily:'Outfit, sans-serif',
+                background:'transparent',color:month===i+1?'var(--blue-vibrant)':'var(--text-muted)',
+                transition:'all 0.2s', minWidth:44}}>{label}</button>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:10}}>
+          {!editing&&<button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();copyFromPrior()}} disabled={saving}>Copy from {year-1}</button>}
+          {!editing&&<button type="button" className="btn btn-sm" onClick={(e)=>{e.preventDefault();startEdit()}}>Edit {MO[month-1]}</button>}
+          {editing&&<button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();setEditing(false);setSuggestions({});}}>Cancel</button>}
+          {editing&&<button type="button" className="btn btn-sm" style={{background:'var(--green)'}} onClick={(e)=>{e.preventDefault();saveEdits()}} disabled={saving}>{saving?'Saving…':'Save'}</button>}
+        </div>
+      </div>
+
+      {editing&&<div style={{fontSize:12,color:'var(--text-muted)',padding:'12px 20px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:8}}>
+        <span style={{width:8,height:8,borderRadius:'50%',background:'var(--blue-vibrant)',display:'inline-block'}}/>
+        Hint values are 3-month trailing averages. Leave blank or enter 0 to clear.
+      </div>}
+
+      <div className="table-wrap" style={{margin:0, padding:0}}>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead>
+            <tr style={{background:'var(--surface)', borderBottom:'1px solid var(--border-strong)'}}>
+              <th style={{textAlign:'left',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)', fontFamily:'Outfit, sans-serif'}}>Category</th>
+              {isMob
+                ?<><th style={{textAlign:'right',padding:'12px 8px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:70}}>Budget</th>
+                    <th style={{textAlign:'right',padding:'12px 8px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:70}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:70}}>Var</th></>
+                :<><th style={{textAlign:'right',padding:'12px 8px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Actual</th>
+                    <th style={{textAlign:'right',padding:'12px 8px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:100}}>{MO[month-1]} Budget</th>
+                    <th className="hide-mobile" style={{textAlign:'right',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:100}}>Variance</th></>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            {renderSectionHeader('Income')}
+            {allIncomeCats.map(cat=>renderPLRow(cat,true,editing))}
+            {renderSectionTotal('Total Income',monthIncomeBudget,monthIncomeActual)}
+
+            {renderSectionHeader('Expenses')}
+            {allExpenseCats.map(cat=>renderPLRow(cat,false,editing))}
+            {renderSectionTotal('Total Expenses',monthExpenseBudget,monthExpenseActual)}
+
+            {renderNetRow(monthNetBudget,monthNetActual)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );};
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW B — ANNUAL VIEW  (read-only 12-column merged table)
+  ═══════════════════════════════════════════════════════════════════════ */
+  const renderAnnualCell=(cat,m)=>{
+    const b=getBudget(cat,m);
+    const isCur=m===curMonth&&year===curYear;
+    const isIE=inlineEdit&&inlineEdit.cat===cat&&inlineEdit.m===m;
+    return(
+      <td key={m} style={{textAlign:'right',padding:'12px 16px',minWidth:90,background:isCur?'rgba(var(--blue-vibrant-rgb), 0.05)':'transparent',cursor:isIE?'default':'pointer',userSelect:'none', borderBottom:'1px solid var(--border)'}}
+        onClick={isIE?undefined:()=>startInlineEdit(cat,m)}>
+        {isIE?(
+          <input type="number" step="1" min="0" autoFocus value={inlineEditVal}
+            onChange={e=>setInlineEditVal(e.target.value)}
+            onBlur={()=>commitInlineEdit(cat,m,inlineEditVal)}
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitInlineEdit(cat,m,inlineEditVal);}if(e.key==='Escape'){e.preventDefault();cancelInlineEdit();}}}
+            onClick={e=>e.stopPropagation()}
+            className="search-input"
+            style={{padding:'4px 8px', fontSize:12, textAlign:'right', border:'1px solid var(--blue-vibrant)'}}/>
+        ):b>0?(
+          <span style={{fontSize:13, fontWeight:600, color:'var(--text-primary)'}}>{fmtRound(b)}</span>
+        ):(
+          <span style={{color:'var(--text-muted)',fontSize:10,opacity:0.4}}>+</span>
+        )}
+      </td>
+    );
+  };
+
+  const renderAnnualSection=(sectionLabel,catList)=>{
+    return(<>
+      <tr style={{background:'var(--surface-hover)'}}>
+        <td colSpan={14} style={{fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',padding:'12px 16px', borderBottom:'1px solid var(--border-strong)', fontFamily:'Outfit, sans-serif'}}>{sectionLabel}</td>
+      </tr>
+      {catList.map(cat=>{
+        const annualBudget=(()=>{let s=0;for(let m=1;m<=12;m++)s+=getBudget(cat,m);return s;})();
+        if(annualBudget===0) return null;
+        return(
+          <tr key={cat}>
+            <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',minWidth:160,position:'sticky',left:0,background:'var(--surface)',zIndex:1,color:'var(--text-primary)', borderBottom:'1px solid var(--border)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+            {MO.map((mo,i)=>renderAnnualCell(cat,i+1))}
+            <td style={{textAlign:'right',fontSize:13,fontWeight:700,padding:'12px 16px',minWidth:100,borderLeft:'1px solid var(--border-strong)', borderBottom:'1px solid var(--border)', color:'var(--text-primary)', background:'var(--surface-hover)'}}>
+              {annualBudget>0?fmtRound(annualBudget):'—'}
+            </td>
+          </tr>
+        );
+      })}
+      {(()=>{
+        const totBudget=(()=>{let s=0;catList.forEach(c=>{for(let m=1;m<=12;m++)s+=getBudget(c,m);});return s;})();
+        return(
+          <tr style={{background:'rgba(var(--blue-vibrant-rgb), 0.03)'}}>
+            <td style={{padding:'12px 16px',fontSize:13,fontWeight:700,color:'var(--text-primary)',position:'sticky',left:0,background:'var(--surface-hover)',zIndex:1, fontFamily:'Outfit, sans-serif'}}>Total {sectionLabel}</td>
+            {MO.map((mo,i)=>{
+              const m=i+1;
+              const tb=catList.reduce((s,c)=>s+getBudget(c,m),0);
+              const isCur=m===curMonth&&year===curYear;
+              return(
+                <td key={i} style={{textAlign:'right',padding:'12px 16px',background:isCur?'rgba(var(--blue-vibrant-rgb), 0.05)':'transparent', borderBottom:'1px solid var(--border-strong)'}}>
+                  <span style={{fontSize:13,fontWeight:700,color:'var(--text-secondary)'}}>{tb>0?fmtRound(tb):'—'}</span>
+                </td>
+              );
+            })}
+            <td style={{textAlign:'right',fontSize:13,fontWeight:800,padding:'12px 16px',borderLeft:'1px solid var(--border-strong)', color:'var(--text-primary)', background:'var(--surface-hover)', borderBottom:'1px solid var(--border-strong)'}}>
+              {totBudget>0?fmtRound(totBudget):'—'}
+            </td>
+          </tr>
+        );
+      })()}
+    </>);
+  };
+
+  const renderAnnualView=()=>{
+    const netBudget=annualIncomeBudget-annualExpenseBudget;
+    return(
+      <div style={{padding:0}}>
+      <div style={{display:'flex',gap:12,padding:'16px 20px',justifyContent:'flex-end',alignItems:'center', background:'var(--surface-hover)', borderBottom:'1px solid var(--border)'}}>
+        <span style={{fontSize:12,color:'var(--text-muted)',flex:1,fontWeight:500}}>Click any cell to edit inline · Enter to save</span>
+        <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.preventDefault();setPasteModal(true)}}>📋 Paste from Excel</button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();startYearEdit()}}>✏ Edit Year</button>
+      </div>
+      <div style={{overflowX:'auto'}}>
+        <table style={{borderCollapse:'collapse',minWidth:1200, width:'100%'}}>
+          <thead>
+            <tr style={{background:'var(--surface)',borderBottom:'1px solid var(--border-strong)'}}>
+              <th style={{textAlign:'left',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:160,position:'sticky',left:0,background:'var(--surface)',zIndex:3, fontFamily:'Outfit, sans-serif'}}>Category</th>
+              {MO.map((mo,i)=>{
+                const isCur=(i+1)===curMonth&&year===curYear;
+                return(
+                  <th key={i} style={{textAlign:'right',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1px',color:isCur?'var(--blue-vibrant)':'var(--text-muted)',minWidth:90,background:isCur?'rgba(var(--blue-vibrant-rgb), 0.05)':'transparent'}}>
+                    {mo}
+                  </th>
+                );
+              })}
+              <th style={{textAlign:'right',padding:'12px 16px',fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:100,borderLeft:'1px solid var(--border-strong)'}}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {renderAnnualSection('Income',allIncomeCats)}
+            {renderAnnualSection('Expenses',allExpenseCats)}
+            {(()=>{
+              return(
+                <tr style={{background:'rgba(var(--blue-vibrant-rgb), 0.08)',fontWeight:700}}>
+                  <td style={{padding:'16px',fontSize:15,fontWeight:800,position:'sticky',left:0,background:'var(--surface)',zIndex:1,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>NET P&L</td>
+                  {MO.map((mo,i)=>{
+                    const m=i+1;
+                    const ib=allIncomeCats.reduce((s,c)=>s+getBudget(c,m),0);
+                    const eb=allExpenseCats.reduce((s,c)=>s+getBudget(c,m),0);
+                    const nb=ib-eb;
+                    const isCur=m===curMonth&&year===curYear;
+                    return(
+                      <td key={i} style={{textAlign:'right',padding:'16px',background:isCur?'rgba(var(--blue-vibrant-rgb), 0.1)':'transparent', borderTop:'2px solid var(--border-strong)'}}>
+                        {nb!==0?<span style={{fontSize:13,fontWeight:700,color:nb>=0?'var(--green)':'var(--red)'}}>{nb>=0?'+':''}{fmtRound(nb)}</span>:<span style={{color:'var(--text-muted)',fontSize:11}}>—</span>}
+                      </td>
+                    );
+                  })}
+                  <td style={{textAlign:'right',fontSize:15,fontWeight:900,color:netBudget>=0?'var(--green)':'var(--red)',padding:'16px',borderLeft:'1px solid var(--border-strong)', borderTop:'2px solid var(--border-strong)'}}>{netBudget>=0?'+':''}{fmtRound(netBudget)}</td>
+                </tr>
+              );
+            })()}
+          </tbody>
+        </table>
+      </div>
+      <div style={{padding:'12px 16px',fontSize:12,fontWeight:500,color:'var(--text-muted)',borderTop:'1px solid var(--border)', background:'var(--surface-hover)'}}>
+        Actuals &amp; progress tracking are on the Dashboard.
+      </div>
+      </div>
+    );
+  };
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW C — EDIT YEAR  (spreadsheet grid, all 12 months × all categories)
+  ═══════════════════════════════════════════════════════════════════════ */
+  const renderEditYearView=()=>{
+    const setCell=(cat,m,val)=>setYearEdits(prev=>({...prev,[cat]:{...prev[cat],[String(m)]:val}}));
+    const renderSection=(label,catList,isIncome)=>(
+      <>
+        <tr style={{background:'var(--elevated)'}}>
+          <td colSpan={13} style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',paddingLeft:10,paddingTop:8,paddingBottom:4,borderTop:'2px solid var(--border)'}}>{label}</td>
+        </tr>
+        {catList.map(cat=>(
+          <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
+            <td style={{fontWeight:400,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--surface)',zIndex:1,whiteSpace:'nowrap',color:'var(--text-primary)'}}>{cat}</td>
+            {MO.map((mo,i)=>{
+              const m=i+1;
+              const isCur=m===curMonth&&year===curYear;
+              const val=yearEdits[cat]?.[String(m)]??'';
+              const actual=getActual(cat,m);
+              return(
+                <td key={m} style={{padding:'3px 3px',background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'transparent',minWidth:82}}>
+                  <input type="number" step="1" min="0" value={val}
+                    onChange={e=>setCell(cat,m,e.target.value)}
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 5px',fontSize:11,textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:300,
+                      background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'var(--elevated)',color:'var(--text-primary)',
+                      outline:isCur?'1px solid var(--blue-primary)':undefined}}
+                    placeholder={actual>0?String(Math.round(actual)):''}/>
+                  {actual>0&&<div style={{fontSize:9,color:isIncome?'var(--green)':'var(--text-muted)',textAlign:'right',padding:'1px 3px 0',opacity:0.8,fontWeight:300}}>
+                    act {fmt(actual)}</div>}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </>
+    );
+    return(
+      <div>
+        <div style={{display:'flex',gap:8,marginBottom:10,justifyContent:'flex-end',alignItems:'center'}}>
+          <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>Editing all months for {year} · Current month (highlighted) shown first</span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setView('annual');setYearEdits({});}}>Cancel</button>
+          <button type="button" className="btn btn-sm btn-success" onClick={saveYearEdits} disabled={saving}>{saving?'Saving…':'Save Year'}</button>
+        </div>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:0,overflow:'hidden'}}>
+          <div style={{overflowX:'auto'}}>
+            <table style={{borderCollapse:'collapse',minWidth:1100}}>
+              <thead>
+                <tr style={{background:'var(--elevated)',borderBottom:'2px solid var(--border)'}}>
+                  <th style={{textAlign:'left',padding:'8px 10px',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)',minWidth:150,position:'sticky',left:0,background:'var(--elevated)',zIndex:3}}>Category</th>
+                  {MO.map((mo,i)=>{
+                    const isCur=(i+1)===curMonth&&year===curYear;
+                    return(
+                      <th key={i} style={{textAlign:'center',padding:'6px 4px',fontWeight:isCur?500:400,fontSize:10,textTransform:'uppercase',letterSpacing:'1px',
+                        color:isCur?'var(--blue-primary)':'var(--text-muted)',minWidth:82,
+                        background:isCur?'rgba(var(--blue-primary-rgb), 0.12)':'transparent',
+                        borderBottom:isCur?'2px solid var(--blue-primary)':undefined}}>
+                        {mo}{isCur?' ★':''}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {renderSection('Income',allIncomeCats,true)}
+                {renderSection('Expenses',allExpenseCats,false)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ── KPI strip (shared across both views) ───────────────────────────────── */
+  const renderKPIs=()=>{
+    const kpiStyle={padding:20};
+    if(view==='month'){
+      const expPct=monthExpenseBudget>0?Math.round(monthExpenseActual/monthExpenseBudget*100):0;
+      const expColor=expPct>=100?'var(--red)':expPct>=80?'var(--amber)':'var(--green)';
+      return(
+        <div className="metric-grid grid-4" style={{marginBottom:24}}>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Income — {MO[month-1]}</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(monthIncomeBudget)}</div><div style={{fontSize:12, marginTop:4, opacity:0.8}}>Actual: {fmt(monthIncomeActual)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Expenses — {MO[month-1]}</div><div className="metric-value">{fmt(monthExpenseBudget)}</div><div style={{fontSize:12, marginTop:4, opacity:0.8}}>Actual: {fmt(monthExpenseActual)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:expColor}}>{expPct}%</div><div style={{fontSize:12, marginTop:4, color:expColor}}>{fmt(monthExpenseActual)} of {fmt(monthExpenseBudget)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Net — {MO[month-1]}</div><div className="metric-value" style={{color:monthNetBudget>=0?'var(--blue-vibrant)':'var(--red)'}}>{monthNetBudget>=0?'+':''}{fmt(monthNetBudget)}</div><div style={{fontSize:12, marginTop:4, opacity:0.8}}>Actual: {monthNetActual>=0?'+':''}{fmt(monthNetActual)}</div></div>
+        </div>
+      );
+    }else{
+      const annExpPct=annualExpenseBudget>0?Math.round(annualExpenseActual/annualExpenseBudget*100):0;
+      const annExpColor=annExpPct>=100?'var(--red)':annExpPct>=80?'var(--amber)':'var(--green)';
+      return(
+        <div className="metric-grid grid-4" style={{marginBottom:24}}>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Annual Income</div><div className="metric-value" style={{color:'var(--green)'}}>{fmt(annualIncomeBudget)}</div><div style={{fontSize:12, marginTop:4, opacity:0.8}}>Actual: {fmt(annualIncomeActual)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Annual Expenses</div><div className="metric-value">{fmt(annualExpenseBudget)}</div><div style={{fontSize:12, marginTop:4, opacity:0.8}}>Actual: {fmt(annualExpenseActual)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Budget Used</div><div className="metric-value" style={{color:annExpColor}}>{annExpPct}%</div><div style={{fontSize:12, marginTop:4, color:annExpColor}}>{fmt(annualExpenseActual)} of {fmt(annualExpenseBudget)}</div></div>
+          <div className="card metric-card" style={kpiStyle}><div className="metric-label">Annual Net</div><div className="metric-value" style={{color:(annualIncomeBudget-annualExpenseBudget)>=0?'var(--blue-vibrant)':'var(--red)'}}>{(annualIncomeBudget-annualExpenseBudget)>=0?'+':''}{fmt(annualIncomeBudget-annualExpenseBudget)}</div></div>
+        </div>
+      );
+    }
+  };
+
+  /* ── Main render ────────────────────────────────────────────────────────── */
+  return(
+    <div className="budgets-page">
+      {/* Top Header Card */}
+      <div className="card" style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 24px', marginBottom:24, flexWrap:'wrap', gap:16}}>
+        <div style={{display:'flex', alignItems:'center', gap:20}}>
+          <div style={{display:'flex', gap:12}}>
+            {[curYear-1,curYear,curYear+1].map(y=>(
+              <button type="button" key={y} onClick={(e)=>{e.preventDefault();setYear(y);setEditing(false);setSuggestions({});}}
+                style={{padding:'6px 0',border:'none',borderBottom:year===y?'2px solid var(--blue-vibrant)':'2px solid transparent',cursor:'pointer',fontSize:14,fontWeight:year===y?700:500,fontFamily:'Outfit, sans-serif',
+                  background:'transparent',color:year===y?'var(--blue-vibrant)':'var(--text-muted)',
+                  transition:'all 0.2s'}}>{y}</button>
+            ))}
+          </div>
+        </div>
+        
+        <div className="sel-pill">
+          <button type="button" data-active={view==='month'} onClick={(e)=>{e.preventDefault();setView('month')}}>Month</button>
+          <button type="button" data-active={view==='annual'} onClick={(e)=>{e.preventDefault();setView('annual')}}>Annual</button>
+          <button type="button" data-active={view==='edit-year'} onClick={(e)=>{e.preventDefault();startYearEdit()}}>Edit Year</button>
+        </div>
+      </div>
+
+      {renderKPIs()}
+
+      <div className="card" style={{padding:0, overflow:'hidden'}}>
+        {loading
+          ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :(allIncomeCats.length===0&&allExpenseCats.length===0&&Object.keys(targets).length===0)
+            ?<div style={{padding:60,textAlign:'center'}}><div style={{color:'var(--text-muted)',fontSize:15,fontWeight:300}}>No budget data for {year}</div></div>
+            :view==='edit-year'?renderEditYearView():view==='annual'?renderAnnualView():renderMonthView()
+        }
+      </div>
+
+      {/* ── Paste from Excel modal ─────────────────────────────────────── */}
+      {pasteModal&&(
+        <div className="review-overlay">
+          <div className="review-panel" style={{maxWidth:900}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <h3 style={{margin:0,fontSize:20,fontWeight:700,color:'var(--text-primary)',fontFamily:'Outfit, sans-serif'}}>📋 Paste Budget from Excel</h3>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();closePasteModal()}}>✕</button>
+            </div>
+            <p style={{fontSize:14,color:'var(--text-secondary)',margin:'0 0 20px',lineHeight:1.6}}>
+              Copy from Excel/Sheets and paste below. Expected format: <strong>Category</strong> in column A, then columns for Jan–Dec.
+            </p>
+            <textarea
+              className="search-input"
+              style={{width:'100%',height:140,padding:12,fontSize:13,fontFamily:'inherit',resize:'vertical', marginBottom:20}}
+              placeholder={"Category\tJan\tFeb\tMar...\nGroceries\t1200\t1200\t1300..."}
+              value={pasteText}
+              onChange={e=>{setPasteText(e.target.value);parsePasteText(e.target.value);}}
+              autoFocus/>
+
+            {parseErrors.length>0&&(
+              <div style={{marginBottom:20,padding:'12px 16px',background:'rgba(239, 68, 68, 0.05)',border:'1px solid var(--red)',borderRadius:12,fontSize:13,color:'var(--red)'}}>
+                {parseErrors.map((er,i)=><div key={i}>⚠ {er}</div>)}
+              </div>
+            )}
+
+            {parsedRows&&parsedRows.length>0&&(
+              <div style={{marginTop:20}}>
+                <div style={{fontSize:14,fontWeight:700,marginBottom:12,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>
+                  Preview — {parsedRows.length} categories, {parsedRows.reduce((s,r)=>s+r.values.filter(v=>v!=null).length,0)} targets:
+                </div>
+                <div style={{overflowX:'auto', borderRadius:16, border:'1px solid var(--border)', background:'var(--surface-hover)'}}>
+                  <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
+                    <thead>
+                      <tr style={{background:'var(--surface)'}}>
+                        <th style={{textAlign:'left',padding:'8px 12px',color:'var(--text-muted)',textTransform:'uppercase',fontSize:10,letterSpacing:'1px'}}>Category</th>
+                        {MO.map(mo=><th key={mo} style={{textAlign:'right',padding:'8px 12px',color:'var(--text-muted)',textTransform:'uppercase',fontSize:10,letterSpacing:'1px'}}>{mo}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRows.map(({cat,values})=>(
+                        <tr key={cat} style={{borderTop:'1px solid var(--border)'}}>
+                          <td style={{padding:'8px 12px',fontWeight:600,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+                          {values.map((v,i)=>(
+                            <td key={i} style={{textAlign:'right',padding:'8px 12px',color:v!=null?'var(--text-primary)':'var(--text-muted)'}}>
+                              {v!=null?fmtRound(v):'—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:'flex',justifyContent:'flex-end',gap:12,marginTop:24}}>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.preventDefault();closePasteModal()}}>Cancel</button>
+                  <button type="button" className="btn btn-sm" onClick={(e)=>{e.preventDefault();confirmPaste()}} disabled={pasteSaving}>
+                    {pasteSaving?'Saving…':`Save ${parsedRows.reduce((s,r)=>s+r.values.filter(v=>v!=null).length,0)} targets`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(!parsedRows||parsedRows.length===0)&&pasteText.trim()&&(
+              <div style={{marginTop:16,fontSize:14,color:'var(--text-muted)', textAlign:'center'}}>No valid rows found. Check that category names match exactly.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NetWorthPage({toast,refreshKey}){
+  /* ── shared "as of" date ─────────────────────────────────────────────── */
+  const todayStr=localDateStr(new Date());
+  const[asOf,setAsOf]=useState(todayStr);
+  const[subTab,setSubTab]=useState('networth');   // 'networth' | 'balances'
+
+  /* ── Net Worth tab state ─────────────────────────────────────────────── */
+  const[nwData,setNwData]=useState(null);
+  const[tlData,setTlData]=useState([]);
+  const[nwLoading,setNwLoading]=useState(true);
+  const[expanded,setExpanded]=useState({});
+  /* inline edit for starting balance */
+  const[editingAcct,setEditingAcct]=useState(null); // account_id
+  const[editBal,setEditBal]=useState('');
+  const[editDate,setEditDate]=useState('');
+  const[editSaving,setEditSaving]=useState(false);
+
+  /* ── Balances tab state ──────────────────────────────────────────────── */
+  const[accounts,setAccounts]=useState([]);
+  const[selectedId,setSelectedId]=useState(null);
+  const[selectedAccount,setSelectedAccount]=useState(null);
+  const[timeline,setTimeline]=useState(null);
+  const[balLoading,setBalLoading]=useState(true);
+  const[tlLoading,setTlLoading]=useState(false);
+  const[error,setError]=useState('');
+  /* filters */
+  const[sideFilter,setSideFilter]=useState('');
+  const[typeFilter,setTypeFilter]=useState(null); // null=all, Set=specific
+  const[nameFilter,setNameFilter]=useState('');
+  /* statement / reconcile view */
+  const[stmtView,setStmtView]=useState(false);
+  const[reconcileData,setReconcileData]=useState(null);
+  const[reconcileLoading,setReconcileLoading]=useState(false);
+
+  /* ── Net Worth: load data ────────────────────────────────────────────── */
+  const loadNW=useCallback(async()=>{
+    setNwLoading(true);setError('');
+    try{
+      const[nw,tl]=await Promise.all([
+        apiFetch(`/net-worth?as_of=${asOf}`),
+        apiFetch('/net-worth/timeline?months=12'),
+      ]);
+      setNwData(nw);setTlData(tl.timeline||[]);
+    }catch(e){setError('Failed to load net worth');toast('Failed to load','error');}
+    finally{setNwLoading(false);}
+  },[asOf]);
+  useEffect(()=>{loadNW();},[loadNW,refreshKey]);
+
+  /* ── Balances: load accounts list ────────────────────────────────────── */
+  const loadAccounts=useCallback(async()=>{
+    setBalLoading(true);
+    try{setAccounts(await apiFetch('/accounts'));}
+    catch(e){setError('Failed to load accounts');}
+    finally{setBalLoading(false);}
+  },[]);
+  useEffect(()=>{loadAccounts();},[loadAccounts,refreshKey]);
+
+  /* ── Balances: load per-account timeline ─────────────────────────────── */
+  const loadTimeline=useCallback(async(id)=>{
+    setTlLoading(true);setError('');
+    try{setTimeline(await apiFetch(`/accounts/${id}/balance-timeline?end=${asOf}`));}
+    catch(e){setError('Failed to load balance timeline');toast('Failed to load','error');}
+    finally{setTlLoading(false);}
+  },[asOf]);
+  useEffect(()=>{
+    if(selectedId){setSelectedAccount(accounts.find(a=>a.id===selectedId)||null);loadTimeline(selectedId);}
+    else{setTimeline(null);setSelectedAccount(null);}
+  },[selectedId,asOf]);
+
+  /* Fetch statement/reconcile data when account or date changes (only when stmtView is open) */
+  useEffect(()=>{
+    if(!selectedId||!stmtView){setReconcileData(null);return;}
+    setReconcileLoading(true);
+    apiFetch(`/accounts/${selectedId}/reconcile?end=${asOf}`)
+      .then(d=>setReconcileData(d))
+      .catch(()=>toast('Failed to load statement','error'))
+      .finally(()=>setReconcileLoading(false));
+  },[selectedId,stmtView,asOf]);
+
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+  const fmtBal=(v)=>v===0?'$0':(v<0?'-':'')+fmt(Math.abs(v));
+  const toggleBucket=(b)=>setExpanded(prev=>({...prev,[b]:!prev[b]}));
+
+  /* ── Starting balance inline edit ────────────────────────────────────── */
+  const startEditAcct=(acct)=>{setEditingAcct(acct.account_id);setEditBal(String(Math.abs(acct.balance)));setEditDate(acct.start_date||'2025-12-31');};
+  const cancelEditAcct=()=>{setEditingAcct(null);setEditBal('');setEditDate('');};
+  const saveEditAcct=async(acct)=>{
+    setEditSaving(true);
+    try{
+      // For liabilities the stored balance should be negative; user enters positive
+      const isAsset=nwData?.buckets?.[Object.keys(nwData.buckets).find(k=>nwData.buckets[k].accounts.some(a=>a.account_id===acct.account_id))]?.is_asset??true;
+      const amt=parseFloat(editBal)||0;
+      const storedAmt=isAsset?amt:-amt;
+      await apiFetch(`/accounts/${acct.account_id}`,{method:'PATCH',body:JSON.stringify({starting_balance:storedAmt,start_date:editDate})});
+      toast('Starting balance saved');cancelEditAcct();loadNW();
+    }catch(e){toast('Failed to save','error');}
+    finally{setEditSaving(false);}
+  };
+
+  /* ══════════════════════════════════════════════════════════════════════
+     NET WORTH TAB
+  ══════════════════════════════════════════════════════════════════════ */
+  const NW_ASSET_ORDER=['Cash & Savings','Investments','Real Estate','Other Assets'];
+  const NW_LIAB_ORDER=['Mortgage','Credit Cards','Personal Loans','Business Loans','Other Liabilities'];
+
+  const renderNWTab=()=>{
+    if(nwLoading)return<div className="loading"><div className="spinner"/><span>Loading…</span></div>;
+    const buckets=nwData?.buckets||{};
+    const assetBuckets=NW_ASSET_ORDER.map(name=>[name,buckets[name]]).filter(([,v])=>v);
+    // also include any unknown asset buckets
+    Object.entries(buckets).forEach(([k,v])=>{if(v.is_asset&&!NW_ASSET_ORDER.includes(k))assetBuckets.push([k,v]);});
+    const liabBuckets=NW_LIAB_ORDER.map(name=>[name,buckets[name]]).filter(([,v])=>v);
+    Object.entries(buckets).forEach(([k,v])=>{if(!v.is_asset&&!NW_LIAB_ORDER.includes(k))liabBuckets.push([k,v]);});
+
+    /* SVG timeline chart */
+    const chartW=800;const chartH=160;const pad=36;
+    const vals=tlData.map(d=>d.net_worth);
+    const minV=vals.length?Math.min(...vals):0;const maxV=vals.length?Math.max(...vals):0;
+    const rng=maxV-minV||1;
+    const tlPts=tlData.map((d,i)=>{
+      const x=pad+(i/(tlData.length-1||1))*(chartW-2*pad);
+      const y=pad+(1-(d.net_worth-minV)/rng)*(chartH-2*pad);
+      return`${x},${y}`;
+    }).join(' ');
+
+    const BucketPanel=({bucketList,isAsset})=>(
+      <div>
+        {bucketList.length===0&&<div className="empty" style={{padding:24}}><span>None</span></div>}
+        {bucketList.map(([bucketName,bData])=>{
+          const bucketTotal=bData.accounts.reduce((s,a)=>s+Math.abs(a.balance),0);
+          const isExp=expanded[bucketName]!==false;
+          return(
+            <div key={bucketName} style={{borderBottom:'1px solid var(--border)'}}>
+              {/* Bucket header row */}
+              <div onClick={()=>toggleBucket(bucketName)}
+                style={{padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',background:'var(--elevated)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:10,color:'var(--text-muted)',transform:isExp?'rotate(90deg)':'none',display:'inline-block',transition:'transform 0.15s'}}>▶</span>
+                  <span style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{bucketName}</span>
+                  <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>({bData.accounts.length})</span>
+                </div>
+                <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(bucketTotal)}</span>
+              </div>
+              {/* Account rows */}
+              {isExp&&bData.accounts.map(a=>{
+                const isEditing=editingAcct===a.account_id;
+                const dispBal=Math.abs(a.balance);
+                return(
+                  <div key={a.account_id} style={{padding:'8px 16px 8px 40px',borderTop:'1px solid var(--border)',background:'var(--surface)'}}>
+                    {isEditing?(
+                      /* ── Inline edit form ── */
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:12,fontWeight:400,marginBottom:2,color:'var(--text-primary)'}}>{a.account_name}{a.mask?` ···${a.mask}`:''}</div>
+                          <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtAcctType(a.account_type)}</div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <span style={{fontSize:11,color:'var(--text-muted)'}}>Balance $</span>
+                          <input type="number" step="0.01" min="0" value={editBal} onChange={e=>setEditBal(e.target.value)}
+                            style={{width:110,border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',fontSize:12,fontFamily:'Plus Jakarta Sans',fontWeight:300,textAlign:'right',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
+                          <span style={{fontSize:11,color:'var(--text-muted)'}}>as of</span>
+                          <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)}
+                            style={{border:'1px solid var(--border)',borderRadius:6,padding:'3px 6px',fontSize:12,fontWeight:300,background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
+                          <button type="button" className="btn btn-sm btn-success" onClick={()=>saveEditAcct(a)} disabled={editSaving}>{editSaving?'…':'Save'}</button>
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={cancelEditAcct}>✕</button>
+                        </div>
+                      </div>
+                    ):(
+                      /* ── Read-only row ── */
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div>
+                          <span style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{a.account_name}{a.mask?<span style={{fontSize:11,color:'var(--text-muted)',marginLeft:4,fontWeight:300}}>···{a.mask}</span>:null}</span>
+                          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
+                            {fmtAcctType(a.account_type)}{a.is_manual?' · Manual':''}
+                            {a.start_date?<span style={{marginLeft:8}}>Anchor: {fmtBal(a.starting_balance)} as of {a.start_date}</span>:
+                              <span style={{marginLeft:8,color:'var(--amber)'}}>⚠ No starting balance set</span>}
+                          </div>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:13,fontWeight:300,color:isAsset?'var(--green)':'var(--red)'}}>{fmtBal(dispBal)}</span>
+                          <button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>startEditAcct(a)}>Edit anchor</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+
+    return(<>
+      {/* KPI strip */}
+      {(()=>{
+        const currNW=nwData?.net_worth||0;
+        const prevMo=tlData.length>=2?tlData[tlData.length-2]?.net_worth:null;
+        const start12=tlData.length>=1?tlData[0]?.net_worth:null;
+        const moChg=prevMo!=null?currNW-prevMo:null;
+        const yr12Chg=start12!=null?currNW-start12:null;
+        const moChgPct=moChg!=null&&Math.abs(prevMo)>1?Math.round(moChg/Math.abs(prevMo)*100):null;
+        const yr12ChgPct=yr12Chg!=null&&Math.abs(start12)>1?Math.round(yr12Chg/Math.abs(start12)*100):null;
+        const NWTrendBadge=({chg,pct})=>{
+          if(chg==null)return<span style={{fontSize:11,color:'var(--text-muted)'}}>—</span>;
+          const pos=chg>=0;
+          return<span style={{background:pos?'rgba(52,211,153,0.12)':'rgba(248,113,113,0.12)',color:pos?'var(--green)':'var(--red)',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:500}}>{chg>0?'+':''}{fmt(chg)}{pct!=null?` (${pct>0?'+':''}${pct}%)`:''}</span>;
+        };
+        return(
+          <div className="metric-grid grid-4" style={{marginBottom:16}}>
+            {[
+              {label:'Net Worth',value:()=><span style={{color:currNW>=0?'var(--green)':'var(--red)'}}>{currNW<0?'-':''}{fmt(Math.abs(currNW))}</span>,sub:()=><><NWTrendBadge chg={moChg} pct={moChgPct}/><span style={{fontSize:11,color:'var(--text-muted)'}}>vs last month</span></>},
+              {label:'Total Assets',value:()=><span style={{color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>,sub:()=><span style={{fontSize:11,color:'var(--text-muted)'}}>as of {asOf}</span>},
+              {label:'Total Liabilities',value:()=><span style={{color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>,sub:()=><span style={{fontSize:11,color:'var(--text-muted)'}}>as of {asOf}</span>},
+              {label:'12-Month Change',value:()=><span style={{color:yr12Chg!=null?(yr12Chg>=0?'var(--green)':'var(--red)'):'var(--text-primary)'}}>{yr12Chg!=null?(yr12Chg>0?'+':yr12Chg<0?'-':'')+fmt(Math.abs(yr12Chg)):'—'}</span>,sub:()=>yr12ChgPct!=null&&<span style={{fontSize:11,color:'var(--text-muted)'}}>{yr12ChgPct>0?'+':''}{yr12ChgPct}% · since {tlData[0]?.date}</span>},
+            ].map(k=>(
+              <div key={k.label} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:18}}>
+                <div className="metric-label">{k.label}</div><div className="metric-value">{k.value()}</div><div className="metric-sub">{k.sub()}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Timeline chart — Catmull-Rom spline matching Dashboard style */}
+      {tlData.length>1&&(()=>{
+        const W=800,H=180,padC={t:14,r:20,b:28,l:52};
+        const cW=W-padC.l-padC.r,cH=H-padC.t-padC.b;
+        const yMax=maxV*1.05;const yMin=minV-(maxV-minV)*0.05;const yRng=yMax-yMin||1;
+        const pts=tlData.map((d,i)=>[
+          padC.l+(i/(tlData.length-1))*cW,
+          padC.t+cH-((d.net_worth-yMin)/yRng)*cH
+        ]);
+        const smoothPath=(points)=>{
+          if(points.length<2)return'';
+          let d=`M${points[0][0]},${points[0][1]}`;
+          for(let i=0;i<points.length-1;i++){
+            const p0=points[Math.max(i-1,0)],p1=points[i],p2=points[i+1],p3=points[Math.min(i+2,points.length-1)];
+            const t=0.3;
+            d+=` C${p1[0]+(p2[0]-p0[0])*t},${p1[1]+(p2[1]-p0[1])*t} ${p2[0]-(p3[0]-p1[0])*t},${p2[1]-(p3[1]-p1[1])*t} ${p2[0]},${p2[1]}`;
+          }
+          return d;
+        };
+        const pathD=smoothPath(pts);
+        const areaD=pathD+` L${pts[pts.length-1][0]},${padC.t+cH} L${pts[0][0]},${padC.t+cH} Z`;
+        const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return(
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Net Worth Over Time</div>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',maxHeight:200}}>
+            <defs><linearGradient id="nwAreaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue-primary)" stopOpacity="0.25"/><stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/></linearGradient></defs>
+            {[0,0.25,0.5,0.75,1].map((p,i)=>{
+              const y=padC.t+(1-p)*cH;const val=yMin+yRng*p;
+              return(<g key={i}><line x1={padC.l} y1={y} x2={W-padC.r} y2={y} stroke="var(--border)" strokeWidth={1}/>
+                <text x={padC.l-6} y={y+3} textAnchor="end" fontSize={9} fill="var(--text-muted)" fontFamily="Plus Jakarta Sans">{val>=10000||val<=-10000?`${(val/1000).toFixed(0)}k`:val>=1000?`${(val/1000).toFixed(1)}k`:`${Math.round(val)}`}</text></g>);
+            })}
+            {tlData.map((d,i)=>{
+              if(tlData.length>6&&i%2!==0&&i!==tlData.length-1)return null;
+              const dt=new Date(d.date+'T12:00:00');
+              return<text key={i} x={pts[i][0]} y={H-4} textAnchor="middle" fontSize={9} fill="var(--text-muted)" fontFamily="Plus Jakarta Sans">{MO[dt.getMonth()]}</text>;
+            })}
+            <path d={areaD} fill="url(#nwAreaGrad)"/>
+            <path d={pathD} fill="none" stroke="var(--blue-primary)" strokeWidth={2} strokeLinecap="round"/>
+            {pts.map((p,i)=>(
+              <g key={i}>
+                <circle cx={p[0]} cy={p[1]} r={3} fill="var(--blue-primary)" style={{cursor:'pointer'}}/>
+                <title>{tlData[i].date}: {fmt(tlData[i].net_worth)}</title>
+              </g>
+            ))}
+          </svg>
+        </div>);
+      })()}
+
+      {/* Assets | Liabilities two-column */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+          <div style={{padding:'14px 20px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Assets</span>
+            <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--green)'}}>{fmt(nwData?.total_assets||0)}</span>
+          </div>
+          <BucketPanel bucketList={assetBuckets} isAsset={true}/>
+        </div>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+          <div style={{padding:'14px 20px',borderBottom:'2px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Liabilities</span>
+            <span style={{fontFamily:'Plus Jakarta Sans, sans-serif',fontSize:14,fontWeight:300,color:'var(--red)'}}>{fmt(Math.abs(nwData?.total_liabilities||0))}</span>
+          </div>
+          <BucketPanel bucketList={liabBuckets} isAsset={false}/>
+        </div>
+      </div>
+    </>);
+  };
+
+  /* ══════════════════════════════════════════════════════════════════════
+     BALANCES TAB
+  ══════════════════════════════════════════════════════════════════════ */
+  const renderBalancesTab=()=>{
+    const tlItems=timeline?.timeline||[];
+    const startBal=timeline?.starting_balance||0;
+    const asOfBal=tlItems.length?tlItems[tlItems.length-1].balance:startBal;
+    const change=asOfBal-startBal;
+
+    const chartW=800;const chartH=180;const pad=36;
+    const minBal=tlItems.length?Math.min(...tlItems.map(d=>d.balance)):0;
+    const maxBal=tlItems.length?Math.max(...tlItems.map(d=>d.balance)):0;
+    const rng=maxBal-minBal||1;
+    const balPts=tlItems.map((d,i)=>{
+      const x=pad+(i/(tlItems.length-1||1))*(chartW-2*pad);
+      const y=pad+(1-(d.balance-minBal)/rng)*(chartH-2*pad);
+      return`${x},${y}`;
+    }).join(' ');
+
+    const accountTypes=[...new Set(accounts.map(a=>a.account_type))].sort();
+    const filteredAccounts=accounts.filter(a=>{
+      if(sideFilter==='asset'&&!a.is_asset)return false;
+      if(sideFilter==='liability'&&!a.is_liability)return false;
+      if(typeFilter!==null&&!typeFilter.has(a.account_type))return false;
+      if(nameFilter&&a.id!==parseInt(nameFilter))return false;
+      return true;
+    });
+
+    return(<>
+      {/* Filters */}
+      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <select className="filter-select" value={sideFilter} onChange={e=>setSideFilter(e.target.value)}>
+          <option value="">Asset / Liability</option>
+          <option value="asset">Assets only</option>
+          <option value="liability">Liabilities only</option>
+        </select>
+        <MultiSelectFilter label="All types" options={accountTypes.map(t=>({value:t,label:fmtAcctType(t)}))}
+          selected={typeFilter} onChange={setTypeFilter}/>
+        <select className="filter-select" value={selectedId||''} onChange={e=>{setSelectedId(parseInt(e.target.value)||null);setTimeline(null);}}>
+          <option value="">— Select account —</option>
+          {filteredAccounts.map(a=><option key={a.id} value={a.id}>{a.account_name}{a.mask?` ···${a.mask}`:''}{a.is_manual?' (Manual)':''}</option>)}
+        </select>
+        {(sideFilter||typeFilter!==null)&&<button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSideFilter('');setTypeFilter(null);}}>Clear filters</button>}
+      </div>
+
+      {!selectedId
+        ?<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:40,textAlign:'center'}}><div style={{color:'var(--text-muted)',fontSize:13,fontWeight:300}}>Select an account to view its balance as of {asOf}</div></div>
+        :tlLoading
+          ?<div className="loading"><div className="spinner"/><span>Loading…</span></div>
+          :<>
+            {/* KPI strip */}
+            <div className="metric-grid grid-3" style={{marginBottom:16}}>
+              {[
+                {label:'Starting Balance',val:fmtBal(startBal),color:undefined,sub:timeline?.start_date?`as of ${timeline.start_date}`:''},
+                {label:`Balance as of ${asOf}`,val:fmtBal(asOfBal),color:asOfBal>=0?'var(--green)':'var(--red)',sub:''},
+                {label:'Change',val:(change>=0?'+':'')+fmtBal(change),color:change>=0?'var(--green)':'var(--red)',sub:''},
+              ].map(k=>(
+                <div key={k.label} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:18}}>
+                  <div className="metric-label">{k.label}</div><div className="metric-value" style={{color:k.color}}>{k.val}</div>{k.sub&&<div className="metric-sub">{k.sub}</div>}
+                </div>
+              ))}
+            </div>
+
+            {/* Balance chart */}
+            {tlItems.length>1&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:16,marginBottom:16}}>
+              <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',marginBottom:8,textTransform:'uppercase',letterSpacing:'1.5px'}}>Balance Over Time</div>
+              <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{width:'100%',height:180}}>
+                <polyline fill="none" stroke="var(--blue-primary)" strokeWidth="2" points={balPts}/>
+                <polyline fill="url(#balgrad)" stroke="none" points={`${pad},${chartH-pad} ${balPts} ${pad+(tlItems.length-1)/(tlItems.length-1||1)*(chartW-2*pad)},${chartH-pad}`}/>
+                <defs><linearGradient id="balgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--blue-primary)" stopOpacity="0.15"/><stop offset="100%" stopColor="var(--blue-primary)" stopOpacity="0"/></linearGradient></defs>
+                <text x={pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)">{tlItems[0]?.date}</text>
+                <text x={chartW-pad} y={chartH-pad+14} fontSize="10" fill="var(--text-muted)" textAnchor="end">{tlItems[tlItems.length-1]?.date}</text>
+                <text x={pad-4} y={pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(maxBal)}</text>
+                <text x={pad-4} y={chartH-pad+4} fontSize="10" fill="var(--text-muted)" textAnchor="end">{fmtBal(minBal)}</text>
+              </svg>
+            </div>}
+
+            {/* Daily / Statement toggle card */}
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+              <div style={{padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid var(--border)'}}>
+                <span style={{fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>{stmtView?'Statement View':'Daily Balances'}</span>
+                <div style={{display:'flex',alignItems:'center',gap:14}}>
+                  {stmtView&&reconcileData&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>
+                    {reconcileData.transaction_count} txns
+                    {reconcileData.excluded_count>0&&<span style={{color:'var(--amber)',marginLeft:6}}>· {reconcileData.excluded_count} excluded</span>}
+                  </span>}
+                  {!stmtView&&<span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>{tlItems.length} days</span>}
+                  <div style={{display:'flex',gap:16}}>
+                    <button type="button" onClick={()=>setStmtView(false)}
+                      style={{padding:'4px 0',border:'none',borderBottom:!stmtView?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:!stmtView?500:400,
+                        background:'transparent',color:!stmtView?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Daily</button>
+                    <button type="button" onClick={()=>setStmtView(true)}
+                      style={{padding:'4px 0',border:'none',borderBottom:stmtView?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:11,fontWeight:stmtView?500:400,
+                        background:'transparent',color:stmtView?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Statement</button>
+                  </div>
+                </div>
+              </div>
+
+              {stmtView
+                /* ── Statement view: individual transactions + running balance ── */
+                ? reconcileLoading
+                  ? <div className="loading" style={{padding:24}}><div className="spinner"/><span>Loading…</span></div>
+                  : !reconcileData||reconcileData.transactions.length===0
+                    ? <div className="empty"><span>No transactions since the anchor date</span></div>
+                    : <div className="table-wrap" style={{maxHeight:440,overflowY:'auto'}}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Description</th>
+                              <th style={{textAlign:'right'}}>Amount</th>
+                              <th style={{textAlign:'right'}}>Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Anchor row (always first) */}
+                            <tr style={{background:'var(--elevated)'}}>
+                              <td style={{color:'var(--text-muted)',fontSize:12}}>{reconcileData.anchor_date||'—'}</td>
+                              <td style={{fontSize:12,color:'var(--text-muted)',fontStyle:'italic'}}>⚓ Anchor — starting balance</td>
+                              <td/>
+                              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:500}}>{fmtBal(reconcileData.anchor_balance)}</td>
+                            </tr>
+                            {/* Transactions oldest→newest */}
+                            {reconcileData.transactions.map(t=>(
+                              <tr key={t.id} style={{opacity:t.is_excluded?0.4:1,background:t.is_excluded?'var(--elevated)':undefined}}>
+                                <td style={{color:'var(--text-secondary)',fontSize:13}}>{t.date}</td>
+                                <td>
+                                  <div style={{fontSize:13,textDecoration:t.is_excluded?'line-through':'none'}}>{t.description}</div>
+                                  <div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>
+                                    {t.action}{t.category&&t.action!=='Transfer'?` · ${t.category}`:''}
+                                    {t.is_excluded?<span style={{color:'var(--amber)',marginLeft:4}}>excluded</span>:''}
+                                    {t.needs_review?<span style={{color:'var(--amber)',marginLeft:4}}>· needs review</span>:''}
+                                  </div>
+                                </td>
+                                <td style={{textAlign:'right'}}>
+                                  <span className={t.amount>0?'amount-pos':'amount-neg'} style={{textDecoration:t.is_excluded?'line-through':'none'}}>
+                                    {t.amount>0?'+':''}{fmt(Math.abs(t.amount))}
+                                  </span>
+                                </td>
+                                <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:t.is_excluded?'var(--text-muted)':t.running_balance>=0?'var(--text-primary)':'var(--red)'}}>
+                                  {t.is_excluded?'—':fmtBal(t.running_balance)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                /* ── Daily summary view (existing) ── */
+                : tlItems.length===0
+                  ? <div className="empty"><span>No transaction data in this range</span></div>
+                  : <div className="table-wrap" style={{maxHeight:380,overflowY:'auto'}}>
+                      <table>
+                        <thead><tr><th>Date</th><th>Daily Change</th><th>Balance</th></tr></thead>
+                        <tbody>{[...tlItems].reverse().map(d=>(
+                          <tr key={d.date}>
+                            <td style={{color:'var(--text-secondary)',fontSize:13}}>{d.date}</td>
+                            <td><span className={d.change>0?'amount-pos':d.change<0?'amount-neg':'amount-neutral'}>{d.change>0?'+':d.change<0?'-':''}{d.change!==0?fmt(Math.abs(d.change)):'—'}</span></td>
+                            <td><span style={{fontFamily:'Plus Jakarta Sans',fontSize:13,fontWeight:500,color:d.balance>=0?'var(--text-primary)':'var(--red)'}}>{fmtBal(d.balance)}</span></td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+              }
+            </div>
+          </>
+      }
+    </>);
+  };
+
+  /* ── Main render ─────────────────────────────────────────────────────── */
+  return(
+    <div>
+      {/* Top bar: As Of date + sub-tabs */}
+      <div className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,marginBottom:24,flexWrap:'wrap',padding:'12px 24px'}}>
+        <div style={{display:'flex',gap:20}}>
+          <button type="button" onClick={()=>setSubTab('networth')}
+            style={{padding:'5px 0',border:'none',borderBottom:subTab==='networth'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='networth'?500:400,
+              background:'transparent',color:subTab==='networth'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Net Worth</button>
+          <button type="button" onClick={()=>setSubTab('balances')}
+            style={{padding:'5px 0',border:'none',borderBottom:subTab==='balances'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:subTab==='balances'?500:400,
+              background:'transparent',color:subTab==='balances'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.15s'}}>Account Balances</button>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:11,color:'var(--text-muted)',fontWeight:400}}>As of</span>
+          <input type="date" value={asOf} onChange={e=>{setAsOf(e.target.value);setTimeline(null);}}
+            className="date-input" style={{padding:'4px 8px',fontSize:13}}/>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setAsOf(todayStr);setTimeline(null);}}>Today</button>
+        </div>
+      </div>
+
+      {error&&<div style={{color:'var(--red)',fontSize:13,marginBottom:12}}>{error}</div>}
+
+      {subTab==='networth'?renderNWTab():renderBalancesTab()}
+    </div>
+  );
+}
+
+/* ── Loans Page (Section 1) ──────────────────────────────────────────────── */
+
+// LoanForm is a top-level component so React never remounts it mid-edit
+// (if defined inside LoansPage, every keystroke re-creates a new function
+// reference, causing React to unmount+remount the form and lose focus).
+function LoanForm({editVals,setEditVals,accounts,loanTypes,isNew,onSave,onCancel}){
+  const inp=(field,type='text',step)=>(
+    <input type={type} step={step} value={editVals[field]??''} onChange={e=>setEditVals(v=>({...v,[field]:e.target.value}))}
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'}}/>
+  );
+  const sel=(field,opts)=>(
+    <select value={editVals[field]??''} onChange={e=>setEditVals(v=>({...v,[field]:e.target.value}))}
+      style={{width:'100%',border:'1px solid var(--border)',borderRadius:6,padding:'4px 6px',fontSize:12,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)'}}>
+      {opts}
+    </select>
+  );
+  const lbl=(text,req)=><label style={{fontSize:11,color:'var(--text-muted)',display:'block',marginBottom:2}}>{text}{req&&<span style={{color:'var(--red)'}}> *</span>}</label>;
+  const checkAccts=accounts.filter(a=>['Checking','Savings'].includes(a.account_type));
+  const liabAccts=accounts.filter(a=>a.is_liability);
+  const bal=parseFloat(editVals.current_balance)||0;
+  const rate=parseFloat(editVals.interest_rate)||0;
+  const pmt=parseFloat(editVals.monthly_payment)||0;
+  const tax=parseFloat(editVals.property_tax_monthly)||0;
+  const ins=parseFloat(editVals.insurance_monthly)||0;
+  const prevInt=pmt>0?Math.round(bal*(rate/100/12)*100)/100:0;
+  const prevEsc=tax+ins;
+  const prevPrin=pmt>0?Math.round((pmt-prevInt-prevEsc)*100)/100:0;
+  return(
+    <div style={{padding:'16px 20px',background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:14,margin:'0 0 16px'}}>
+      <div style={{fontSize:13,fontWeight:400,marginBottom:12,color:'var(--text-primary)'}}>{isNew?'New Loan':'Edit Loan'}</div>
+      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:8,marginBottom:8}}>
+        <div>{lbl('Lender',true)}{inp('lender')}</div>
+        <div>{lbl('Type')}{sel('loan_type',loanTypes.map(t=><option key={t}>{t}</option>))}</div>
+        <div>{lbl('Linked Account (Liability)')}{sel('account_id',[<option key="" value="">— None —</option>,...liabAccts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)])}</div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8,marginBottom:8}}>
+        <div>{lbl('Original Principal',true)}{inp('original_principal','number','0.01')}</div>
+        <div>{lbl('Balance (as of below)')}{inp('current_balance','number','0.01')}</div>
+        <div>{lbl('Balance Date')}{inp('balance_date','date')}</div>
+        <div>{lbl('Remaining Months')}{inp('remaining_term_months','number','1')}</div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8,marginBottom:8}}>
+        <div>{lbl('Interest Rate (%)')}{inp('interest_rate','number','0.001')}</div>
+        <div>{lbl('Total Monthly Payment')}{inp('monthly_payment','number','0.01')}</div>
+        <div>{lbl('Property Tax / mo')}{inp('property_tax_monthly','number','0.01')}</div>
+        <div>{lbl('Insurance / mo')}{inp('insurance_monthly','number','0.01')}</div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8,marginBottom:8}}>
+        <div>{lbl('Paid From (Checking)')}{sel('payment_account_id',[<option key="" value="">— None —</option>,...checkAccts.map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)])}</div>
+        <div>{lbl('Due Day of Month')}{inp('payment_due_day','number','1')}</div>
+        <div>{lbl('Original Term (months)')}{inp('term_months','number','1')}</div>
+        <div>{lbl('Maturity Date')}{inp('maturity_date','date')}</div>
+      </div>
+      {pmt>0&&<div style={{background:'var(--elevated)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',marginBottom:8,fontSize:12,fontWeight:300,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontWeight:500,color:'var(--text-muted)'}}>Next payment preview:</span>
+        <span>Principal <b style={{fontFamily:'Plus Jakarta Sans'}}>${prevPrin.toLocaleString()}</b></span>
+        <span>Interest <b style={{fontFamily:'Plus Jakarta Sans',color:'var(--red)'}}>${prevInt.toLocaleString()}</b></span>
+        {tax>0&&<span>Prop Tax <b style={{fontFamily:'Plus Jakarta Sans'}}>${tax.toLocaleString()}</b></span>}
+        {ins>0&&<span>Insurance <b style={{fontFamily:'Plus Jakarta Sans'}}>${ins.toLocaleString()}</b></span>}
+      </div>}
+      <div style={{marginBottom:8}}>{lbl('Notes')}{inp('notes')}</div>
+      <div style={{display:'flex',gap:8}}>
+        <button type="button" className="btn btn-sm btn-success" onClick={onSave}>Save</button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function LoansPage({toast,refreshKey}){
+  const[loans,setLoans]=useState([]);
+  const[accounts,setAccounts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[editing,setEditing]=useState(null);
+  const[editVals,setEditVals]=useState({});
+  const[linkModal,setLinkModal]=useState(null);
+  const[candidates,setCandidates]=useState([]);
+  const[linkPreview,setLinkPreview]=useState(null);
+  const[linking,setLinking]=useState(false);
+  const[linkedTxns,setLinkedTxns]=useState([]);
+  const[cm,setCm]=useState(null);
+
+  const loanTypes=['Mortgage','Auto','Student','Personal','Other'];
+  const blankLoan={lender:'',loan_type:'Mortgage',original_principal:'',current_balance:'',
+    balance_date:'',remaining_term_months:'',interest_rate:'',term_months:'',monthly_payment:'',
+    property_tax_monthly:'',insurance_monthly:'',payment_account_id:'',payment_due_day:'',
+    start_date:'',maturity_date:'',account_id:'',notes:''};
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{const[l,a]=await Promise.all([apiFetch('/loans'),apiFetch('/accounts')]);setLoans(l);setAccounts(a);}
+    catch(e){toast('Failed to load loans','error');}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load();},[load,refreshKey]);
+
+  const saveLoan=async()=>{
+    const body={...editVals,
+      original_principal:parseFloat(editVals.original_principal)||0,
+      current_balance:editVals.current_balance!==''?parseFloat(editVals.current_balance):null,
+      interest_rate:editVals.interest_rate!==''?parseFloat(editVals.interest_rate):null,
+      term_months:editVals.term_months!==''?parseInt(editVals.term_months):null,
+      remaining_term_months:editVals.remaining_term_months!==''?parseInt(editVals.remaining_term_months):null,
+      monthly_payment:editVals.monthly_payment!==''?parseFloat(editVals.monthly_payment):null,
+      property_tax_monthly:editVals.property_tax_monthly!==''?parseFloat(editVals.property_tax_monthly):null,
+      insurance_monthly:editVals.insurance_monthly!==''?parseFloat(editVals.insurance_monthly):null,
+      payment_account_id:editVals.payment_account_id?parseInt(editVals.payment_account_id):null,
+      payment_due_day:editVals.payment_due_day!==''?parseInt(editVals.payment_due_day):null,
+      account_id:editVals.account_id?parseInt(editVals.account_id):null,
+    };
+    try{
+      if(editing==='new'){await apiFetch('/loans',{method:'POST',body:JSON.stringify(body)});toast('Loan created');}
+      else{await apiFetch(`/loans/${editing}`,{method:'PATCH',body:JSON.stringify(body)});toast('Loan updated');}
+      setEditing(null);await load();
+    }catch(e){toast('Failed to save: '+e.message,'error');}
+  };
+
+  const deleteLoan=(id)=>{
+    setCm({
+      title:'Deactivate Loan',
+      body:'This loan will be deactivated. Linked transactions will not be affected.',
+      confirmLabel:'Deactivate',danger:true,
+      onConfirm:async()=>{
+        try{await apiFetch(`/loans/${id}`,{method:'DELETE'});toast('Loan deactivated');await load();}
+        catch(e){toast('Failed','error');}
+      }
+    });
+  };
+
+  const openLinkModal=async(loan)=>{
+    setLinkModal(loan);setLinkPreview(null);setCandidates([]);setLinkedTxns([]);
+    try{
+      const[cands,preview,linked]=await Promise.all([
+        apiFetch(`/loans/${loan.id}/candidate-transactions`),
+        apiFetch(`/loans/${loan.id}/compute-split`),
+        apiFetch(`/loans/${loan.id}/linked-transactions`),
+      ]);
+      setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
+    }catch(e){toast('Failed to load candidates: '+e.message,'error');}
+  };
+
+  const doLink=async(txnId)=>{
+    if(!linkModal)return;
+    setLinking(true);
+    try{
+      const r=await apiFetch(`/loans/${linkModal.id}/link-transaction`,{method:'POST',body:JSON.stringify({transaction_id:txnId})});
+      toast(`Linked! Principal ${fmt(r.split.principal)}, Interest ${fmt(r.split.interest)}. New balance: ${fmt(r.new_balance)}`);
+      setLinkModal(null);await load();
+    }catch(e){toast('Link failed: '+e.message,'error');}
+    finally{setLinking(false);}
+  };
+
+  const doUnlink=(txnId)=>{
+    if(!linkModal)return;
+    setCm({
+      title:'Unlink Payment',
+      body:'This payment will be unlinked and the loan balance will be restored.',
+      confirmLabel:'Unlink',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/loans/${linkModal.id}/unlink-transaction/${txnId}`,{method:'DELETE'});
+          toast('Payment unlinked');
+          const[cands,preview,linked]=await Promise.all([
+            apiFetch(`/loans/${linkModal.id}/candidate-transactions`),
+            apiFetch(`/loans/${linkModal.id}/compute-split`),
+            apiFetch(`/loans/${linkModal.id}/linked-transactions`),
+          ]);
+          setCandidates(cands);setLinkPreview(preview);setLinkedTxns(linked);
+          await load();
+        }catch(e){toast('Unlink failed: '+e.message,'error');}
+      }
+    });
+  };
+
+  const totalPrincipal=loans.reduce((s,l)=>s+l.original_principal,0);
+  const totalBalance=loans.reduce((s,l)=>s+(l.current_balance||0),0);
+  const totalPayment=loans.reduce((s,l)=>s+(l.monthly_payment||0),0);
+
+  return(
+    <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+      {linkModal&&<div className="review-overlay">
+        <div className="review-panel" style={{width:620,maxHeight:'80vh',overflowY:'auto'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:500}}>Link Payment — {linkModal.lender}</div>
+              <div style={{fontSize:12,color:'var(--text-muted)'}}>Pick the checking transaction that represents this loan payment</div>
+            </div>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setLinkModal(null)}>✕</button>
+          </div>
+          {linkedTxns.length>0&&<div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:6}}>Linked Payments</div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Principal</th><th></th></tr></thead>
+              <tbody>{linkedTxns.map(t=>{
+                const principal=t.splits.find(s=>s.description==='Principal');
+                return(
+                  <tr key={t.id}>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{t.date}</td>
+                    <td style={{fontSize:12}}>{t.description}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{principal?fmt(principal.amount):'—'}</td>
+                    <td><button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>doUnlink(t.id)}>Unlink</button></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+          </div>}
+          {linkPreview&&<div className="grid-4" style={{background:'rgba(var(--blue-primary-rgb), 0.12)',border:'1px solid var(--blue-primary)',borderRadius:10,padding:'10px 14px',marginBottom:12,gap:8}}>
+            {[['Principal',linkPreview.principal,'var(--text)'],['Interest',linkPreview.interest,'var(--red)'],['Prop Tax',linkPreview.property_tax,'var(--text-secondary)'],['Insurance',linkPreview.insurance,'var(--text-secondary)']].map(([lbl,val,color])=>(
+              <div key={lbl} style={{textAlign:'center'}}>
+                <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase'}}>{lbl}</div>
+                <div style={{fontSize:15,fontWeight:500,fontFamily:'Plus Jakarta Sans',color}}>{fmt(val)}</div>
+              </div>
+            ))}
+          </div>}
+          {candidates.length===0
+            ?<div style={{padding:'20px 0',textAlign:'center',color:'var(--text-muted)',fontSize:13}}>
+                No matching transactions found.<br/>
+                <span style={{fontSize:12}}>Ensure the loan has "Paid From" account and "Total Monthly Payment" set, and that the transaction exists in the DB.</span>
+              </div>
+            :<div className="table-wrap"><table>
+              <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th></th></tr></thead>
+              <tbody>{candidates.map(t=>(
+                <tr key={t.id}>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12}}>{t.date}</td>
+                  <td style={{fontSize:12}}>{t.description_clean||t.description_raw}</td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,color:'var(--red)'}}>{fmt(t.amount)}</td>
+                  <td><button type="button" className="btn btn-sm btn-primary" onClick={()=>doLink(t.id)} disabled={linking}>Link</button></td>
+                </tr>
+              ))}</tbody>
+            </table></div>}
+        </div>
+      </div>}
+
+      {editing&&<div style={{marginBottom:16}}>
+        <LoanForm editVals={editVals} setEditVals={setEditVals} accounts={accounts}
+          loanTypes={loanTypes} isNew={editing==='new'}
+          onSave={saveLoan} onCancel={()=>setEditing(null)}/>
+      </div>}
+
+      <div className="metric-grid grid-3" style={{marginBottom:20}}>
+        {[
+          {label:'Total Principal',val:fmt(totalPrincipal)},
+          {label:'Total Balance',val:fmt(Math.abs(totalBalance)),color:'var(--red)'},
+          {label:'Monthly Payments',val:fmt(totalPayment)},
+        ].map(k=>(
+          <div key={k.label} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:18}}>
+            <div className="metric-label">{k.label}</div><div className="metric-value" style={{color:k.color}}>{k.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Payoff Timeline ───────────────────────────────────────────────── */}
+      {loans.length>0&&(()=>{
+        // Compute payoff months for each loan with enough data
+        const now=new Date();
+        const timelineLoans=loans.map(l=>{
+          const bal=Math.abs(l.current_balance||0);
+          const rate=(l.interest_rate||0)/100/12; // monthly rate
+          const pmt=l.monthly_payment||0;
+          if(!bal||!pmt)return{...l,payoffMonths:null,payoffDate:null};
+          let months;
+          if(l.maturity_date){
+            // If maturity date is set, use it directly
+            const mat=new Date(l.maturity_date);
+            months=Math.max(0,Math.round((mat-now)/(1000*60*60*24*30.44)));
+          }else if(l.remaining_term_months){
+            months=l.remaining_term_months;
+          }else if(rate>0){
+            // Amortization formula: n = -ln(1 - (r*PV)/PMT) / ln(1+r)
+            const x=1-(rate*bal)/pmt;
+            if(x<=0)months=999; // payment too low to ever pay off
+            else months=Math.ceil(-Math.log(x)/Math.log(1+rate));
+          }else{
+            months=Math.ceil(bal/pmt);
+          }
+          const payDate=new Date(now.getFullYear(),now.getMonth()+months,1);
+          return{...l,payoffMonths:months,payoffDate:payDate};
+        }).filter(l=>l.payoffMonths!=null&&l.payoffMonths<600);
+
+        if(!timelineLoans.length)return null;
+
+        const maxMonths=Math.max(...timelineLoans.map(l=>l.payoffMonths),1);
+        const maxYears=Math.ceil(maxMonths/12);
+        const COLORS=['var(--blue-primary)','var(--green)','#06b6d4','#a78bfa','var(--red)','var(--amber)'];
+
+        return(
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Payoff Timeline</div>
+            <div style={{position:'relative',paddingBottom:24}}>
+              {/* Year markers */}
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:12,paddingLeft:140}}>
+                {Array.from({length:Math.min(maxYears+1,31)},(_,i)=>(
+                  <div key={i} style={{fontSize:10,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',fontWeight:300,position:'relative'}}>
+                    {i===0?'Now':`${now.getFullYear()+i}`}
+                  </div>
+                ))}
+              </div>
+              {/* Loan bars */}
+              {timelineLoans.map((l,i)=>{
+                const pct=Math.min((l.payoffMonths/maxMonths)*100,100);
+                const color=COLORS[i%COLORS.length];
+                const payLabel=l.payoffDate?l.payoffDate.toLocaleDateString('en-US',{month:'short',year:'numeric'}):`${l.payoffMonths} mo`;
+                return(
+                  <div key={l.id} style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
+                    <div style={{width:128,flexShrink:0,textAlign:'right',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      <div style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{l.lender}</div>
+                      <div style={{fontSize:10,color:'var(--text-muted)',fontWeight:300}}>{fmt(Math.abs(l.current_balance||0))}</div>
+                    </div>
+                    <div style={{flex:1,position:'relative'}}>
+                      <div style={{height:22,background:'var(--elevated)',borderRadius:6,overflow:'hidden',border:'1px solid var(--border)'}}>
+                        <div style={{height:'100%',width:`${pct}%`,background:color,borderRadius:6,opacity:0.75,transition:'width 0.5s ease',display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:pct>15?8:0}}>
+                          {pct>15&&<span style={{fontSize:9,fontWeight:500,color:'#0c0c10',whiteSpace:'nowrap'}}>{payLabel}</span>}
+                        </div>
+                      </div>
+                      {pct<=15&&<span style={{position:'absolute',left:`calc(${pct}% + 6px)`,top:3,fontSize:9,fontWeight:500,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{payLabel}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+        <div style={{padding:'14px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid var(--border)'}}>
+          <span style={{fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'1.5px',color:'var(--text-muted)'}}>Loans ({loans.length})</span>
+          <button type="button" className="btn btn-sm btn-primary" onClick={()=>{setEditing('new');setEditVals({...blankLoan});}}>+ Add Loan</button>
+        </div>
+        {loading?<div className="loading"><div className="spinner"/></div>
+          :loans.length===0&&!editing?<div className="empty"><div className="empty-icon">⌂</div><span>No loans yet</span></div>
+          :<div className="table-wrap"><table>
+            <thead><tr><th>Lender</th><th>Type</th><th>Balance</th><th>Rate</th><th>Principal / Interest / Tax / Ins</th><th>Remaining</th><th>Due</th><th>Actions</th></tr></thead>
+            <tbody>{loans.map(l=>(
+              <tr key={l.id}>
+                <td style={{fontWeight:500}}>{l.lender}</td>
+                <td><span className="badge badge-category" style={{fontSize:11}}>{toTitleCase(l.loan_type||'')}</span></td>
+                <td style={{fontFamily:'Plus Jakarta Sans',fontSize:13,color:'var(--red)'}}>{l.current_balance!=null?fmt(Math.abs(l.current_balance)):'—'}{l.balance_date&&<span style={{fontSize:10,color:'var(--text-muted)',display:'block'}}>as of {l.balance_date}</span>}</td>
+                <td style={{fontFamily:'Plus Jakarta Sans',fontSize:13}}>{l.interest_rate!=null?`${l.interest_rate}%`:'—'}</td>
+                <td style={{fontSize:12}}>
+                  {l.next_split?<span style={{fontFamily:'Plus Jakarta Sans'}}>
+                    {fmt(l.next_split.principal)} / {fmt(l.next_split.interest)} / {fmt(l.next_split.property_tax||0)} / {fmt(l.next_split.insurance||0)}
+                  </span>:<span style={{color:'var(--text-muted)'}}>—</span>}
+                </td>
+                <td style={{fontSize:12,color:'var(--text-muted)'}}>{l.remaining_term_months!=null?`${l.remaining_term_months} mo`:'—'}</td>
+                <td style={{fontSize:12}}>{l.payment_due_day?`Day ${l.payment_due_day}`:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                <td><div className="edit-actions">
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={()=>{setEditing(l.id);setEditVals({lender:l.lender,loan_type:l.loan_type,original_principal:l.original_principal,current_balance:l.current_balance??'',balance_date:l.balance_date||'',remaining_term_months:l.remaining_term_months??'',interest_rate:l.interest_rate??'',term_months:l.term_months??'',monthly_payment:l.monthly_payment??'',property_tax_monthly:l.property_tax_monthly??'',insurance_monthly:l.insurance_monthly??'',payment_account_id:l.payment_account_id??'',payment_due_day:l.payment_due_day??'',start_date:l.start_date||'',maturity_date:l.maturity_date||'',account_id:l.account_id??'',notes:l.notes||''});}}>Edit</button>
+                  <button type="button" className="btn btn-sm btn-ghost" title="Link a payment transaction" onClick={()=>openLinkModal(l)}>💰</button>
+                  <button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteLoan(l.id)}>×</button>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ── Cash Flow Planner Page ──────────────────────────────────────────────── */
+function CashFlowPage({toast,refreshKey}){
+  // Account types eligible as salary deposit destinations
+  const SALARY_TYPES=new Set(['Checking','checking','Savings','savings','HSA','hsa','FSA','fsa','Investment','investment','Brokerage','brokerage','IRA','ira','401k','401K']);
+
+  // ── Salary state ─────────────────────────────────────────────────────
+  const[salaryPayments,setSalaryPayments]=useState([]);
+  const[salaryAccounts,setSalaryAccounts]=useState([]);
+  const[showSalaryForm,setShowSalaryForm]=useState(false);
+  const[editingSalary,setEditingSalary]=useState(null);
+  // payment_dates is always an array (multi-select on add, single-element on edit)
+  const blankSF=()=>({payment_dates:[todayStr()],description:'Salary',person:'',allocations:{},frequency:'',freqConfig:{startDate:todayStr(),dayOfWeek:4,day1:15,day2:0,monthsAhead:3}});
+  const[salaryForm,setSalaryForm]=useState(blankSF());
+  const[salarySaving,setSalarySaving]=useState(false);
+  // ── Selection state ───────────────────────────────────────────────────
+  const[salSel,setSalSel]=useState(new Set());
+  const[ovSel,setOvSel]=useState(new Set());
+
+  // ── Overlay state ─────────────────────────────────────────────────────
+  const[overlays,setOverlays]=useState([]);
+  const[overlayAccounts,setOverlayAccounts]=useState([]);
+  const[showOverlayForm,setShowOverlayForm]=useState(false);
+  const[editingOverlay,setEditingOverlay]=useState(null);
+  const[ovForm,setOvForm]=useState({description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''});
+  const[ovSaving,setOvSaving]=useState(false);
+  const[genBusy,setGenBusy]=useState(false);
+  const[loading,setLoading]=useState(true);
+  const[cm,setCm]=useState(null);
+
+  // ── Analytics state ─────────────────────────────────────────────────
+  const[monthlyTrend,setMonthlyTrend]=useState([]); // [{label,income,expenses}]
+  const[breakdownRange,setBreakdownRange]=useState('month'); // 'month' | 'last30' | 'next30'
+  const[breakdownData,setBdData]=useState({income:{},expenses:{},totalIn:0,totalOut:0});
+  const[bdLoading,setBdLoading]=useState(false);
+
+  const load=useCallback(async(autoGen=false)=>{
+    setLoading(true);
+    try{
+      const[payments,accts,ovs]=await Promise.all([
+        apiFetch('/salary-payments').catch(()=>[]),
+        apiFetch('/accounts').catch(()=>[]),
+        apiFetch('/cash-flow-overlays').catch(()=>[]),
+      ]);
+      setSalaryPayments(payments);
+      setSalaryAccounts(accts.filter(a=>a.is_active&&SALARY_TYPES.has(a.account_type)));
+      setOverlayAccounts(accts);
+      setOverlays(ovs);
+      if(autoGen){
+        // Silently regenerate CC/loan overlays for the next 30 days
+        try{
+          const r=await apiFetch('/cash-flow-overlays/generate',{method:'POST'});
+          if(r.created>0){
+            const fresh=await apiFetch('/cash-flow-overlays').catch(()=>ovs);
+            setOverlays(fresh);
+            toast(`⚡ Auto-refreshed ${r.created} upcoming payment${r.created!==1?'s':''}`);
+          }
+        }catch(_){}
+      }
+    }catch(e){toast('Failed to load','error');}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{load(true);},[load,refreshKey]);
+
+  // ── Load 6-month trend for chart (cash accounts only via /cash-flow) ──
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const now=new Date();const months=[];
+        for(let i=5;i>=0;i--){
+          const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+          const y=d.getFullYear(),m=d.getMonth()+1;
+          const start=`${y}-${String(m).padStart(2,'0')}-01`;
+          const lastDay=new Date(y,m,0).getDate();
+          const end=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+          months.push({year:y,month:m,label:d.toLocaleDateString('en-US',{month:'short'}),start,end});
+        }
+        const results=await Promise.all(months.map(m=>
+          apiFetch(`/cash-flow?start_date=${m.start}&end_date=${m.end}`).catch(()=>({inflows:0,outflows:0}))
+        ));
+        setMonthlyTrend(months.map((m,i)=>({label:m.label,income:results[i].inflows||0,expenses:Math.abs(results[i].outflows||0)})));
+      }catch(_){}
+    })();
+  },[]);
+
+  // ── Load breakdown data based on selected range (cash accounts only) ──
+  useEffect(()=>{
+    (async()=>{
+      setBdLoading(true);
+      try{
+        const now=new Date();const todayS=todayStr();
+        let startD,endD;
+        if(breakdownRange==='month'){
+          const y=now.getFullYear(),m=now.getMonth()+1;
+          startD=`${y}-${String(m).padStart(2,'0')}-01`;
+          const lastDay=new Date(y,m,0).getDate();
+          endD=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+        }else if(breakdownRange==='last30'){
+          const d30ago=new Date(now);d30ago.setDate(d30ago.getDate()-30);
+          startD=d30ago.toISOString().slice(0,10);
+          endD=todayS;
+        }else{
+          // next30: use overlays + salary data, not cash-flow endpoint
+          const d30=new Date(now);d30.setDate(d30.getDate()+30);
+          const futEnd=d30.toISOString().slice(0,10);
+          const fOvs=overlays.filter(o=>o.flow_date>=todayS&&o.flow_date<=futEnd);
+          const fSals=salaryPayments.filter(sp=>sp.payment_date>=todayS&&sp.payment_date<=futEnd);
+          const incCats={};const expCats={};let tIn=0,tOut=0;
+          fSals.forEach(sp=>{const amt=spTotal(sp);tIn+=amt;const k=sp.description||'Salary';incCats[k]=(incCats[k]||0)+amt;});
+          fOvs.forEach(o=>{
+            if(o.amount>0){tIn+=o.amount;const k=o.description||'Other';incCats[k]=(incCats[k]||0)+o.amount;}
+            else{const amt=Math.abs(o.amount);tOut+=amt;const k=o.description||'Other';expCats[k]=(expCats[k]||0)+amt;}
+          });
+          setBdData({income:incCats,expenses:expCats,totalIn:tIn,totalOut:tOut});
+          setBdLoading(false);
+          return;
+        }
+        const cf=await apiFetch(`/cash-flow?start_date=${startD}&end_date=${endD}`);
+        setBdData({
+          income:cf.by_inflow||{},
+          expenses:cf.by_outflow||{},
+          totalIn:cf.inflows||0,
+          totalOut:Math.abs(cf.outflows||0),
+        });
+      }catch(_){setBdData({income:{},expenses:{},totalIn:0,totalOut:0});}
+      finally{setBdLoading(false);}
+    })();
+  },[breakdownRange,overlays,salaryPayments]);
+
+  // ── Salary helpers ────────────────────────────────────────────────────
+  const openAddSalary=()=>{setEditingSalary(null);setSalaryForm(blankSF());setShowSalaryForm(true);};
+  const openEditSalary=sp=>{
+    setEditingSalary(sp);
+    const allocs={};
+    sp.allocations.forEach(a=>{allocs[a.account_id]=String(a.amount);});
+    // Edit mode always has exactly one date (the record's own date)
+    setSalaryForm({payment_dates:[sp.payment_date],description:sp.description,person:sp.person,allocations:allocs});
+    setShowSalaryForm(true);
+  };
+  // Helpers for the multi-date picker (add mode only)
+  const addDate=()=>setSalaryForm(f=>({...f,payment_dates:[...f.payment_dates,'']}));
+  const removeDate=i=>setSalaryForm(f=>({...f,payment_dates:f.payment_dates.filter((_,idx)=>idx!==i)}));
+  const setDate=(i,v)=>setSalaryForm(f=>{const d=[...f.payment_dates];d[i]=v;return{...f,payment_dates:d};});
+
+  const saveSalary=async()=>{
+    const validDates=[...new Set(salaryForm.payment_dates.filter(d=>!!d))].sort();
+    if(validDates.length===0||!salaryForm.description||!salaryForm.person)
+      return toast('Fill in at least one date, description, and person','error');
+    const allocations=Object.entries(salaryForm.allocations)
+      .filter(([,v])=>v&&parseFloat(v)!==0)
+      .map(([account_id,amount])=>({account_id:parseInt(account_id),amount:parseFloat(amount)}));
+    if(allocations.length===0)return toast('Enter at least one account amount','error');
+    setSalarySaving(true);
+    try{
+      if(editingSalary){
+        // Edit: patch the single existing record
+        const body={payment_date:validDates[0],description:salaryForm.description,person:salaryForm.person,allocations};
+        const u=await apiFetch(`/salary-payments/${editingSalary.id}`,{method:'PATCH',body:JSON.stringify(body)});
+        setSalaryPayments(prev=>prev.map(p=>p.id===u.id?u:p));
+        toast('Saved');
+      }else{
+        // Add: create one record per selected date (parallel)
+        const results=await Promise.all(validDates.map(d=>
+          apiFetch('/salary-payments',{method:'POST',body:JSON.stringify({payment_date:d,description:salaryForm.description,person:salaryForm.person,allocations})})
+        ));
+        setSalaryPayments(prev=>[...prev,...results].sort((a,b)=>b.payment_date.localeCompare(a.payment_date)));
+        toast(`Created ${results.length} entr${results.length===1?'y':'ies'}`);
+      }
+      setShowSalaryForm(false);
+    }catch(e){toast('Save failed','error');}
+    finally{setSalarySaving(false);}
+  };
+  const deleteSalary=id=>{
+    setCm({
+      title:'Delete Salary Entry',
+      body:'This salary entry will be permanently deleted.',
+      confirmLabel:'Delete',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/salary-payments/${id}`,{method:'DELETE'});
+          setSalaryPayments(prev=>prev.filter(p=>p.id!==id));
+          toast('Deleted');
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
+  const spTotal=sp=>sp.allocations.reduce((s,a)=>s+a.amount,0);
+
+  // ── Frequency date generator ──────────────────────────────────────────
+  const genFreqDates=(freq,cfg)=>{
+    const out=[];
+    const now=new Date();
+    const end=new Date(now.getFullYear(),now.getMonth()+( cfg.monthsAhead||3),now.getDate());
+    if(freq==='weekly'||freq==='biweekly'){
+      const step=freq==='weekly'?7:14;
+      let d=new Date(cfg.startDate||todayStr());
+      while(d<=end){out.push(d.toISOString().slice(0,10));d=new Date(d);d.setDate(d.getDate()+step);}
+    }else if(freq==='semimonthly'){
+      let d=new Date(now.getFullYear(),now.getMonth(),1);
+      while(d<=end){
+        const yr=d.getFullYear(),mo=d.getMonth();
+        const lastD=new Date(yr,mo+1,0).getDate();
+        const d1=Math.min(cfg.day1||15,lastD);
+        const d2=cfg.day2===0?lastD:Math.min(cfg.day2||lastD,lastD);
+        const dt1=new Date(yr,mo,d1);if(dt1>=now&&dt1<=end)out.push(dt1.toISOString().slice(0,10));
+        if(d1!==d2){const dt2=new Date(yr,mo,d2);if(dt2>=now&&dt2<=end)out.push(dt2.toISOString().slice(0,10));}
+        d=new Date(yr,mo+1,1);
+      }
+    }else if(freq==='monthly'){
+      let d=new Date(now.getFullYear(),now.getMonth(),1);
+      while(d<=end){
+        const yr=d.getFullYear(),mo=d.getMonth();
+        const lastD=new Date(yr,mo+1,0).getDate();
+        const day=cfg.day1===0?lastD:Math.min(cfg.day1||1,lastD);
+        const dt=new Date(yr,mo,day);if(dt>=now&&dt<=end)out.push(dt.toISOString().slice(0,10));
+        d=new Date(yr,mo+1,1);
+      }
+    }
+    return[...new Set(out)].sort();
+  };
+
+  // ── Multi-select helpers ──────────────────────────────────────────────
+  const toggleSalSel=id=>setSalSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleAllSal=()=>setSalSel(s=>s.size===salaryPayments.length?new Set():new Set(salaryPayments.map(p=>p.id)));
+  const deleteSelectedSalary=()=>{
+    const ids=[...salSel];
+    if(!ids.length)return;
+    setCm({title:`Delete ${ids.length} Salary Entr${ids.length===1?'y':'ies'}`,body:`${ids.length} salary entr${ids.length===1?'y':'ies'} will be permanently deleted.`,confirmLabel:'Delete All',danger:true,
+      onConfirm:async()=>{
+        try{
+          await Promise.all(ids.map(id=>apiFetch(`/salary-payments/${id}`,{method:'DELETE'})));
+          setSalaryPayments(prev=>prev.filter(p=>!salSel.has(p.id)));
+          setSalSel(new Set());
+          toast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}`);
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
+  const toggleOvSel=id=>setOvSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleAllOv=()=>setOvSel(s=>s.size===overlays.length?new Set():new Set(overlays.map(o=>o.id)));
+  const deleteSelectedOverlays=()=>{
+    const ids=[...ovSel];
+    if(!ids.length)return;
+    setCm({title:`Delete ${ids.length} Entr${ids.length===1?'y':'ies'}`,body:`${ids.length} cash flow entr${ids.length===1?'y':'ies'} will be permanently deleted.`,confirmLabel:'Delete All',danger:true,
+      onConfirm:async()=>{
+        try{
+          await Promise.all(ids.map(id=>apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'})));
+          setOverlays(prev=>prev.filter(o=>!ovSel.has(o.id)));
+          setOvSel(new Set());
+          toast(`Deleted ${ids.length} entr${ids.length===1?'y':'ies'}`);
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
+
+  // ── Overlay helpers ───────────────────────────────────────────────────
+  const BLANK_OV={description:'',amount:'',flow_date:todayStr(),source:'manual',account_id:''};
+  const SOURCE_BADGE={manual:{label:'Manual',bg:'rgba(var(--blue-primary-rgb), 0.12)',color:'var(--blue-primary)'},cc_payment:{label:'CC',bg:'rgba(248,113,113,0.12)',color:'var(--red)'},loan_payment:{label:'Loan',bg:'rgba(139,92,246,0.12)',color:'var(--violet)'}};
+  const openAddOverlay=()=>{setEditingOverlay(null);setOvForm(BLANK_OV);setShowOverlayForm(true);};
+  const openEditOverlay=o=>{
+    setEditingOverlay(o);
+    setOvForm({description:o.description,amount:String(o.amount),flow_date:o.flow_date,source:o.source,account_id:String(o.account_id||'')});
+    setShowOverlayForm(true);
+  };
+  const saveOverlay=async()=>{
+    if(!ovForm.description||!ovForm.amount||!ovForm.flow_date)return toast('Fill in description, amount, and date','error');
+    setOvSaving(true);
+    try{
+      const body={description:ovForm.description,amount:parseFloat(ovForm.amount),flow_date:ovForm.flow_date,source:ovForm.source,account_id:ovForm.account_id?parseInt(ovForm.account_id):null};
+      if(editingOverlay){
+        const u=await apiFetch(`/cash-flow-overlays/${editingOverlay.id}`,{method:'PATCH',body:JSON.stringify(body)});
+        setOverlays(prev=>prev.map(o=>o.id===u.id?u:o));
+      }else{
+        const c=await apiFetch('/cash-flow-overlays',{method:'POST',body:JSON.stringify(body)});
+        setOverlays(prev=>[...prev,c].sort((a,b)=>a.flow_date.localeCompare(b.flow_date)));
+      }
+      setShowOverlayForm(false);toast('Saved');
+    }catch(e){toast('Save failed','error');}
+    finally{setOvSaving(false);}
+  };
+  const deleteOverlay=id=>{
+    setCm({
+      title:'Delete Cash Flow Entry',
+      body:'This cash flow entry will be permanently deleted.',
+      confirmLabel:'Delete',danger:true,
+      onConfirm:async()=>{
+        try{
+          await apiFetch(`/cash-flow-overlays/${id}`,{method:'DELETE'});
+          setOverlays(prev=>prev.filter(o=>o.id!==id));
+          toast('Deleted');
+        }catch(e){toast('Delete failed','error');}
+      }
+    });
+  };
+  const generateOverlays=async()=>{
+    setGenBusy(true);
+    try{
+      const r=await apiFetch('/cash-flow-overlays/generate',{method:'POST'});
+      toast(`⚡ Generated ${r.created} entr${r.created!==1?'ies':'y'}${r.skipped?`, ${r.skipped} already existed`:''}`);
+      setOverlays(await apiFetch('/cash-flow-overlays'));
+    }catch(e){toast('Generate failed','error');}
+    finally{setGenBusy(false);}
+  };
+
+  const INP={border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:300,fontFamily:'Plus Jakarta Sans, sans-serif',background:'var(--elevated)',color:'var(--text-primary)',outline:'none'};
+
+  if(loading)return<SkeletonTable rows={6}/>;
+
+  const today=todayStr();
+  const futureOvs=overlays.filter(o=>o.flow_date>=today);
+  const futureSals=salaryPayments.filter(sp=>sp.payment_date>=today).sort((a,b)=>a.payment_date.localeCompare(b.payment_date));
+  const ovUpIn=futureOvs.filter(o=>o.amount>0).reduce((s,o)=>s+o.amount,0);
+  const ovUpOut=futureOvs.filter(o=>o.amount<0).reduce((s,o)=>s+o.amount,0);
+  const salUpIn=futureSals.reduce((s,sp)=>s+spTotal(sp),0);
+  const totalUpIn=ovUpIn+salUpIn;
+  const netCF=totalUpIn+ovUpOut;
+  const nextPayEntry=futureSals[0]||null;
+
+  return(
+    <div>
+      {cm&&<ConfirmModal {...cm} onClose={()=>setCm(null)}/>}
+
+      {/* ── KPI strip ──────────────────────────────────────────────────────── */}
+      <div className="metric-grid grid-4" style={{marginBottom:24}}>
+        <div className="card metric-card">
+          <div className="metric-label">Upcoming Income</div>
+          <div className="metric-value" style={{color:'var(--green)'}}>+{fmt(totalUpIn)}</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>salary + one-time</span></div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Upcoming Outflows</div>
+          <div className="metric-value" style={{color:'var(--red)'}}>({fmt(Math.abs(ovUpOut))})</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>bills & payments</span></div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Net Cash Flow</div>
+          <div className="metric-value" style={{color:netCF>=0?'var(--blue-primary)':'var(--red)'}}>{netCF>=0?'+':''}{netCF<0?`(${fmt(Math.abs(netCF))})`:fmt(netCF)}</div>
+          <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>income − outflows</span></div>
+        </div>
+        <div className="card metric-card">
+          <div className="metric-label">Next Pay Date</div>
+          <div className="metric-value" style={{fontSize:18,fontFamily:'Plus Jakarta Sans'}}>{nextPayEntry?nextPayEntry.payment_date:'—'}</div>
+          {nextPayEntry&&<div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:300}}>+{fmt(spTotal(nextPayEntry))} · {nextPayEntry.person}</span></div>}
+        </div>
+      </div>
+
+      {/* ── Monthly Cash Flow Chart ────────────────────────────────────────── */}
+      {monthlyTrend.length>0&&(()=>{
+        const maxVal=Math.max(...monthlyTrend.map(m=>Math.max(m.income,m.expenses)),1);
+        const chartH=160;
+        return(
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Monthly Cash Flow — Last 6 Months</div>
+            <div style={{display:'flex',alignItems:'flex-end',gap:8,height:chartH,paddingBottom:24,position:'relative'}}>
+              {/* Horizontal grid lines */}
+              {[0.25,0.5,0.75,1].map(pct=>(
+                <div key={pct} style={{position:'absolute',left:0,right:0,bottom:24+(chartH-24)*pct,height:1,background:'var(--border)',pointerEvents:'none'}}/>
+              ))}
+              {monthlyTrend.map((m,i)=>{
+                const incH=Math.max(2,m.income/maxVal*(chartH-24));
+                const expH=Math.max(2,m.expenses/maxVal*(chartH-24));
+                const net=m.income-m.expenses;
+                return(
+                  <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:0,position:'relative'}}>
+                    <div style={{display:'flex',gap:3,alignItems:'flex-end',flex:1,width:'100%',justifyContent:'center'}}>
+                      <div title={`Income: ${fmt(m.income)}`} style={{width:'38%',maxWidth:28,height:incH,background:'var(--green)',borderRadius:'4px 4px 0 0',opacity:0.85,transition:'height 0.4s ease'}}/>
+                      <div title={`Expenses: ${fmt(m.expenses)}`} style={{width:'38%',maxWidth:28,height:expH,background:'var(--red)',borderRadius:'4px 4px 0 0',opacity:0.85,transition:'height 0.4s ease'}}/>
+                    </div>
+                    <div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,fontWeight:400}}>{m.label}</div>
+                    <div style={{fontSize:9,color:net>=0?'var(--green)':'var(--red)',fontWeight:500,fontFamily:'Plus Jakarta Sans'}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:'flex',gap:20,justifyContent:'center',marginTop:8}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--text-muted)'}}><div style={{width:10,height:10,borderRadius:2,background:'var(--green)',opacity:0.85}}/> Income</div>
+              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--text-muted)'}}><div style={{width:10,height:10,borderRadius:2,background:'var(--red)',opacity:0.85}}/> Expenses</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Income & Expense Breakdowns ─────────────────────────────────────── */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:20}}>
+        {/* Range toggle — spans both columns */}
+        <div style={{gridColumn:'1/-1',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Breakdown</div>
+          <div style={{display:'flex',gap:16}}>
+            {[['month','This Month'],['last30','Last 30 Days'],['next30','Next 30 Days']].map(([k,label])=>(
+              <button type="button" key={k} onClick={()=>setBreakdownRange(k)}
+                style={{padding:'4px 0',border:'none',borderBottom:breakdownRange===k?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:12,fontWeight:breakdownRange===k?500:400,
+                  background:'transparent',color:breakdownRange===k?'var(--blue-primary)':'var(--text-muted)',
+                  transition:'all 0.15s',fontFamily:'inherit',letterSpacing:'0.2px'}}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Income sources */}
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:14}}>Income Sources</div>
+          {bdLoading?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>Loading…</div>
+          :Object.keys(breakdownData.income).length===0?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>No income data</div>
+          :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {Object.entries(breakdownData.income).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([cat,amt])=>{
+              const pct=breakdownData.totalIn>0?amt/breakdownData.totalIn*100:0;
+              return(
+                <div key={cat}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                    <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--green)'}}>+{fmt(amt)}</span>
+                  </div>
+                  <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--green)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
+              <span style={{color:'var(--text-muted)'}}>Total</span>
+              <span style={{color:'var(--green)',fontFamily:'Plus Jakarta Sans'}}>+{fmt(breakdownData.totalIn)}</span>
+            </div>
+          </div>}
+        </div>
+
+        {/* Top expenses */}
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:14}}>Top Expenses</div>
+          {bdLoading?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>Loading…</div>
+          :Object.keys(breakdownData.expenses).length===0?<div style={{textAlign:'center',padding:20,color:'var(--text-muted)',fontSize:12}}>No expense data</div>
+          :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {Object.entries(breakdownData.expenses).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([cat,amt])=>{
+              const pct=breakdownData.totalOut>0?amt/breakdownData.totalOut*100:0;
+              return(
+                <div key={cat}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                    <span style={{fontSize:12,fontWeight:400,color:'var(--text-primary)'}}>{cat}</span>
+                    <span style={{fontSize:12,fontWeight:400,fontFamily:'Plus Jakarta Sans',color:'var(--red)'}}>{fmt(amt)}</span>
+                  </div>
+                  <div style={{height:6,background:'var(--elevated)',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:`${Math.min(pct,100)}%`,background:'var(--red)',borderRadius:3,opacity:0.7,transition:'width 0.4s ease'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',fontSize:13,fontWeight:500}}>
+              <span style={{color:'var(--text-muted)'}}>Total</span>
+              <span style={{color:'var(--red)',fontFamily:'Plus Jakarta Sans'}}>{fmt(breakdownData.totalOut)}</span>
+            </div>
+          </div>}
+        </div>
+      </div>
+
+      {/* ── Predicted Flows (existing) ─ divider ───────────────────────────── */}
+      <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16,marginTop:8}}>Predicted Cash Flows</div>
+
+      {/* ── Salary modal ───────────────────────────────────────────────────── */}
+      {showSalaryForm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:28,minWidth:520,maxWidth:720,width:'90%',maxHeight:'85vh',overflowY:'auto',boxShadow:'var(--shadow-md)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div style={{fontWeight:400,fontSize:16,letterSpacing:'-0.2px'}}>{editingSalary?'Edit Salary Payment':'New Salary Payment'}</div>
+              <button type="button" onClick={()=>setShowSalaryForm(false)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-muted)',lineHeight:1,padding:0}}>×</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:16}}>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</label>
+                <input value={salaryForm.description} onChange={e=>setSalaryForm(f=>({...f,description:e.target.value}))} placeholder="Salary, HSA Contribution…" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Person</label>
+                <input value={salaryForm.person} onChange={e=>setSalaryForm(f=>({...f,person:e.target.value}))} placeholder="Omer, Daniella…" style={INP}/>
+              </div>
+            </div>
+            {/* ── Frequency picker (add mode only) ── */}
+            {!editingSalary&&(
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:8}}>Frequency</label>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  {[['','One-time'],['weekly','Weekly'],['biweekly','Bi-weekly'],['semimonthly','Semi-monthly'],['monthly','Monthly']].map(([f,label])=>(
+                    <button key={f} type="button" onClick={()=>{
+                      if(f===''){setSalaryForm(sf=>({...sf,frequency:'',payment_dates:[todayStr()]}));}
+                      else{setSalaryForm(sf=>{const dates=genFreqDates(f,sf.freqConfig);return{...sf,frequency:f,payment_dates:dates.length?dates:[todayStr()]};});}
+                    }} style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,cursor:'pointer',border:'1.5px solid',borderColor:salaryForm.frequency===f?'var(--primary)':'var(--border)',background:salaryForm.frequency===f?'var(--primary)':'transparent',color:salaryForm.frequency===f?'#fff':'var(--text-secondary)'}}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {salaryForm.frequency&&(
+                  <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',marginTop:10,padding:'10px 12px',background:'var(--bg)',borderRadius:8,border:'1px solid var(--border)'}}>
+                    {(salaryForm.frequency==='weekly'||salaryForm.frequency==='biweekly')&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Start date</label>
+                        <input type="date" value={salaryForm.freqConfig.startDate} onChange={e=>{const cfg={...salaryForm.freqConfig,startDate:e.target.value};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}/>
+                      </div>
+                    )}
+                    {(salaryForm.frequency==='semimonthly'||salaryForm.frequency==='monthly')&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>{salaryForm.frequency==='semimonthly'?'1st day of month':'Day of month'}</label>
+                        <select value={salaryForm.freqConfig.day1} onChange={e=>{const cfg={...salaryForm.freqConfig,day1:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                          {Array.from({length:28},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}
+                          <option value={0}>Last day</option>
+                        </select>
+                      </div>
+                    )}
+                    {salaryForm.frequency==='semimonthly'&&(
+                      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                        <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>2nd day of month</label>
+                        <select value={salaryForm.freqConfig.day2} onChange={e=>{const cfg={...salaryForm.freqConfig,day2:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                          {Array.from({length:28},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}
+                          <option value={0}>Last day</option>
+                        </select>
+                      </div>
+                    )}
+                    <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                      <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Months ahead</label>
+                      <select value={salaryForm.freqConfig.monthsAhead} onChange={e=>{const cfg={...salaryForm.freqConfig,monthsAhead:parseInt(e.target.value)};setSalaryForm(sf=>{const dates=genFreqDates(sf.frequency,cfg);return{...sf,freqConfig:cfg,payment_dates:dates.length?dates:[todayStr()]};});}} style={{...INP,padding:'4px 8px',fontSize:12}}>
+                        {[1,2,3,6,12].map(m=><option key={m} value={m}>{m} mo</option>)}
+                      </select>
+                    </div>
+                    <div style={{fontSize:12,color:'var(--text-muted)',alignSelf:'center',paddingBottom:2}}>
+                      → <strong style={{color:'var(--text-primary)'}}>{salaryForm.payment_dates.filter(d=>d).length}</strong> pay dates
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* ── Pay date(s) ── */}
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>{editingSalary?'Pay Date':'Pay Dates'}</label>
+                {!editingSalary&&!salaryForm.frequency&&<button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 10px',fontSize:11}} onClick={addDate}>＋ Add Date</button>}
+              </div>
+              {(!editingSalary&&salaryForm.frequency)?(
+                <div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:6,padding:'6px 10px'}}>
+                  {salaryForm.payment_dates.filter(d=>d).length} dates will be created &mdash; {salaryForm.payment_dates[0]} through {salaryForm.payment_dates[salaryForm.payment_dates.length-1]}
+                </div>
+              ):(
+                <>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                    {salaryForm.payment_dates.map((d,i)=>(
+                      <div key={i} style={{display:'flex',alignItems:'center',gap:4}}>
+                        <input type="date" value={d} onChange={e=>setDate(i,e.target.value)} style={{...INP,padding:'5px 8px'}}/>
+                        {!editingSalary&&salaryForm.payment_dates.length>1&&(
+                          <button type="button" onClick={()=>removeDate(i)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text-muted)',lineHeight:1,padding:'0 2px'}}>×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {!editingSalary&&salaryForm.payment_dates.filter(d=>d).length>1&&(
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>
+                      Will create <strong>{[...new Set(salaryForm.payment_dates.filter(d=>d))].length}</strong> separate entr{[...new Set(salaryForm.payment_dates.filter(d=>d))].length===1?'y':'ies'}.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',display:'block',marginBottom:10}}>Deposit Amounts Per Account</label>
+              {salaryAccounts.length===0
+                ?<div style={{fontSize:12,color:'var(--text-muted)',background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>No eligible accounts (add Checking / Savings / HSA / FSA / Investment accounts first).</div>
+                :<div className="grid-auto-sm" style={{gap:10}}>
+                  {salaryAccounts.map(a=>(
+                    <div key={a.id} style={{display:'flex',flexDirection:'column',gap:3}}>
+                      <label style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500}}>{a.account_name} <span style={{opacity:0.55,fontSize:10}}>({fmtAcctType(a.account_type)})</span></label>
+                      <input type="number" step="0.01" min="0" value={salaryForm.allocations[a.id]||''} onChange={e=>setSalaryForm(f=>({...f,allocations:{...f.allocations,[a.id]:e.target.value}}))} placeholder="0.00" style={{...INP,padding:'5px 8px'}}/>
+                    </div>
+                  ))}
+                </div>
+              }
+            </div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:16}}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowSalaryForm(false)}>Cancel</button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={saveSalary} disabled={salarySaving}>{salarySaving?'Saving…':'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Overlay modal ──────────────────────────────────────────────────── */}
+      {showOverlayForm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:28,minWidth:420,maxWidth:560,width:'90%',boxShadow:'var(--shadow-md)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div style={{fontWeight:400,fontSize:16,letterSpacing:'-0.2px'}}>{editingOverlay?'Edit Cash Flow Entry':'New Cash Flow Entry'}</div>
+              <button type="button" onClick={()=>setShowOverlayForm(false)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-muted)',lineHeight:1,padding:0}}>×</button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:20}}>
+              <div style={{gridColumn:'1/-1',display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Description</label>
+                <input value={ovForm.description} onChange={e=>setOvForm(f=>({...f,description:e.target.value}))} placeholder="e.g. Tax Refund, Chase Payment…" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Amount <span style={{fontWeight:400,opacity:0.7,textTransform:'none'}}>(– outflow, + inflow)</span></label>
+                <input type="number" step="0.01" value={ovForm.amount} onChange={e=>setOvForm(f=>({...f,amount:e.target.value}))} placeholder="-1500.00" style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Date</label>
+                <input type="date" value={ovForm.flow_date} onChange={e=>setOvForm(f=>({...f,flow_date:e.target.value}))} style={INP}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Source</label>
+                <select value={ovForm.source} onChange={e=>setOvForm(f=>({...f,source:e.target.value}))} style={INP}>
+                  <option value="manual">Manual</option>
+                  <option value="cc_payment">CC Payment</option>
+                  <option value="loan_payment">Loan Payment</option>
+                </select>
+              </div>
+              <div style={{gridColumn:'1/-1',display:'flex',flexDirection:'column',gap:4}}>
+                <label style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Account <span style={{fontWeight:400,opacity:0.7,textTransform:'none'}}>(optional)</span></label>
+                <select value={ovForm.account_id} onChange={e=>setOvForm(f=>({...f,account_id:e.target.value}))} style={INP}>
+                  <option value="">— None —</option>
+                  {overlayAccounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.account_name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:16}}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setShowOverlayForm(false)}>Cancel</button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={saveOverlay} disabled={ovSaving}>{ovSaving?'Saving…':'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Salary & Income card ───────────────────────────────────────────── */}
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden',marginBottom:20}}>
+        <div style={{padding:'18px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Salary & Income</div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {salSel.size>0&&<button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={deleteSelectedSalary}>Delete Selected ({salSel.size})</button>}
+            <button type="button" className="btn btn-sm btn-primary" onClick={openAddSalary}>+ Add Payment</button>
+          </div>
+        </div>
+        {salaryPayments.length===0
+          ?<div style={{textAlign:'center',padding:'28px 0',color:'var(--text-muted)',fontSize:13}}>No salary entries yet — click <strong>+ Add Payment</strong> to add a pay date.</div>
+          :<div className="table-wrap"><table style={{fontSize:13}}>
+            <thead><tr>
+              <th style={{width:32,textAlign:'center'}}><input type="checkbox" checked={salSel.size>0&&salSel.size===salaryPayments.length} onChange={toggleAllSal} style={{cursor:'pointer'}}/></th>
+              <th style={{minWidth:100}}>Date</th>
+              <th>Description</th>
+              <th>Person</th>
+              {salaryAccounts.map(a=>(
+                <th key={a.id} style={{textAlign:'right',minWidth:110,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={`${a.account_name} (${fmtAcctType(a.account_type)})`}>{a.account_name}</th>
+              ))}
+              <th style={{textAlign:'right',minWidth:100}}>Total</th>
+              <th style={{textAlign:'center'}}>Actions</th>
+            </tr></thead>
+            <tbody>{salaryPayments.map(sp=>{
+              const allocMap={};
+              sp.allocations.forEach(a=>{allocMap[a.account_id]=a.amount;});
+              const isPast=sp.payment_date<today;
+              return(
+                <tr key={sp.id} style={{opacity:isPast?0.5:1,background:isPast?'var(--elevated)':'transparent'}}>
+                  <td style={{textAlign:'center'}}><input type="checkbox" checked={salSel.has(sp.id)} onChange={()=>toggleSalSel(sp.id)} style={{cursor:'pointer'}}/></td>
+                  <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{sp.payment_date}</td>
+                  <td style={{fontWeight:300}}>{sp.description}</td>
+                  <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:400,background:'rgba(52,211,153,0.12)',color:'var(--green)'}}>{sp.person}</span></td>
+                  {salaryAccounts.map(a=>{
+                    const amt=allocMap[a.id];
+                    return<td key={a.id} style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontSize:12,color:amt?'var(--green)':'var(--text-muted)'}}>{amt?'+$'+amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>;
+                  })}
+                  <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:400,color:'var(--green)'}}>+${spTotal(sp).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  <td style={{textAlign:'center'}}>
+                    <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                      <button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditSalary(sp)}>Edit</button>
+                      <button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteSalary(sp.id)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}</tbody>
+          </table></div>
+        }
+      </div>
+
+      {/* ── Expected Outflows & One-Time Income card ───────────────────────── */}
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
+        <div style={{padding:'18px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
+          <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px'}}>Expected Outflows & One-Time Income</div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {ovSel.size>0&&<button type="button" className="btn btn-sm btn-ghost" style={{color:'var(--red)'}} onClick={deleteSelectedOverlays}>Delete Selected ({ovSel.size})</button>}
+            <button type="button" className="btn btn-sm btn-secondary" onClick={generateOverlays} disabled={genBusy} title="Auto-create entries from credit card and loan payment schedules">
+              {genBusy?'Generating…':'Generate from Cards & Loans'}
+            </button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={openAddOverlay}>+ Add</button>
+          </div>
+        </div>
+        {overlays.length===0
+          ?<div style={{textAlign:'center',padding:'28px 0',color:'var(--text-muted)',fontSize:13}}>No entries yet — add one manually or click <strong>Generate from Cards &amp; Loans</strong>.</div>
+          :<div className="table-wrap">
+            <table style={{fontSize:13}}>
+              <thead><tr>
+                <th style={{width:32,textAlign:'center'}}><input type="checkbox" checked={ovSel.size>0&&ovSel.size===overlays.length} onChange={toggleAllOv} style={{cursor:'pointer'}}/></th>
+                <th style={{minWidth:90}}>Date</th>
+                <th>Description</th>
+                <th style={{textAlign:'right',minWidth:100}}>Amount</th>
+                <th>Account</th>
+                <th>Source</th>
+                <th style={{textAlign:'center'}}>Actions</th>
+              </tr></thead>
+              <tbody>{overlays.map(o=>{
+                const badge=SOURCE_BADGE[o.source]||SOURCE_BADGE.manual;
+                const isOut=o.amount<0;
+                const isPast=o.flow_date<today;
+                return(
+                  <tr key={o.id} style={{opacity:isPast?0.5:1,background:isPast?'var(--elevated)':'transparent'}}>
+                    <td style={{textAlign:'center'}}><input type="checkbox" checked={ovSel.has(o.id)} onChange={()=>toggleOvSel(o.id)} style={{cursor:'pointer'}}/></td>
+                    <td style={{fontFamily:'Plus Jakarta Sans',fontSize:12,fontWeight:300,whiteSpace:'nowrap',color:isPast?'var(--text-muted)':'var(--text-primary)'}}>{o.flow_date}</td>
+                    <td style={{fontWeight:300}}>{o.description}</td>
+                    <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans',fontWeight:300,color:isOut?'var(--red)':'var(--green)',whiteSpace:'nowrap'}}>
+                      {isOut?'(':'+'}{isOut?'':'$'}{Math.abs(o.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}{isOut?')':''}
+                    </td>
+                    <td style={{color:'var(--text-muted)',fontSize:12}}>{o.account_name||'—'}</td>
+                    <td><span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:500,background:badge.bg,color:badge.color}}>{badge.label}</span></td>
+                    <td style={{textAlign:'center'}}>
+                      <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                        <button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11}} onClick={()=>openEditOverlay(o)}>Edit</button>
+                        <button type="button" className="btn btn-sm btn-ghost" style={{padding:'2px 8px',fontSize:11,color:'var(--red)'}} onClick={()=>deleteOverlay(o.id)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+            {overlays.length>0&&(()=>{
+              const net=ovUpIn+ovUpOut;
+              return(
+                <div style={{display:'flex',gap:28,padding:'10px 18px',borderTop:'1px solid var(--border)',background:'var(--elevated)',fontSize:12,fontWeight:300,color:'var(--text-muted)'}}>
+                  <span>Upcoming inflows: <span style={{color:'var(--green)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>+{fmt(ovUpIn)}</span></span>
+                  <span>Outflows: <span style={{color:'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>({fmt(Math.abs(ovUpOut))})</span></span>
+                  <span>Net: <span style={{color:net>=0?'var(--blue-primary)':'var(--red)',fontFamily:'Plus Jakarta Sans',fontWeight:400}}>{net>=0?'+':''}{net<0?`(${fmt(Math.abs(net))})`:fmt(net)}</span></span>
+                </div>
+              );
+            })()}
+          </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ── Reconciliation Panel ──────────────────────────────────────────────── */
+function ReconciliationPanel({toast}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const load=async()=>{
+    setLoading(true);
+    try{const r=await apiFetch('/reconciliation');setData(r);}
+    catch(e){toast('Failed to load reconciliation data','error');}
+    finally{setLoading(false);}
+  };
+  useEffect(()=>{load();},[]);
+  if(loading)return<div style={{padding:40,textAlign:'center'}}><div className="spinner"/></div>;
+  if(!data||!data.accounts?.length)return<div style={{padding:40,textAlign:'center',color:'var(--text-muted)'}}>No balance observations yet. Click <strong>Sync</strong> in the sidebar to record the first observations.</div>;
+  const fmtDt=(iso)=>{if(!iso)return'—';const d=new Date(iso);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});};
+  const driftColor=(d)=>{if(d==null)return'var(--text-muted)';const a=Math.abs(d);return a<0.02?'var(--green)':a<5?'var(--amber)':'var(--red)';};
+  const driftBadge=(d)=>{if(d==null)return'—';const a=Math.abs(d);return a<0.02?'✓ Matched':d>0?`+${fmt(d)} over`:`${fmt(a)} under`;};
+  return(
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div>
+          <h2 style={{fontSize:16,fontWeight:500,margin:0}}>Balance Reconciliation</h2>
+          <p style={{fontSize:12,color:'var(--text-muted)',margin:'4px 0 0'}}>Plaid-reported vs. transaction-derived balances. Observations are recorded every sync.</p>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={async()=>{
+            try{
+              const r=await apiFetch('/reconciliation/reanchor-all',{method:'POST'});
+              toast(`Re-anchored ${r.corrected} of ${r.total_accounts} accounts`);
+              load();
+            }catch(e){toast('Re-anchor all failed: '+e.message,'error');}
+          }}>⚓ Re-anchor All</button>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={load}>↻ Refresh</button>
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table style={{fontSize:13}}>
+          <thead><tr>
+            <th>Account</th>
+            <th style={{textAlign:'right'}}>Plaid Balance</th>
+            <th style={{textAlign:'right'}}>Computed Balance</th>
+            <th style={{textAlign:'right'}}>Drift</th>
+            <th>Last Observed</th>
+            <th>Last Reconciled</th>
+            <th style={{textAlign:'center'}}>Observations</th>
+            <th></th>
+          </tr></thead>
+          <tbody>{data.accounts.map(a=>(
+            <tr key={a.account_id}>
+              <td style={{fontWeight:500}}>
+                {a.account_name}
+                <div style={{fontSize:11,color:'var(--text-muted)'}}>{fmtAcctType(a.account_type)}</div>
+              </td>
+              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans'}}>{a.latest?(a.latest.plaid_balance<0?'−':'')+fmt(a.latest.plaid_balance):'—'}</td>
+              <td style={{textAlign:'right',fontFamily:'Plus Jakarta Sans'}}>{a.latest?(a.latest.computed_balance<0?'−':'')+fmt(a.latest.computed_balance):'—'}</td>
+              <td style={{textAlign:'right',fontWeight:500,color:driftColor(a.latest?.delta)}}>
+                {a.latest?driftBadge(a.latest.delta):'—'}
+              </td>
+              <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.latest?fmtDt(a.latest.observed_at):'Never'}</td>
+              <td style={{fontSize:12,color:'var(--text-secondary)'}}>{a.last_reconciled?fmtDt(a.last_reconciled):'Never'}</td>
+              <td style={{textAlign:'center',color:'var(--text-muted)'}}>{a.observation_count}</td>
+              <td>{a.latest&&Math.abs(a.latest.delta)>=0.02&&<button type="button" className="btn btn-sm btn-ghost" style={{fontSize:11,padding:'2px 8px',color:'var(--blue)'}}
+                onClick={async()=>{
+                  try{
+                    const r=await apiFetch(`/reconciliation/${a.account_id}/reanchor`,{method:'POST'});
+                    toast(`${a.account_name}: re-anchored from Plaid (${r.old_balance?.toFixed(2)} → ${r.new_balance?.toFixed(2)})`);
+                    load();
+                  }catch(e){toast('Re-anchor failed: '+e.message,'error');}
+                }}>Re-anchor</button>}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {/* Drift history sparklines for accounts with drift */}
+      {data.accounts.filter(a=>a.drift_history?.length>1).map(a=>(
+        <div key={a.account_id} style={{marginTop:16,padding:12,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8}}>
+          <div style={{fontSize:13,fontWeight:500,marginBottom:8}}>{a.account_name} — Drift History</div>
+          <div style={{display:'flex',alignItems:'flex-end',gap:2,height:40}}>
+            {(()=>{
+              const pts=a.drift_history;
+              const maxD=Math.max(...pts.map(p=>Math.abs(p.delta||0)),0.01);
+              return pts.map((p,i)=>{
+                const h=Math.max(2,Math.abs(p.delta||0)/maxD*36);
+                const clr=(p.delta||0)===0?'var(--green)':(p.delta||0)>0?'#f59e0b':'var(--blue-primary)';
+                return<div key={i} title={`${fmtDt(p.date)}: ${p.delta>0?'+':''}${p.delta?.toFixed(2)}`}
+                  style={{width:Math.max(4,Math.floor(300/pts.length)),height:h,background:clr,borderRadius:2,opacity:0.8}}/>;
+              });
+            })()}
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text-muted)',marginTop:4}}>
+            <span>{a.drift_history[0]?.date?.slice(0,10)}</span>
+            <span>{a.drift_history[a.drift_history.length-1]?.date?.slice(0,10)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Daily Balances Page ─────────────────────────────────────────────────── */
+function LiquidityForecastCard({ toast }) {
+  const [forecast, setForecast] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAcct, setSelectedAcct] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', amount: '', expected_date: todayStr() });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const accts = await apiFetch('/accounts');
+        const cashAccts = accts.filter(a => ['Checking', 'Savings'].includes(a.account_type));
+        setAccounts(cashAccts);
+        if (cashAccts.length > 0) setSelectedAcct(cashAccts[0].id);
+      } catch (e) {}
+    })();
+  }, []);
+
+  const loadForecast = useCallback(async () => {
+    if (!selectedAcct) return;
+    setLoading(true);
+    try {
+      const data = await apiFetch(`/forecast/${selectedAcct}?days=30`);
+      setForecast(data);
+    } catch (e) {
+      toast('Failed to load forecast', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedAcct]);
+
+  useEffect(() => { loadForecast(); }, [loadForecast]);
+
+  const handleAddPurchase = async (e) => {
+    e.preventDefault();
+    try {
+      await apiFetch('/planned-purchases', {
+        method: 'POST',
+        body: JSON.stringify({ ...form, amount: parseFloat(form.amount) })
+      });
+      toast('Planned purchase added');
+      setForm({ name: '', amount: '', expected_date: todayStr() });
+      setShowForm(false);
+      loadForecast();
+    } catch (e) {
+      toast('Failed to add purchase', 'error');
+    }
+  };
+
+  return (
+    <div className="card" style={{ padding: '24px 28px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h3 style={{ fontSize: 18, fontWeight: 600 }}>Liquidity Forecast</h3>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>Projected 30-day runway including scheduled flows</p>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <select value={selectedAcct} onChange={e => setSelectedAcct(e.target.value)} className="filter-select">
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+          </select>
+          <button type="button" className="btn btn-primary" onClick={() => setShowForm(!showForm)}>+ Planned Spend</button>
+        </div>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleAddPurchase} style={{ background: 'var(--elevated)', padding: 24, borderRadius: 20, marginBottom: 24, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 16, alignItems: 'end', border: '1px solid var(--border)' }}>
+          <div className="review-field" style={{ marginBottom: 0 }}><label>Description</label><input className="search-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+          <div className="review-field" style={{ marginBottom: 0 }}><label>Amount</label><input className="search-input" type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div>
+          <div className="review-field" style={{ marginBottom: 0 }}><label>Expected Date</label><input className="search-input" type="date" value={form.expected_date} onChange={e => setForm({ ...form, expected_date: e.target.value })} required /></div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary" type="submit">Add</button>
+            <button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)}>✕</button>
+          </div>
+        </form>
+      )}
+
+      {loading ? <div className="loading" style={{ padding: 40 }}><div className="spinner" /></div> : (
+        <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 16, scrollbarWidth: 'none' }}>
+          {forecast.map(d => (
+            <div key={d.date} style={{ 
+              minWidth: 100, padding: '16px 14px', borderRadius: 20, 
+              background: d.shortfall ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface)', 
+              border: d.shortfall ? '1px solid var(--red)' : '1px solid var(--border)', 
+              textAlign: 'center', flexShrink: 0,
+              boxShadow: d.shortfall ? '0 0 15px rgba(239, 68, 68, 0.1)' : 'none'
+            }}>
+              <div style={{ fontSize: 11, color: d.shortfall ? 'var(--red)' : 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: d.shortfall ? 'var(--red)' : 'var(--text-primary)', marginTop: 8 }}>
+                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(d.balance)}
+              </div>
+              {d.shortfall && <div style={{ fontSize: 9, color: 'var(--red)', marginTop: 6, fontWeight: 800, letterSpacing: '0.5px' }}>SHORTFALL</div>}
+            </div>
+          ))}
+          {forecast.length === 0 && <div style={{ padding: 40, color: 'var(--text-muted)', fontSize: 14, textAlign: 'center', width: '100%' }}>Select a cash account to generate projection</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BalanceCellModal({ cell, onClose }) {
+  return (
+    <div className="review-overlay">
+      <div className="review-panel" style={{ maxWidth: 400 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 600 }}>{cell.acct_name}</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fmtDate(cell.date)}</p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} style={{ padding: 4, minHeight: 0 }}>✕</button>
+        </div>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Balance Before</span>
+            <span style={{ fontWeight: 600 }}>{fmt(cell.raw_balance)}</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {cell.entries.map((e, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 12, borderLeft: `3px solid ${e.amount >= 0 ? 'var(--green)' : 'var(--red)'}` }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{e.description}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{e.source.replace(/_/g, ' ')}</div>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: e.amount >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {e.amount >= 0 ? '+' : '-'}{fmt(Math.abs(e.amount))}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, borderTop: '2px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+            <span style={{ fontWeight: 600 }}>Projected Balance</span>
+            <span style={{ fontWeight: 700, color: cell.projected_balance >= 0 ? 'var(--blue-primary)' : 'var(--red)' }}>{fmt(cell.projected_balance)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DailyBalancesPage({toast,refreshKey}){
+  const[tab,setTab]=useState('balances'); // 'balances' | 'reconciliation'
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[rangeMode,setRangeMode]=useState('month');
+  const[customStart,setCustomStart]=useState('');
+  const[customEnd,setCustomEnd]=useState('');
+  const[collapsed,setCollapsed]=useState({'Other Assets':true,'Other Liabilities':true});
+  const[cellModal,setCellModal]=useState(null);
+  const[acctFilter,setAcctFilter]=useState(new Set());
+  const[acctDropOpen,setAcctDropOpen]=useState(false);
+  const toggleAcctFilter=(id)=>setAcctFilter(prev=>{const s=new Set(prev);if(s.has(String(id)))s.delete(String(id));else s.add(String(id));return s;});
+
+  const getRange=()=>{
+    const n=new Date();
+    const fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if(rangeMode==='month'){
+      const y=n.getFullYear(),m=n.getMonth()+1;
+      const s=`${y}-${String(m).padStart(2,'0')}-01`;
+      const last=new Date(y,m,0).getDate();
+      return{s,e:`${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`};
+    }
+    if(rangeMode==='30d'){
+      const s=new Date(n);s.setDate(s.getDate()-29);
+      return{s:fmt(s),e:fmt(n)};
+    }
+    if(rangeMode==='90d'){
+      const s=new Date(n);s.setDate(s.getDate()-89);
+      return{s:fmt(s),e:fmt(n)};
+    }
+    return{s:customStart,e:customEnd};
+  };
+
+  const load=useCallback(async()=>{
+    const{s,e}=getRange();
+    if(rangeMode==='custom'&&(!s||!e))return;
+    setLoading(true);
+    try{
+      const ct=todayStr();
+      const q=`?client_today=${ct}${s?`&start_date=${s}`:''}${e?`&end_date=${e}`:''}`;
+      setData(await apiFetch(`/daily-balances${q}`));
+    }catch(err){toast('Failed to load daily balances','error');}
+    finally{setLoading(false);}
+  },[rangeMode,customStart,customEnd]);
+
+  useEffect(()=>{load();},[load,refreshKey]);
+  const toggle=g=>setCollapsed(p=>({...p,[g]:!p[g]}));
+  const fmtBal=v=>{
+    if(v==null)return'—';
+    const abs=Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    return v<0?`(${abs})`:abs;
+  };
+
+  const GRP_COLORS={'Checking & Savings':'rgba(16,185,129,0.05)','Investments':'rgba(59,130,246,0.05)','Other Assets':'rgba(139,92,246,0.05)','Credit Cards':'rgba(251,191,36,0.05)','Loans':'rgba(239,68,68,0.05)'};
+
+  if(loading)return<SkeletonTable rows={6}/>;
+  if(!data||!data.dates)return<div className="empty">No data found</div>;
+
+  const{dates,groups=[],today,projection_details={}}=data;
+  const numDays=dates.length;
+
+  return(
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="card" style={{display:'flex',gap:24,padding:'12px 24px'}}>
+        <button type="button" onClick={()=>setTab('balances')}
+          style={{padding:'12px 0',border:'none',borderBottom:tab==='balances'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:13,fontWeight:tab==='balances'?700:500,letterSpacing:'0.2px',
+            background:'transparent',color:tab==='balances'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.2s ease',marginBottom:'-1px'}}>Daily Balances</button>
+        <button type="button" onClick={()=>setTab('reconciliation')}
+          style={{padding:'12px 0',border:'none',borderBottom:tab==='reconciliation'?'2px solid var(--blue-primary)':'2px solid transparent',cursor:'pointer',fontSize:13,fontWeight:tab==='reconciliation'?700:500,letterSpacing:'0.2px',
+            background:'transparent',color:tab==='reconciliation'?'var(--blue-primary)':'var(--text-muted)',transition:'all 0.2s ease',marginBottom:'-1px'}}>Reconciliation</button>
+      </div>
+
+      {tab==='reconciliation'?<ReconciliationPanel toast={toast}/>:<>
+      <LiquidityForecastCard toast={toast} />
+      <div className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:16,padding:'16px 24px'}}>
+        <div><p style={{fontSize:12,color:'var(--text-secondary)',margin:0}}>{numDays} days · end-of-day · <span style={{fontStyle:'italic', opacity: 0.8}}>italic = projected</span> · <span style={{color:'var(--blue-primary)'}}>◈</span> = detail</p>
+        </div>
+        <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <div className="sel-pill">
+            {[['month','Month'],['30d','30d'],['90d','90d'],['custom','Custom']].map(([v,l])=>(
+              <button type="button" key={v} onClick={()=>setRangeMode(v)} data-active={rangeMode===v} style={{
+background:rangeMode===v?'var(--blue-primary)':'none',color:rangeMode===v?'white':'var(--text-secondary)',fontSize:11}}>{l}</button>
+            ))}
+          </div>
+          {rangeMode==='custom'&&(
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <input type="date" className="date-input" value={customStart} onChange={e=>setCustomStart(e.target.value)}/>
+              <span style={{color:'var(--text-muted)'}}>→</span>
+              <input type="date" className="date-input" value={customEnd} onChange={e=>setCustomEnd(e.target.value)}/>
+            </div>
+          )}
+          <div style={{position:'relative'}}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={()=>setAcctDropOpen(p=>!p)} style={{gap:6}}>
+               <Icon name="wallet" size={13}/>
+               <span>Accounts {acctFilter.size>0&&`(${acctFilter.size})`}</span>
+               <span style={{fontSize:8}}>▼</span>
+            </button>
+            {acctDropOpen&&<div style={{position:'absolute',top:'100%',right:0,marginTop:8,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:12,zIndex:30,boxShadow:'var(--card-shadow)',minWidth:240,maxHeight:400,overflowY:'auto'}}
+              onMouseLeave={()=>setAcctDropOpen(false)}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                <span style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase'}}>Show Accounts</span>
+                {acctFilter.size>0&&<button type="button" style={{border:'none',background:'none',fontSize:10,color:'var(--blue-primary)',cursor:'pointer',fontWeight:600}} onClick={()=>setAcctFilter(new Set())}>✕ CLEAR</button>}
+              </div>
+              {groups.map(g=>(
+                <div key={g.group} style={{marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>{g.group}</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                    {g.accounts.map(a=>(
+                      <label key={a.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',color:acctFilter.has(String(a.id))?'var(--text-primary)':'var(--text-secondary)'}}>
+                        <input type="checkbox" checked={acctFilter.has(String(a.id))} onChange={()=>toggleAcctFilter(a.id)}/>
+                        {a.account_name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>}
+          </div>
+        </div>
+      </div>
+
+      {cellModal&&<BalanceCellModal cell={cellModal} onClose={()=>setCellModal(null)} toast={toast}/>}
+
+      {/* ── Filtered groups logic ── */}
+      {(()=>{
+        const filtIds=acctFilter.size>0?acctFilter:null;
+        const fGroups=filtIds
+          ?groups.map(g=>{
+            const matchAccts=g.accounts.filter(a=>filtIds.has(String(a.id)));
+            if(!matchAccts.length)return null;
+            const totals={};
+            matchAccts.forEach(a=>{Object.entries(a.balances||{}).forEach(([d,v])=>{totals[d]=(totals[d]||0)+v;});});
+            return{...g,accounts:matchAccts,totals};
+          }).filter(Boolean)
+          :groups;
+        
+        const isSingle=filtIds&&filtIds.size===1;
+        const singleId=isSingle?[...acctFilter][0]:null;
+        const singleLabel=isSingle?data.accounts.find(a=>String(a.id)===singleId)?.account_name:'Selected';
+
+        const computeNW=(di)=>{
+          let s=0;
+          fGroups.forEach(g=>{const v=g.totals[di]??0;s+=g.is_asset?v:-Math.abs(v);});
+          return Math.round(s*100)/100;
+        };
+        const todayDi=dates.indexOf(today);
+        const lastActualDi=todayDi>=0?todayDi:dates.reduce((best,d,i)=>d<=today?i:best,-1);
+        const kpiStrip=lastActualDi<0?null:(()=>{
+          const nwStart=computeNW(0);
+          const nwNow=computeNW(lastActualDi);
+          const nwChg=nwNow-nwStart;
+          const nwChgPct=Math.abs(nwStart)>1?Math.round(nwChg/Math.abs(nwStart)*100):null;
+          const nwPeak=Math.max(...Array.from({length:lastActualDi+1},(_,i)=>computeNW(i)));
+          const fmtNW=v=>{const abs=fmt(Math.abs(v));return v<0?`(${abs})`:abs;};
+          const chgPos=nwChg>=0;
+          const lbl1=isSingle?`${singleLabel} — Today`:'Net Worth — Today';
+          return(
+            <div className="metric-grid">
+              <div className="card metric-card">
+                <div className="metric-label">{lbl1}</div>
+                <div className="metric-value" style={{color:nwNow>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwNow)}</div>
+                <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:600}}>{today.toUpperCase()}</span></div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Start of Period</div>
+                <div className="metric-value" style={{color:nwStart>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwStart)}</div>
+                <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:600}}>{dates[0].toUpperCase()}</span></div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Net Change</div>
+                <div className="metric-value" style={{color:chgPos?'var(--green)':'var(--red)'}}>{chgPos?'+':''}{fmtNW(nwChg)}</div>
+                <div className="metric-sub">{nwChgPct!=null&&<span className="badge" style={{background:chgPos?'rgba(16,185,129,0.1)':'rgba(239, 68, 68, 0.1)',color:chgPos?'var(--green)':'var(--red)'}}>{nwChgPct>0?'+':''}{nwChgPct}%</span>}</div>
+              </div>
+              <div className="card metric-card">
+                <div className="metric-label">Period Peak</div>
+                <div className="metric-value" style={{color:nwPeak>=0?'var(--green)':'var(--red)'}}>{fmtNW(nwPeak)}</div>
+                <div className="metric-sub"><span style={{fontSize:11,color:'var(--text-muted)',fontWeight:600}}>ACTUAL HIGH IN RANGE</span></div>
+              </div>
+            </div>
+          );
+        })();
+
+        return(<>
+      {kpiStrip}
+
+      <div className="card" style={{padding:0, overflow:'hidden'}}>
+        <div className="table-wrap" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          <table>
+            <thead style={{position:'sticky',top:0,zIndex:10}}>
+              <tr>
+                <th rowSpan={2} style={{position:'sticky',left:0,zIndex:12,background:'var(--surface)',backdropFilter:'var(--glass-blur)',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:'2px solid var(--border)',borderRight:'2px solid var(--border)',minWidth:90,color:'var(--text-muted)'}}>DATE</th>
+                {fGroups.map(grp=>{
+                  const span=collapsed[grp.group]?1:1+grp.accounts.length;
+                  return(
+                    <th key={grp.group} colSpan={span} style={{padding:'10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',borderBottom:'1px solid var(--border)',borderLeft:'2px solid var(--border)',background:'rgba(59,130,246,0.05)',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}
+                      onClick={()=>toggle(grp.group)}>
+                      {grp.group} {collapsed[grp.group]?'▸':'▾'}
+                    </th>
+                  );
+                })}
+                <th rowSpan={2} style={{padding:'10px',textAlign:'right',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',borderBottom:'2px solid var(--border)',borderLeft:'3px solid var(--blue-primary)',background:'rgba(var(--blue-primary-rgb), 0.1)',whiteSpace:'nowrap',color:'var(--blue-primary)',minWidth:120}}>GRAND TOTAL</th>
+              </tr>
+              <tr style={{background:'var(--surface)', backdropFilter:'var(--glass-blur)'}}>
+                {fGroups.map(grp=>[
+                  <th key={`${grp.group}-tot`} style={{padding:'8px 12px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:'2px solid var(--border)',borderLeft:'2px solid var(--border)',color:'var(--text-primary)',background:'rgba(59,130,246,0.02)'}}>TOTAL</th>,
+                  ...(collapsed[grp.group]?[]:grp.accounts.map(acct=>(
+                    <th key={acct.id} style={{padding:'8px 12px',textAlign:'right',fontSize:10,fontWeight:600,borderBottom:'2px solid var(--border)',borderLeft:'1px solid var(--border)',whiteSpace:'nowrap',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',color:'var(--text-secondary)'}} title={acct.account_name}>{acct.account_name.toUpperCase()}</th>
+                  )))
+                ])}
+              </tr>
+            </thead>
+            <tbody>
+              {dates.map((d,di)=>{
+                const isToday=d===today;
+                const isFuture=d>today;
+                const rowBg=isToday?'rgba(var(--blue-primary-rgb), 0.08)':isFuture?'rgba(var(--blue-vibrant-rgb), 0.02)':'transparent';
+                return(
+                  <tr key={d} style={{background:rowBg}}>
+                    <td style={{position:'sticky',left:0,zIndex:2,background:isToday?'rgba(var(--blue-primary-rgb), 0.1)':isFuture?'var(--elevated)':'var(--surface)',padding:'8px 12px',fontSize:12,fontWeight:isToday?700:500,borderRight:'2px solid var(--border)',borderBottom:'1px solid var(--border)',whiteSpace:'nowrap',color:isToday?'var(--blue-primary)':isFuture?'var(--text-muted)':'var(--text-secondary)'}}>
+                      {d.slice(5)}{isToday&&<span className="badge" style={{marginLeft:8,fontSize:9,background:'var(--blue-primary)',color:'white'}}>TODAY</span>}
+                    </td>
+                    {(()=>{
+                      let grandTotal=0;
+                      const cells=fGroups.flatMap(grp=>{
+                        const isLiab=!grp.is_asset;
+                        const rawTot=grp.totals[di];
+                        const dispTot=isLiab?-rawTot:rawTot;
+                        grandTotal+=rawTot;
+                        const totCell=(
+                          <td key={`${grp.group}-tot`} style={{padding:'8px 12px',textAlign:'right',fontSize:12,fontWeight:700,borderLeft:'2px solid var(--border)',borderBottom:'1px solid var(--border)',color:dispTot<0?'var(--red)':'var(--text-primary)',background:'rgba(59,130,246,0.01)'}}>
+                            {fmtBal(dispTot)}
+                          </td>
+                        );
+                        const acctCells=collapsed[grp.group]?[]:grp.accounts.map(acct=>{
+                          const val=acct.balances[di];
+                          const dispVal=isLiab?-val:val;
+                          const isProj=acct.projected_dates.includes(d);
+                          const projEntries=projection_details[acct.id]?.[d];
+                          const hasProj=!!(projEntries&&projEntries.length>0);
+                          const isShortfall=isProj && ['Checking','Savings'].includes(acct.account_type) && dispVal < 200;
+                          const handleClick=hasProj?()=>{
+                            const entriesSum=projEntries.reduce((s,e)=>s+e.amount,0);
+                            const balBefore=Math.round((dispVal-entriesSum)*100)/100;
+                            setCellModal({acct_name:acct.account_name,date:d,raw_balance:balBefore,projected_balance:dispVal,entries:projEntries});
+                          }:undefined;
+                          return(
+                            <td key={acct.id} onClick={handleClick} title={isShortfall?`WARNING: Projected shortfall` : (hasProj?`Click to see ${projEntries.length} projection${projEntries.length>1?'s':''}`:undefined)} 
+                              style={{padding:'8px 12px',textAlign:'right',fontSize:12,borderLeft:'1px solid var(--border)',borderBottom:'1px solid var(--border)',
+                                color:isShortfall?'var(--red)':dispVal<0?'var(--red)':'inherit',
+                                fontWeight:isShortfall?700:400,
+                                fontStyle:isProj?'italic':'normal',opacity:isProj?0.8:1,whiteSpace:'nowrap',cursor:hasProj?'pointer':undefined,
+                                background:isShortfall?'rgba(239, 68, 68, 0.1)':hasProj?'rgba(var(--blue-primary-rgb), 0.05)':undefined,
+                                boxShadow:isShortfall?'inset 0 0 10px rgba(239, 68, 68, 0.1)':undefined}}>
+                              {fmtBal(dispVal)}{hasProj&&<span style={{marginLeft:4,fontSize:10,color:isShortfall?'var(--red)':'var(--blue-primary)',verticalAlign:'super'}}>◈</span>}
+                            </td>
+                          );
+                        });
+                        return[totCell,...acctCells];
+                      });
+                      grandTotal=Math.round(grandTotal*100)/100;
+                      const gtColor=grandTotal>=0?'var(--green)':'var(--red)';
+                      cells.push(
+                        <td key="grand-total" style={{padding:'8px 12px',textAlign:'right',fontSize:13,fontWeight:700,borderLeft:'3px solid var(--blue-primary)',borderBottom:'1px solid var(--border)',color:gtColor,background:'rgba(var(--blue-primary-rgb), 0.08)'}}>
+                          {fmtBal(grandTotal)}
+                        </td>
+                      );
+                      return cells;
+                    })()}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </>);
+      })()}
+      </>}
+    </div>
+  );
+}
+
+/* ── Hash-based URL routing ─────────────────────────────────────────────── */
+const PAGES=['dashboard','transactions','budgets','networth','cashflow',
+             'cashplanner','loans','gcb','cards','accounts','settings'];
+function parseHash(){
+  const raw=window.location.hash.slice(1)||'';
+  const qi=raw.indexOf('?');
+  const path=qi>=0?raw.slice(0,qi):raw;
+  const search=qi>=0?raw.slice(qi+1):'';
+  return{page:PAGES.includes(path)?path:'dashboard',params:new URLSearchParams(search)};
+}
+function syncHashParams(newParams){
+  const{page}=parseHash();
+  const qs=new URLSearchParams(
+    Object.fromEntries(Object.entries(newParams).filter(([,v])=>v!=null&&String(v)!==''))
+  ).toString();
+  window.history.replaceState(null,'','#'+page+(qs?'?'+qs:''));
+}
+function useHashRouter(){
+  const[route,setRoute]=useState(parseHash);
+  useEffect(()=>{
+    const h=()=>setRoute(parseHash());
+    window.addEventListener('hashchange',h);
+    return()=>window.removeEventListener('hashchange',h);
+  },[]);
+  const navigate=useCallback((page,params={})=>{
+    const filtered=Object.fromEntries(
+      Object.entries(params).filter(([,v])=>v!=null&&String(v)!=='')
+    );
+    const qs=new URLSearchParams(filtered).toString();
+    window.location.hash=qs?`${page}?${qs}`:page;
+  },[]);
+  return{page:route.page,params:route.params,navigate};
+}
+
+function App(){
+  const{page,navigate}=useHashRouter();
+  const setPage=useCallback((p)=>navigate(p),[navigate]);
+  const[categories,setCategories]=useState([]);
+  const[banks,setBanks]=useState([]);
+  const[collapsed,setCollapsed]=useState(()=>{try{const v=localStorage.getItem('nav-collapsed');return v===null?true:v==='1';}catch(e){return true;}});
+  const[refreshKey,setRefreshKey]=useState(0);
+  const[refreshing,setRefreshing]=useState(false);
+  const[pendingDupScan,setPendingDupScan]=useState(false);
+  const[theme,setTheme]=useState(()=>{try{return localStorage.getItem('theme')||'dark'}catch(e){return'dark'}});
+  const{toasts,toast}=useToast();
+  const contentRef=useRef(null);
+
+  useEffect(()=>{document.documentElement.setAttribute('data-theme',theme);try{localStorage.setItem('theme',theme)}catch(e){}const tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.content=theme==='dark'?'#0c0c10':'#f5f3ef';},[theme]);
+
+  const handleRefresh=useCallback(()=>{
+    setRefreshing(true);
+    setRefreshKey(k=>k+1);
+    setTimeout(()=>setRefreshing(false),600);
+  },[]);
+  const{ptrState,pullY}=usePullToRefresh(contentRef,handleRefresh);
+
+  const loadMeta=useCallback(async()=>{
+    try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
+  },[]);
+
+  // Auto-sync on app open — throttled to once per 20 minutes so refreshing
+  // the page doesn't hammer Plaid.  Runs silently in the background.
+  useEffect(()=>{
+    loadMeta();
+    if(!document.getElementById('plaid-script')){const s=document.createElement('script');s.id='plaid-script';s.src='https://cdn.plaid.com/link/v2/stable/link-initialize.js';document.head.appendChild(s);}
+    const AUTO_SYNC_INTERVAL=20*60*1000;
+    const last=parseInt(localStorage.getItem('lastAutoSync')||'0');
+    if(Date.now()-last>AUTO_SYNC_INTERVAL){
+      localStorage.setItem('lastAutoSync',String(Date.now()));
+      apiFetch('/plaid/sync-transactions',{method:'POST'})
+        .then(r=>{
+          if(r.items_errored>0){
+            const names=r.errored.map(e=>e.institution_name).join(', ');
+            toast(`⚠️ ${r.items_errored} bank${r.items_errored!==1?' accounts need':'account needs'} reconnecting: ${names}`,'error');
+          }
+          if(r.items_cursor_reset>0){
+            toast(`↺ ${r.items_cursor_reset} stuck account${r.items_cursor_reset!==1?'s':''} reset — re-downloading transactions`);
+          }
+          setTimeout(loadMeta,15000);
+          apiFetch('/challenges/recalc-all',{method:'POST'}).catch(()=>{});
+        })
+        .catch(()=>{});
+    }
+  },[]);
+
+  const sync=async()=>{
+    try{
+      const r=await apiFetch('/plaid/sync-transactions',{method:'POST'});
+      if(r.items_errored>0&&r.items_queued===0){
+        const names=r.errored.map(e=>e.institution_name).join(', ');
+        toast(`Sync skipped — reconnect required: ${names} (Settings → Connected Banks)`,'error');
+      }else if(r.items_errored>0){
+        const names=r.errored.map(e=>e.institution_name).join(', ');
+        const resetNote=r.items_cursor_reset>0?` (${r.items_cursor_reset} re-downloading from scratch)`:'';
+        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''}${resetNote} — reconnect required: ${names}`,'error');
+      }else if(r.items_cursor_reset>0){
+        toast(`↺ ${r.items_cursor_reset} stuck account${r.items_cursor_reset!==1?'s':''} reset + syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — transactions will appear shortly`);
+      }else{
+        toast(`Syncing ${r.items_queued} bank${r.items_queued!==1?'s':''} — new transactions will appear shortly`);
+      }
+      loadMeta();
+      setTimeout(loadMeta,15000);
+      apiFetch('/challenges/recalc-all',{method:'POST'}).catch(()=>{});
+    }catch(e){toast('Sync failed: '+(e.message||e),'error');}
+  };
+
+  /* After a successful link: reload meta; if new accounts were created,
+     navigate to Settings → Bank Links and auto-trigger a duplicate scan */
+  const handleLinkDone=useCallback((hasNew)=>{
+    loadMeta();
+    if(hasNew){setPage('settings');setPendingDupScan(true);}
+  },[loadMeta]);
+
+  const[openPlaid,linkSummaryModal]=usePlaidLink(toast,handleLinkDone);
+  const[online,setOnline]=useState(navigator.onLine);
+  useEffect(()=>{
+    const on=()=>{setOnline(true);handleRefresh();toast('Back online — refreshing data');};
+    const off=()=>{setOnline(false);toast('You\'re offline — showing cached data','error');};
+    window.addEventListener('online',on);window.addEventListener('offline',off);
+    return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off);};
+  },[handleRefresh]);
+  const titles={dashboard:'Dashboard',transactions:'Transactions',budgets:'Budgets',networth:'Net Worth',cashflow:'Daily Balance Timeline',cashplanner:'Cash Flow & Forecasting',loans:'Loans',gcb:'GCB',cards:'Cards',accounts:'Accounts',settings:'Settings'};
+
+  return(
+    <div className="app-container">
+      <Sidebar page={page} setPage={setPage} banks={banks} onConnectBank={openPlaid} onSync={sync} collapsed={collapsed} setCollapsed={setCollapsed}/>
+      
+      <div className="main" style={{ marginLeft: collapsed ? 72 : 240 }}>
+        <header className="topbar">
+          <div className="topbar-title">{titles[page]}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {!online && <div className="badge badge-expense" style={{ fontSize: 10 }}>OFFLINE</div>}
+            {banks.length > 0 && <div className="badge badge-income" style={{ fontSize: 10 }}>{banks.length} ACTIVE</div>}
+            
+            <button type="button" className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
+              <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
+              <span className="hide-mobile">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+            </button>
+
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleRefresh} title="Refresh data" style={{ padding: '6px 10px' }}>
+              <span style={{ display: 'inline-block', transition: 'transform 0.4s', transform: refreshing ? 'rotate(360deg)' : 'rotate(0deg)' }}>↻</span>
+            </button>
+          </div>
+        </header>
+
+        <main className="content" ref={contentRef}>
+          <PullToRefreshIndicator pullY={pullY} ptrState={ptrState}/>
+          {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage} refreshKey={refreshKey}/>}
+          {page==='transactions'&&<TransactionsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
+          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
+          {page==='cashflow'&&<DailyBalancesPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='cashplanner'&&<CashFlowPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='networth'&&<NetWorthPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='loans'&&<LoansPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast} refreshKey={refreshKey}/>}
+          {page==='cards'&&<CardsPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='gcb'&&<GCBPage toast={toast} refreshKey={refreshKey}/>}
+          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta} categories={categories} autoScan={pendingDupScan} onAutoScanDone={()=>setPendingDupScan(false)}/>}
+        </main>
+      </div>
+
+      <ToastContainer toasts={toasts}/>
+      {linkSummaryModal}
+      <MobileNav page={page} setPage={setPage}/>
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<App/>);

@@ -1476,14 +1476,34 @@ async def startup_event():
 # Frontend
 # ---------------------------------------------------------------------------
 
+def _frontend_index() -> str:
+    """
+    Path to the HTML entry point.
+
+    Prefers the Vite build output (static/app/index.html, produced by
+    `cd frontend && npm run build` — the Dockerfile does this in a Node build
+    stage). Falls back to the legacy single-file v2.html so a checkout with no
+    build still runs, and logs loudly when it does, because silently serving
+    the old bundle would hide a broken build in production.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    built = os.path.join(here, "static", "app", "index.html")
+    if os.path.exists(built):
+        return built
+    logger.warning(
+        "Vite build not found at static/app/index.html — falling back to the "
+        "legacy v2.html. Run `cd frontend && npm run build`."
+    )
+    return os.path.join(here, "v2.html")
+
+
 @app.get("/")
 async def serve_frontend():
-    # v2.html (formerly the "/v2" sandbox) is now the one production
-    # frontend — promoted 2026-07-21 at Omer's direction ("stop landing me
-    # on the old design"). frontend.html (the old gold/dark theme) is no
-    # longer served anywhere; kept in the repo for now, not deleted.
-    here = os.path.dirname(os.path.abspath(__file__))
-    return FileResponse(os.path.join(here, "v2.html"), media_type="text/html")
+    # v2.html (formerly the "/v2" sandbox) was promoted to the one production
+    # frontend on 2026-07-21. As of 2026-07-30 it is built by Vite from
+    # frontend/src instead of being served as a single hand-edited file.
+    # frontend.html (the old gold/dark theme) is no longer served anywhere.
+    return FileResponse(_frontend_index(), media_type="text/html")
 
 # Service worker — must be served from root scope for PWA
 @app.get("/sw.js")
@@ -1494,8 +1514,7 @@ async def serve_service_worker():
 # ✅ Step 7: OAuth redirect landing route (serve the same frontend)
 @app.get("/plaid/oauth-return")
 async def plaid_oauth_return():
-    here = os.path.dirname(os.path.abspath(__file__))
-    return FileResponse(os.path.join(here, "v2.html"), media_type="text/html")
+    return FileResponse(_frontend_index(), media_type="text/html")
 
 # ---------------------------------------------------------------------------
 # Plaid: link token
@@ -11727,15 +11746,13 @@ async def serve_mockup():
     with open(path, "r") as f:
         return f.read()
 
-@app.get("/v2", response_class=HTMLResponse)
+@app.get("/v2")
 async def serve_v2():
-    """Serve the new V2 frontend sandbox."""
-    v2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2.html")
-    if not os.path.exists(v2_path):
-        # Fallback if v2.html isn't created yet during development
-        return "<h1>V2 Sandbox</h1><p>v2.html not found yet. Keep building!</p>"
-    with open(v2_path, "r") as f:
-        return f.read()
+    """
+    Legacy alias for the app. Kept because it is bookmarked and appears in
+    older notes; serves the exact same entry point as "/".
+    """
+    return FileResponse(_frontend_index(), media_type="text/html")
 
 @app.get("/api/forecast/{account_id}")
 async def get_liquidity_forecast(account_id: int, days: int = 30, db: Session = Depends(get_db)):

@@ -1,14 +1,17 @@
 // Moresheth — Service Worker
-const CACHE_VERSION = 'v11';
+// v12 (2026-07-30): the app moved from a single hand-edited v2.html with
+// in-browser Babel to a Vite build. React/ReactDOM/Babel are no longer loaded
+// from a CDN — they're bundled into /static/app/assets/*. Bumping the version
+// is what evicts the old shell cache, which would otherwise keep serving the
+// pre-build HTML (exactly the stale-SW trap noted in PLAN.md).
+const CACHE_VERSION = 'v12';
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const API_CACHE = `api-${CACHE_VERSION}`;
 
-// Static CDN assets — safe to cache-first (versioned URLs)
-const CDN_ASSETS = [
-  'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js'
-];
+// Nothing to precache at install time any more. Vite emits content-hashed
+// filenames, so the cache-first branch in fetch() below picks them up on
+// first use and they can never go stale — a new build means a new URL.
+const CDN_ASSETS = [];
 
 // Key API endpoints to eagerly cache on first load — these power offline mode
 const EAGER_API = [

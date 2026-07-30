@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Moresheth</title>
+<link rel="manifest" href="/static/manifest.json"/>
+<meta name="theme-color" content="#0c0c10"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Moresheth"/>
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-pro.png" media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14-promax.png" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-14.png" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)"/>
+<link rel="apple-touch-startup-image" href="/static/icons/splash-iphone-se.png" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+<script>
+// Service Worker registration
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('/sw.js').then(r=>{
+      console.log('[SW] Registered, scope:',r.scope);
+    }).catch(e=>console.warn('[SW] Registration failed:',e));
+  });
+}
+
+// iOS Add-to-Home-Screen tooltip (shown once)
+(function(){
+  var isIOS=/iPhone|iPad/.test(navigator.userAgent)&&!window.navigator.standalone;
+  var dismissed=localStorage.getItem('pwa-install-dismissed');
+  if(isIOS&&!dismissed){
+    setTimeout(function(){
+      var tip=document.createElement('div');
+      tip.id='ios-install-tip';
+      tip.style.cssText='position:fixed;bottom:74px;left:12px;right:12px;z-index:9999;background:var(--surface);border:1px solid var(--blue-primary);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4)';
+      var inner=document.createElement('div');
+      inner.style.flex='1';
+      var title=document.createElement('div');
+      title.style.cssText='font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:4px';
+      title.textContent='Install Moresheth';
+      var desc=document.createElement('div');
+      desc.style.cssText='font-size:11px;color:var(--text-muted)';
+      desc.textContent='Tap the Share button \u2B06 then "Add to Home Screen"';
+      inner.appendChild(title);
+      inner.appendChild(desc);
+      var btn=document.createElement('button');
+      btn.textContent='Got it';
+      btn.style.cssText='background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-muted);cursor:pointer;font-size:11px;font-family:inherit';
+      btn.onclick=function(){localStorage.setItem('pwa-install-dismissed','1');tip.remove();};
+      tip.appendChild(inner);
+      tip.appendChild(btn);
+      document.body.appendChild(tip);
+    },3000);
+  }
+})();
+
+// Android install prompt
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();
+  deferredPrompt=e;
+});
+</script>
+</body>
+</html>

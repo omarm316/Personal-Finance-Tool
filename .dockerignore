@@ -6,3 +6,20 @@ __pycache__
 *.pyc
 .claude
 main copy.py
+
+# Node/Vite. node_modules MUST be excluded: the frontend build stage runs
+# `npm ci` and then `COPY frontend/ ./`, so a host node_modules would overwrite
+# the container's freshly installed one with macOS-native binaries and break
+# the Linux build. static/app is excluded because the image takes the built
+# assets from the frontend stage, not from whatever happens to be on disk here.
+node_modules
+frontend/node_modules
+static/app
+
+# Local-only clutter that need not enter the build context
+.pytest_cache
+docs/archive
+mockups
+assets
+*.md
+!requirements.txt

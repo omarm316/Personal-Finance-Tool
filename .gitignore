@@ -24,3 +24,7 @@ main copy.py
 
 # OS
 .DS_Store
+
+# Vite build output (built in Docker; see Dockerfile stage 1)
+static/app/
+frontend/node_modules/
