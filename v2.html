@@ -81,7 +81,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .mobile-nav { display: none; }
 /* ── App Layout ── */
 .app-container { display: flex; height: 100%; overflow: hidden; }
-.main { flex: 1; display: flex; flex-direction: column; transition: margin-left 0.3s ease; min-width: 0; background: var(--bg); }
+/* min-height:0 is load-bearing, not tidiness. Under the mobile media query
+   .app-container becomes flex-direction:column, which makes height the main
+   axis — and .main's overflow is visible, so its automatic minimum size
+   (min-height:auto) resolves to its full content height and it grows straight
+   past .app-container's fixed height. .content's flex:1 then resolves against
+   that inflated height, so the scroll container ends up exactly as tall as its
+   own content and never scrolls, with the overflow clipped by .app-container's
+   overflow:hidden. Landscape (>768px) stays row-direction and is unaffected,
+   which is why this only ever reproduced in portrait. min-width:0 below is the
+   same fix for the row axis. */
+.main { flex: 1; display: flex; flex-direction: column; transition: margin-left 0.3s ease; min-width: 0; min-height: 0; background: var(--bg); }
 .content { flex: 1; overflow-y: auto; padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; position: relative; }
 
 /* ── Sidebar ── */
@@ -374,6 +384,17 @@ tr:hover td { background: var(--surface-hover); }
   .main { margin-left: 0 !important; }
   .content { padding: 16px 16px 100px; }
   .topbar { padding: env(safe-area-inset-top) 16px 0; height: calc(64px + env(safe-area-inset-top)); }
+
+  /* KPI cards 2-up instead of 1-up. The base rule's minmax(200px,1fr) floor
+     can't fit two columns in a ~343px content box (2×200+16=416), so all five
+     Dashboard KPI cards stacked single-column — ~1,300px of scrolling before
+     reaching any actual content. Padding and type scale down to match the
+     narrower column. Scoped away from .grid-3/.grid-4, which are deliberate
+     fixed-column layouts on other pages rather than auto-fit ones. */
+  .metric-grid:not(.grid-3):not(.grid-4) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .metric-grid:not(.grid-3):not(.grid-4) .metric-card { padding: 14px; }
+  .metric-grid:not(.grid-3):not(.grid-4) .metric-value { font-size: 19px; letter-spacing: -0.6px; }
+  .metric-grid:not(.grid-3):not(.grid-4) .metric-label { font-size: 10px; letter-spacing: 0.6px; margin-bottom: 6px; }
   .app-container { flex-direction: column; }
   .hide-mobile { display: none !important; }
 
@@ -3025,19 +3046,23 @@ function RecentTransactionsCard({recent,onSeeMore,onRowClick}){
 }
 
 function DashboardPage({categories,toast,setPage,refreshKey}){
-  const[stats,setStats]=useState(null);
   const[recent,setRecent]=useState([]);
-  const[reviewQ,setReviewQ]=useState([]);
   const[netWorth,setNetWorth]=useState(null);
-  const[topCats,setTopCats]=useState([]);
   const[reviewTxn,setReviewTxn]=useState(null);
+  // Subscribes to resize, unlike the bare window.innerWidth read this replaced —
+  // that was sampled during render with nothing listening, so crossing the
+  // breakpoint (device rotation, most realistically) left the stale value in
+  // place until some unrelated state change forced a re-render.
+  const isMob=useIsMobile();
   const[splitTxn,setSplitTxn]=useState(null);
   const[loading,setLoading]=useState(true);
   const hasLoaded=React.useRef(false);
   const[spendHoverIdx,setSpendHoverIdx]=useState(null);
   const[budgetTargets,setBudgetTargets]=useState({});
   const[budgetActuals,setBudgetActuals]=useState({});
-  const[budgetTargetsPrior,setBudgetTargetsPrior]=useState({});
+  // Prior-year *actuals* only. The matching prior-year targets call was dropped:
+  // nothing rendered it. Actuals are read by the Spending Trend, whose 6-month
+  // window can reach back into viewYear-1.
   const[budgetActualsPrior,setBudgetActualsPrior]=useState({});
   const[budgetView,_setBudgetView]=useState(()=>parseHash().params.get('view')||'month');
   const[ytdByCat,setYtdByCat]=useState({});          // expense-only YTD by_category from /stats
@@ -3050,21 +3075,6 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
   const[kpiStats,setKpiStats]=useState(null);
   const[kpiPriorStats,setKpiPriorStats]=useState(null);
   const[kpiLabel,setKpiLabel]=useState('');
-
-  const getDates=()=>{
-    const now=new Date();
-    if(budgetView==='month'){
-      // Use selected year/month so budget scorecard and KPI metrics stay in sync
-      const firstDay=`${viewYear}-${String(viewMonth).padStart(2,'0')}-01`;
-      const lastDay=new Date(viewYear,viewMonth,0).getDate();
-      const lastDayStr=`${viewYear}-${String(viewMonth).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      return{start:firstDay,end:lastDayStr};
-    }
-    // annual: current year → today; prior year → Dec 31
-    const curY=now.getFullYear();
-    const endStr=viewYear<curY?`${viewYear}-12-31`:todayStr();
-    return{start:`${viewYear}-01-01`,end:endStr};
-  };
 
   // Returns date range for the KPI cards (MTD for current month, full period for past)
   // and the comparison label like "vs Feb 6"
@@ -3098,8 +3108,6 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
   const load=useCallback(async({silent=false}={})=>{
     if(!silent)setLoading(true);
     try{
-      const{start,end}=getDates();
-      const statsQ=`/stats${start?`?start_date=${start}`:''}${end?(start?`&end_date=${end}`:`?end_date=${end}`):''}`;
       const yr=viewYear;
       const curY=new Date().getFullYear();
       // YTD stats: Jan 1 → end of viewMonth (capped at today so future months don't show zeros)
@@ -3111,26 +3119,27 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
       const{kpiStart,kpiEnd,priorKpiStart,priorKpiEnd,kpiLabel:kLabel}=getKpiDates();
       const kpiQ=`/stats?start_date=${kpiStart}&end_date=${kpiEnd}`;
       const kpiPriorQ=`/stats?start_date=${priorKpiStart}&end_date=${priorKpiEnd}`;
-      const[s,r,rv,nw,bt,ba,bt2,ba2,ytdS,kpiS,kpiPS]=await Promise.all([
-        apiFetch(statsQ),
+      /* Three requests were dropped from this list because nothing rendered
+         their results: the selected-range /stats call (fed `stats`/`topCats`),
+         /transactions?needs_review=true&limit=50 (fed the Needs Review section,
+         which was removed), and the prior-year /budget/targets call. The KPI
+         cards use their own kpiQ/kpiPriorQ /stats calls and the category table
+         uses ytdQ, so nothing on screen lost a data source. */
+      const[r,nw,bt,ba,ba2,ytdS,kpiS,kpiPS]=await Promise.all([
         apiFetch('/transactions?limit=12'),
-        apiFetch('/transactions?needs_review=true&limit=50'),
         apiFetch('/net-worth').catch(e=>{console.warn('Net worth fetch failed:',e);return null;}),
         apiFetch(`/budget/targets?year=${yr}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr}`).catch(()=>({categories:{}})),
-        apiFetch(`/budget/targets?year=${yr-1}`).catch(()=>({categories:{}})),
         apiFetch(`/budget/actuals?year=${yr-1}`).catch(()=>({categories:{}})),
         apiFetch(ytdQ).catch(()=>({by_category:{}})),
         apiFetch(kpiQ).catch(()=>null),
         apiFetch(kpiPriorQ).catch(()=>null),
       ]);
-      setStats(s);setRecent(r);setReviewQ(rv);setNetWorth(nw);
+      setRecent(r);setNetWorth(nw);
       setBudgetTargets(bt.categories||{});setBudgetActuals(ba.categories||{});
-      setBudgetTargetsPrior(bt2.categories||{});setBudgetActualsPrior(ba2.categories||{});
+      setBudgetActualsPrior(ba2.categories||{});
       setYtdByCat(ytdS.by_category||{});
       setKpiStats(kpiS);setKpiPriorStats(kpiPS);setKpiLabel(kLabel);
-      const byCat=s?.by_category||{};
-      setTopCats(Object.entries(byCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,6));
     }catch(e){toast('Failed to load','error');}
     finally{if(!silent)setLoading(false);}
   },[budgetView,viewYear,viewMonth]);
@@ -3179,7 +3188,6 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
 
   const hr=new Date().getHours();
   const greeting=hr<12?'morning':hr<17?'afternoon':'evening';
-  const expCats=categories.filter(c=>c.category_type==='expense').map(c=>c.name);
   // KPI card values
   const kpiIncome=kpiStats?.total_income??0;
   const kpiExpenses=kpiStats?.total_expenses??0;
@@ -3256,7 +3264,6 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
 
       {/* ── Spending Trend (full-width on desktop) + Budget Overview (mobile only) ── */}
       {(()=>{
-        const isMob=window.innerWidth<768;
         /* Non-spending buckets. 'Work' is income and 'Transfer' is money moving
            between accounts — summing them into a "spending" line plots spend +
            income, which overstates every month and can invert the trend
@@ -3345,9 +3352,21 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
           const budget=budgetTargets[cat]?.[mStr]?.amount||0;
           const actual=budgetActuals[cat]?.[mStr]||0;
           if(budget<=0&&actual<=0)return;
-          const pct=budget>0?Math.round((actual/budget)*100):actual>0?100:0;
+          /* Mirrors the desktop RowEl's flags. An unbudgeted category used to
+             get pct=100 and remaining=0−actual, and since `over` was pct>100
+             (strictly greater) it fell through to the "left" branch — so a
+             category with no budget at all and $4,060.50 spent rendered as
+             "$4,060.50 left", the exact opposite of the truth. Credit rows
+             (net refund) likewise have no meaningful "% of budget spent".
+             `over` is >=100 here to match desktop, where exactly 100% is
+             already treated as over. */
+          const hasBudget=budget>0;
+          const isCredit=actual<0;
+          const noBudget=!hasBudget&&actual>0;
+          const pct=hasBudget?Math.round((actual/budget)*100):0;
+          const over=hasBudget&&!isCredit&&pct>=100;
           const remaining=budget-actual;
-          budgetRows.push({cat:normalizeCat(cat),budget,actual,pct,remaining});
+          budgetRows.push({cat:normalizeCat(cat),budget,actual,pct,remaining,hasBudget,isCredit,noBudget,over});
         });
         budgetRows.sort((a,b)=>b.actual-a.actual);
         const topBudgetRows=budgetRows.slice(0,6);
@@ -3418,17 +3437,29 @@ function DashboardPage({categories,toast,setPage,refreshKey}){
               <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:16}}>Top Budgets</div>
               <div style={{display:'flex',flexDirection:'column',gap:16}}>
                 {topBudgetRows.map(r=>{
-                  const over=r.pct>100;
-                  const dollarLabel=over?`${fmt(Math.abs(r.remaining))} over`:`${fmt(r.remaining)} left`;
+                  const over=r.over;
+                  /* No budget → say so, and show what was spent, rather than
+                     inventing a remaining figure. Credit rows show the refund.
+                     Only a real budget gets "left"/"over". */
+                  const dollarLabel=r.noBudget?`${fmt(r.actual)} spent · no budget set`
+                    :r.isCredit?`${fmt(Math.abs(r.actual))} refunded`
+                    :over?`${fmt(Math.abs(r.remaining))} over`
+                    :`${fmt(r.remaining)} left`;
+                  /* An empty track for rows with no budget or a net credit —
+                     a filled bar would imply a proportion of something that
+                     doesn't exist. Same treatment as the desktop table. */
+                  const barPct=r.hasBudget&&!r.isCredit?Math.min(r.pct,100):0;
                   return(
                     <div key={r.cat}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
                         <span style={{fontSize:14,fontWeight:500}}>{r.cat}</span>
-                        <span style={{fontSize:12,fontWeight:600,color:over?'var(--red)':'var(--text-secondary)'}}>{r.pct}%</span>
+                        {r.hasBudget&&!r.isCredit
+                          ?<span style={{fontSize:12,fontWeight:600,color:over?'var(--red)':'var(--text-secondary)'}}>{r.pct}%</span>
+                          :<span style={{fontSize:10,fontWeight:500,color:'var(--text-muted)'}}>{r.noBudget?'no budget':''}</span>}
                       </div>
                       <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
-                        <div style={{height:'100%',borderRadius:3,width:`${Math.min(r.pct,100)}%`,
-                          background:over?'var(--red)':'var(--blue-primary)',transition:'width 0.6s ease'}}/>
+                        {barPct>0&&<div style={{height:'100%',borderRadius:3,width:`${barPct}%`,
+                          background:over?'var(--red)':'var(--blue-primary)',transition:'width 0.6s ease'}}/>}
                       </div>
                       <div style={{fontSize:10,color:'var(--text-muted)',marginTop:4,textAlign:'right'}}>{dollarLabel}</div>
                     </div>

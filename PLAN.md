@@ -1,7 +1,35 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-28
+> Last updated: 2026-07-30
+
+---
+
+## Session 2026-07-30 — Dashboard cleanup (B22/B23/B24 + `isMob`), and a much bigger mobile bug
+
+Picked the Dashboard cluster off the backlog — the four items logged during the 2026-07-27 review. Mid-session Omer reported: **"scrolling does not work on my iphone, only when i rotate it to landscape."** That turned out to be an app-wide layout bug, not a Dashboard one, and took priority.
+
+### The scrolling bug (highest-value find of the session)
+
+The landscape/portrait asymmetry was the whole clue: it pointed at something gated on the 768px breakpoint. The mobile media query sets `.app-container { flex-direction: column }`, which flips the main axis to vertical. `.main` carried `min-width:0` — the fix for the *row* axis — but not `min-height:0`. Because `.main`'s `overflow` is `visible`, its automatic minimum size (`min-height:auto`) resolves to its full content height, so it grew past `.app-container`'s fixed height; `.content`'s `flex:1` then resolved against that inflated height and the scroll container ended up exactly as tall as its own content. `overflow:hidden` on `.app-container` clipped the remainder, making it permanently unreachable.
+
+Fix is one declaration: `min-height: 0` on `.main`. Measured at 375×812 before → after: `.main` 1412px → 812px, `.app-container` scrollHeight 1412 (600px unreachable) → 812, `.content` 1348/1348 → 1096/748, and `scrollTop=400` went from a no-op to landing at the true max (348).
+
+**Worth internalizing:** `min-width:0` and `min-height:0` are *axis-specific*. A flex item that's safe in a row container can break the moment a media query flips the container to column. And `overflow-y:auto` zeroes an item's automatic minimum size, which is why `.content` was never the problem and why this stayed latent — the flaw was one level up, on the item that *doesn't* scroll.
+
+### The four Dashboard items
+
+All shipped; full detail in BACKLOG.md's Recently Completed. Summary:
+- **B22** — mirrored the desktop `RowEl`'s `hasBudget`/`isCredit`/`noBudget`/`over` flags into the mobile Top Budgets card. Also aligned `over` to desktop's `>=100` and killed the negative-% credit case. Cross-checking the rendered rows against `/api/budget/actuals` surfaced a **second** instance the backlog hadn't found ("For Others", $947.45).
+- **B23** — 11 → 8 requests per dashboard load; removed the dead state plus `expCats` and `getDates()` (the latter became dead once `statsQ` went).
+- **B24** — KPI cards 2-up on mobile, scoped `:not(.grid-3):not(.grid-4)` to avoid restructuring other pages' fixed grids. Verified by measuring real text widths (99px widest vs 133px available) rather than eyeballing.
+- **`isMob`** — swapped for the existing `useIsMobile()` hook. This had been logged as a duplicate **B26**, colliding with the `/api/cards/earn-summary` item; that one is still open and keeps the number.
+
+**Two method notes for next session:**
+1. **The preview browser's `resize_window` does not dispatch a `resize` event.** It updates CSS media queries (the rendering engine handles those), but React hooks listening for `resize` never fire — so a resize-driven state fix looks broken when it isn't. Dispatch `new Event('resize')` manually to test. Cost a few minutes chasing a non-bug.
+2. **The service worker re-registers on load and will serve stale HTML again** even after you've cleared it once — the first network batch on a fresh navigation came back showing the *old* request set. Clear it and re-navigate before trusting any network-log measurement. This is the same trap as the 2026-07-27 note; it recurs every session that edits `v2.html`.
+
+**Not done:** B25 (the $299 basis mismatch) is still open — it needs a decision from Omer on which basis the dashboard should present, not a code change.
 
 ---
 
