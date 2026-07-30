@@ -20,7 +20,13 @@ Omer handed over prioritization ("go by whatever you feel you should prioritize"
 
 **Strata Premier prep:** `citi_strata_premier` (id 44) already exists in the catalog with real researched rates (added 2026-07-24), currently `status='not_held'`. When the account syncs it will need: status → active, account → product link, and a **`Card` row created manually** — sync still doesn't auto-create one (the B18 addendum gap). No research needed; the catalog entry is ready.
 
-**Next up (my proposed order):** B26 (`/api/cards/earn-summary` ~44s — I watched the Cards page fail to render inside 6s again this session) → B4 → then the Cash Flow / Daily Balances / Loans deep-dives Omer asked for.
+**B26 fixed — 43s → 9s.** Full detail in BACKLOG.md. The method note worth keeping: **profiling first completely changed the diagnosis.** The backlog attributed the slowness to per-account `CardProduct` lookups; those were real but only 2.7s of 43s. The actual dominant cost was `calc_auto_top_category_points()` issuing **one query per calendar month** while being called with `start_date=2000-01-01` — ~318 round-trips for a single Citi Custom Cash account. Nothing about reading the code suggested that; it fell out of counting queries by SQL shape.
+
+Two things this session established that should shape future perf work here:
+- **The DB is remote (Railway proxy), so query *count* is the cost, not query complexity.** ~70ms per round-trip means 596 queries ≈ 41s before a single row is processed. Batch aggressively; prefer one `IN` query plus Python grouping over anything per-entity.
+- **Prove perf refactors by diffing the actual response.** Captured all three periods plus six drill-downs, `git stash`ed, re-captured from the original, diffed recursively: zero differences. That is much stronger than spot-checking a few numbers, and it caught nothing only because the refactor was actually correct — the `timestamp` vs `date` comparison trap in `_compute_ecosystem_balance` would have surfaced here if I hadn't handled it.
+
+**Next up:** B4 (sync-on-every-page-load) → then the Cash Flow / Daily Balances / Loans deep-dives.
 
 ---
 

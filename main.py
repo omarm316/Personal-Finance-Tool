@@ -520,9 +520,6 @@ def calc_auto_top_category_points(db, account_id, product, start_date, end_date)
       - Non-eligible categories get base earn rate
     Returns total points earned.
     """
-    from calendar import monthrange
-    import datetime as dt
-
     # Get eligible categories for auto_top_category
     auto_rewards = [r for r in product.rewards if getattr(r, 'reward_type', 'fixed') == 'auto_top_category']
     base_reward  = next((r for r in product.rewards if r.is_base_rate), None)
@@ -536,29 +533,37 @@ def calc_auto_top_category_points(db, account_id, product, start_date, end_date)
     bonus_multiplier = base_rate + (float(auto_rewards[0].multiplier) if auto_rewards else 4)
     spend_cap = 500.0
 
-    # Iterate month by month
+    # One query for the whole range, then bucket by calendar month in Python.
+    # This used to issue a separate query *per month* while walking the range.
+    # _compute_balance_bucket() calls this with start_date=2000-01-01 whenever
+    # the bucket has no baseline snapshot, so a single auto-top account cost
+    # ~318 round-trips (Jan 2000 → today) — the dominant cost in
+    # /api/cards/earn-summary's ~43s. Months with no activity contribute
+    # nothing, so skipping them entirely is equivalent. See BACKLOG B26.
+    #
+    # Range note: the original walked from start_date.replace(day=1), so
+    # transactions earlier in start_date's own month were included. Preserved
+    # deliberately rather than silently narrowing the window.
+    range_start = start_date.replace(day=1)
+    all_txns = db.query(Transaction).filter(
+        Transaction.account_id == account_id,
+        Transaction.date >= range_start,
+        Transaction.date <= end_date,
+        Transaction.action == 'Expense',
+        Transaction.amount < 0,
+        Transaction.is_excluded != True,
+    ).all()
+
+    # month key (year, month) → {category → spend}
+    by_month: dict[tuple, dict] = {}
+    for t in all_txns:
+        key = (t.date.year, t.date.month)
+        cat = t.points_category or 'Other'
+        m = by_month.setdefault(key, {})
+        m[cat] = m.get(cat, 0.0) + abs(float(t.amount))
+
     total_points = 0.0
-    current = start_date.replace(day=1)
-    while current <= end_date:
-        month_end = current.replace(day=monthrange(current.year, current.month)[1])
-        period_end = min(month_end, end_date)
-
-        # All transactions for this account in this month
-        txns = db.query(Transaction).filter(
-            Transaction.account_id == account_id,
-            Transaction.date >= current,
-            Transaction.date <= period_end,
-            Transaction.action == 'Expense',
-            Transaction.amount < 0,
-            Transaction.is_excluded != True,
-        ).all()
-
-        # Group by category
-        cat_spend: dict[str, float] = {}
-        for t in txns:
-            cat = t.points_category or 'Other'
-            cat_spend[cat] = cat_spend.get(cat, 0.0) + abs(float(t.amount))
-
+    for cat_spend in by_month.values():
         # Find top eligible category by spend
         top_cat = None
         top_amt = 0.0
@@ -575,12 +580,6 @@ def calc_auto_top_category_points(db, account_id, product, start_date, end_date)
                 total_points += bonus_spend * bonus_multiplier + over_spend * base_rate
             else:
                 total_points += amt * base_rate
-
-        # Advance to next month
-        if current.month == 12:
-            current = current.replace(year=current.year + 1, month=1)
-        else:
-            current = current.replace(month=current.month + 1)
 
     return round(total_points, 1)
 
@@ -4878,6 +4877,21 @@ def _points_pending(txn_date, close_day, today):
     return today < posts_on
 
 
+def _load_products_by_id(db, credit_accounts, card_by_acct):
+    """
+    Batch-load every CardProduct reachable from these accounts/cards in ONE
+    query. Replaces a per-account `.filter_by(id=...).first()` that ran inside
+    the account loop in three separate handlers (cards_earn_summary,
+    cash_back_earn_detail, ecosystem_earn_detail) — ~40 round-trips each,
+    against a remote DB, for a set of rows that mostly repeat. See BACKLOG B26.
+    """
+    pids = {a.product_id for a in credit_accounts if a.product_id}
+    pids |= {c.product_id for c in card_by_acct.values() if c.product_id}
+    if not pids:
+        return {}
+    return {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(pids)).all()}
+
+
 def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                                 redemption_rows, transfers_out, transfers_in,
                                 adjustment_rows, person_transfer_rows, known_people):
@@ -4899,7 +4913,7 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
     balance today, Daniella's might still be unset) — there is
     deliberately no single shared "as of" date at the Total level.
     """
-    from datetime import date as _date, timedelta as _timedelta
+    from datetime import date as _date, timedelta as _timedelta, datetime as _datetime, time as _dtime
 
     def _bucket_matches(row_person, bucket):
         if bucket is None:  # "Shared" — untagged/legacy rows
@@ -4927,13 +4941,41 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
 
     _today = _date.today()
 
-    def _compute_balance_bucket(bucket):
-        snap_q = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id)
+    # ── Prefetched once, partitioned per bucket in Python ────────────────────
+    # This used to issue one snapshot query AND one full transaction query per
+    # bucket (per person, plus Shared) — and this whole helper is itself called
+    # once per ecosystem by /api/cards/earn-summary. That fanned out to 357
+    # transaction round-trips and 48 snapshot round-trips on a ~12-ecosystem
+    # portfolio. Against the remote Railway Postgres (~70ms per round-trip)
+    # that alone was ~28s of the endpoint's ~43s. Every per-bucket filter is on
+    # `spender` / `card_id` / date, all of which are just as easy to evaluate
+    # in Python, so we fetch once and slice in memory instead. See BACKLOG B26.
+    _all_snaps = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id).all()
+    _all_txns = []
+    if eco_accts:
+        _all_txns = db.query(Transaction).filter(
+            Transaction.account_id.in_(eco_accts),
+            Transaction.is_excluded != True,
+        ).all()
+    _owner_card_ids = set(card_primary_user.keys())
+
+    def _txn_in_bucket(t, bucket):
+        """Python equivalent of the per-bucket spender/card_id SQL filter."""
+        sp = t.spender or ''          # matches `spender IS NULL OR spender = ''`
         if bucket is None:
-            snap_q = snap_q.filter(or_(PointsBalanceSnapshot.person.is_(None), PointsBalanceSnapshot.person == ''))
+            # Shared: untagged AND not claimed by any owned card's default.
+            return (not sp) and (t.card_id is None or t.card_id not in _owner_card_ids)
+        if sp == bucket:
+            return True
+        # Untagged transactions fall back to the card's primary_user.
+        return (not sp) and t.card_id is not None and card_primary_user.get(t.card_id) == bucket
+
+    def _compute_balance_bucket(bucket):
+        if bucket is None:
+            _snaps = [s for s in _all_snaps if not s.person]
         else:
-            snap_q = snap_q.filter(PointsBalanceSnapshot.person == bucket)
-        latest = snap_q.order_by(PointsBalanceSnapshot.snapshot_date.desc()).first()
+            _snaps = [s for s in _all_snaps if s.person == bucket]
+        latest = max(_snaps, key=lambda s: s.snapshot_date) if _snaps else None
         b_baseline = latest.balance if latest else 0.0
         b_baseline_date = latest.snapshot_date if latest else None
 
@@ -4948,31 +4990,18 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
         # simplification (same class of limitation as B11).
         b_pending = 0.0
         if eco_accts:
-            earn_q = db.query(Transaction).filter(
-                Transaction.account_id.in_(eco_accts),
-                Transaction.is_excluded != True,
-            )
-            _no_spender = or_(Transaction.spender.is_(None), Transaction.spender == '')
-            _owned_card_ids = [cid for cid, u in card_primary_user.items() if u == bucket] if bucket is not None else []
-            if bucket is None:
-                # Shared: no spender tagged, AND (no card_id at all, or that
-                # card has no primary_user) — i.e. not claimed by anyone else's
-                # card-level default either.
-                _owner_card_ids = list(card_primary_user.keys())
-                if _owner_card_ids:
-                    earn_q = earn_q.filter(_no_spender, or_(Transaction.card_id.is_(None), ~Transaction.card_id.in_(_owner_card_ids)))
-                else:
-                    earn_q = earn_q.filter(_no_spender)
-            elif _owned_card_ids:
-                earn_q = earn_q.filter(or_(
-                    Transaction.spender == bucket,
-                    and_(_no_spender, Transaction.card_id.in_(_owned_card_ids)),
-                ))
-            else:
-                earn_q = earn_q.filter(Transaction.spender == bucket)
-            if b_baseline_date:
-                earn_q = earn_q.filter(Transaction.date > b_baseline_date)
-            for t in earn_q.all():
+            # Transaction.date is a timestamp, snapshot_date a plain date.
+            # SQL's `timestamp > date` coerces the date to midnight, so do the
+            # same here — comparing a datetime to a date directly is a
+            # TypeError in Python, and truncating t.date to a date instead
+            # would silently drop any same-day-after-midnight transaction that
+            # the original query counted.
+            _baseline_dt = _datetime.combine(b_baseline_date, _dtime.min) if b_baseline_date else None
+            for t in _all_txns:
+                if not _txn_in_bucket(t, bucket):
+                    continue
+                if _baseline_dt and not (t.date > _baseline_dt):
+                    continue
                 if t.action != 'Expense':
                     continue
                 # auto_top_category accounts can't be read from the locked
@@ -5165,13 +5194,15 @@ async def cards_earn_summary(
         if c.account_id and c.account_id not in card_by_acct:
             card_by_acct[c.account_id] = c
 
+    _products_by_id = _load_products_by_id(db, credit_accounts, card_by_acct)
+
     for acct in credit_accounts:
         card = card_by_acct.get(acct.id)
         product = None
         if acct.product_id:
-            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+            product = _products_by_id.get(acct.product_id)
         if not product and card and card.product_id:
-            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+            product = _products_by_id.get(card.product_id)
 
         eco_id = None
         if product and product.ecosystem_id:
@@ -5302,6 +5333,34 @@ async def cards_earn_summary(
         elif acct_id not in eco_totals[eco_id]['by_acct']:
             eco_totals[eco_id]['by_acct'][acct_id] = 0.0
 
+    # ── batch every per-ecosystem ledger table into one query each ───────────
+    # These were five separate .filter_by(ecosystem_id=...) queries plus a
+    # Card lookup *inside* the output loop below — i.e. 6 round-trips per
+    # ecosystem. Fetched once here and grouped in Python instead. See B26.
+    _eco_ids_out = [e for e in eco_totals.keys() if ecosystems_map.get(e) and not ecosystems_map[e].is_cash_back]
+    _redemptions_by_eco: dict[int, list] = {}
+    _transfers_out_by_eco: dict[int, list] = {}
+    _transfers_in_by_eco: dict[int, list] = {}
+    _adjustments_by_eco: dict[int, list] = {}
+    _person_transfers_by_eco: dict[int, list] = {}
+    _snapshot_people_by_eco: dict[int, set] = {}
+    if _eco_ids_out:
+        for r in db.query(Redemption).filter(Redemption.ecosystem_id.in_(_eco_ids_out)).all():
+            _redemptions_by_eco.setdefault(r.ecosystem_id, []).append(r)
+        for t in db.query(Transfer).filter(Transfer.source_ecosystem_id.in_(_eco_ids_out)).all():
+            _transfers_out_by_eco.setdefault(t.source_ecosystem_id, []).append(_serialize_transfer(t))
+        for t in db.query(Transfer).filter(Transfer.destination_ecosystem_id.in_(_eco_ids_out)).all():
+            _transfers_in_by_eco.setdefault(t.destination_ecosystem_id, []).append(_serialize_transfer(t))
+        for a in db.query(PointsAdjustment).filter(PointsAdjustment.ecosystem_id.in_(_eco_ids_out)).all():
+            _adjustments_by_eco.setdefault(a.ecosystem_id, []).append(a)
+        for pt in db.query(PersonPointsTransfer).filter(PersonPointsTransfer.ecosystem_id.in_(_eco_ids_out)).all():
+            _person_transfers_by_eco.setdefault(pt.ecosystem_id, []).append(pt)
+        for s in db.query(PointsBalanceSnapshot).filter(PointsBalanceSnapshot.ecosystem_id.in_(_eco_ids_out)).all():
+            if s.person:
+                _snapshot_people_by_eco.setdefault(s.ecosystem_id, set()).add(s.person)
+    # card_by_acct already holds every Card keyed by account, so the
+    # primary_user lookup that ran per ecosystem needs no query at all.
+
     # ── shape output ─────────────────────────────────────────────────────────
     ecosystems_out = []
     for eco_id, data in eco_totals.items():
@@ -5330,21 +5389,13 @@ async def cards_earn_summary(
         pending_balance = None
         if not eco.is_cash_back:
             eco_accts_bal = list(data['by_acct'].keys())
-            redemption_rows_bal = db.query(Redemption).filter_by(ecosystem_id=eco_id).all()
-            transfers_out_bal = [
-                _serialize_transfer(t) for t in
-                db.query(Transfer).filter_by(source_ecosystem_id=eco_id).all()
-            ]
-            transfers_in_bal = [
-                _serialize_transfer(t) for t in
-                db.query(Transfer).filter_by(destination_ecosystem_id=eco_id).all()
-            ]
-            adjustment_rows_bal = db.query(PointsAdjustment).filter_by(ecosystem_id=eco_id).all()
-            person_transfer_rows_bal = db.query(PersonPointsTransfer).filter_by(ecosystem_id=eco_id).all()
+            redemption_rows_bal = _redemptions_by_eco.get(eco_id, [])
+            transfers_out_bal = _transfers_out_by_eco.get(eco_id, [])
+            transfers_in_bal = _transfers_in_by_eco.get(eco_id, [])
+            adjustment_rows_bal = _adjustments_by_eco.get(eco_id, [])
+            person_transfer_rows_bal = _person_transfers_by_eco.get(eco_id, [])
             known_people_bal = {'Omer', 'Daniella'}
-            for s in db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id).all():
-                if s.person:
-                    known_people_bal.add(s.person)
+            known_people_bal |= _snapshot_people_by_eco.get(eco_id, set())
             for a in adjustment_rows_bal:
                 if a.person:
                     known_people_bal.add(a.person)
@@ -5359,9 +5410,10 @@ async def cards_earn_summary(
             for pt in person_transfer_rows_bal:
                 known_people_bal.add(pt.from_person)
                 known_people_bal.add(pt.to_person)
-            if eco_accts_bal:
-                for c in db.query(Card).filter(Card.account_id.in_(eco_accts_bal), Card.primary_user.isnot(None)).all():
-                    known_people_bal.add(c.primary_user)
+            for _aid in eco_accts_bal:
+                _c = card_by_acct.get(_aid)
+                if _c and _c.primary_user:
+                    known_people_bal.add(_c.primary_user)
             bal = _compute_ecosystem_balance(
                 db, eco_id, eco_accts_bal, acct_info, cat_parent_map,
                 redemption_rows_bal, transfers_out_bal, transfers_in_bal,
@@ -5511,13 +5563,15 @@ async def cash_back_earn_detail(
     acct_info: dict[int, dict] = {}
     acct_eco: dict[int, int] = {}  # track which eco each account belongs to
 
+    _products_by_id = _load_products_by_id(db, credit_accounts, card_by_acct)
+
     for acct in credit_accounts:
         card = card_by_acct.get(acct.id)
         product = None
         if acct.product_id:
-            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+            product = _products_by_id.get(acct.product_id)
         if not product and card and card.product_id:
-            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+            product = _products_by_id.get(card.product_id)
 
         a_eco_id = None
         if product and product.ecosystem_id:
@@ -5832,13 +5886,15 @@ async def ecosystem_earn_detail(
     )
     eco_accts = []
     acct_info: dict[int, dict] = {}
+    _products_by_id = _load_products_by_id(db, credit_accounts, card_by_acct)
+
     for acct in credit_accounts:
         card = card_by_acct.get(acct.id)
         product = None
         if acct.product_id:
-            product = db.query(CardProduct).filter_by(id=acct.product_id).first()
+            product = _products_by_id.get(acct.product_id)
         if not product and card and card.product_id:
-            product = db.query(CardProduct).filter_by(id=card.product_id).first()
+            product = _products_by_id.get(card.product_id)
 
         a_eco_id = None
         if product and product.ecosystem_id:
