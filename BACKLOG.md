@@ -29,6 +29,7 @@
 
 | # | Item | Notes |
 |---|------|-------|
+| H6 | **UI tightening pass — "airy", Monarch-informed** | Brief from Omer 2026-07-30: tighten layouts on mobile and desktop; **menus and color scheme**, not the palette. Concrete spec written to [docs/ui-direction.md](docs/ui-direction.md) from the reference shots in `assets/example_images/`. Headline: what makes Monarch feel airy is **less color and less enclosure**, not more whitespace — neutral chrome with one accent per screen, hairline borders instead of shadow/glass, uniformly outlined controls, value-first KPI typography, consistent ~50px row rhythm. **Decided: the 24px in-bar-label budget bars from 2026-07-27 stay** (Monarch's thin bars were explicitly rejected). Sequenced *after* the Vite Phase 2 split, since most of these changes touch every page and are far cheaper against extracted components. One open decision flagged in the doc: whether to adopt the two-column masonry dashboard. |
 | H1 | **Mobile QA pass** | User working through mobile-specific bugs — awaiting findings |
 | H2 | **Account reclassification** | User should reclassify FSA/HSA accounts from "Other Assets" to correct type using the new dropdown |
 | H3 | **Transaction: filter by description/merchant** | Text search input — already exists; verify working well |
