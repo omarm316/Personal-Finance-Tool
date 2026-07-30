@@ -10711,11 +10711,17 @@ async def get_cash_flow(
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Cash accounts = checking, savings, money market, cd, cash
+    # Cash accounts = checking, savings, money market, cd, cash.
+    # Matched case-insensitively: account_type is stored capitalized
+    # ('Checking', 'Savings', 'HSA', 'FSA'), so a plain .in_() against these
+    # lowercase literals matched *nothing* — cash_id_list came back empty and
+    # the endpoint short-circuited to `empty`, which is why every range
+    # reported $0 income/expenses with transaction_count 0 (BACKLOG B5).
+    from sqlalchemy import func as _func
     cash_types = {'checking', 'savings', 'money market', 'cd', 'cash', 'hsa', 'fsa'}
     cash_accounts = db.query(Account).filter(
         Account.is_active == True,
-        Account.account_type.in_(cash_types),
+        _func.lower(Account.account_type).in_(cash_types),
     ).all()
     cash_ids = set(a.id for a in cash_accounts)
     cash_id_list = list(cash_ids)

@@ -5,6 +5,25 @@
 
 ---
 
+## Session 2026-07-30 (cont'd) — Backlog audit, B5 fixed, Plaid capability question
+
+Omer handed over prioritization ("go by whatever you feel you should prioritize"), mentioned he holds a **VentureOne (no annual fee)** and just acquired a **Citi Strata Premier** that should sync soon, and said the next deep-dives are **Cash Flow, Daily Balances, and Loans**.
+
+**Safety note discovered here: the local dev server is pointed at the production Railway Postgres** (`DATABASE_URL` in `.env`), not a local SQLite file. Every "live verification" in recent sessions has therefore been against real production data. Read-only audits are safe; writes need to be deliberate.
+
+**Stale-item audit against production** (the five "verify" items I'd flagged as suspect turned out to be worth checking):
+- **B14 closed as already-done** — `capital_one_venture_one` (id 46) exists and is active, account 152 linked, Card row 17 present. Fixed on 2026-07-26, never closed out.
+- **B18 scope corrected and narrowed** — orphaned transactions are 1,356 → 583, but only **4** are on a credit account (all on West Elm 6184). The other 579 are Checking/Savings/HSA/FSA/Investment where a NULL `card_id` is correct. Two active credit accounts still lack a `Card` row: West Elm 6184 (blocked on F12's research) and Fidelity Visa Signature (0 transactions, so nothing is being lost).
+- **Correction worth recording:** I first reported "no active credit account lacks a Card row" from a query filtering `account_type='credit'` — the real value is `'Credit Card'`, so it matched nothing and I read an empty result as a clean bill of health. Re-ran correctly. **`account_type` capitalization is a recurring trap in this codebase** — it is exactly what caused B5 too.
+
+**B5 fixed** — `/api/cash-flow` all zeros. Same capitalization trap: the cash-account filter used lowercase literals against capitalized stored values, matched zero accounts, and short-circuited to an `empty` return. One-line fix (`func.lower(...)`). Prioritized specifically because it gates the Cash Flow deep-dive Omer asked for next. Full detail in BACKLOG.md.
+
+**Strata Premier prep:** `citi_strata_premier` (id 44) already exists in the catalog with real researched rates (added 2026-07-24), currently `status='not_held'`. When the account syncs it will need: status → active, account → product link, and a **`Card` row created manually** — sync still doesn't auto-create one (the B18 addendum gap). No research needed; the catalog entry is ready.
+
+**Next up (my proposed order):** B26 (`/api/cards/earn-summary` ~44s — I watched the Cards page fail to render inside 6s again this session) → B4 → then the Cash Flow / Daily Balances / Loans deep-dives Omer asked for.
+
+---
+
 ## Session 2026-07-30 — Dashboard cleanup (B22/B23/B24 + `isMob`), and a much bigger mobile bug
 
 Picked the Dashboard cluster off the backlog — the four items logged during the 2026-07-27 review. Mid-session Omer reported: **"scrolling does not work on my iphone, only when i rotate it to landscape."** That turned out to be an app-wide layout bug, not a Dashboard one, and took priority.
