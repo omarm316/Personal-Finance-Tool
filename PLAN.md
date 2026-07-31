@@ -10,6 +10,53 @@
 
 ---
 
+## Session 2026-07-30 (cont'd) — Vite Phase 2: the component split
+
+`main.jsx` (10,957 lines) → **62 modules**: `lib/` (3), `hooks/` (1), `components/` (44),
+`pages/` (13), `App.jsx`, `main.jsx` (a 5-line entry).
+
+**Done mechanically, and that was the right call.** Before writing anything I built the
+dependency graph and ran Tarjan SCC over it: **zero cycles**. That is what made a
+scripted split safe — imports are *computed from the graph*, not hand-written, so
+nothing can be missed or go stale. The splitter lives in the session scratchpad; the
+important part is the method, not the script.
+
+**The bug worth remembering.** My first pass stripped comments *and string literals*
+before scanning for references, to avoid false-positive imports. That was actively
+wrong: JSX **text** routinely contains a bare apostrophe — `If you're re-linking...` —
+which the naive regex read as the start of a string literal and used to swallow
+everything up to the next quote. It ate `usePlaidLink`'s JSX through to
+`useHashRouter`'s `useCallback`, which built fine and then threw
+`ReferenceError: useCallback is not defined` at runtime. Fixed by stripping **comments
+only** and detecting on raw code: over-detection is the safe direction, since every
+symbol is exported so a spurious import is harmless and tree-shaken.
+
+**A tell worth knowing:** the broken split produced a *smaller* bundle (635 kB vs
+654 kB) precisely because the missing edges let real code be tree-shaken away. After
+the fix it is 654.60 kB against the pre-split 654.63 kB — a 30-byte delta. **If a
+refactor makes the bundle unexpectedly smaller, suspect lost references, not a win.**
+
+**Verified:** all 94 symbols still exported (none missing, none extra); every line of
+the original accounted for before writing; zero cycles; build clean; all 11 routes
+render with no console errors.
+
+### A severe pre-existing bug found while verifying — B28
+
+The Transactions page renders **"No transactions found"** on a cold load. I suspected
+my split and disproved it properly: rebuilt the pre-split monolith bundle and got the
+identical result. The data path is fine (500 txns / 47 accounts, and the page's exact
+`Promise.all` succeeds by hand in the console).
+
+Cause is a three-way interaction: `load()` couples the transactions and accounts
+fetches in one `Promise.all`, the backend is slow on a cold load (B4 — ~6.8s per call,
+`--workers 1`), and `static/sw.js` answers a failed `/api/` fetch with
+`Response(JSON.stringify([]), {status:503})`. `apiFetch` throws on `!res.ok`, so that
+stub rejects the whole `Promise.all` and the table renders empty. **A backend slowdown
+is being presented to the user as a confident, wrong empty state.** Full writeup and
+the three separate fixes in BACKLOG.md.
+
+---
+
 ## Session 2026-07-30 (cont'd) — Docs cleanup + Vite migration (Phase 1)
 
 Omer: "start with cleanup, then the split."

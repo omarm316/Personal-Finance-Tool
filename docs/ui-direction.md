@@ -86,9 +86,31 @@ Do this **after** the Vite Phase 2 component split. Editing `components/Button.j
 once beats hunting ~70 call sites in an 11k-line file, and several of these changes
 (control shape, tabs, KPI order) are exactly the kind that touch every page.
 
-## Open question for Omer
+## Dashboard layout — DECIDED 2026-07-30
 
-Whether to also adopt Monarch's **two-column masonry dashboard** (cards of varying
-height in 2 columns) instead of our full-width vertical stack. It roughly halves
-dashboard scroll length, but it is a bigger structural change than the rest of this
-doc — worth deciding explicitly rather than sliding into it.
+**Two-column masonry + cap the Budget Performance card.** Omer approved the cap.
+
+Mockup: [`mockups/dashboard-airy-masonry.html`](../mockups/dashboard-airy-masonry.html)
+(interactive — before/after, budget cap, light/dark; real tokens, real July 2026 data).
+
+Measuring it changed the recommendation, so record the reasoning:
+
+| variant | page height | columns |
+|---|---|---|
+| Before — stacked, all 22 rows | 2244px | — |
+| Masonry, all 22 rows | 1861px (−17%) | 1539 vs 913 → **626px dead space** |
+| Masonry + budget capped to 8 | **1235px (−45%)** | 629 vs 913 |
+
+**Masonry alone is not the win.** Monarch runs ~6 similarly-sized cards; we have 3,
+one of which (Budget Performance, 22 rows) dwarfs the others — so two columns without
+a cap merely relocate the scroll into one column and leave the other ragged. The
+change that pays off is *capping the budget card with a "Show all N →" link and adding
+a card to the short column* (Net Worth in the mockup). Masonry is what makes that
+worthwhile.
+
+Tuning note: at 8 rows the left column becomes the shorter one (629 vs 913), so
+**~12 rows balances most closely**. A knob, not a structural question.
+
+### Known nits to fix when this is built for real
+- Light theme: over-budget fills at 0.42 opacity across a full track read very pink.
+- The `96%` / `114%` labels sit on the fill, where contrast is tightest.
