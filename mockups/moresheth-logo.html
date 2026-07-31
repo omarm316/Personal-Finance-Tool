@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Moresheth — Brand Sheet</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;transition:background 0.3s,color 0.3s}
+body.dark{background:#0c0c10;color:#e8e8ed}
+body.light{background:#f5f3ef;color:#1a1a2e}
+.container{max-width:900px;margin:0 auto;padding:40px 20px}
+h1{font-family:'Playfair Display',serif;font-size:28px;font-weight:400;margin-bottom:4px;letter-spacing:1px}
+.subtitle{font-size:13px;font-weight:300;color:#707080;margin-bottom:40px;letter-spacing:0.5px}
+.section{margin-bottom:48px}
+.section-label{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:2px;color:#707080;margin-bottom:16px}
+.row{display:flex;gap:32px;align-items:center;flex-wrap:wrap}
+.card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:32px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+body.light .card{background:rgba(0,0,0,0.02);border-color:rgba(0,0,0,0.08)}
+.toggle{position:fixed;top:20px;right:20px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:6px 14px;cursor:pointer;font-size:12px;color:#d4a44a;font-family:inherit;z-index:10}
+body.light .toggle{background:rgba(0,0,0,0.05);border-color:rgba(0,0,0,0.1);color:#b8860b}
+.sizes{display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap}
+.size-label{font-size:10px;color:#707080;text-align:center;margin-top:8px}
+.lockup-name{font-family:'DM Sans',sans-serif;font-weight:300;font-size:22px;letter-spacing:4px;color:#d4a44a}
+body.light .lockup-name{color:#b8860b}
+.lockup-tag{font-size:11px;font-weight:300;letter-spacing:2px;color:#707080}
+.app-icon{border-radius:22%;overflow:hidden;display:inline-block}
+.splash{width:200px;height:360px;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#0c0c10;border:1px solid rgba(255,255,255,0.06)}
+body.light .splash{background:#f5f3ef;border-color:rgba(0,0,0,0.08)}
+</style>
+</head>
+<body class="dark">
+<button class="toggle" onclick="document.body.classList.toggle('dark');document.body.classList.toggle('light');this.textContent=document.body.classList.contains('dark')?'☀ Light':'◑ Dark'">☀ Light</button>
+
+<div class="container">
+  <h1>Moresheth</h1>
+  <div class="subtitle">Brand Identity — The Gold Coin · "Steward of your inheritance"</div>
+
+  <!-- Shared SVG defs -->
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <radialGradient id="coinFace" cx="40%" cy="35%" r="60%">
+        <stop offset="0%" stop-color="#f0d878"/>
+        <stop offset="40%" stop-color="#d4a44a"/>
+        <stop offset="100%" stop-color="#9a7030"/>
+      </radialGradient>
+      <radialGradient id="coinRim" cx="50%" cy="50%" r="50%">
+        <stop offset="85%" stop-color="#c49a3a"/>
+        <stop offset="100%" stop-color="#7a5820"/>
+      </radialGradient>
+      <filter id="mEmboss">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="blur"/>
+        <feOffset dx="-0.5" dy="-1" result="hiOff"/>
+        <feFlood flood-color="#f5e6a0" flood-opacity="0.6" result="hiColor"/>
+        <feComposite in="hiColor" in2="hiOff" operator="in" result="highlight"/>
+        <feOffset in="blur" dx="0.5" dy="1" result="shOff"/>
+        <feFlood flood-color="#6a4810" flood-opacity="0.7" result="shColor"/>
+        <feComposite in="shColor" in2="shOff" operator="in" result="shadow"/>
+        <feMerge><feMergeNode in="shadow"/><feMergeNode in="highlight"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <linearGradient id="iconGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#12121a"/>
+        <stop offset="100%" stop-color="#0c0c10"/>
+      </linearGradient>
+      <linearGradient id="goldBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#d4a44a"/>
+        <stop offset="100%" stop-color="#9a7030"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- ═══ 1. Primary Coin Icon — Sizes ═══ -->
+  <div class="section">
+    <div class="section-label">1. Primary Icon — Sizes</div>
+    <div class="sizes">
+      <div>
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="56" fill="url(#coinRim)"/>
+          <circle cx="60" cy="60" r="52" fill="none" stroke="#a07830" stroke-width="0.5" opacity="0.6"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#e8c96a" stroke-width="0.3" opacity="0.4"/>
+          <circle cx="60" cy="60" r="49" fill="url(#coinFace)"/>
+          <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" stroke-width="0.5" opacity="0.35"/>
+          <circle cx="60" cy="60" r="42" fill="none" stroke="#f0d878" stroke-width="0.3" opacity="0.2"/>
+          <text x="60" y="76" text-anchor="middle" font-family="'Playfair Display', serif" font-size="52" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+          <ellipse cx="45" cy="38" rx="22" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20,45,38)"/>
+        </svg>
+        <div class="size-label">120px</div>
+      </div>
+      <div>
+        <svg width="64" height="64" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="56" fill="url(#coinRim)"/>
+          <circle cx="60" cy="60" r="52" fill="none" stroke="#a07830" stroke-width="0.8" opacity="0.6"/>
+          <circle cx="60" cy="60" r="49" fill="url(#coinFace)"/>
+          <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" stroke-width="0.8" opacity="0.35"/>
+          <text x="60" y="76" text-anchor="middle" font-family="'Playfair Display', serif" font-size="52" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+          <ellipse cx="45" cy="38" rx="22" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20,45,38)"/>
+        </svg>
+        <div class="size-label">64px</div>
+      </div>
+      <div>
+        <svg width="32" height="32" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="56" fill="url(#coinRim)"/>
+          <circle cx="60" cy="60" r="49" fill="url(#coinFace)"/>
+          <text x="60" y="78" text-anchor="middle" font-family="'Playfair Display', serif" font-size="56" font-weight="700" fill="#b8920a">M</text>
+        </svg>
+        <div class="size-label">32px favicon</div>
+      </div>
+      <div>
+        <svg width="16" height="16" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="56" fill="#d4a44a"/>
+          <text x="60" y="82" text-anchor="middle" font-family="'Playfair Display', serif" font-size="64" font-weight="700" fill="#8a6a1a">M</text>
+        </svg>
+        <div class="size-label">16px</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 2. Horizontal Lockup ═══ -->
+  <div class="section">
+    <div class="section-label">2. Horizontal Lockup</div>
+    <div class="card" style="flex-direction:row;gap:24px;padding:40px 48px">
+      <svg width="56" height="56" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="56" fill="url(#coinRim)"/>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#a07830" stroke-width="0.8" opacity="0.6"/>
+        <circle cx="60" cy="60" r="49" fill="url(#coinFace)"/>
+        <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" stroke-width="0.8" opacity="0.35"/>
+        <text x="60" y="76" text-anchor="middle" font-family="'Playfair Display', serif" font-size="52" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+        <ellipse cx="45" cy="38" rx="22" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20,45,38)"/>
+      </svg>
+      <div>
+        <div class="lockup-name">MORESHETH</div>
+        <div class="lockup-tag">PERSONAL FINANCE</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 3. iOS App Icon ═══ -->
+  <div class="section">
+    <div class="section-label">3. iOS App Icon</div>
+    <div class="row">
+      <div>
+        <div class="app-icon">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <rect width="120" height="120" fill="#0c0c10"/>
+            <circle cx="60" cy="60" r="42" fill="url(#coinRim)"/>
+            <circle cx="60" cy="60" r="39" fill="none" stroke="#a07830" stroke-width="0.5" opacity="0.6"/>
+            <circle cx="60" cy="60" r="37" fill="url(#coinFace)"/>
+            <circle cx="60" cy="60" r="33" fill="none" stroke="#b8920a" stroke-width="0.5" opacity="0.35"/>
+            <text x="60" y="72" text-anchor="middle" font-family="'Playfair Display', serif" font-size="40" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+            <ellipse cx="48" cy="42" rx="16" ry="9" fill="rgba(255,255,255,0.06)" transform="rotate(-20,48,42)"/>
+          </svg>
+        </div>
+        <div class="size-label">Dark bg</div>
+      </div>
+      <div>
+        <div class="app-icon">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <rect width="120" height="120" fill="url(#iconGrad)"/>
+            <circle cx="60" cy="60" r="50" fill="rgba(212,164,74,0.06)"/>
+            <circle cx="60" cy="60" r="42" fill="url(#coinRim)"/>
+            <circle cx="60" cy="60" r="39" fill="none" stroke="#a07830" stroke-width="0.5" opacity="0.6"/>
+            <circle cx="60" cy="60" r="37" fill="url(#coinFace)"/>
+            <circle cx="60" cy="60" r="33" fill="none" stroke="#b8920a" stroke-width="0.5" opacity="0.35"/>
+            <text x="60" y="72" text-anchor="middle" font-family="'Playfair Display', serif" font-size="40" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+            <ellipse cx="48" cy="42" rx="16" ry="9" fill="rgba(255,255,255,0.06)" transform="rotate(-20,48,42)"/>
+          </svg>
+        </div>
+        <div class="size-label">With glow</div>
+      </div>
+      <div>
+        <div class="app-icon">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <rect width="120" height="120" fill="url(#goldBg)"/>
+            <text x="60" y="78" text-anchor="middle" font-family="'Playfair Display', serif" font-size="56" font-weight="600" fill="#0c0c10" opacity="0.85">M</text>
+          </svg>
+        </div>
+        <div class="size-label">Monochrome gold</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 4. Splash Screen ═══ -->
+  <div class="section">
+    <div class="section-label">4. Splash Screen</div>
+    <div class="splash">
+      <svg width="80" height="80" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="56" fill="url(#coinRim)"/>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#a07830" stroke-width="0.5" opacity="0.6"/>
+        <circle cx="60" cy="60" r="49" fill="url(#coinFace)"/>
+        <circle cx="60" cy="60" r="44" fill="none" stroke="#b8920a" stroke-width="0.5" opacity="0.35"/>
+        <text x="60" y="76" text-anchor="middle" font-family="'Playfair Display', serif" font-size="52" font-weight="600" fill="#b8920a" filter="url(#mEmboss)">M</text>
+        <ellipse cx="45" cy="38" rx="22" ry="12" fill="rgba(255,255,255,0.08)" transform="rotate(-20,45,38)"/>
+      </svg>
+      <div style="text-align:center">
+        <div style="font-family:'DM Sans',sans-serif;font-weight:300;font-size:18px;letter-spacing:4px;color:#d4a44a">MORESHETH</div>
+        <div style="font-size:10px;font-weight:300;letter-spacing:2px;color:#707080;margin-top:4px">PERSONAL FINANCE</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 5. Color Palette ═══ -->
+  <div class="section">
+    <div class="section-label">5. Color Palette</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#d4a44a"></div><div class="size-label">Gold Primary<br/>#d4a44a</div></div>
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#f0d878"></div><div class="size-label">Gold Highlight<br/>#f0d878</div></div>
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#a07830"></div><div class="size-label">Gold Shadow<br/>#a07830</div></div>
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#b8860b"></div><div class="size-label">Light Mode Gold<br/>#b8860b</div></div>
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#0c0c10;border:1px solid rgba(255,255,255,0.1)"></div><div class="size-label">Midnight<br/>#0c0c10</div></div>
+      <div style="text-align:center"><div style="width:64px;height:64px;border-radius:12px;background:#f5f3ef;border:1px solid rgba(0,0,0,0.08)"></div><div class="size-label">Linen<br/>#f5f3ef</div></div>
+    </div>
+  </div>
+
+  <!-- ═══ 6. Typography ═══ -->
+  <div class="section">
+    <div class="section-label">6. Typography</div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div><span style="font-family:'Playfair Display',serif;font-size:32px;font-weight:400;color:#d4a44a">Moresheth</span><span style="font-size:11px;color:#707080;margin-left:12px">Playfair Display 400 — Display / Logo</span></div>
+      <div><span style="font-family:'DM Sans',sans-serif;font-size:22px;font-weight:300;letter-spacing:4px;color:#d4a44a">MORESHETH</span><span style="font-size:11px;color:#707080;margin-left:12px">DM Sans 300 — Wordmark</span></div>
+      <div><span style="font-family:'DM Sans',sans-serif;font-size:15px;font-weight:500">Dashboard Interface Text</span><span style="font-size:11px;color:#707080;margin-left:12px">DM Sans 500 — Headings</span></div>
+      <div><span style="font-family:'DM Sans',sans-serif;font-size:13px;font-weight:300">Body text and account details</span><span style="font-size:11px;color:#707080;margin-left:12px">DM Sans 300 — Body</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

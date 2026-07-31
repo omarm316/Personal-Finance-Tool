@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option C: Aurora — Finance Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --surface: #ffffff;
+    --border: #e0e4ea;
+    --sidebar-bg: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-soft: #eef2ff;
+    --accent-secondary: #14b8a6;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --danger: #ef4444;
+    --glow: 0 0 20px rgba(99,102,241,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    font-weight: 300;
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    overflow: hidden;
+  }
+
+  .sidebar-logo {
+    padding: 28px 20px 4px;
+  }
+
+  .sidebar-logo h1 {
+    font-size: 16px;
+    font-weight: 500;
+    color: #fff;
+    letter-spacing: -0.3px;
+  }
+
+  .sidebar-logo p {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    font-weight: 300;
+    margin-top: 2px;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    padding: 20px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 20px;
+    font-size: 13px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    text-decoration: none;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+
+  .nav-item:hover {
+    color: rgba(255,255,255,0.8);
+    background: rgba(255,255,255,0.04);
+  }
+
+  .nav-item.active {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 18px;
+    background: #fff;
+    border-radius: 0 2px 2px 0;
+  }
+
+  .nav-icon {
+    width: 16px;
+    height: 16px;
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+
+  .nav-item.active .nav-icon { opacity: 1; }
+
+  .sidebar-footer {
+    padding: 16px 16px 20px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .sidebar-footer-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 10px;
+    font-weight: 400;
+  }
+
+  .sidebar-footer-btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  .sidebar-btn {
+    flex: 1;
+    padding: 7px 0;
+    font-size: 11px;
+    font-weight: 400;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .sidebar-btn.ghost {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.6);
+  }
+
+  .sidebar-btn.ghost:hover {
+    border-color: rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.9);
+  }
+
+  .sidebar-btn.primary {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.8);
+  }
+
+  .sidebar-btn.primary:hover {
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+  }
+
+  .sidebar-glow {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 160px;
+    background: rgba(99,102,241,0.2);
+    border-radius: 50%;
+    filter: blur(60px);
+    pointer-events: none;
+  }
+
+  /* ── Main Content ── */
+  .main {
+    margin-left: 200px;
+    flex: 1;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 32px 40px 60px;
+  }
+
+  /* ── Page Header ── */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .page-title {
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+  }
+
+  /* ── Tab Switcher ── */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px;
+    width: fit-content;
+  }
+
+  .tab-btn {
+    padding: 7px 20px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .tab-btn:hover {
+    color: var(--text-primary);
+  }
+
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+
+  /* ── Period Selector ── */
+  .period-selector {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pill-toggle {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 0;
+  }
+
+  .pill-btn {
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 400;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .pill-btn.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .year-dropdown {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 400;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+
+  /* ── Section Label ── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+
+  .section-header {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+    transition: all 0.2s ease;
+  }
+
+  /* ── Ecosystem Grid ── */
+  .ecosystem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+
+  .eco-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .eco-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(99,102,241,0.1), var(--glow);
+    border-color: rgba(99,102,241,0.25);
+  }
+
+  .eco-icon {
+    width: 48px;
+    height: 32px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .eco-info { flex: 1; min-width: 0; }
+
+  .eco-name {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  .eco-currency {
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .eco-value {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .eco-points {
+    font-size: 30px;
+    font-weight: 300;
+    color: var(--accent);
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+
+  .eco-points.teal {
+    color: var(--accent-secondary);
+  }
+
+  .eco-est {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-top: 2px;
+    text-align: right;
+  }
+
+  .eco-chevron {
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 300;
+    flex-shrink: 0;
+    margin-left: 4px;
+  }
+
+  /* ── Your Cards Grid ── */
+  .cards-horizontal {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin-bottom: 36px;
+  }
+
+  .credit-card {
+    width: 200px;
+    height: 126px;
+    border-radius: 14px;
+    padding: 18px;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(99,102,241,0.15);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .credit-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 28px rgba(99,102,241,0.25);
+  }
+
+  .credit-card::after {
+    content: '';
+    position: absolute;
+    top: -20px;
+    right: -20px;
+    width: 80px;
+    height: 80px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 50%;
+  }
+
+  .cc-chip {
+    width: 28px;
+    height: 20px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+
+  .cc-name {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.8);
+    letter-spacing: 0.5px;
+  }
+
+  .cc-number {
+    font-size: 13px;
+    font-weight: 300;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.6);
+  }
+
+  .cc-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  /* ── Active Challenges ── */
+  .challenges-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+
+  .challenge-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+  }
+
+  .challenge-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .challenge-card-name {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  .progress-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .progress-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent), #818cf8);
+    transition: width 0.4s ease;
+  }
+
+  .progress-pct {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    flex-shrink: 0;
+    min-width: 32px;
+    text-align: right;
+  }
+
+  /* ── Dashboard Page ── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 22px;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text-primary);
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+
+  .metric-value.accent {
+    color: var(--accent);
+  }
+
+  .metric-change {
+    font-size: 12px;
+    font-weight: 400;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .metric-change.positive { color: var(--accent-secondary); }
+  .metric-change.negative { color: var(--danger); }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .donut-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .donut-legend {
+    margin-left: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-secondary);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-val {
+    margin-left: auto;
+    font-weight: 400;
+    color: var(--text-primary);
+    padding-left: 16px;
+  }
+
+  .recent-tx-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--bg);
+  }
+
+  .recent-tx-item:last-child { border-bottom: none; }
+
+  .recent-tx-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-right: 12px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .recent-tx-info { flex: 1; }
+
+  .recent-tx-name {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  .recent-tx-date {
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .recent-tx-amount {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+  }
+
+  .recent-tx-amount.positive { color: var(--accent-secondary); }
+
+  /* ── Transactions Page ── */
+  .filter-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .filter-input {
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 300;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    min-width: 160px;
+  }
+
+  .filter-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+  }
+
+  .filter-select {
+    padding: 8px 32px 8px 14px;
+    font-size: 13px;
+    font-weight: 300;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .filter-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+  }
+
+  .tx-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .tx-table thead th {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    padding: 14px 18px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+  }
+
+  .tx-table tbody td {
+    font-size: 13px;
+    font-weight: 300;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--bg);
+    color: var(--text-primary);
+  }
+
+  .tx-table tbody tr:last-child td { border-bottom: none; }
+
+  .tx-table tbody tr {
+    transition: background 0.15s ease;
+  }
+
+  .tx-table tbody tr:hover {
+    background: #f5f7ff;
+  }
+
+  .tx-category {
+    display: inline-block;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 400;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 24px;
+  }
+
+  .tx-amount {
+    font-weight: 400;
+    letter-spacing: -0.3px;
+  }
+
+  .tx-amount.negative { color: var(--text-primary); }
+  .tx-amount.positive { color: var(--accent-secondary); }
+
+  /* ── Page visibility ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Scrollbar ── */
+  .main::-webkit-scrollbar { width: 6px; }
+  .main::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  .main::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+  /* ── SVG icons in sidebar ── */
+  .nav-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .recent-tx-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>Finance</h1>
+    <p>Personal dashboard</p>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item" data-nav="dashboard" onclick="switchTab('dashboard')">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+      Dashboard
+    </button>
+    <button class="nav-item" data-nav="transactions" onclick="switchTab('transactions')">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
+      Transactions
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6"/></svg></span>
+      Budgets
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+      Net Worth
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-7"/></svg></span>
+      Daily Balances
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+      Cash Flow
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 7h18v13a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></span>
+      Loans
+    </button>
+    <button class="nav-item active" data-nav="cards" onclick="switchTab('cards')">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></span>
+      Cards
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M19 5H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
+      Accounts
+    </button>
+    <button class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>
+      Settings
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="sidebar-footer-label">Bank Connections</div>
+    <div class="sidebar-footer-btns">
+      <button class="sidebar-btn ghost">Manage</button>
+      <button class="sidebar-btn primary">+ Add</button>
+    </div>
+  </div>
+
+  <div class="sidebar-glow"></div>
+</aside>
+
+<!-- ── Main ── -->
+<main class="main">
+
+  <!-- Tab Bar -->
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:28px;">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('cards')">Cards</button>
+      <button class="tab-btn" onclick="switchTab('dashboard')">Dashboard</button>
+      <button class="tab-btn" onclick="switchTab('transactions')">Transactions</button>
+    </div>
+  </div>
+
+  <!-- ════════════════ CARDS PAGE ════════════════ -->
+  <div class="page active" id="page-cards">
+
+    <div class="page-header">
+      <h2 class="page-title">Portfolio</h2>
+      <div class="period-selector">
+        <div class="pill-toggle">
+          <button class="pill-btn">Monthly</button>
+          <button class="pill-btn active">Quarterly</button>
+          <button class="pill-btn">Annual</button>
+        </div>
+        <select class="year-dropdown">
+          <option>2026</option>
+          <option>2025</option>
+          <option>2024</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Ecosystem Section -->
+    <div class="section-label">Ecosystems</div>
+    <div class="ecosystem-grid">
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#1e40af,#3b82f6)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Chase</div>
+          <div class="eco-currency">Ultimate Rewards</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">184k</div>
+          <div class="eco-est">~$2,760</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#047857,#10b981)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Amex</div>
+          <div class="eco-currency">Membership Rewards</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">312k</div>
+          <div class="eco-est">~$4,680</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#5b21b6,#8b5cf6)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Hilton</div>
+          <div class="eco-currency">Honors Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">540k</div>
+          <div class="eco-est">~$2,700</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#92400e,#d97706)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Marriott</div>
+          <div class="eco-currency">Bonvoy Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">215k</div>
+          <div class="eco-est">~$1,720</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#1e3a5f,#3b82f6)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Delta</div>
+          <div class="eco-currency">SkyMiles</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">87k</div>
+          <div class="eco-est">~$1,044</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#7f1d1d,#dc2626)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Hyatt</div>
+          <div class="eco-currency">World of Hyatt</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">64k</div>
+          <div class="eco-est">~$1,280</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background:linear-gradient(135deg,#0d9488,#2dd4bf); display:flex; align-items:center; justify-content:center;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6"/></svg>
+        </div>
+        <div class="eco-info">
+          <div class="eco-name">Cash Back</div>
+          <div class="eco-currency">Statement credits</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points teal">$438</div>
+          <div class="eco-est">Available</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+    </div>
+
+    <!-- Your Cards -->
+    <div class="section-label">Your Cards</div>
+    <div class="cards-horizontal">
+
+      <div class="credit-card" style="background:linear-gradient(135deg,#1e3a5f,#0f172a)">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div class="cc-chip"></div>
+          <span style="font-size:10px; font-weight:300; opacity:0.5;">VISA</span>
+        </div>
+        <div class="cc-bottom">
+          <div>
+            <div class="cc-name">Chase Sapphire</div>
+            <div class="cc-number">**** 4821</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="credit-card" style="background:linear-gradient(135deg,#b8860b,#8b6914)">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div class="cc-chip"></div>
+          <span style="font-size:10px; font-weight:300; opacity:0.5;">AMEX</span>
+        </div>
+        <div class="cc-bottom">
+          <div>
+            <div class="cc-name">Amex Gold</div>
+            <div class="cc-number">**** 3007</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="credit-card" style="background:linear-gradient(135deg,#4c1d95,#2e1065)">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div class="cc-chip"></div>
+          <span style="font-size:10px; font-weight:300; opacity:0.5;">AMEX</span>
+        </div>
+        <div class="cc-bottom">
+          <div>
+            <div class="cc-name">Hilton Aspire</div>
+            <div class="cc-number">**** 9152</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="credit-card" style="background:linear-gradient(135deg,#0d9488,#115e59)">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div class="cc-chip"></div>
+          <span style="font-size:10px; font-weight:300; opacity:0.5;">VISA</span>
+        </div>
+        <div class="cc-bottom">
+          <div>
+            <div class="cc-name">Freedom Flex</div>
+            <div class="cc-number">**** 6340</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Active Challenges -->
+    <div class="section-label">Active Challenges</div>
+    <div class="challenges-grid">
+
+      <div class="challenge-card">
+        <div class="challenge-name">Welcome Bonus</div>
+        <div class="challenge-card-name">Chase Sapphire Preferred</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar"><div class="progress-fill" style="width:72%"></div></div>
+          <span class="progress-pct">72%</span>
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-name">Quarterly Spend</div>
+        <div class="challenge-card-name">Amex Gold Card</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar"><div class="progress-fill" style="width:45%"></div></div>
+          <span class="progress-pct">45%</span>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ════════════════ DASHBOARD PAGE ════════════════ -->
+  <div class="page" id="page-dashboard">
+
+    <div class="page-header">
+      <h2 class="page-title">Dashboard</h2>
+      <div class="period-selector">
+        <div class="pill-toggle">
+          <button class="pill-btn active">This Month</button>
+          <button class="pill-btn">Last Month</button>
+          <button class="pill-btn">YTD</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Total Spend</div>
+        <div class="metric-value">$4,218</div>
+        <div class="metric-change negative">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 3v6M3 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          8.2% vs last month
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Points Earned</div>
+        <div class="metric-value accent">12,840</div>
+        <div class="metric-change positive">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          14.5% vs last month
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Earn Rate</div>
+        <div class="metric-value">3.04x</div>
+        <div class="metric-change positive">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          0.3x improvement
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Annual Fees</div>
+        <div class="metric-value">$1,790</div>
+        <div class="metric-change" style="color:var(--text-muted);">5 active cards</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Net Value</div>
+        <div class="metric-value accent">$14,184</div>
+        <div class="metric-change positive">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 9V3M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Portfolio value
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+
+      <div class="card">
+        <div class="section-header">Spending Breakdown</div>
+        <div class="donut-wrap">
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            <!-- Donut chart -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#eef2ff" stroke-width="24"/>
+            <!-- Dining 35% -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#6366f1" stroke-width="24"
+              stroke-dasharray="131.95 245.04" stroke-dashoffset="94.25"
+              transform="rotate(-90 80 80)"/>
+            <!-- Travel 25% -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#14b8a6" stroke-width="24"
+              stroke-dasharray="94.25 282.74" stroke-dashoffset="-37.70"
+              transform="rotate(-90 80 80)"/>
+            <!-- Groceries 20% -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#8b5cf6" stroke-width="24"
+              stroke-dasharray="75.40 301.59" stroke-dashoffset="-131.95"
+              transform="rotate(-90 80 80)"/>
+            <!-- Shopping 12% -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#a78bfa" stroke-width="24"
+              stroke-dasharray="45.24 331.75" stroke-dashoffset="-207.35"
+              transform="rotate(-90 80 80)"/>
+            <!-- Other 8% -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#c4b5fd" stroke-width="24"
+              stroke-dasharray="30.16 346.83" stroke-dashoffset="-252.59"
+              transform="rotate(-90 80 80)"/>
+            <text x="80" y="76" text-anchor="middle" font-family="Plus Jakarta Sans" font-size="22" font-weight="300" fill="#111827">$4,218</text>
+            <text x="80" y="94" text-anchor="middle" font-family="Plus Jakarta Sans" font-size="10" font-weight="400" fill="#9ca3af" letter-spacing="1">TOTAL</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="legend-item"><span class="legend-dot" style="background:#6366f1"></span>Dining<span class="legend-val">$1,476</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#14b8a6"></span>Travel<span class="legend-val">$1,054</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#8b5cf6"></span>Groceries<span class="legend-val">$844</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#a78bfa"></span>Shopping<span class="legend-val">$506</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#c4b5fd"></span>Other<span class="legend-val">$338</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-header">Recent Transactions</div>
+        <div>
+          <div class="recent-tx-item">
+            <div class="recent-tx-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/><path d="M6 1v3M10 1v3M14 1v3"/></svg></div>
+            <div class="recent-tx-info">
+              <div class="recent-tx-name">Blue Bottle Coffee</div>
+              <div class="recent-tx-date">Mar 20, 2026</div>
+            </div>
+            <div class="recent-tx-amount">-$6.50</div>
+          </div>
+          <div class="recent-tx-item">
+            <div class="recent-tx-icon"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg></div>
+            <div class="recent-tx-info">
+              <div class="recent-tx-name">Whole Foods Market</div>
+              <div class="recent-tx-date">Mar 19, 2026</div>
+            </div>
+            <div class="recent-tx-amount">-$84.32</div>
+          </div>
+          <div class="recent-tx-item">
+            <div class="recent-tx-icon"><svg viewBox="0 0 24 24"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0120 10.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg></div>
+            <div class="recent-tx-info">
+              <div class="recent-tx-name">Uber</div>
+              <div class="recent-tx-date">Mar 18, 2026</div>
+            </div>
+            <div class="recent-tx-amount">-$23.40</div>
+          </div>
+          <div class="recent-tx-item">
+            <div class="recent-tx-icon"><svg viewBox="0 0 24 24"><path d="M20 12V8H6a2 2 0 01-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12a2 2 0 002 2h14v-4"/><path d="M18 12a2 2 0 000 4h4v-4h-4z"/></svg></div>
+            <div class="recent-tx-info">
+              <div class="recent-tx-name">Chase Sapphire Reward</div>
+              <div class="recent-tx-date">Mar 17, 2026</div>
+            </div>
+            <div class="recent-tx-amount positive">+$125.00</div>
+          </div>
+          <div class="recent-tx-item">
+            <div class="recent-tx-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 01-8 0"/></svg></div>
+            <div class="recent-tx-info">
+              <div class="recent-tx-name">Amazon</div>
+              <div class="recent-tx-date">Mar 16, 2026</div>
+            </div>
+            <div class="recent-tx-amount">-$156.78</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ════════════════ TRANSACTIONS PAGE ════════════════ -->
+  <div class="page" id="page-transactions">
+
+    <div class="page-header">
+      <h2 class="page-title">Transactions</h2>
+    </div>
+
+    <div class="filter-bar">
+      <input class="filter-input" type="text" placeholder="Search transactions..." style="flex:1; max-width:280px;">
+      <select class="filter-select">
+        <option>All Cards</option>
+        <option>Chase Sapphire</option>
+        <option>Amex Gold</option>
+        <option>Hilton Aspire</option>
+        <option>Freedom Flex</option>
+      </select>
+      <select class="filter-select">
+        <option>All Categories</option>
+        <option>Dining</option>
+        <option>Travel</option>
+        <option>Groceries</option>
+        <option>Shopping</option>
+        <option>Entertainment</option>
+      </select>
+      <select class="filter-select">
+        <option>March 2026</option>
+        <option>February 2026</option>
+        <option>January 2026</option>
+      </select>
+    </div>
+
+    <table class="tx-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Merchant</th>
+          <th>Card</th>
+          <th>Category</th>
+          <th style="text-align:right">Amount</th>
+          <th style="text-align:right">Points</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mar 20</td>
+          <td>Blue Bottle Coffee</td>
+          <td>Sapphire *4821</td>
+          <td><span class="tx-category">Dining</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$6.50</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+19</td>
+        </tr>
+        <tr>
+          <td>Mar 19</td>
+          <td>Whole Foods Market</td>
+          <td>Amex Gold *3007</td>
+          <td><span class="tx-category">Groceries</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$84.32</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+337</td>
+        </tr>
+        <tr>
+          <td>Mar 18</td>
+          <td>Uber</td>
+          <td>Sapphire *4821</td>
+          <td><span class="tx-category">Travel</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$23.40</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+70</td>
+        </tr>
+        <tr>
+          <td>Mar 17</td>
+          <td>Delta Air Lines</td>
+          <td>Amex Gold *3007</td>
+          <td><span class="tx-category">Travel</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$412.00</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+1,236</td>
+        </tr>
+        <tr>
+          <td>Mar 16</td>
+          <td>Amazon</td>
+          <td>Freedom Flex *6340</td>
+          <td><span class="tx-category">Shopping</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$156.78</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+157</td>
+        </tr>
+        <tr>
+          <td>Mar 15</td>
+          <td>Nobu Restaurant</td>
+          <td>Sapphire *4821</td>
+          <td><span class="tx-category">Dining</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$234.50</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+703</td>
+        </tr>
+        <tr>
+          <td>Mar 14</td>
+          <td>Hilton Garden Inn</td>
+          <td>Hilton Aspire *9152</td>
+          <td><span class="tx-category">Travel</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$289.00</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+4,046</td>
+        </tr>
+        <tr>
+          <td>Mar 13</td>
+          <td>Spotify Premium</td>
+          <td>Freedom Flex *6340</td>
+          <td><span class="tx-category">Entertainment</span></td>
+          <td class="tx-amount negative" style="text-align:right">-$10.99</td>
+          <td style="text-align:right; color:var(--accent); font-weight:400;">+11</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+</main>
+
+<script>
+function switchTab(tab) {
+  // Update pages
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase() === tab);
+  });
+
+  // Update sidebar nav
+  document.querySelectorAll('.nav-item[data-nav]').forEach(item => {
+    item.classList.toggle('active', item.dataset.nav === tab);
+  });
+  // Also remove active from non-data-nav items
+  document.querySelectorAll('.nav-item:not([data-nav])').forEach(item => {
+    item.classList.remove('active');
+  });
+}
+</script>
+
+</body>
+</html>

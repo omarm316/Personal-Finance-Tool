@@ -28,3 +28,6 @@ main copy.py
 # Vite build output (built in Docker; see Dockerfile stage 1)
 static/app/
 frontend/node_modules/
+
+# Stray empty SQLite file (0 bytes); the real DB is Postgres on Railway
+finance_automation.db

@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Finance Automation — Current State Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--sidebar-w:56px;--radius:14px}
+
+[data-theme="dark"]{
+  --bg:#0c0c10;--surface:#16161c;--surface-hover:#1e1e26;--elevated:#22222c;
+  --border:rgba(255,255,255,0.06);--border-strong:rgba(255,255,255,0.1);
+  --text-primary:#e8e8ed;--text-secondary:#a0a0b0;--text-muted:#707080;
+  --gold:#d4a44a;--gold-soft:rgba(212,164,74,0.12);--gold-glow:0 0 20px rgba(212,164,74,0.15);
+  --green:#34d399;--red:#f87171;--amber:#fbbf24;--violet:#a78bfa;--violet-soft:rgba(167,139,250,0.12);
+  --sidebar-bg:#0a0a0e;--sidebar-text:#a0a0b0;--sidebar-hover-bg:rgba(255,255,255,0.04);
+  --sidebar-active-bg:rgba(212,164,74,0.1);--sidebar-active-color:#d4a44a;
+  --shadow:0 1px 3px rgba(0,0,0,0.3);--shadow-md:0 8px 24px rgba(0,0,0,0.4);
+  --card-bg:#16161c;--blue:#60a5fa;
+}
+
+[data-theme="light"]{
+  --bg:#f5f3ef;--surface:#ffffff;--surface-hover:#faf8f5;--elevated:#f0ede8;
+  --border:rgba(0,0,0,0.08);--border-strong:rgba(0,0,0,0.12);
+  --text-primary:#1a1a2e;--text-secondary:#5c5c6f;--text-muted:#9ca3af;
+  --gold:#b8860b;--gold-soft:rgba(184,134,11,0.08);--gold-glow:0 0 20px rgba(184,134,11,0.1);
+  --green:#059669;--red:#dc2626;--amber:#d97706;--violet:#7c3aed;--violet-soft:rgba(124,58,237,0.08);
+  --sidebar-bg:#f0ede8;--sidebar-text:#5c5c6f;--sidebar-hover-bg:rgba(0,0,0,0.04);
+  --sidebar-active-bg:rgba(184,134,11,0.08);--sidebar-active-color:#b8860b;
+  --shadow:0 1px 3px rgba(0,0,0,0.06);--shadow-md:0 8px 24px rgba(0,0,0,0.1);
+  --card-bg:#ffffff;--blue:#3b82f6;
+}
+
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-primary)}
+body{overflow:hidden}
+
+/* Sidebar — collapsed */
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:56px;background:var(--sidebar-bg);display:flex;flex-direction:column;z-index:100;border-right:1px solid var(--border);transition:width 0.22s ease;overflow:hidden}
+.sidebar-logo{padding:18px 0 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;min-height:72px}
+.sidebar-toggle{background:none;border:none;cursor:pointer;color:var(--sidebar-text);padding:4px;border-radius:6px;line-height:1;display:flex;align-items:center;justify-content:center}
+.sidebar-toggle:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
+.sidebar-nav{flex:1;padding:12px 6px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.nav-item{display:flex;align-items:center;justify-content:center;gap:0;padding:9px 0;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:400;color:var(--sidebar-text);transition:all 0.15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;white-space:nowrap;overflow:hidden}
+.nav-item:hover{background:var(--sidebar-hover-bg);color:var(--text-primary)}
+.nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-color);font-weight:500}
+.nav-icon{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px}
+.sidebar-footer{padding:12px 6px;border-top:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;gap:6px}
+.sidebar-footer .btn{justify-content:center;padding:7px 0;width:100%}
+
+/* Main area */
+.main{margin-left:56px;height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:margin-left 0.22s ease}
+.topbar{background:var(--surface);border-bottom:none;padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.topbar-title{font-size:15px;font-weight:500;color:var(--text-primary)}
+.topbar-right{display:flex;align-items:center;gap:10px}
+
+.quick-nav{display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:36px;flex-shrink:0}
+.quick-nav button{position:relative;border:none;cursor:pointer;background:transparent;font-family:inherit;font-size:13px;font-weight:400;color:var(--text-muted);padding:0 16px;letter-spacing:0.3px;transition:color 0.15s}
+.quick-nav button.active{color:var(--gold);font-weight:500}
+.quick-nav button::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--gold);transform:scaleX(0);transition:transform 0.2s ease}
+.quick-nav button.active::after{transform:scaleX(1)}
+
+.content{flex:1;overflow-y:auto;padding:24px 20px;background:var(--bg)}
+.content::-webkit-scrollbar{width:5px}
+.content::-webkit-scrollbar-track{background:transparent}
+.content::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:5px}
+
+/* Cards & metrics */
+.card{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow)}
+.metric-grid{display:grid;gap:12px;margin-bottom:24px}
+.metric-card{padding:18px;border-radius:14px}
+.metric-label{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px}
+.metric-value{font-size:24px;font-weight:300;font-family:'DM Sans',sans-serif;letter-spacing:-1px;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.metric-sub{font-size:11px;color:var(--text-muted);margin-top:4px;display:flex;align-items:center;gap:6px}
+
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit}
+.btn-primary{background:var(--gold);color:#0c0c10}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
+.btn-secondary{background:var(--elevated);color:var(--text-primary);border:1px solid var(--border)}
+.btn-ghost{background:transparent;color:var(--text-secondary)}
+
+.section-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+.section-title{font-size:14px;font-weight:500}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:none}
+.settings-label{font-size:14px;font-weight:500}
+.settings-desc{font-size:12px;color:var(--text-muted);margin-top:2px}
+
+table{width:100%;border-collapse:collapse}
+thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);border-bottom:1px solid var(--border-strong);white-space:nowrap;background:var(--surface);position:sticky;top:0;z-index:2}
+tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s}
+tbody tr:hover{background:var(--surface-hover)}
+td{padding:11px 14px;font-size:13px;font-weight:300;color:var(--text-primary)}
+
+.sel-drop{font-size:12px;border:1px solid var(--border);border-radius:8px;padding:4px 8px;background:var(--surface);color:var(--text-primary);cursor:pointer;height:34px;font-family:inherit}
+
+/* Page switcher at top */
+.page-switcher{display:flex;align-items:center;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:40px;flex-shrink:0}
+.page-switcher button{position:relative;border:none;cursor:pointer;background:transparent;font-family:inherit;font-size:12px;font-weight:400;color:var(--text-muted);padding:0 14px;height:100%;letter-spacing:0.3px;transition:color 0.15s}
+.page-switcher button.active{color:var(--gold);font-weight:500}
+.page-switcher button::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--gold);transform:scaleX(0);transition:transform 0.2s ease}
+.page-switcher button.active::after{transform:scaleX(1)}
+
+/* Theme toggle */
+.theme-toggle{position:fixed;bottom:20px;right:20px;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 16px;cursor:pointer;color:var(--text-secondary);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;box-shadow:var(--shadow-md);display:flex;align-items:center;gap:8px;transition:all 0.2s}
+.theme-toggle:hover{background:var(--surface-hover);border-color:var(--border-strong)}
+
+/* Toggle switch */
+.toggle-btn{min-width:56px;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;font-family:inherit}
+.toggle-on{background:var(--green);color:#fff}
+.toggle-off{background:var(--elevated);color:var(--text-muted);border:1px solid var(--border)}
+
+/* Page views */
+.page-view{display:none}
+.page-view.active{display:block}
+
+/* Bank badge */
+.bank-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--green)}
+
+/* Inner tab bar (Settings, Daily Balances) */
+.inner-tabs{display:flex;gap:24px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;width:fit-content}
+.inner-tab{padding:8px 0;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:400;letter-spacing:0.2px;background:transparent;color:var(--text-muted);transition:all 0.15s;margin-bottom:-1px;font-family:inherit}
+.inner-tab.active{color:var(--gold);font-weight:500;border-bottom-color:var(--gold)}
+
+/* Account cards grid */
+.acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+</style>
+</head>
+<body>
+
+<!-- Sidebar (collapsed) -->
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <button class="sidebar-toggle" title="Expand menu">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+  </div>
+  <nav class="sidebar-nav" id="sidebarNav">
+    <!-- Populated by JS -->
+  </nav>
+  <div class="sidebar-footer">
+    <button class="btn btn-sm btn-primary" style="justify-content:center;padding:7px 0;width:100%">+</button>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- Topbar -->
+  <div class="topbar">
+    <span class="topbar-title" id="topbarTitle">Dashboard</span>
+    <div class="topbar-right">
+      <span class="bank-badge">5 accounts connected</span>
+      <button onclick="toggleTheme()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);padding:6px 8px" title="Toggle theme" id="themeBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
+      <button style="background:none;border:1px solid var(--border);border-radius:7px;padding:5px 10px;cursor:pointer;color:var(--text-muted);font-size:15px;line-height:1">&#8635;</button>
+    </div>
+  </div>
+
+  <!-- Quick nav (for Dashboard) -->
+  <div class="quick-nav" id="quickNav">
+    <button class="active">Dashboard</button>
+    <button>Transactions</button>
+    <button>Cards</button>
+  </div>
+
+  <!-- Page switcher -->
+  <div class="page-switcher">
+    <button class="active" onclick="showPage('dashboard')">Dashboard</button>
+    <button onclick="showPage('cashflow')">Cash Flow</button>
+    <button onclick="showPage('balances')">Daily Balances</button>
+    <button onclick="showPage('loans')">Loans</button>
+    <button onclick="showPage('accounts')">Accounts</button>
+    <button onclick="showPage('settings')">Settings</button>
+  </div>
+
+  <!-- Content area -->
+  <div class="content">
+
+    <!-- ========== DASHBOARD ========== -->
+    <div class="page-view active" id="page-dashboard">
+      <div class="metric-grid" style="grid-template-columns:repeat(5,1fr)">
+        <div class="card metric-card">
+          <div class="metric-label">Net Worth</div>
+          <div class="metric-value" style="color:var(--green)">$284,520</div>
+          <div class="metric-sub"><span style="background:rgba(52,211,153,0.12);color:var(--green);border-radius:12px;padding:2px 8px;font-size:11px">+2.4%</span> vs last month</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Total Assets</div>
+          <div class="metric-value">$412,830</div>
+          <div class="metric-sub">across 5 accounts</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Total Liabilities</div>
+          <div class="metric-value" style="color:var(--red)">$128,310</div>
+          <div class="metric-sub">2 loans + 2 cards</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">This Month Income</div>
+          <div class="metric-value" style="color:var(--green)">$8,450</div>
+          <div class="metric-sub">salary + transfers</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">This Month Expenses</div>
+          <div class="metric-value" style="color:var(--red)">$5,120</div>
+          <div class="metric-sub"><span style="background:rgba(52,211,153,0.12);color:var(--green);border-radius:12px;padding:2px 8px;font-size:11px">-8%</span> vs last month</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px">
+        <!-- Spending chart placeholder -->
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="section-header">
+            <div class="section-title">Spending by Category</div>
+            <span style="font-size:12px;color:var(--text-muted)">March 2026</span>
+          </div>
+          <div style="padding:20px;display:flex;align-items:flex-end;gap:10px;height:200px">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--red);border-radius:4px 4px 0 0;height:140px;opacity:0.8"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Dining</span>
+              <span style="font-size:10px;color:var(--red);font-weight:500">$1,240</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--amber);border-radius:4px 4px 0 0;height:105px;opacity:0.8"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Groceries</span>
+              <span style="font-size:10px;color:var(--amber);font-weight:500">$890</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--blue);border-radius:4px 4px 0 0;height:85px;opacity:0.8"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Transport</span>
+              <span style="font-size:10px;color:var(--blue);font-weight:500">$680</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--violet);border-radius:4px 4px 0 0;height:65px;opacity:0.8"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Shopping</span>
+              <span style="font-size:10px;color:var(--violet);font-weight:500">$520</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--green);border-radius:4px 4px 0 0;height:50px;opacity:0.8"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Utilities</span>
+              <span style="font-size:10px;color:var(--green);font-weight:500">$380</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:100%;background:var(--text-muted);border-radius:4px 4px 0 0;height:55px;opacity:0.5"></div>
+              <span style="font-size:10px;color:var(--text-muted)">Other</span>
+              <span style="font-size:10px;color:var(--text-muted);font-weight:500">$410</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent transactions -->
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="section-header">
+            <div class="section-title">Recent Transactions</div>
+          </div>
+          <div style="padding:0">
+            <div style="display:flex;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:13px;font-weight:400">Whole Foods Market</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mar 22 · Groceries</div>
+              </div>
+              <div style="font-size:13px;font-weight:500;color:var(--red)">$86.42</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:13px;font-weight:400">Uber Eats</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mar 21 · Dining</div>
+              </div>
+              <div style="font-size:13px;font-weight:500;color:var(--red)">$34.18</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:13px;font-weight:400">Direct Deposit</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mar 20 · Income</div>
+              </div>
+              <div style="font-size:13px;font-weight:500;color:var(--green)">$4,225.00</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:13px;font-weight:400">Amazon.com</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mar 19 · Shopping</div>
+              </div>
+              <div style="font-size:13px;font-weight:500;color:var(--red)">$52.99</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:10px 18px">
+              <div>
+                <div style="font-size:13px;font-weight:400">Shell Gas Station</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mar 18 · Transport</div>
+              </div>
+              <div style="font-size:13px;font-weight:500;color:var(--red)">$48.30</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== CASH FLOW ========== -->
+    <div class="page-view" id="page-cashflow">
+      <h2 style="font-size:20px;font-weight:400;letter-spacing:-0.3px;margin-bottom:24px">Cash Flow & Forecasting</h2>
+
+      <!-- KPI strip -->
+      <div class="metric-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="card metric-card">
+          <div class="metric-label">Upcoming Income</div>
+          <div class="metric-value" style="color:var(--green)">+$12,675</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted);font-weight:300">salary + one-time</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Upcoming Outflows</div>
+          <div class="metric-value" style="color:var(--red)">($4,890)</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted);font-weight:300">bills & payments</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Net Cash Flow</div>
+          <div class="metric-value" style="color:var(--gold)">+$7,785</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted);font-weight:300">income - outflows</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Next Pay Date</div>
+          <div class="metric-value" style="font-size:18px;font-family:'DM Sans'">2026-04-01</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted);font-weight:300">+$4,225.00 · Omer</span></div>
+        </div>
+      </div>
+
+      <!-- 6-month bar chart -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px">Monthly Cash Flow — Last 6 Months</div>
+        <div style="display:flex;align-items:flex-end;gap:8px;height:160px;padding-bottom:24px;position:relative">
+          <!-- Grid lines -->
+          <div style="position:absolute;left:0;right:0;bottom:58px;height:1px;background:var(--border)"></div>
+          <div style="position:absolute;left:0;right:0;bottom:92px;height:1px;background:var(--border)"></div>
+          <div style="position:absolute;left:0;right:0;bottom:126px;height:1px;background:var(--border)"></div>
+
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div title="Income: $7,200" style="width:38%;max-width:28px;height:80px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div title="Expenses: $6,100" style="width:38%;max-width:28px;height:68px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Oct</div>
+            <div style="font-size:9px;color:var(--green);font-weight:500;font-family:'DM Sans'">+$1,100</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div style="width:38%;max-width:28px;height:90px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div style="width:38%;max-width:28px;height:75px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Nov</div>
+            <div style="font-size:9px;color:var(--green);font-weight:500;font-family:'DM Sans'">+$1,650</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div style="width:38%;max-width:28px;height:85px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div style="width:38%;max-width:28px;height:100px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Dec</div>
+            <div style="font-size:9px;color:var(--red);font-weight:500;font-family:'DM Sans'">($820)</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div style="width:38%;max-width:28px;height:95px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div style="width:38%;max-width:28px;height:72px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Jan</div>
+            <div style="font-size:9px;color:var(--green);font-weight:500;font-family:'DM Sans'">+$2,430</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div style="width:38%;max-width:28px;height:100px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div style="width:38%;max-width:28px;height:65px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Feb</div>
+            <div style="font-size:9px;color:var(--green);font-weight:500;font-family:'DM Sans'">+$3,100</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;position:relative">
+            <div style="display:flex;gap:3;align-items:flex-end;flex:1;width:100%;justify-content:center">
+              <div style="width:38%;max-width:28px;height:110px;background:var(--green);border-radius:4px 4px 0 0;opacity:0.85"></div>
+              <div style="width:38%;max-width:28px;height:60px;background:var(--red);border-radius:4px 4px 0 0;opacity:0.85"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-weight:400">Mar</div>
+            <div style="font-size:9px;color:var(--green);font-weight:500;font-family:'DM Sans'">+$3,330</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:20px;justify-content:center;margin-top:8px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)"><div style="width:10px;height:10px;border-radius:2px;background:var(--green);opacity:0.85"></div> Income</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)"><div style="width:10px;height:10px;border-radius:2px;background:var(--red);opacity:0.85"></div> Expenses</div>
+        </div>
+      </div>
+
+      <!-- Breakdown cards -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <!-- Range toggle -->
+        <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px">Breakdown</div>
+          <div style="display:flex;gap:2px;background:var(--elevated);border-radius:8px;padding:2px;border:1px solid var(--border)">
+            <button style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:11px;font-weight:500;background:var(--gold);color:#0c0c10;font-family:inherit">This Month</button>
+            <button style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:11px;font-weight:400;background:transparent;color:var(--text-muted);font-family:inherit">Last 30 Days</button>
+            <button style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:11px;font-weight:400;background:transparent;color:var(--text-muted);font-family:inherit">Next 30 Days</button>
+          </div>
+        </div>
+
+        <!-- Income Sources -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px">
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">Income Sources</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:400;color:var(--text-primary)">Salary / Income</span>
+                <span style="font-size:12px;font-weight:400;font-family:'DM Sans';color:var(--green)">+$8,450.00</span>
+              </div>
+              <div style="height:6px;background:var(--elevated);border-radius:3px;overflow:hidden"><div style="height:100%;width:100%;background:var(--green);border-radius:3px;opacity:0.7"></div></div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:8px;display:flex;justify-content:space-between;font-size:13px;font-weight:500">
+              <span style="color:var(--text-muted)">Total</span>
+              <span style="color:var(--green);font-family:'DM Sans'">+$8,450.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Expenses -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px">
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">Top Expenses</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:400">Dining</span>
+                <span style="font-size:12px;font-family:'DM Sans';color:var(--red)">$1,240.00</span>
+              </div>
+              <div style="height:6px;background:var(--elevated);border-radius:3px;overflow:hidden"><div style="height:100%;width:100%;background:var(--red);border-radius:3px;opacity:0.7"></div></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:400">Groceries</span>
+                <span style="font-size:12px;font-family:'DM Sans';color:var(--red)">$890.00</span>
+              </div>
+              <div style="height:6px;background:var(--elevated);border-radius:3px;overflow:hidden"><div style="height:100%;width:72%;background:var(--red);border-radius:3px;opacity:0.7"></div></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:400">Transport</span>
+                <span style="font-size:12px;font-family:'DM Sans';color:var(--red)">$680.00</span>
+              </div>
+              <div style="height:6px;background:var(--elevated);border-radius:3px;overflow:hidden"><div style="height:100%;width:55%;background:var(--red);border-radius:3px;opacity:0.7"></div></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+                <span style="font-size:12px;font-weight:400">Shopping</span>
+                <span style="font-size:12px;font-family:'DM Sans';color:var(--red)">$520.00</span>
+              </div>
+              <div style="height:6px;background:var(--elevated);border-radius:3px;overflow:hidden"><div style="height:100%;width:42%;background:var(--red);border-radius:3px;opacity:0.7"></div></div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:8px;display:flex;justify-content:space-between;font-size:13px;font-weight:500">
+              <span style="color:var(--text-muted)">Total</span>
+              <span style="color:var(--red);font-family:'DM Sans'">$5,120.00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Predicted Cash Flows divider -->
+      <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;margin-top:8px">Predicted Cash Flows</div>
+
+      <!-- Predicted KPI strip -->
+      <div class="metric-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
+        <div class="card metric-card">
+          <div class="metric-label">Salary Entries</div>
+          <div class="metric-value">4</div>
+          <div class="metric-sub">next 30 days</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Cash Flow Overlays</div>
+          <div class="metric-value">7</div>
+          <div class="metric-sub">manual + auto-generated</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Net Predicted</div>
+          <div class="metric-value" style="color:var(--green)">+$7,785</div>
+          <div class="metric-sub">income - outflows</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== DAILY BALANCES ========== -->
+    <div class="page-view" id="page-balances">
+      <!-- Inner tabs -->
+      <div class="inner-tabs">
+        <button class="inner-tab active">Daily Balances</button>
+        <button class="inner-tab">Reconciliation</button>
+      </div>
+
+      <!-- Toolbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div>
+          <h2 style="font-size:20px;font-weight:400;letter-spacing:-0.3px">Daily Balances</h2>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:3px;font-weight:300">31 days · end-of-day · <i>italic = projected</i> · <span style="color:var(--amber)">&#9672;</span> = click for detail</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="sel-drop" style="font-size:11px;padding:4px 8px;height:30px">
+            <option>All Accounts</option>
+            <option>Chase Checking</option>
+            <option>Chase Savings</option>
+            <option>Amex Gold</option>
+            <option>Vanguard 401k</option>
+          </select>
+          <div style="display:flex;gap:16px">
+            <button class="inner-tab active" style="padding:4px 0;font-size:11px;margin-bottom:0">This Month</button>
+            <button class="inner-tab" style="padding:4px 0;font-size:11px;margin-bottom:0">This Quarter</button>
+            <button class="inner-tab" style="padding:4px 0;font-size:11px;margin-bottom:0">Custom</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI strip -->
+      <div class="metric-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+        <div class="card metric-card">
+          <div class="metric-label">Net Worth — Today</div>
+          <div class="metric-value" style="color:var(--green)">$284,520</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted)">2026-03-23</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Start of Period</div>
+          <div class="metric-value" style="color:var(--green)">$279,100</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted)">2026-03-01</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Period Change</div>
+          <div class="metric-value" style="color:var(--green)">+$5,420</div>
+          <div class="metric-sub"><span style="background:rgba(52,211,153,0.12);color:var(--green);border-radius:12px;padding:2px 8px;font-size:11px;font-weight:400">+1.9%</span></div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">Period High</div>
+          <div class="metric-value" style="color:var(--green)">$286,200</div>
+          <div class="metric-sub"><span style="font-size:11px;color:var(--text-muted)">actual high in range</span></div>
+        </div>
+      </div>
+
+      <!-- Balance grid table -->
+      <div style="overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);max-height:380px;overflow-y:auto">
+        <table style="border-collapse:collapse;font-size:12px;width:100%">
+          <thead style="position:sticky;top:0;z-index:10">
+            <tr>
+              <th rowspan="2" style="position:sticky;left:0;z-index:12;background:var(--surface);padding:8px 12px;text-align:left;font-size:11px;font-weight:400;border-bottom:2px solid var(--border);border-right:2px solid var(--border);white-space:nowrap;min-width:70;color:var(--text-muted)">Date</th>
+              <th colspan="3" style="padding:6px 10px;text-align:center;font-size:10px;font-weight:400;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);border-left:2px solid var(--border);background:rgba(52,211,153,0.08);cursor:pointer;white-space:nowrap">Checking & Savings &#9660;</th>
+              <th colspan="2" style="padding:6px 10px;text-align:center;font-size:10px;font-weight:400;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);border-left:2px solid var(--border);background:rgba(96,165,250,0.08);cursor:pointer;white-space:nowrap">Investments &#9660;</th>
+              <th colspan="2" style="padding:6px 10px;text-align:center;font-size:10px;font-weight:400;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);border-left:2px solid var(--border);background:rgba(251,191,36,0.08);cursor:pointer;white-space:nowrap">Credit Cards &#9660;</th>
+              <th rowspan="2" style="padding:6px 10px;text-align:right;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid var(--border);border-left:3px solid var(--gold);background:var(--gold-soft);white-space:nowrap;color:var(--gold);min-width:100px">Grand Total</th>
+            </tr>
+            <tr style="background:var(--surface)">
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:2px solid var(--border);background:rgba(52,211,153,0.08);white-space:nowrap;color:var(--text-secondary)">Total</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Chase Checking</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Chase Savings</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:2px solid var(--border);background:rgba(96,165,250,0.08);white-space:nowrap;color:var(--text-secondary)">Total</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Vanguard 401k</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:2px solid var(--border);background:rgba(251,191,36,0.08);white-space:nowrap;color:var(--text-secondary)">Total</th>
+              <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:400;border-bottom:2px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Amex Gold</th>
+            </tr>
+          </thead>
+          <tbody id="balanceTableBody">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== LOANS ========== -->
+    <div class="page-view" id="page-loans">
+      <!-- KPI strip -->
+      <div class="metric-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px">
+          <div class="metric-label">Total Principal</div>
+          <div class="metric-value">$485,000</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px">
+          <div class="metric-label">Total Balance</div>
+          <div class="metric-value" style="color:var(--red)">$362,140</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px">
+          <div class="metric-label">Monthly Payments</div>
+          <div class="metric-value">$2,847</div>
+        </div>
+      </div>
+
+      <!-- Payoff Timeline chart -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px">Payoff Timeline</div>
+
+        <!-- Year markers -->
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;padding:0 120px 0 0">
+          <span style="font-size:10px;color:var(--text-muted)">2026</span>
+          <span style="font-size:10px;color:var(--text-muted)">2030</span>
+          <span style="font-size:10px;color:var(--text-muted)">2035</span>
+          <span style="font-size:10px;color:var(--text-muted)">2040</span>
+          <span style="font-size:10px;color:var(--text-muted)">2045</span>
+          <span style="font-size:10px;color:var(--text-muted)">2050</span>
+          <span style="font-size:10px;color:var(--text-muted)">2055</span>
+        </div>
+
+        <!-- Mortgage bar -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="width:120px;text-align:right;font-size:12px;font-weight:400;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Home Mortgage</div>
+          <div style="flex:1;height:24px;background:var(--elevated);border-radius:6px;overflow:hidden;position:relative">
+            <div style="height:100%;width:90%;background:linear-gradient(90deg,rgba(248,113,113,0.3),rgba(248,113,113,0.6));border-radius:6px;display:flex;align-items:center;padding-left:8px">
+              <span style="font-size:10px;font-weight:500;color:var(--red)">$340,000 · 6.25% · 28yr left</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto loan bar -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="width:120px;text-align:right;font-size:12px;font-weight:400;color:var(--text-primary);white-space:nowrap">Auto Loan</div>
+          <div style="flex:1;height:24px;background:var(--elevated);border-radius:6px;overflow:hidden;position:relative">
+            <div style="height:100%;width:18%;background:linear-gradient(90deg,rgba(251,191,36,0.3),rgba(251,191,36,0.6));border-radius:6px;display:flex;align-items:center;padding-left:8px">
+              <span style="font-size:10px;font-weight:500;color:var(--amber)">$22,140 · 4.9%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loans table -->
+      <div class="card" style="overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Lender</th>
+                <th>Type</th>
+                <th>Principal</th>
+                <th>Balance</th>
+                <th>Rate</th>
+                <th>Monthly</th>
+                <th>Remaining</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:400">Wells Fargo</td>
+                <td><span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(248,113,113,0.1);color:var(--red)">Mortgage</span></td>
+                <td style="font-family:'DM Sans';font-size:13px">$420,000</td>
+                <td style="font-family:'DM Sans';font-size:13px;color:var(--red)">$340,000</td>
+                <td style="font-family:'DM Sans';font-size:13px">6.25%</td>
+                <td style="font-family:'DM Sans';font-size:13px">$2,385</td>
+                <td style="font-size:12px;color:var(--text-muted)">336 mo</td>
+                <td><button class="btn btn-sm btn-secondary" style="font-size:11px">Link Payment</button></td>
+              </tr>
+              <tr>
+                <td style="font-weight:400">Chase Auto</td>
+                <td><span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(251,191,36,0.1);color:var(--amber)">Auto</span></td>
+                <td style="font-family:'DM Sans';font-size:13px">$65,000</td>
+                <td style="font-family:'DM Sans';font-size:13px;color:var(--red)">$22,140</td>
+                <td style="font-family:'DM Sans';font-size:13px">4.90%</td>
+                <td style="font-family:'DM Sans';font-size:13px">$462</td>
+                <td style="font-size:12px;color:var(--text-muted)">48 mo</td>
+                <td><button class="btn btn-sm btn-secondary" style="font-size:11px">Link Payment</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== ACCOUNTS ========== -->
+    <div class="page-view" id="page-accounts">
+      <!-- Summary KPIs -->
+      <div class="metric-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="card metric-card"><div class="metric-label">Total Accounts</div><div class="metric-value">7</div></div>
+        <div class="card metric-card"><div class="metric-label">Total Assets</div><div class="metric-value" style="color:var(--green)">$412,830</div></div>
+        <div class="card metric-card"><div class="metric-label">Total Liabilities</div><div class="metric-value" style="color:var(--red)">$128,310</div></div>
+        <div class="card metric-card"><div class="metric-label">Net Worth</div><div class="metric-value" style="color:var(--gold)">$284,520</div></div>
+      </div>
+
+      <!-- Plaid Accounts -->
+      <div style="margin-bottom:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px">Plaid Accounts (5)</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-secondary">&#8635; Sync All</button>
+            <button class="btn btn-sm btn-primary">+ Connect Bank</button>
+          </div>
+        </div>
+        <div class="acct-grid">
+          <!-- Account Card 1 -->
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:#0060f0"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Chase Checking</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                  <div style="font-family:'DM Sans';font-size:16px;font-weight:400">$15,420.33</div>
+                  <div style="font-size:10px;color:var(--text-muted);margin-top:1px">342 txns</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.1);color:var(--green)">Checking</span>
+                <span style="font-size:10px;font-weight:400;padding:2px 8px;border-radius:10px;background:var(--elevated);color:var(--text-muted)">····4892</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.10);color:var(--green)">&#9679; Plaid</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" style="font-size:11px">Edit</button>
+                <button class="btn btn-sm" style="background:rgba(96,165,250,0.08);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);font-size:11px">Merge</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Card 2 -->
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:#0060f0"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Chase Savings</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                  <div style="font-family:'DM Sans';font-size:16px;font-weight:400">$42,800.00</div>
+                  <div style="font-size:10px;color:var(--text-muted);margin-top:1px">28 txns</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.1);color:var(--green)">Savings</span>
+                <span style="font-size:10px;font-weight:400;padding:2px 8px;border-radius:10px;background:var(--elevated);color:var(--text-muted)">····7731</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.10);color:var(--green)">&#9679; Plaid</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" style="font-size:11px">Edit</button>
+                <button class="btn btn-sm" style="background:rgba(96,165,250,0.08);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);font-size:11px">Merge</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Card 3 -->
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:#006fcf"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Amex Gold</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                  <div style="font-family:'DM Sans';font-size:16px;font-weight:400;color:var(--red)">($3,218.45)</div>
+                  <div style="font-size:10px;color:var(--text-muted);margin-top:1px">186 txns</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(251,191,36,0.1);color:var(--amber)">Credit Card</span>
+                <span style="font-size:10px;font-weight:400;padding:2px 8px;border-radius:10px;background:var(--elevated);color:var(--text-muted)">····1008</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.10);color:var(--green)">&#9679; Plaid</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" style="font-size:11px">Edit</button>
+                <button class="btn btn-sm" style="background:rgba(96,165,250,0.08);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);font-size:11px">Merge</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Card 4 -->
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:#c41230"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Vanguard 401k</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                  <div style="font-family:'DM Sans';font-size:16px;font-weight:400">$198,640.00</div>
+                  <div style="font-size:10px;color:var(--text-muted);margin-top:1px">48 txns</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(96,165,250,0.1);color:var(--blue)">Investment</span>
+                <span style="font-size:10px;font-weight:400;padding:2px 8px;border-radius:10px;background:var(--elevated);color:var(--text-muted)">····5501</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.10);color:var(--green)">&#9679; Plaid</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" style="font-size:11px">Edit</button>
+                <button class="btn btn-sm" style="background:rgba(96,165,250,0.08);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);font-size:11px">Merge</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Card 5 -->
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:#1a8754"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:500;color:var(--text-primary)">Fidelity HSA</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                  <div style="font-family:'DM Sans';font-size:16px;font-weight:400">$8,750.00</div>
+                  <div style="font-size:10px;color:var(--text-muted);margin-top:1px">12 txns</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.1);color:var(--green)">HSA</span>
+                <span style="font-size:10px;font-weight:400;padding:2px 8px;border-radius:10px;background:var(--elevated);color:var(--text-muted)">····3320</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(52,211,153,0.10);color:var(--green)">&#9679; Plaid</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-secondary" style="font-size:11px">Edit</button>
+                <button class="btn btn-sm" style="background:rgba(96,165,250,0.08);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);font-size:11px">Merge</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual Accounts -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px">Manual Accounts (2)</div>
+          <button class="btn btn-sm btn-primary">+ Manual Account</button>
+        </div>
+        <div class="acct-grid">
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:var(--violet)"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div><div style="font-size:14px;font-weight:500;color:var(--text-primary)">Home Value</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic">Zillow estimate</div></div>
+                <div style="text-align:right"><div style="font-family:'DM Sans';font-size:16px;font-weight:400">$580,000</div></div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(139,92,246,0.1);color:var(--violet)">Other Asset</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:var(--gold-soft);color:var(--gold)">Manual</span>
+              </div>
+            </div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="height:4px;background:var(--amber)"></div>
+            <div style="padding:16px 18px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div><div style="font-size:14px;font-weight:500;color:var(--text-primary)">Car Value</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic">KBB estimate</div></div>
+                <div style="text-align:right"><div style="font-family:'DM Sans';font-size:16px;font-weight:400">$32,500</div></div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(251,191,36,0.1);color:var(--amber)">Other Asset</span>
+                <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:var(--gold-soft);color:var(--gold)">Manual</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SETTINGS ========== -->
+    <div class="page-view" id="page-settings">
+      <!-- Inner tabs -->
+      <div class="inner-tabs">
+        <button class="inner-tab active">Preferences</button>
+        <button class="inner-tab">Data Management</button>
+        <button class="inner-tab">Rules</button>
+        <button class="inner-tab">Bank Links</button>
+        <button class="inner-tab">About</button>
+      </div>
+
+      <!-- Display section -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header"><div class="section-title">Display</div></div>
+        <div class="settings-row">
+          <div><div class="settings-label">Currency</div><div class="settings-desc">Currency symbol used throughout the app</div></div>
+          <select class="sel-drop" style="width:120px">
+            <option>$ USD</option>
+            <option>&#8364; EUR</option>
+            <option>&#163; GBP</option>
+            <option>&#8362; ILS</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-label">Date Format</div><div class="settings-desc">How dates are displayed in tables and charts</div></div>
+          <select class="sel-drop" style="width:140px">
+            <option>MM/DD/YYYY</option>
+            <option>DD/MM/YYYY</option>
+            <option>YYYY-MM-DD</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-label">Number Format</div><div class="settings-desc">How amounts are formatted (thousands separator)</div></div>
+          <select class="sel-drop" style="width:140px">
+            <option>1,234.56</option>
+            <option>1.234,56</option>
+            <option>1 234.56</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Behavior section -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header"><div class="section-title">Behavior</div></div>
+        <div class="settings-row">
+          <div><div class="settings-label">Default Transaction View</div><div class="settings-desc">Which month loads first on the Transactions page</div></div>
+          <select class="sel-drop" style="width:140px">
+            <option>Current Month</option>
+            <option>Previous Month</option>
+            <option>All Time</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-label">Compact Tables</div><div class="settings-desc">Reduce row height in transaction and balance tables</div></div>
+          <button class="toggle-btn toggle-off">Off</button>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-label">Show Cents</div><div class="settings-desc">Display decimal places in amounts (e.g. $1,234.56 vs $1,235)</div></div>
+          <button class="toggle-btn toggle-on">On</button>
+        </div>
+      </div>
+
+      <!-- Data section -->
+      <div class="card">
+        <div class="section-header"><div class="section-title">Data</div></div>
+        <div class="settings-row">
+          <div><div class="settings-label">Export All Transactions</div><div class="settings-desc">Download a CSV file of all transactions for external analysis</div></div>
+          <button class="btn btn-sm btn-secondary">&#8595; Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- Theme toggle button -->
+<button class="theme-toggle" onclick="toggleTheme()">
+  <span id="themeIcon">&#9789;</span>
+  <span id="themeLabel">Toggle Theme</span>
+</button>
+
+<script>
+// Sidebar nav icons (collapsed, just show icons)
+const sidebarItems = [
+  {id:'dashboard', icon:'&#8962;', label:'Dashboard'},
+  {id:'transactions', icon:'&#8693;', label:'Transactions'},
+  {id:'budgets', icon:'&#9678;', label:'Budgets'},
+  {id:'networth', icon:'&#8599;', label:'Net Worth'},
+  {id:'cashflow', icon:'&#9783;', label:'Daily Balances'},
+  {id:'cashplanner', icon:'&#128181;', label:'Cash Flow'},
+  {id:'loans', icon:'&#127970;', label:'Loans'},
+  {id:'gcb', icon:'&#9734;', label:'GCB'},
+  {id:'cards', icon:'&#128179;', label:'Cards'},
+  {id:'accounts', icon:'&#128091;', label:'Accounts'},
+  {id:'settings', icon:'&#9881;', label:'Settings'},
+];
+
+let activeSidebarItem = 'dashboard';
+const sidebarNav = document.getElementById('sidebarNav');
+
+function renderSidebar() {
+  sidebarNav.innerHTML = sidebarItems.map(n =>
+    `<button class="nav-item ${n.id === activeSidebarItem ? 'active' : ''}" title="${n.label}" onclick="setSidebarActive('${n.id}')">
+      <span class="nav-icon">${n.icon}</span>
+    </button>`
+  ).join('');
+}
+
+function setSidebarActive(id) {
+  activeSidebarItem = id;
+  renderSidebar();
+  // Map sidebar items to page views
+  const pageMap = {
+    dashboard: 'dashboard',
+    cashplanner: 'cashflow',
+    cashflow: 'balances',
+    loans: 'loans',
+    accounts: 'accounts',
+    settings: 'settings',
+  };
+  if (pageMap[id]) showPage(pageMap[id]);
+}
+
+renderSidebar();
+
+// Page switching
+const pages = ['dashboard','cashflow','balances','loans','accounts','settings'];
+const pageTitles = {
+  dashboard: 'Dashboard',
+  cashflow: 'Cash Flow',
+  balances: 'Daily Balances',
+  loans: 'Loans',
+  accounts: 'Accounts',
+  settings: 'Settings',
+};
+
+function showPage(pageId) {
+  pages.forEach(p => {
+    document.getElementById('page-' + p).classList.toggle('active', p === pageId);
+  });
+  // Update page switcher buttons
+  document.querySelectorAll('.page-switcher button').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.trim().toLowerCase().replace(/\s+/g, '') === pageId.replace(/\s+/g, ''));
+  });
+  // Fix: explicit matching
+  const switcher = document.querySelector('.page-switcher');
+  const buttons = switcher.querySelectorAll('button');
+  buttons.forEach(btn => btn.classList.remove('active'));
+  const nameMap = {dashboard:0,cashflow:1,balances:2,loans:3,accounts:4,settings:5};
+  if (nameMap[pageId] !== undefined) buttons[nameMap[pageId]].classList.add('active');
+
+  document.getElementById('topbarTitle').textContent = pageTitles[pageId] || pageId;
+
+  // Show/hide quick nav only for dashboard
+  document.getElementById('quickNav').style.display = pageId === 'dashboard' ? 'flex' : 'none';
+
+  // Update sidebar active
+  const sideMap = {dashboard:'dashboard',cashflow:'cashplanner',balances:'cashflow',loans:'loans',accounts:'accounts',settings:'settings'};
+  activeSidebarItem = sideMap[pageId] || 'dashboard';
+  renderSidebar();
+}
+
+// Theme toggle
+function toggleTheme() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  document.getElementById('themeIcon').innerHTML = isDark ? '&#9728;' : '&#9789;';
+  document.getElementById('themeBtn').innerHTML = isDark
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+}
+
+// Populate balance table with sample data
+(function() {
+  const tbody = document.getElementById('balanceTableBody');
+  const baseData = {
+    chaseChecking: 15420, chaseSavings: 42800, vanguard: 198640, amex: -3218
+  };
+  const today = 23;
+  let rows = '';
+
+  for (let d = 1; d <= 31; d++) {
+    const dateStr = `2026-03-${String(d).padStart(2, '0')}`;
+    const isToday = d === today;
+    const isFuture = d > today;
+
+    // Simulate daily fluctuations
+    const offset = (d - 1) * 120 + Math.sin(d) * 500;
+    const cc = baseData.chaseChecking + offset - d * 80;
+    const cs = baseData.chaseSavings + (d > 15 ? 200 : 0);
+    const vg = baseData.vanguard + d * 180;
+    const ax = baseData.amex - d * 40;
+    const csTotal = cc + cs;
+    const invTotal = vg;
+    const ccTotal = ax;
+    const grand = csTotal + invTotal + Math.abs(ccTotal) + ccTotal; // net
+
+    const rowBg = isToday ? 'var(--gold-soft)' : isFuture ? 'var(--elevated)' : 'transparent';
+    const fontStyle = isFuture ? 'italic' : 'normal';
+    const fmt = (v) => {
+      const abs = Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      return v < 0 ? `(${abs})` : abs;
+    };
+
+    const grandVal = csTotal + invTotal + ccTotal;
+
+    if (d > 28) continue; // Keep table reasonable
+
+    rows += `<tr style="background:${rowBg}">
+      <td style="position:sticky;left:0;z-index:1;background:${isToday ? 'var(--gold-soft)' : isFuture ? 'var(--elevated)' : 'var(--surface)'};padding:6px 12px;border-right:2px solid var(--border);font-size:11px;font-weight:${isToday?500:300};color:${isToday?'var(--gold)':'var(--text-primary)'};white-space:nowrap">${dateStr}${isToday?' &#9679;':''}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:2px solid var(--border);font-style:${fontStyle};color:var(--green)">${fmt(csTotal)}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:1px solid var(--border);font-style:${fontStyle}">${fmt(cc)}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:1px solid var(--border);font-style:${fontStyle}">${fmt(cs)}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:2px solid var(--border);font-style:${fontStyle};color:var(--blue)">${fmt(invTotal)}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:1px solid var(--border);font-style:${fontStyle}">${fmt(vg)}</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:2px solid var(--border);font-style:${fontStyle};color:var(--red)">(${fmt(Math.abs(ax))})</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:300;padding:6px 8px;border-left:1px solid var(--border);font-style:${fontStyle};color:var(--red)">(${fmt(Math.abs(ax))})</td>
+      <td style="text-align:right;font-family:'DM Sans';font-size:11px;font-weight:500;padding:6px 8px;border-left:3px solid var(--gold);color:${grandVal>=0?'var(--gold)':'var(--red)'}">${fmt(grandVal)}</td>
+    </tr>`;
+  }
+  tbody.innerHTML = rows;
+})();
+
+// Initialize
+showPage('dashboard');
+</script>
+
+</body>
+</html>

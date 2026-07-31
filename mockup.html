@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Moresheth | Premium Glassy Blue Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --blue-primary: #2563EB;
+  --blue-vibrant: #3B82F6;
+  --blue-soft: #60A5FA;
+  --blue-neon: #38BDF8;
+  --green-glow: #10B981;
+  --red-glow: #EF4444;
+  --sidebar-w: 240px;
+  --glass-blur: blur(20px);
+}
+
+[data-theme="light"] {
+  --bg: #F0F4F8;
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-hover: rgba(255, 255, 255, 0.75);
+  --border: rgba(255, 255, 255, 0.4);
+  --border-strong: rgba(255, 255, 255, 0.6);
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  --card-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  --accent-gradient: linear-gradient(135deg, #2563EB, #60A5FA);
+}
+
+[data-theme="dark"] {
+  --bg: #020617;
+  --surface: rgba(15, 23, 42, 0.4);
+  --surface-hover: rgba(15, 23, 42, 0.6);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --accent-gradient: linear-gradient(135deg, #38BDF8, #60A5FA);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  transition: background-color 0.4s ease;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(37, 99, 235, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.05) 0%, transparent 40%);
+}
+
+h1, h2, h3, .logo-text { font-family: 'Outfit', sans-serif; font-weight: 600; }
+
+.app-container { display: flex; min-height: 100vh; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--border);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 48px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: var(--accent-gradient);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);
+}
+
+.logo-text { font-size: 20px; letter-spacing: -0.5px; }
+
+.nav-list { list-style: none; flex: 1; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  margin-bottom: 4px;
+}
+
+.nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--blue-primary);
+  transform: translateX(4px);
+}
+
+.nav-item.active {
+  background: var(--blue-primary);
+  color: white;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+/* ── Main Content ── */
+.main-content {
+  flex: 1;
+  padding: 40px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 40px;
+}
+
+.theme-toggle {
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  padding: 10px 20px;
+  border-radius: 20px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover { transform: scale(1.05); border-color: var(--blue-primary); }
+
+/* ── Glassy Cards ── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.card {
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: var(--card-shadow);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  border-color: var(--blue-soft);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.15);
+}
+
+.card-title {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.card-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.trend-up { color: var(--green-glow); font-size: 13px; font-weight: 600; }
+.trend-down { color: var(--red-glow); font-size: 13px; font-weight: 600; }
+
+/* ── Table ── */
+.table-card { padding: 0; overflow: hidden; }
+.table-header {
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: 16px 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+td {
+  padding: 18px 24px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface-hover); }
+
+.amount-cell { font-family: 'Outfit', sans-serif; font-weight: 600; text-align: right; }
+
+/* ── Buttons ── */
+.btn {
+  background: var(--accent-gradient);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Outfit', sans-serif;
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.2);
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+  filter: brightness(1.1);
+}
+
+</style>
+</head>
+<body>
+
+<div class="app-container">
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">M</div>
+      <span class="logo-text">Moresheth</span>
+    </div>
+    
+    <nav class="nav-list">
+      <a href="#" class="nav-item active">Dashboard</a>
+      <a href="#" class="nav-item">Transactions</a>
+      <a href="#" class="nav-item">Budgets</a>
+      <a href="#" class="nav-item">Forecast</a>
+      <a href="#" class="nav-item">Accounts</a>
+      <a href="#" class="nav-item">Settings</a>
+    </nav>
+    
+    <div class="sidebar-footer">
+      <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">CONNECTED BANK</div>
+      <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
+        <div style="width:8px; height:8px; border-radius:50%; background:var(--green-glow);"></div>
+        Chase Bank
+      </div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="header">
+      <div>
+        <h1 style="font-size: 28px;">Good morning, Omer</h1>
+        <p style="color: var(--text-secondary); font-size: 14px;">Here is your financial status today.</p>
+      </div>
+      <button class="theme-toggle" id="themeToggle">
+        <span id="themeIcon">☀️</span>
+        <span id="themeText">Light Mode</span>
+      </button>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">Total Balance</div>
+        <div class="card-value">$42,520.00</div>
+        <div class="trend-up" style="margin-top: 8px;">↑ 2.4% from last month</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Monthly Spending</div>
+        <div class="card-value">$3,842.15</div>
+        <div class="trend-down" style="margin-top: 8px;">↓ $120.00 vs. budget</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Liquidity Score</div>
+        <div class="card-value">98/100</div>
+        <div style="margin-top: 8px; font-size: 13px; color: var(--blue-neon);">Optimal health</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 32px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <h2 style="font-size: 18px;">Liquidity Forecast</h2>
+        <button class="btn">+ Planned Purchase</button>
+      </div>
+      <div style="display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px;">
+        <!-- Forecast Pills -->
+        <div style="min-width: 100px; padding: 16px; background: rgba(37, 99, 235, 0.1); border: 1px solid var(--blue-primary); border-radius: 16px; text-align: center;">
+          <div style="font-size: 11px; color: var(--blue-primary); font-weight: 700;">MAY 24</div>
+          <div style="font-size: 16px; font-weight: 600; margin-top: 4px;">$10,525</div>
+        </div>
+        <div style="min-width: 100px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted);">MAY 25</div>
+          <div style="font-size: 16px; font-weight: 600; margin-top: 4px;">$10,525</div>
+        </div>
+        <div style="min-width: 100px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted);">MAY 26</div>
+          <div style="font-size: 16px; font-weight: 600; margin-top: 4px;">$10,525</div>
+        </div>
+        <div style="min-width: 100px; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red-glow); border-radius: 16px; text-align: center;">
+          <div style="font-size: 11px; color: var(--red-glow); font-weight: 700;">JUN 05</div>
+          <div style="font-size: 16px; font-weight: 600; margin-top: 4px;">$180</div>
+          <div style="font-size: 9px; font-weight: 800; margin-top: 2px;">ALERT</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-header">
+        <h2 style="font-size: 18px;">Recent Transactions</h2>
+        <a href="#" style="color: var(--blue-primary); font-size: 13px; font-weight: 600; text-decoration: none;">View All</a>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Category</th>
+            <th style="text-align: right;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>May 23, 2026</td>
+            <td>Apple Store Soho</td>
+            <td>Electronics</td>
+            <td class="amount-cell" style="color: var(--red-glow);">$1,299.00</td>
+          </tr>
+          <tr>
+            <td>May 22, 2026</td>
+            <td>Whole Foods Market</td>
+            <td>Groceries</td>
+            <td class="amount-cell" style="color: var(--red-glow);">$142.10</td>
+          </tr>
+          <tr>
+            <td>May 21, 2026</td>
+            <td>Stripe Payout</td>
+            <td>Income</td>
+            <td class="amount-cell" style="color: var(--green-glow);">+$4,500.00</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script>
+  const html = document.documentElement;
+  const toggle = document.getElementById('themeToggle');
+  const icon = document.getElementById('themeIcon');
+  const text = document.getElementById('themeText');
+
+  toggle.addEventListener('click', () => {
+    const currentTheme = html.getAttribute('data-theme');
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+    
+    html.setAttribute('data-theme', newTheme);
+    icon.innerText = newTheme === 'light' ? '☀️' : '🌙';
+    text.innerText = newTheme === 'light' ? 'Light Mode' : 'Dark Mode';
+  });
+</script>
+
+</body>
+</html>

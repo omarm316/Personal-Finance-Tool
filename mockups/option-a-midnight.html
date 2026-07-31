@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option A: Midnight — Finance Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0c0c14;
+    --surface: #161621;
+    --surface-elevated: #1e1f2e;
+    --border: rgba(255,255,255,0.06);
+    --accent: #c9a55a;
+    --accent-secondary: #8b8cf5;
+    --text-primary: #e8e8f0;
+    --text-secondary: #7a7b8e;
+    --text-muted: #4a4b5e;
+    --success: #3ecf8e;
+    --danger: #f87171;
+    --sidebar-bg: #0a0a12;
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    background: var(--bg);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── LAYOUT ─── */
+  .app {
+    display: flex;
+    height: 100vh;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    padding: 28px 0 20px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 10;
+  }
+
+  .sidebar-brand {
+    padding: 0 24px;
+    margin-bottom: 36px;
+  }
+
+  .sidebar-logo {
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .sidebar-subtitle {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 24px;
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s ease;
+    position: relative;
+    user-select: none;
+  }
+
+  .nav-item:hover {
+    color: var(--text-primary);
+  }
+
+  .nav-item.active {
+    color: var(--accent);
+  }
+
+  .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 20px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  .nav-icon {
+    width: 16px;
+    height: 16px;
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+
+  .nav-item.active .nav-icon { opacity: 0.8; }
+
+  .sidebar-footer {
+    padding: 16px 24px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .connected-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  .connected-dot {
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .sidebar-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .sidebar-btn {
+    flex: 1;
+    padding: 7px 0;
+    font-size: 11px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .sidebar-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ─── MAIN AREA ─── */
+  .main {
+    flex: 1;
+    margin-left: 200px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ─── TOP BAR ─── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 36px 0;
+    flex-shrink: 0;
+  }
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 300;
+    color: var(--text-primary);
+  }
+
+  .page-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .page-tab {
+    padding: 8px 20px;
+    font-size: 12px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-right: 1px solid var(--border);
+  }
+
+  .page-tab:last-child { border-right: none; }
+
+  .page-tab:hover { color: var(--text-primary); }
+
+  .page-tab.active {
+    background: var(--accent);
+    color: #0c0c14;
+    font-weight: 400;
+  }
+
+  /* ─── CONTENT ─── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 36px 40px;
+  }
+
+  .content::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ─── PERIOD SELECTOR ─── */
+  .period-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .period-pills {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .period-pill {
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-right: 1px solid var(--border);
+  }
+
+  .period-pill:last-child { border-right: none; }
+
+  .period-pill.active {
+    background: var(--accent);
+    color: #0c0c14;
+    font-weight: 400;
+  }
+
+  .year-dropdown {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+  }
+
+  .year-dropdown option { background: var(--surface); }
+
+  /* ─── SECTION LABELS ─── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+    margin-top: 32px;
+  }
+
+  .section-label:first-child { margin-top: 0; }
+
+  /* ─── GLASS CARD ─── */
+  .glass {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+  }
+
+  .glass:hover {
+    border-color: rgba(255,255,255,0.1);
+  }
+
+  /* ═══════════════════════════════
+     CARDS PAGE
+  ═══════════════════════════════ */
+
+  .ecosystems {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .eco-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    cursor: pointer;
+  }
+
+  .eco-card:hover {
+    transform: translateY(-1px);
+  }
+
+  .eco-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .eco-logo {
+    width: 48px;
+    height: 32px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .eco-name {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  .eco-currency {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .eco-right {
+    text-align: right;
+  }
+
+  .eco-points {
+    font-size: 32px;
+    font-weight: 300;
+    color: var(--accent);
+    letter-spacing: -1.5px;
+    line-height: 1;
+  }
+
+  .eco-points.mint { color: var(--success); }
+
+  .eco-value {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* CHALLENGES */
+  .challenges-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .challenge-card {
+    padding: 18px 20px;
+  }
+
+  .challenge-name {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .challenge-card-name {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  .progress-track {
+    height: 3px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  .progress-label {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* YOUR CARDS */
+  .cards-scroll {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .cards-scroll::-webkit-scrollbar { height: 3px; }
+  .cards-scroll::-webkit-scrollbar-track { background: transparent; }
+  .cards-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .credit-card {
+    min-width: 200px;
+    width: 200px;
+    height: 126px; /* 200/1.586 */
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .credit-card:hover { transform: translateY(-2px); }
+
+  .card-chip {
+    width: 28px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  .card-number {
+    font-size: 12px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 2px;
+  }
+
+  .card-name {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.8);
+  }
+
+  .cc-sapphire { background: linear-gradient(135deg, #1a3a6e, #0d1f3c); }
+  .cc-amex-gold { background: linear-gradient(135deg, #b89333, #7a5f1a); }
+  .cc-hilton { background: linear-gradient(135deg, #4a2d7a, #1c1545); }
+  .cc-freedom { background: linear-gradient(135deg, #1a6b6a, #0d2f3c); }
+
+  /* ═══════════════════════════════
+     DASHBOARD PAGE
+  ═══════════════════════════════ */
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .metric-card {
+    padding: 20px;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text-primary);
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .metric-change {
+    font-size: 11px;
+    font-weight: 300;
+  }
+
+  .metric-change.up { color: var(--success); }
+  .metric-change.down { color: var(--danger); }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .dash-card {
+    padding: 24px;
+  }
+
+  .dash-card-title {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+
+  .donut-container {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .donut-svg {
+    width: 140px;
+    height: 140px;
+    flex-shrink: 0;
+  }
+
+  .donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-amount {
+    margin-left: auto;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Recent transactions mini */
+  .mini-txn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mini-txn:last-child { border-bottom: none; }
+
+  .mini-txn-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mini-txn-desc {
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-primary);
+  }
+
+  .mini-txn-date {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .mini-txn-amount {
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mini-txn-amount.positive { color: var(--success); }
+
+  /* ═══════════════════════════════
+     TRANSACTIONS PAGE
+  ═══════════════════════════════ */
+
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .filter-input {
+    flex: 1;
+    max-width: 260px;
+    padding: 9px 14px;
+    font-size: 12px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+
+  .filter-input::placeholder { color: var(--text-muted); }
+  .filter-input:focus { border-color: rgba(255,255,255,0.12); }
+
+  .filter-select {
+    padding: 9px 14px;
+    font-size: 12px;
+    font-weight: 300;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .filter-select option { background: var(--surface); }
+
+  .txn-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .txn-table thead th {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .txn-table thead th:last-child { text-align: right; }
+
+  .txn-table tbody tr {
+    transition: background 0.2s ease;
+    cursor: default;
+  }
+
+  .txn-table tbody tr:hover {
+    background: rgba(255,255,255,0.02);
+  }
+
+  .txn-table tbody td {
+    padding: 12px 12px;
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  .txn-table tbody td:last-child {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .txn-date {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .txn-category {
+    display: inline-block;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.04);
+    border-radius: 20px;
+  }
+
+  .txn-amount.negative { color: var(--text-primary); }
+  .txn-amount.positive { color: var(--success); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ─── SIDEBAR ─── -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-logo">FINANCE</div>
+      <div class="sidebar-subtitle">Personal Portfolio</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-item" data-nav="dashboard">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-nav="transactions">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+        Transactions
+      </div>
+      <div class="nav-item" data-nav="budgets">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
+        Budgets
+      </div>
+      <div class="nav-item" data-nav="networth">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 12L6 6l3 3 5-7"/></svg>
+        Net Worth
+      </div>
+      <div class="nav-item" data-nav="balances">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 14V6h3v8zM7 14V2h3v12zM12 14V8h3v6z"/></svg>
+        Daily Balances
+      </div>
+      <div class="nav-item" data-nav="cashflow">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 8h14M11 4l4 4-4 4"/></svg>
+        Cash Flow
+      </div>
+      <div class="nav-item" data-nav="loans">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 7h12"/></svg>
+        Loans
+      </div>
+      <div class="nav-item active" data-nav="cards">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="3" width="14" height="10" rx="2"/><path d="M1 7h14"/><rect x="3" y="9" width="4" height="2" rx="0.5"/></svg>
+        Cards
+      </div>
+      <div class="nav-item" data-nav="accounts">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 1L14 4v2H2V4z"/><rect x="3" y="7" width="2" height="5"/><rect x="7" y="7" width="2" height="5"/><rect x="11" y="7" width="2" height="5"/><rect x="1" y="12" width="14" height="2" rx="0.5"/></svg>
+        Accounts
+      </div>
+      <div class="nav-item" data-nav="settings">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.9 2.9l1.5 1.5M11.6 11.6l1.5 1.5M13.1 2.9l-1.5 1.5M4.4 11.6l-1.5 1.5"/></svg>
+        Settings
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="connected-status">
+        <span class="connected-dot"></span>
+        3 Banks Connected
+      </div>
+      <div class="sidebar-actions">
+        <button class="sidebar-btn">+ Connect</button>
+        <button class="sidebar-btn">Sync</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ─── MAIN ─── -->
+  <main class="main">
+    <div class="topbar">
+      <div class="page-title" id="pageTitle">Portfolio</div>
+      <div class="page-tabs">
+        <button class="page-tab active" data-page="cards">Cards</button>
+        <button class="page-tab" data-page="dashboard">Dashboard</button>
+        <button class="page-tab" data-page="transactions">Transactions</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ═══ CARDS PAGE ═══ -->
+      <div class="page active" id="page-cards">
+        <div class="period-bar">
+          <div class="period-pills">
+            <button class="period-pill active">MTD</button>
+            <button class="period-pill">QTD</button>
+            <button class="period-pill">YTD</button>
+          </div>
+          <select class="year-dropdown">
+            <option>2026</option>
+            <option>2025</option>
+            <option>2024</option>
+          </select>
+        </div>
+
+        <div class="section-label" style="margin-top:0">Points &amp; Miles</div>
+        <div class="ecosystems">
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#2563eb,#1e3a8a)"></div>
+              <div>
+                <div class="eco-name">Chase Ultimate Rewards</div>
+                <div class="eco-currency">Ultimate Rewards Points</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">184,320</div>
+              <div class="eco-value">~$2,765 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#22c55e,#166534)"></div>
+              <div>
+                <div class="eco-name">American Express</div>
+                <div class="eco-currency">Membership Rewards Points</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">97,540</div>
+              <div class="eco-value">~$1,463 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#8b5cf6,#4c1d95)"></div>
+              <div>
+                <div class="eco-name">Hilton Honors</div>
+                <div class="eco-currency">Hilton Honors Points</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">312,800</div>
+              <div class="eco-value">~$1,564 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#d4a843,#8b6914)"></div>
+              <div>
+                <div class="eco-name">Marriott Bonvoy</div>
+                <div class="eco-currency">Marriott Bonvoy Points</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">145,200</div>
+              <div class="eco-value">~$1,016 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#1e3a5f,#0f1f3d)"></div>
+              <div>
+                <div class="eco-name">Delta SkyMiles</div>
+                <div class="eco-currency">Delta SkyMiles</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">68,900</div>
+              <div class="eco-value">~$827 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#991b1b,#450a0a)"></div>
+              <div>
+                <div class="eco-name">World of Hyatt</div>
+                <div class="eco-currency">World of Hyatt Points</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points">42,100</div>
+              <div class="eco-value">~$842 value</div>
+            </div>
+          </div>
+
+          <div class="eco-card glass">
+            <div class="eco-left">
+              <div class="eco-logo" style="background:linear-gradient(135deg,#3ecf8e,#1a7a4c)"></div>
+              <div>
+                <div class="eco-name">Cash Back</div>
+                <div class="eco-currency">Unredeemed Cash</div>
+              </div>
+            </div>
+            <div class="eco-right">
+              <div class="eco-points mint">$438.22</div>
+              <div class="eco-value">Statement credits available</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-label">Active Challenges</div>
+        <div class="challenges-grid">
+          <div class="challenge-card glass">
+            <div class="challenge-name">Spend $6,000 in 3 months</div>
+            <div class="challenge-card-name">Chase Sapphire Preferred</div>
+            <div class="progress-track"><div class="progress-fill" style="width:72%"></div></div>
+            <div class="progress-label">$4,320 / $6,000 &mdash; 72%</div>
+          </div>
+          <div class="challenge-card glass">
+            <div class="challenge-name">Spend $4,000 in 6 months</div>
+            <div class="challenge-card-name">Amex Gold Card</div>
+            <div class="progress-track"><div class="progress-fill" style="width:45%"></div></div>
+            <div class="progress-label">$1,800 / $4,000 &mdash; 45%</div>
+          </div>
+        </div>
+
+        <div class="section-label">Your Cards</div>
+        <div class="cards-scroll">
+          <div class="credit-card cc-sapphire">
+            <div class="card-chip"></div>
+            <div>
+              <div class="card-number">**** 4891</div>
+              <div class="card-name">Chase Sapphire Preferred</div>
+            </div>
+          </div>
+          <div class="credit-card cc-amex-gold">
+            <div class="card-chip"></div>
+            <div>
+              <div class="card-number">**** 7203</div>
+              <div class="card-name">Amex Gold Card</div>
+            </div>
+          </div>
+          <div class="credit-card cc-hilton">
+            <div class="card-chip"></div>
+            <div>
+              <div class="card-number">**** 5518</div>
+              <div class="card-name">Hilton Honors Aspire</div>
+            </div>
+          </div>
+          <div class="credit-card cc-freedom">
+            <div class="card-chip"></div>
+            <div>
+              <div class="card-number">**** 3342</div>
+              <div class="card-name">Chase Freedom Flex</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ DASHBOARD PAGE ═══ -->
+      <div class="page" id="page-dashboard">
+        <div class="metrics-grid">
+          <div class="metric-card glass">
+            <div class="metric-label">Total Assets</div>
+            <div class="metric-value">$214,830</div>
+            <div class="metric-change up">+2.4% vs last month</div>
+          </div>
+          <div class="metric-card glass">
+            <div class="metric-label">Net Worth</div>
+            <div class="metric-value">$187,420</div>
+            <div class="metric-change up">+1.8% vs last month</div>
+          </div>
+          <div class="metric-card glass">
+            <div class="metric-label">Monthly Spend</div>
+            <div class="metric-value">$4,312</div>
+            <div class="metric-change down">+8.1% vs last month</div>
+          </div>
+          <div class="metric-card glass">
+            <div class="metric-label">Monthly Income</div>
+            <div class="metric-value">$9,850</div>
+            <div class="metric-change up">+0.0% vs last month</div>
+          </div>
+          <div class="metric-card glass">
+            <div class="metric-label">Savings Rate</div>
+            <div class="metric-value">56.2%</div>
+            <div class="metric-change down">-3.2% vs last month</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="dash-card glass">
+            <div class="dash-card-title">Spending Breakdown</div>
+            <div class="donut-container">
+              <svg class="donut-svg" viewBox="0 0 42 42">
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="var(--surface-elevated)" stroke-width="4"/>
+                <!-- Housing 35% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#c9a55a" stroke-width="4"
+                  stroke-dasharray="35 65" stroke-dashoffset="25"/>
+                <!-- Food 20% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#8b8cf5" stroke-width="4"
+                  stroke-dasharray="20 80" stroke-dashoffset="90"/>
+                <!-- Transport 15% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#3ecf8e" stroke-width="4"
+                  stroke-dasharray="15 85" stroke-dashoffset="70"/>
+                <!-- Shopping 12% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#f87171" stroke-width="4"
+                  stroke-dasharray="12 88" stroke-dashoffset="55"/>
+                <!-- Entertainment 10% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#38bdf8" stroke-width="4"
+                  stroke-dasharray="10 90" stroke-dashoffset="43"/>
+                <!-- Other 8% -->
+                <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#a78bfa" stroke-width="4"
+                  stroke-dasharray="8 92" stroke-dashoffset="33"/>
+              </svg>
+              <div class="donut-legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#c9a55a"></span>Housing<span class="legend-amount">$1,509</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background:#8b8cf5"></span>Food<span class="legend-amount">$862</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background:#3ecf8e"></span>Transport<span class="legend-amount">$647</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background:#f87171"></span>Shopping<span class="legend-amount">$517</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Entertainment<span class="legend-amount">$431</span></div>
+                <div class="legend-item"><span class="legend-dot" style="background:#a78bfa"></span>Other<span class="legend-amount">$346</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dash-card glass">
+            <div class="dash-card-title">Recent Transactions</div>
+            <div class="mini-txn">
+              <div class="mini-txn-left">
+                <div class="mini-txn-desc">Whole Foods Market</div>
+                <div class="mini-txn-date">Mar 20, 2026</div>
+              </div>
+              <div class="mini-txn-amount">-$127.43</div>
+            </div>
+            <div class="mini-txn">
+              <div class="mini-txn-left">
+                <div class="mini-txn-desc">Uber Ride</div>
+                <div class="mini-txn-date">Mar 19, 2026</div>
+              </div>
+              <div class="mini-txn-amount">-$24.80</div>
+            </div>
+            <div class="mini-txn">
+              <div class="mini-txn-left">
+                <div class="mini-txn-desc">Employer Direct Deposit</div>
+                <div class="mini-txn-date">Mar 15, 2026</div>
+              </div>
+              <div class="mini-txn-amount positive">+$4,925.00</div>
+            </div>
+            <div class="mini-txn">
+              <div class="mini-txn-left">
+                <div class="mini-txn-desc">Netflix Subscription</div>
+                <div class="mini-txn-date">Mar 14, 2026</div>
+              </div>
+              <div class="mini-txn-amount">-$22.99</div>
+            </div>
+            <div class="mini-txn">
+              <div class="mini-txn-left">
+                <div class="mini-txn-desc">Shell Gas Station</div>
+                <div class="mini-txn-date">Mar 13, 2026</div>
+              </div>
+              <div class="mini-txn-amount">-$58.12</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TRANSACTIONS PAGE ═══ -->
+      <div class="page" id="page-transactions">
+        <div class="filter-bar">
+          <input class="filter-input" type="text" placeholder="Search transactions...">
+          <select class="filter-select">
+            <option>All Dates</option>
+            <option>This Week</option>
+            <option>This Month</option>
+            <option>Last 30 Days</option>
+            <option>Last 90 Days</option>
+          </select>
+          <select class="filter-select">
+            <option>All Categories</option>
+            <option>Food &amp; Dining</option>
+            <option>Shopping</option>
+            <option>Transport</option>
+            <option>Housing</option>
+            <option>Entertainment</option>
+          </select>
+          <select class="filter-select">
+            <option>All Cards</option>
+            <option>Chase Sapphire</option>
+            <option>Amex Gold</option>
+            <option>Freedom Flex</option>
+            <option>Hilton Aspire</option>
+          </select>
+        </div>
+
+        <table class="txn-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Category</th>
+              <th>Card</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="txn-date">Mar 20</td>
+              <td>Whole Foods Market</td>
+              <td><span class="txn-category">Groceries</span></td>
+              <td style="color:var(--text-secondary)">Amex Gold</td>
+              <td class="txn-amount negative">-$127.43</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 19</td>
+              <td>Uber Technologies</td>
+              <td><span class="txn-category">Transport</span></td>
+              <td style="color:var(--text-secondary)">Sapphire Preferred</td>
+              <td class="txn-amount negative">-$24.80</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 18</td>
+              <td>Amazon.com</td>
+              <td><span class="txn-category">Shopping</span></td>
+              <td style="color:var(--text-secondary)">Freedom Flex</td>
+              <td class="txn-amount negative">-$89.99</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 17</td>
+              <td>Sweetgreen</td>
+              <td><span class="txn-category">Dining</span></td>
+              <td style="color:var(--text-secondary)">Amex Gold</td>
+              <td class="txn-amount negative">-$16.45</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 15</td>
+              <td>Employer Direct Deposit</td>
+              <td><span class="txn-category">Income</span></td>
+              <td style="color:var(--text-secondary)">Chase Checking</td>
+              <td class="txn-amount positive">+$4,925.00</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 14</td>
+              <td>Netflix</td>
+              <td><span class="txn-category">Entertainment</span></td>
+              <td style="color:var(--text-secondary)">Freedom Flex</td>
+              <td class="txn-amount negative">-$22.99</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 13</td>
+              <td>Shell Gas Station</td>
+              <td><span class="txn-category">Transport</span></td>
+              <td style="color:var(--text-secondary)">Freedom Flex</td>
+              <td class="txn-amount negative">-$58.12</td>
+            </tr>
+            <tr>
+              <td class="txn-date">Mar 12</td>
+              <td>Hilton Garden Inn</td>
+              <td><span class="txn-category">Travel</span></td>
+              <td style="color:var(--text-secondary)">Hilton Aspire</td>
+              <td class="txn-amount negative">-$312.00</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // Page tab switching
+  const pageTabs = document.querySelectorAll('.page-tab');
+  const pages = document.querySelectorAll('.page');
+  const pageTitle = document.getElementById('pageTitle');
+  const navItems = document.querySelectorAll('.nav-item');
+
+  const titles = { cards: 'Portfolio', dashboard: 'Dashboard', transactions: 'Transactions' };
+
+  function switchPage(pageId) {
+    pageTabs.forEach(t => t.classList.toggle('active', t.dataset.page === pageId));
+    pages.forEach(p => p.classList.toggle('active', p.id === 'page-' + pageId));
+    pageTitle.textContent = titles[pageId] || pageId;
+
+    // Sync sidebar
+    navItems.forEach(n => n.classList.toggle('active', n.dataset.nav === pageId));
+  }
+
+  pageTabs.forEach(tab => {
+    tab.addEventListener('click', () => switchPage(tab.dataset.page));
+  });
+
+  // Sidebar nav clicks (only for pages that exist)
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const nav = item.dataset.nav;
+      if (titles[nav]) {
+        switchPage(nav);
+      } else {
+        // For pages without content, just highlight sidebar
+        navItems.forEach(n => n.classList.remove('active'));
+        item.classList.add('active');
+        pageTitle.textContent = item.textContent.trim();
+      }
+    });
+  });
+
+  // Period pill switching
+  document.querySelectorAll('.period-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.period-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

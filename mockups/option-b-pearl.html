@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option B: Pearl — Finance Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f3ef;
+    --surface: #ffffff;
+    --surface-secondary: #faf8f5;
+    --border: #e8e3db;
+    --accent: #1a5c3a;
+    --accent-light: #e8f2ec;
+    --accent-secondary: #8b7355;
+    --sidebar-bg: #1b2332;
+    --text-primary: #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-muted: #a3a09a;
+    --success: #1a5c3a;
+    --danger: #b91c1c;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Sidebar ─── */
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: var(--sidebar-bg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 28px 0;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 100;
+  }
+
+  .sidebar-logo {
+    padding: 0 24px;
+    margin-bottom: 4px;
+  }
+
+  .sidebar-logo h1 {
+    font-family: 'Instrument Serif', serif;
+    font-weight: 400;
+    font-size: 18px;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+  }
+
+  .sidebar-logo p {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.4);
+    margin-top: 2px;
+  }
+
+  .sidebar-nav {
+    margin-top: 32px;
+    flex: 1;
+  }
+
+  .sidebar-nav a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 24px;
+    font-size: 13px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+    transition: color 0.2s ease;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .sidebar-nav a:hover {
+    color: rgba(255,255,255,0.8);
+  }
+
+  .sidebar-nav a.active {
+    color: #ffffff;
+  }
+
+  .sidebar-nav a.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 20px;
+    background: #ffffff;
+    border-radius: 1px;
+  }
+
+  .sidebar-nav a svg {
+    width: 16px;
+    height: 16px;
+    opacity: 0.7;
+    flex-shrink: 0;
+  }
+
+  .sidebar-footer {
+    padding: 0 24px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding-top: 20px;
+  }
+
+  .bank-connection {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .bank-dot {
+    width: 6px;
+    height: 6px;
+    background: #34d399;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .bank-connection span {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.45);
+  }
+
+  .sidebar-footer-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .sidebar-footer-buttons button {
+    flex: 1;
+    padding: 7px 0;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    font-weight: 300;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .sidebar-footer-buttons button:hover {
+    border-color: rgba(255,255,255,0.25);
+    color: rgba(255,255,255,0.8);
+  }
+
+  /* ─── Main Content ─── */
+  .main {
+    margin-left: 200px;
+    flex: 1;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 36px 44px 60px;
+  }
+
+  /* ─── Page Tabs ─── */
+  .page-tabs {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 36px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .page-tabs button {
+    background: none;
+    border: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+    padding: 0 0 14px;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.2s ease;
+  }
+
+  .page-tabs button:hover {
+    color: var(--text-secondary);
+  }
+
+  .page-tabs button.active {
+    color: var(--text-primary);
+  }
+
+  .page-tabs button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ─── Section Headers ─── */
+  .page-title {
+    font-family: 'Instrument Serif', serif;
+    font-weight: 400;
+    font-size: 28px;
+    color: var(--text-primary);
+    margin-bottom: 24px;
+  }
+
+  .section-title {
+    font-family: 'Instrument Serif', serif;
+    font-weight: 400;
+    font-size: 16px;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    margin-top: 40px;
+  }
+
+  /* ─── Labels ─── */
+  .label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+  }
+
+  /* ─── Period Selector ─── */
+  .period-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 28px;
+  }
+
+  .period-tabs {
+    display: flex;
+    gap: 0;
+  }
+
+  .period-tabs button {
+    background: none;
+    border: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+    padding: 6px 14px;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.2s ease;
+  }
+
+  .period-tabs button.active {
+    color: var(--accent);
+  }
+
+  .period-tabs button.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 14px;
+    right: 14px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  .period-tabs button + button {
+    border-left: 1px solid var(--border);
+  }
+
+  .year-select {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 12px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a3a09a' stroke-width='1.2'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+
+  /* ─── Ecosystem Grid ─── */
+  .ecosystem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px;
+  }
+
+  .eco-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 28px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+
+  .eco-card:hover {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    border-color: #d8d3ca;
+  }
+
+  .eco-icon {
+    width: 52px;
+    height: 36px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .eco-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .eco-name {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  .eco-currency {
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .eco-value {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .eco-points {
+    font-size: 34px;
+    font-weight: 300;
+    color: var(--accent);
+    line-height: 1.1;
+  }
+
+  .eco-points.bronze {
+    color: var(--accent-secondary);
+  }
+
+  .eco-est {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--accent-secondary);
+    margin-top: 2px;
+    text-align: right;
+  }
+
+  .eco-chevron {
+    color: var(--text-muted);
+    font-size: 18px;
+    font-weight: 300;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+
+  /* ─── Challenges ─── */
+  .challenges-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+  }
+
+  .challenge-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+
+  .challenge-name {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .challenge-card-name {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+
+  .challenge-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--surface-secondary);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .challenge-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  .challenge-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 300;
+    color: var(--text-muted);
+  }
+
+  .challenge-meta .amount {
+    color: var(--accent);
+    font-weight: 400;
+  }
+
+  /* ─── Your Cards ─── */
+  .cards-row {
+    display: flex;
+    gap: 18px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .credit-card {
+    width: 200px;
+    min-width: 200px;
+    height: 126px;
+    border-radius: 14px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .credit-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+  }
+
+  .card-chip {
+    width: 28px;
+    height: 20px;
+    background: linear-gradient(135deg, #d4a853 0%, #c49a3c 100%);
+    border-radius: 4px;
+    opacity: 0.85;
+  }
+
+  .card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .card-name {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.85);
+    letter-spacing: 0.3px;
+  }
+
+  .card-digits {
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 1px;
+  }
+
+  /* ─── Dashboard ─── */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text-primary);
+    line-height: 1.1;
+    margin-bottom: 6px;
+  }
+
+  .metric-change {
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .metric-change.positive { color: var(--success); }
+  .metric-change.negative { color: var(--danger); }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .dash-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+  }
+
+  .dash-card-title {
+    font-family: 'Instrument Serif', serif;
+    font-weight: 400;
+    font-size: 16px;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+  }
+
+  .donut-container {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .donut-legend {
+    flex: 1;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-secondary);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-value {
+    margin-left: auto;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  .recent-tx-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 300;
+  }
+
+  .recent-tx-row:last-child {
+    border-bottom: none;
+  }
+
+  .recent-tx-name {
+    flex: 1;
+    color: var(--text-primary);
+    font-weight: 400;
+  }
+
+  .recent-tx-cat {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 100px;
+  }
+
+  .recent-tx-date {
+    font-size: 12px;
+    color: var(--text-muted);
+    width: 80px;
+    text-align: right;
+  }
+
+  .recent-tx-amount {
+    width: 90px;
+    text-align: right;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  /* ─── Transactions Page ─── */
+  .filter-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+
+  .filter-bar input,
+  .filter-bar select {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 14px;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .filter-bar input:focus,
+  .filter-bar select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+
+  .filter-bar input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .filter-bar input[type="text"] {
+    min-width: 240px;
+  }
+
+  .tx-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .tx-table thead th {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    padding: 14px 20px;
+    text-align: left;
+    background: var(--surface-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tx-table thead th:last-child {
+    text-align: right;
+  }
+
+  .tx-table tbody td {
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-primary);
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tx-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .tx-table tbody tr {
+    transition: background 0.15s ease;
+  }
+
+  .tx-table tbody tr:hover {
+    background: #f0faf4;
+  }
+
+  .tx-table tbody td:last-child {
+    text-align: right;
+    font-weight: 400;
+  }
+
+  .cat-pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 24px;
+    font-size: 11px;
+    font-weight: 400;
+  }
+
+  .cat-dining { background: #fef3e2; color: #92600a; }
+  .cat-travel { background: #e8f2ec; color: #1a5c3a; }
+  .cat-groceries { background: #eef2ff; color: #3730a3; }
+  .cat-shopping { background: #fce7f3; color: #9d174d; }
+  .cat-transport { background: #f0f9ff; color: #0369a1; }
+  .cat-entertainment { background: #faf5ff; color: #7c3aed; }
+  .cat-utilities { background: #f5f5f4; color: #57534e; }
+  .cat-health { background: #fef2f2; color: #b91c1c; }
+
+  /* ─── Scrollbar ─── */
+  .main::-webkit-scrollbar { width: 6px; }
+  .main::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .main::-webkit-scrollbar-thumb:hover { background: #ccc8bf; }
+</style>
+</head>
+<body>
+
+<!-- ─── Sidebar ─── -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <h1>Finance</h1>
+    <p>Personal dashboard</p>
+  </div>
+
+  <div class="sidebar-nav">
+    <a href="#" onclick="switchTab('dashboard')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+      Dashboard
+    </a>
+    <a href="#" onclick="switchTab('transactions')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+      Transactions
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4.5l3 1.5"/></svg>
+      Budgets
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 12l3-4 3 2 4-6 2 3"/></svg>
+      Net Worth
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 13V5M6 13V3M10 13V7M14 13V9"/></svg>
+      Daily Balances
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 8h3l2-5 2 10 2-5h3"/></svg>
+      Cash Flow
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="6" width="12" height="7" rx="1.5"/><path d="M4 6V4a4 4 0 018 0v2"/></svg>
+      Loans
+    </a>
+    <a href="#" class="active" onclick="switchTab('cards')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="3" width="14" height="10" rx="2"/><path d="M1 7h14"/></svg>
+      Cards
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="2" width="10" height="12" rx="2"/><path d="M6 6h4M6 9h4"/></svg>
+      Accounts
+    </a>
+    <a href="#">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3M8 10.5v.5"/></svg>
+      Settings
+    </a>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="bank-connection"><span class="bank-dot"></span><span>Chase -- Connected</span></div>
+    <div class="bank-connection"><span class="bank-dot"></span><span>Amex -- Connected</span></div>
+    <div class="bank-connection"><span class="bank-dot"></span><span>Citi -- Connected</span></div>
+    <div class="sidebar-footer-buttons">
+      <button>Sync</button>
+      <button>Add Bank</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Main ─── -->
+<main class="main">
+
+  <!-- Page Tabs -->
+  <div class="page-tabs">
+    <button class="active" onclick="switchTab('cards')">Cards</button>
+    <button onclick="switchTab('dashboard')">Dashboard</button>
+    <button onclick="switchTab('transactions')">Transactions</button>
+  </div>
+
+  <!-- ══════════ CARDS PAGE ══════════ -->
+  <div class="page active" id="page-cards">
+    <h2 class="page-title">Portfolio</h2>
+
+    <div class="period-bar">
+      <div class="period-tabs">
+        <button class="active">MTD</button>
+        <button>QTD</button>
+        <button>YTD</button>
+      </div>
+      <select class="year-select">
+        <option>2026</option>
+        <option>2025</option>
+        <option>2024</option>
+      </select>
+    </div>
+
+    <!-- Ecosystem -->
+    <div class="ecosystem-grid">
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #1a3f6f, #2563eb)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Chase Ultimate Rewards</div>
+          <div class="eco-currency">Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">184,320</div>
+          <div class="eco-est">~$2,764</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #0d6e6e, #14b8a6)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Amex Membership Rewards</div>
+          <div class="eco-currency">Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">97,450</div>
+          <div class="eco-est">~$1,461</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #3b1f6e, #7c3aed)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Hilton Honors</div>
+          <div class="eco-currency">Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">312,800</div>
+          <div class="eco-est">~$1,564</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #6b1a2a, #be123c)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Marriott Bonvoy</div>
+          <div class="eco-currency">Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">145,600</div>
+          <div class="eco-est">~$1,019</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #1a2744, #1e3a5f)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Delta SkyMiles</div>
+          <div class="eco-currency">Miles</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">68,200</div>
+          <div class="eco-est">~$818</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #14432a, #1a5c3a)"></div>
+        <div class="eco-info">
+          <div class="eco-name">World of Hyatt</div>
+          <div class="eco-currency">Points</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points">42,750</div>
+          <div class="eco-est">~$855</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+
+      <div class="eco-card">
+        <div class="eco-icon" style="background: linear-gradient(135deg, #6b5b3e, #8b7355)"></div>
+        <div class="eco-info">
+          <div class="eco-name">Cash Back</div>
+          <div class="eco-currency">USD</div>
+        </div>
+        <div class="eco-value">
+          <div class="eco-points bronze">$438</div>
+          <div class="eco-est">lifetime earned</div>
+        </div>
+        <span class="eco-chevron">&#8250;</span>
+      </div>
+    </div>
+
+    <!-- Active Challenges -->
+    <h3 class="section-title" style="margin-top: 44px;">Active Challenges</h3>
+    <div class="challenges-grid">
+      <div class="challenge-card">
+        <div class="challenge-name">Welcome Bonus: $4,000 in 3 months</div>
+        <div class="challenge-card-name">Chase Sapphire Preferred</div>
+        <div class="challenge-progress-bar"><div class="challenge-progress-fill" style="width: 72%"></div></div>
+        <div class="challenge-meta">
+          <span><span class="amount">$2,880</span> / $4,000</span>
+          <span>38 days left</span>
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-name">Welcome Bonus: $6,000 in 6 months</div>
+        <div class="challenge-card-name">Amex Gold</div>
+        <div class="challenge-progress-bar"><div class="challenge-progress-fill" style="width: 45%"></div></div>
+        <div class="challenge-meta">
+          <span><span class="amount">$2,700</span> / $6,000</span>
+          <span>94 days left</span>
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-name">Spend $15,000 for free night</div>
+        <div class="challenge-card-name">Marriott Bonvoy Brilliant</div>
+        <div class="challenge-progress-bar"><div class="challenge-progress-fill" style="width: 28%"></div></div>
+        <div class="challenge-meta">
+          <span><span class="amount">$4,200</span> / $15,000</span>
+          <span>Dec 31, 2026</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Your Cards -->
+    <h3 class="section-title" style="margin-top: 44px;">Your Cards</h3>
+    <div class="cards-row">
+      <div class="credit-card" style="background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%)">
+        <div class="card-chip"></div>
+        <div class="card-bottom">
+          <span class="card-name">Chase Sapphire Reserve</span>
+          <span class="card-digits">4821</span>
+        </div>
+      </div>
+      <div class="credit-card" style="background: linear-gradient(135deg, #92600a 0%, #d4a853 40%, #92600a 100%)">
+        <div class="card-chip"></div>
+        <div class="card-bottom">
+          <span class="card-name">Amex Gold</span>
+          <span class="card-digits">1007</span>
+        </div>
+      </div>
+      <div class="credit-card" style="background: linear-gradient(135deg, #2d1654 0%, #6b21a8 50%, #2d1654 100%)">
+        <div class="card-chip"></div>
+        <div class="card-bottom">
+          <span class="card-name">Hilton Aspire</span>
+          <span class="card-digits">5533</span>
+        </div>
+      </div>
+      <div class="credit-card" style="background: linear-gradient(135deg, #4a0e1a 0%, #9f1239 50%, #4a0e1a 100%)">
+        <div class="card-chip"></div>
+        <div class="card-bottom">
+          <span class="card-name">Marriott Bonvoy Brilliant</span>
+          <span class="card-digits">3290</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ DASHBOARD PAGE ══════════ -->
+  <div class="page" id="page-dashboard">
+    <h2 class="page-title">Dashboard</h2>
+
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-label">Total Points</div>
+        <div class="metric-value">851,120</div>
+        <div class="metric-change positive">+12.4% vs prior</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Est. Value</div>
+        <div class="metric-value">$8,481</div>
+        <div class="metric-change positive">+$940</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Monthly Spend</div>
+        <div class="metric-value">$4,328</div>
+        <div class="metric-change negative">+8.2% vs avg</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Points Earned</div>
+        <div class="metric-value">14,780</div>
+        <div class="metric-change positive">3.4x earn rate</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Active Cards</div>
+        <div class="metric-value">7</div>
+        <div class="metric-change" style="color: var(--text-muted)">2 challenges</div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <!-- Spending Donut -->
+      <div class="dash-card">
+        <div class="dash-card-title">Spending breakdown</div>
+        <div class="donut-container">
+          <svg width="140" height="140" viewBox="0 0 140 140">
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#e8e3db" stroke-width="14"/>
+            <!-- Dining 28% -->
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#1a5c3a" stroke-width="14"
+              stroke-dasharray="95 244" stroke-dashoffset="85" stroke-linecap="round"/>
+            <!-- Travel 22% -->
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#8b7355" stroke-width="14"
+              stroke-dasharray="75 264" stroke-dashoffset="-10" stroke-linecap="round"/>
+            <!-- Groceries 18% -->
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#2563eb" stroke-width="14"
+              stroke-dasharray="61 278" stroke-dashoffset="-85" stroke-linecap="round"/>
+            <!-- Shopping 15% -->
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#7c3aed" stroke-width="14"
+              stroke-dasharray="51 288" stroke-dashoffset="-146" stroke-linecap="round"/>
+            <!-- Other 17% -->
+            <circle cx="70" cy="70" r="54" fill="none" stroke="#a3a09a" stroke-width="14"
+              stroke-dasharray="57 282" stroke-dashoffset="-197" stroke-linecap="round"/>
+            <text x="70" y="66" text-anchor="middle" font-family="Inter" font-weight="300" font-size="20" fill="#1a1a2e">$4,328</text>
+            <text x="70" y="82" text-anchor="middle" font-family="Inter" font-weight="300" font-size="10" fill="#a3a09a">this month</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="legend-item"><span class="legend-dot" style="background:#1a5c3a"></span>Dining<span class="legend-value">$1,212</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#8b7355"></span>Travel<span class="legend-value">$952</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#2563eb"></span>Groceries<span class="legend-value">$779</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Shopping<span class="legend-value">$649</span></div>
+            <div class="legend-item"><span class="legend-dot" style="background:#a3a09a"></span>Other<span class="legend-value">$736</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Transactions -->
+      <div class="dash-card">
+        <div class="dash-card-title">Recent transactions</div>
+        <div class="recent-tx-row">
+          <span class="recent-tx-name">Whole Foods Market</span>
+          <span class="recent-tx-cat">Groceries</span>
+          <span class="recent-tx-date">Mar 20</span>
+          <span class="recent-tx-amount">-$87.42</span>
+        </div>
+        <div class="recent-tx-row">
+          <span class="recent-tx-name">Delta Airlines</span>
+          <span class="recent-tx-cat">Travel</span>
+          <span class="recent-tx-date">Mar 19</span>
+          <span class="recent-tx-amount">-$342.00</span>
+        </div>
+        <div class="recent-tx-row">
+          <span class="recent-tx-name">Nobu Restaurant</span>
+          <span class="recent-tx-cat">Dining</span>
+          <span class="recent-tx-date">Mar 18</span>
+          <span class="recent-tx-amount">-$215.80</span>
+        </div>
+        <div class="recent-tx-row">
+          <span class="recent-tx-name">Apple Store</span>
+          <span class="recent-tx-cat">Shopping</span>
+          <span class="recent-tx-date">Mar 17</span>
+          <span class="recent-tx-amount">-$149.00</span>
+        </div>
+        <div class="recent-tx-row">
+          <span class="recent-tx-name">Uber</span>
+          <span class="recent-tx-cat">Transport</span>
+          <span class="recent-tx-date">Mar 16</span>
+          <span class="recent-tx-amount">-$24.50</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ TRANSACTIONS PAGE ══════════ -->
+  <div class="page" id="page-transactions">
+    <h2 class="page-title">Transactions</h2>
+
+    <div class="filter-bar">
+      <input type="text" placeholder="Search transactions...">
+      <select>
+        <option value="">All Cards</option>
+        <option>Chase Sapphire Reserve</option>
+        <option>Amex Gold</option>
+        <option>Hilton Aspire</option>
+        <option>Marriott Bonvoy Brilliant</option>
+      </select>
+      <select>
+        <option value="">All Categories</option>
+        <option>Dining</option>
+        <option>Travel</option>
+        <option>Groceries</option>
+        <option>Shopping</option>
+        <option>Transport</option>
+      </select>
+      <input type="date" value="2026-03-01" style="width: 150px;">
+      <input type="date" value="2026-03-21" style="width: 150px;">
+    </div>
+
+    <table class="tx-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Merchant</th>
+          <th>Card</th>
+          <th>Category</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mar 20, 2026</td>
+          <td>Whole Foods Market</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Amex Gold</td>
+          <td><span class="cat-pill cat-groceries">Groceries</span></td>
+          <td>-$87.42</td>
+        </tr>
+        <tr>
+          <td>Mar 19, 2026</td>
+          <td>Delta Airlines</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Chase Sapphire Reserve</td>
+          <td><span class="cat-pill cat-travel">Travel</span></td>
+          <td>-$342.00</td>
+        </tr>
+        <tr>
+          <td>Mar 18, 2026</td>
+          <td>Nobu Restaurant</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Amex Gold</td>
+          <td><span class="cat-pill cat-dining">Dining</span></td>
+          <td>-$215.80</td>
+        </tr>
+        <tr>
+          <td>Mar 17, 2026</td>
+          <td>Apple Store</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Chase Sapphire Reserve</td>
+          <td><span class="cat-pill cat-shopping">Shopping</span></td>
+          <td>-$149.00</td>
+        </tr>
+        <tr>
+          <td>Mar 16, 2026</td>
+          <td>Uber</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Chase Sapphire Reserve</td>
+          <td><span class="cat-pill cat-transport">Transport</span></td>
+          <td>-$24.50</td>
+        </tr>
+        <tr>
+          <td>Mar 15, 2026</td>
+          <td>Netflix</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Hilton Aspire</td>
+          <td><span class="cat-pill cat-entertainment">Entertainment</span></td>
+          <td>-$22.99</td>
+        </tr>
+        <tr>
+          <td>Mar 14, 2026</td>
+          <td>Con Edison</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Marriott Bonvoy Brilliant</td>
+          <td><span class="cat-pill cat-utilities">Utilities</span></td>
+          <td>-$134.20</td>
+        </tr>
+        <tr>
+          <td>Mar 13, 2026</td>
+          <td>CVS Pharmacy</td>
+          <td style="font-weight: 300; color: var(--text-secondary);">Amex Gold</td>
+          <td><span class="cat-pill cat-health">Health</span></td>
+          <td>-$48.75</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+function switchTab(tab) {
+  // Update page tabs
+  document.querySelectorAll('.page-tabs button').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase() === tab);
+  });
+
+  // Update pages
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+
+  // Update sidebar
+  const labelMap = { cards: 'Cards', dashboard: 'Dashboard', transactions: 'Transactions' };
+  document.querySelectorAll('.sidebar-nav a').forEach(a => {
+    a.classList.toggle('active', a.textContent.trim() === labelMap[tab]);
+  });
+}
+
+// Period tab clicks
+document.querySelectorAll('.period-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>
