@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Moresheth — Dashboard: airy + masonry proposal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+/* Tokens copied verbatim from frontend/src/index.css so this is a faithful
+   preview, not an approximation. The `after` variant adds a few new ones. */
+:root{
+  --blue-primary:#2563EB; --blue-primary-rgb:37,99,235;
+  --blue-vibrant:#3B82F6; --blue-soft:#60A5FA; --blue-neon:#38BDF8;
+  --green:#10B981; --red:#EF4444; --amber:#F59E0B;
+  --sidebar-w:240px; --glass-blur:blur(20px);
+}
+[data-theme="light"]{
+  --bg:#F0F4F8; --surface:rgba(255,255,255,.55); --surface-solid:#FFF;
+  --surface-hover:rgba(255,255,255,.75); --elevated:rgba(255,255,255,.85);
+  --border:rgba(15,23,42,.08); --border-strong:rgba(15,23,42,.14);
+  --text-primary:#0F172A; --text-secondary:#475569; --text-muted:#94A3B8;
+  --card-shadow:0 8px 32px 0 rgba(31,38,135,.07);
+}
+[data-theme="dark"]{
+  --bg:#020617; --surface:rgba(15,23,42,.4); --surface-solid:#0F172A;
+  --surface-hover:rgba(15,23,42,.6); --elevated:rgba(30,41,59,.5);
+  --border:rgba(255,255,255,.06); --border-strong:rgba(255,255,255,.12);
+  --text-primary:#F8FAFC; --text-secondary:#94A3B8; --text-muted:#64748B;
+  --card-shadow:0 8px 32px 0 rgba(0,0,0,.37);
+}
+/* ── AFTER-only tokens ────────────────────────────────────────────────
+   "Airy" = less colour and less enclosure. Surfaces get slightly lighter
+   and fully opaque (no glass), borders stay hairline, shadows go away. */
+.v-after[data-theme="dark"]{
+  --surface:#0B1220; --surface-hover:#111B2E; --elevated:#111B2E;
+  --border:rgba(255,255,255,.07); --card-shadow:none;
+  --bg:#060B16;
+}
+.v-after[data-theme="light"]{
+  --surface:#FFFFFF; --surface-hover:#FAFBFC; --elevated:#FAFBFC;
+  --border:rgba(15,23,42,.09); --card-shadow:none;
+  --bg:#F7F8FA;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text-primary);
+  -webkit-font-smoothing:antialiased;transition:background .3s ease}
+h1,h2,h3{font-family:'Outfit',sans-serif;font-weight:600}
+
+/* ── Mockup control bar (not part of the app) ─────────────────────── */
+.ctl{position:sticky;top:0;z-index:50;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  padding:12px 20px;background:#0b0b0f;border-bottom:1px solid rgba(255,255,255,.1);color:#e6e8ee;
+  font-size:13px;font-family:'Plus Jakarta Sans',sans-serif}
+.ctl strong{font-family:'Outfit',sans-serif;font-weight:600;margin-right:6px}
+.ctl button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;padding:7px 13px;
+  background:#1a1c24;border:1px solid rgba(255,255,255,.14);color:#cbd2e0}
+.ctl button[aria-pressed="true"]{background:#2563EB;border-color:#2563EB;color:#fff}
+.ctl .note{color:#8b93a7;font-size:12px;margin-left:auto;max-width:520px;line-height:1.45}
+
+/* ── App shell ────────────────────────────────────────────────────── */
+.app{display:flex;min-height:640px}
+.sidebar{width:var(--sidebar-w);flex:none;padding:20px 12px;border-right:1px solid var(--border);
+  background:var(--surface);backdrop-filter:var(--glass-blur)}
+.v-after .sidebar{backdrop-filter:none;background:transparent}
+.brand{display:flex;align-items:center;gap:10px;padding:0 10px 20px;font-family:'Outfit',sans-serif;
+  font-weight:600;font-size:17px;letter-spacing:-.3px}
+.brand i{width:26px;height:26px;border-radius:8px;background:var(--accent, linear-gradient(135deg,#38BDF8,#60A5FA));
+  display:grid;place-items:center;color:#fff;font-style:normal;font-size:13px;font-weight:700}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;
+  color:var(--text-secondary);text-decoration:none;font-size:13.5px;font-weight:500}
+.nav a svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7}
+/* BEFORE: saturated filled pill for the active item */
+.v-before .nav a.on{background:var(--blue-primary);color:#fff;
+  box-shadow:0 4px 12px rgba(var(--blue-primary-rgb),.28)}
+/* AFTER: soft neutral fill, accent carried by the text only */
+.v-after .nav a.on{background:var(--surface-hover);color:var(--text-primary);font-weight:600}
+.v-after .nav a.on svg{stroke:var(--blue-neon)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:14px 24px;border-bottom:1px solid var(--border)}
+.topbar h1{font-size:19px;font-weight:400;letter-spacing:-.3px}
+.content{padding:22px 24px 40px;display:flex;flex-direction:column;gap:20px}
+.v-after .content{gap:16px}
+
+/* ── Controls ─────────────────────────────────────────────────────── */
+.pill{display:inline-flex;background:var(--elevated);border:1px solid var(--border);
+  border-radius:10px;padding:3px;gap:2px}
+.pill button{font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;border:none;
+  border-radius:8px;padding:6px 13px;background:none;color:var(--text-secondary)}
+.v-before .pill button.on{background:var(--blue-primary);color:#fff;
+  box-shadow:0 4px 12px rgba(var(--blue-primary-rgb),.2)}
+/* AFTER: tabs are text + underline, no fill anywhere */
+.v-after .pill{background:none;border:none;padding:0;gap:20px;border-radius:0}
+.v-after .pill button{padding:5px 0;border-bottom:2px solid transparent;border-radius:0}
+.v-after .pill button.on{color:var(--text-primary);border-bottom-color:var(--blue-neon)}
+.btn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;
+  cursor:pointer;padding:7px 12px;border-radius:9px;background:var(--elevated);
+  border:1px solid var(--border);color:var(--text-secondary)}
+.v-after .btn{background:var(--surface);border-radius:7px}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;
+  box-shadow:var(--card-shadow);backdrop-filter:var(--glass-blur)}
+.v-after .card{backdrop-filter:none;box-shadow:none;border-radius:12px;padding:16px}
+.ch{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px}
+.ch h3{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.4px}
+/* AFTER: Monarch's header pattern — bold title + light inline context */
+.v-after .ch h3{font-size:14px;font-weight:600;text-transform:none;letter-spacing:-.2px;
+  color:var(--text-primary);font-family:'Outfit',sans-serif}
+.ch .sub{font-size:11.5px;color:var(--text-muted);font-weight:400}
+.v-after .ch .sub{font-size:12.5px}
+
+/* ── KPI row ──────────────────────────────────────────────────────── */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.kpi{display:flex;flex-direction:column}
+.kpi .lbl{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px}
+.kpi .val{font-family:'Outfit',sans-serif;font-size:25px;font-weight:700;letter-spacing:-.6px}
+.kpi .sub{font-size:11px;color:var(--text-muted);margin-top:5px;display:flex;align-items:center;gap:6px}
+/* AFTER: value first, label underneath — reads bolder at the same size */
+.v-after .kpi{flex-direction:column}
+.v-after .kpi .val{order:1;font-size:26px;margin-bottom:5px}
+.v-after .kpi .lbl{order:2;margin-bottom:0;font-size:10.5px;letter-spacing:.7px;text-transform:uppercase}
+.v-after .kpi .sub{order:3;margin-top:8px}
+.badge{border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600}
+.badge.up{background:rgba(16,185,129,.13);color:var(--green)}
+.badge.dn{background:rgba(239,68,68,.13);color:var(--red)}
+/* AFTER: badges lose their fill — colour carried by the text */
+.v-after .badge{background:none;padding:0;font-weight:700}
+
+/* ── Layout: the actual structural proposal ───────────────────────── */
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.masonry{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* ── Budget bars — 24px in-bar label. DECIDED: unchanged. ─────────── */
+.brow{padding:9px 0;border-bottom:1px solid var(--border)}
+.brow:last-child{border-bottom:none}
+.bmeta{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-size:13.5px}
+.bmeta .amt{font-weight:600;font-variant-numeric:tabular-nums}
+.track{position:relative;height:24px;border-radius:6px;overflow:hidden;
+  background:var(--border);border:1px solid var(--border)}
+.fill{position:absolute;inset:0 auto 0 0;border-radius:6px}
+.tick{position:absolute;top:0;bottom:0;width:1px;background:var(--border-strong)}
+.pct{position:relative;height:100%;display:flex;align-items:center;justify-content:flex-end;
+  padding:0 8px;font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.nb{font-size:9.5px;font-weight:500;color:var(--text-muted)}
+
+/* ── Transaction rows — ~50px, shared columns ─────────────────────── */
+.tx{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--border)}
+.tx:last-child{border-bottom:none}
+.tx .nm{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx .cat{font-size:11px;color:var(--text-muted);margin-top:2px}
+.tx .amt{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.tx .dt{font-size:10.5px;color:var(--text-muted);text-align:right;margin-top:2px}
+.pos{color:var(--green)} .neg{color:var(--red)}
+
+.seeall{margin-top:12px;font-size:12px;font-weight:600;color:var(--blue-neon);cursor:pointer}
+svg.chart{width:100%;height:auto;display:block}
+
+@media(max-width:900px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .row2,.masonry{grid-template-columns:1fr}
+  .sidebar{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="ctl">
+  <strong>Mockup</strong>
+  <button id="bBefore" aria-pressed="false">Before (today)</button>
+  <button id="bAfter"  aria-pressed="true">After (airy + masonry)</button>
+  <span style="width:14px"></span>
+  <button id="bCap" aria-pressed="true">Budget: top 8</button>
+  <button id="bTheme" aria-pressed="true">Dark</button>
+  <span class="note">Real July 2026 figures, all 22 budget rows. Budget bars are
+    deliberately unchanged (24px, in-bar label). Toggle <em>Budget: all 22</em> to see
+    why masonry needs the cap — the columns fall badly out of balance without it.</span>
+</div>
+
+<div class="app v-after" id="root">
+  <aside class="sidebar">
+    <div class="brand"><i>M</i> Moresheth</div>
+    <nav class="nav">
+      <a class="on" href="#"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21H3z"/></svg>Dashboard</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M7 7h13M7 12h13M7 17h13M3 7h.01M3 12h.01M3 17h.01"/></svg>Transactions</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Accounts</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 7-7"/></svg>Budgets</a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Cash Flow</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15h4"/></svg>Cards</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Net Worth</a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>Settings</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>Dashboard</h1>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="pill"><button class="on">Monthly</button><button>Annual YTD</button></div>
+        <button class="btn">July 2026 ▾</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- KPI row -->
+      <div class="kpis">
+        <div class="card kpi"><div class="lbl">Checking &amp; Savings</div>
+          <div class="val">$34,706.14</div><div class="sub">—<span>vs. last month</span></div></div>
+        <div class="card kpi"><div class="lbl">Net Worth</div>
+          <div class="val" style="color:var(--blue-neon)">$528,503.17</div><div class="sub">—<span>vs. last month</span></div></div>
+        <div class="card kpi"><div class="lbl">Income</div>
+          <div class="val">$11,528.18</div><div class="sub"><span class="badge dn">−16%</span><span>vs. last month</span></div></div>
+        <div class="card kpi"><div class="lbl">Expenses</div>
+          <div class="val">$11,889.03</div><div class="sub"><span class="badge up">−39%</span><span>vs. last month</span></div></div>
+        <div class="card kpi"><div class="lbl">Net Cash Flow</div>
+          <div class="val">($360.85)</div><div class="sub"><span class="badge up">+94%</span><span>vs. last month</span></div></div>
+      </div>
+
+      <!-- BEFORE: 50/50 row, then a full-width budget table below -->
+      <div id="beforeBody" style="display:none">
+        <div class="row2" style="margin-bottom:20px">
+          <div class="card" id="trendA"></div>
+          <div class="card" id="txA"></div>
+        </div>
+        <div class="card" id="budgetA"></div>
+      </div>
+
+      <!-- AFTER: two-column masonry -->
+      <div id="afterBody" class="masonry">
+        <div class="col">
+          <div class="card" id="budgetB"></div>
+        </div>
+        <div class="col">
+          <div class="card" id="trendB"></div>
+          <div class="card" id="txB"></div>
+          <div class="card" id="nwB"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Real data pulled from the running app ─────────────────────────── */
+const SPEND=[{m:'Feb',v:10300},{m:'Mar',v:8200},{m:'Apr',v:11600},
+             {m:'May',v:19800},{m:'Jun',v:19200},{m:'Jul',v:11900}];
+/* All 22 real rows for July 2026, straight from /api/budget/actuals+targets.
+   The row COUNT is the whole point — see the note in the control bar. */
+const BUD=[
+ {c:"Other", b:0, a:3160.5, pct:null},
+ {c:"Healthcare", b:800.0, a:2562.12, pct:320},
+ {c:"Travel", b:500.0, a:2292.27, pct:458},
+ {c:"Groceries", b:1200.0, a:1590.78, pct:133},
+ {c:"For Others", b:0, a:947.45, pct:null},
+ {c:"Dining", b:700.0, a:800.3, pct:114},
+ {c:"Clothing", b:200.0, a:450.0, pct:225},
+ {c:"Transportation", b:200.0, a:339.34, pct:170},
+ {c:"Utilities", b:400.0, a:293.52, pct:73},
+ {c:"Electronics", b:0, a:270.0, pct:null},
+ {c:"Home", b:450.0, a:160.58, pct:36},
+ {c:"Insurance", b:200.0, a:152.95, pct:76},
+ {c:"Fitness", b:150.0, a:130.0, pct:87},
+ {c:"Kids", b:200.0, a:108.51, pct:54},
+ {c:"Business", b:0, a:67.5, pct:null},
+ {c:"Streaming", b:50.0, a:10.99, pct:22},
+ {c:"Gifts", b:50.0, a:0, pct:0},
+ {c:"Housing", b:1100.0, a:0, pct:0},
+ {c:"Self Care", b:100.0, a:0, pct:0},
+ {c:"Vehicle", b:200.0, a:0, pct:0},
+ {c:"Entertainment", b:200.0, a:-254.07, pct:null},
+ {c:"Education", b:4330.0, a:-732.61, pct:null},
+];
+const NW=[498,505,501,512,509,518,515,524,521,528,526,528.5];
+const TX=[
+ {n:'APLAY BLUE ANGEL CAHOBOKEN', c:'Dining',     a:-14.55,   d:'Jul 29'},
+ {n:'ADVANCED THERAPY OF AMERICA',c:'Healthcare', a:-175.00,  d:'Jul 29'},
+ {n:'PRUDENTIAL',                 c:'Work',       a:2475.00,  d:'Jul 29'},
+ {n:'PRUPLAZACAFE',               c:'Dining',     a:-8.08,    d:'Jul 29'},
+ {n:'KINGS FOOD MARKETS',         c:'Groceries',  a:-4.99,    d:'Jul 29'},
+];
+const money=n=>'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function trendCard(){
+  const W=520,H=190,pad={t:16,r:26,b:28,l:26};
+  const cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;
+  const max=Math.max(...SPEND.map(d=>d.v))*1.12;
+  const pts=SPEND.map((d,i)=>[pad.l+(i/(SPEND.length-1))*cW, pad.t+cH-(d.v/max)*cH]);
+  const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area=line+` L${pts[pts.length-1][0].toFixed(1)},${pad.t+cH} L${pts[0][0].toFixed(1)},${pad.t+cH} Z`;
+  return `<div class="ch"><h3>Spending Trend</h3><span class="sub">Feb – Jul 2026</span></div>
+  <svg class="chart" viewBox="0 0 ${W} ${H}">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="var(--blue-primary)" stop-opacity=".18"/>
+      <stop offset="100%" stop-color="var(--blue-primary)" stop-opacity="0"/></linearGradient></defs>
+    ${[0,.25,.5,.75,1].map(p=>`<line x1="${pad.l}" y1="${(pad.t+(1-p)*cH).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+(1-p)*cH).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`).join('')}
+    <path d="${area}" fill="url(#g)"/>
+    <path d="${line}" fill="none" stroke="var(--blue-vibrant)" stroke-width="2.5" stroke-linecap="round"/>
+    ${pts.map((p,i)=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.6" fill="var(--blue-vibrant)"/>
+      <text x="${p[0].toFixed(1)}" y="${(p[1]-11).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="600" fill="var(--text-secondary)">${(SPEND[i].v/1000).toFixed(1)}k</text>
+      <text x="${p[0].toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${SPEND[i].m}</text>`).join('')}
+  </svg>`;
+}
+function txCard(){
+  return `<div class="ch"><h3>Recent Transactions</h3><span class="sub">Most recent</span></div>`+
+   TX.map(t=>`<div class="tx"><div><div class="nm">${t.n}</div><div class="cat">${t.c}</div></div>
+     <div><div class="amt ${t.a>0?'pos':'neg'}">${t.a>0?'+':'−'}${money(t.a)}</div><div class="dt">${t.d}</div></div></div>`).join('')+
+   `<div class="seeall">See more →</div>`;
+}
+function nwCard(){
+  const W=520,H=150,pad={t:14,r:20,b:22,l:20};
+  const cW=W-pad.l-pad.r,cH=H-pad.t-pad.b;
+  const mn=Math.min(...NW)*.995,mx=Math.max(...NW)*1.005;
+  const pts=NW.map((v,i)=>[pad.l+(i/(NW.length-1))*cW, pad.t+cH-((v-mn)/(mx-mn))*cH]);
+  const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  return `<div class="ch"><h3>Net Worth</h3><span class="sub">12 months</span></div>
+   <div style="font-family:Outfit,sans-serif;font-size:24px;font-weight:700;letter-spacing:-.6px;margin-bottom:2px">$528,503.17</div>
+   <div style="font-size:12px;color:var(--green);font-weight:600;margin-bottom:10px">↑ $30,503 (6.1%) this year</div>
+   <svg class="chart" viewBox="0 0 ${W} ${H}">
+     <path d="${line} L${pts[pts.length-1][0].toFixed(1)},${pad.t+cH} L${pts[0][0].toFixed(1)},${pad.t+cH} Z" fill="url(#g)"/>
+     <path d="${line}" fill="none" stroke="var(--blue-neon)" stroke-width="2.2" stroke-linecap="round"/>
+   </svg>`;
+}
+function budgetCard(capped){
+  const rows = capped ? BUD.slice(0,8) : BUD;
+  const more  = capped ? `<div class="seeall">Show all ${BUD.length} categories →</div>` : '';
+  return `<div class="ch"><h3>Budget Performance</h3><span class="sub">${capped?`Top 8 of ${BUD.length} · July 2026`:`All ${BUD.length} · July 2026`}</span></div>`+
+   rows.map(r=>{
+     const over=r.pct!==null&&r.pct>=100, near=r.pct!==null&&!over&&r.pct>=80;
+     const fillW=r.pct===null?0:Math.min(r.pct,100);
+     const col=over?'var(--red)':near?'var(--amber)':'var(--blue-primary)';
+     const op=over?.42:near?.38:.30;
+     return `<div class="brow">
+       <div class="bmeta"><span>${r.c}</span>
+         <span class="amt" style="${over?'color:var(--red)':''}">${money(r.a)}${r.b?` <span style="color:var(--text-muted);font-weight:400">of ${money(r.b)}</span>`:''}</span></div>
+       <div class="track">
+         ${fillW?`<div class="fill" style="width:${fillW}%;background:${col};opacity:${op}"></div>`:''}
+         ${r.pct!==null?[25,50,75].map(m=>`<div class="tick" style="left:${m}%"></div>`).join(''):''}
+         <div class="pct">${r.pct!==null
+            ?`<span style="color:${over?'var(--red)':'var(--text-secondary)'}">${r.pct}%</span>`
+            :`<span class="nb">no budget set</span>`}</div>
+       </div></div>`;
+   }).join('')+more;
+}
+
+['A','B'].forEach(s=>{
+  document.getElementById('trend'+s).innerHTML=trendCard();
+  document.getElementById('tx'+s).innerHTML=txCard();
+});
+document.getElementById('budgetA').innerHTML=budgetCard(false);   // before: all 22, full width
+document.getElementById('nwB').innerHTML=nwCard();
+
+const root=document.getElementById('root');
+const bB=document.getElementById('bBefore'), bA=document.getElementById('bAfter'),
+      bC=document.getElementById('bCap'), bT=document.getElementById('bTheme');
+let capped=true;
+function renderAfterBudget(){ document.getElementById('budgetB').innerHTML=budgetCard(capped); }
+function setVariant(after){
+  root.classList.toggle('v-after',after); root.classList.toggle('v-before',!after);
+  bA.setAttribute('aria-pressed',after); bB.setAttribute('aria-pressed',!after);
+  document.getElementById('afterBody').style.display=after?'grid':'none';
+  document.getElementById('beforeBody').style.display=after?'none':'block';
+  bC.style.display=after?'':'none';
+}
+bC.onclick=()=>{capped=!capped;bC.setAttribute('aria-pressed',capped);
+  bC.textContent=capped?'Budget: top 8':'Budget: all 22';renderAfterBudget();};
+renderAfterBudget();
+bA.onclick=()=>setVariant(true); bB.onclick=()=>setVariant(false);
+bT.onclick=()=>{const d=document.documentElement.getAttribute('data-theme')==='dark';
+  document.documentElement.setAttribute('data-theme',d?'light':'dark');
+  bT.textContent=d?'Light':'Dark'; bT.setAttribute('aria-pressed',!d);};
+setVariant(true);
+</script>
+</body>
+</html>
