@@ -1989,6 +1989,33 @@ def seed_card_products(session):
             "_base": 2,
         }),
 
+        # Real rates verified via web search 2026-07-31 (not memory): $375/yr,
+        # 4x on whichever 2 of 6 eligible categories (US advertising/media,
+        # software/cloud, gas stations, restaurants, transit, wireless) the
+        # account spends most on THAT BILLING CYCLE, up to $150,000 combined
+        # per calendar year, then 1x. This is a genuinely different mechanic
+        # from the existing `_auto_top` support (top-1 category, $500/month
+        # cap, hardcoded +4 bonus — built for Citi Custom Cash) — top-2,
+        # annual $150K cap, no monthly reset. Modeling it through `_auto_top`
+        # would silently produce wrong numbers, so left as base-rate-only
+        # (same precedent as Citi Strata Elite's unmodeled portal rates) —
+        # see BACKLOG for the follow-up to build proper top-2/annual-cap
+        # support before this card's points math can be trusted.
+        ("amex_business_gold", "American Express® Business Gold Card",
+         "Amex MR", "active", 375, [
+            ("FedEx/Grubhub/Office Supply Credit", 20, "monthly", None,
+             "$20/mo ($240/yr) at FedEx, Grubhub, and office supply stores. Enrollment required."),
+            ("Walmart+ Membership Credit", 12.95, "monthly", "Walmart",
+             "Covers one Walmart+ membership fee/month on a Basic or Employee Card."),
+            ("Squarespace Credit", 150, "annual", None, None),
+            ("ChatGPT Business Credit", 300, "annual", None,
+             "Statement credits on ChatGPT Business purchases made directly with OpenAI."),
+            ("Hotel Collection Credit (per qualifying 2-night+ stay)", 100, "annual", "Hotels",
+             "Booked via AmexTravel.com's Hotel Collection; no annual cap, doesn't expire unused."),
+        ], {
+            "_base": 1,
+        }),
+
         ("atmos_ascent", "Atmos Rewards Ascent Visa Signature",
          "Atmos Rewards", "active", 95, [
             ("Free First Checked Bag", 0, "annual", None,

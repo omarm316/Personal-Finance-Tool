@@ -14,7 +14,7 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
     const n=(ecoName||'').toLowerCase();
     if(n==='cash back')return'#d97706';
     if(n.includes('chase')||n.includes('ultimate'))return'#1a56db';
-    if(n.includes('amex')||n.includes('membership'))return'#059669';
+    if(n.includes('amex')||n.includes('membership'))return'#2563eb'; // Amex's real brand blue — was green, clashed with the actual (blue) card art
     if(n.includes('hilton'))return'#7c3aed';
     if(n.includes('citi'))return'#0891b2';
     if(n.includes('marriott')||n.includes('bonvoy'))return'#b45309';
@@ -351,7 +351,7 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
     const n=(ecoName||'').toLowerCase();
     if(n==='cash back')return'linear-gradient(135deg,#b45309,#d97706)';
     if(n.includes('chase')||n.includes('ultimate'))return'linear-gradient(135deg,#1e40af,var(--blue-primary))';
-    if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#047857,#10b981)';
+    if(n.includes('amex')||n.includes('membership'))return'linear-gradient(135deg,#0a2f6b,#2563eb)'; // real Amex blue, matches the card art
     if(n.includes('hilton'))return'linear-gradient(135deg,#5b21b6,#8b5cf6)';
     if(n.includes('citi'))return'linear-gradient(135deg,#155e75,#06b6d4)';
     if(n.includes('marriott')||n.includes('bonvoy'))return'linear-gradient(135deg,#92400e,#d97706)';
@@ -398,6 +398,7 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
     chase_sapphire_reserve:'linear-gradient(135deg,#0f172a,#1e3a5f)',chase_freedom_unlimited:'linear-gradient(135deg,#0ea5e9,#0369a1)',
     chase_freedom:'linear-gradient(135deg,#0369a1,#0ea5e9)',amex_gold:'linear-gradient(135deg,#b45309,#f59e0b)',
     amex_platinum:'linear-gradient(135deg,#78716c,#d6d3d1)',amex_blue_business_plus:'linear-gradient(135deg,#1e40af,#60a5fa)',
+    amex_business_gold:'linear-gradient(135deg,#0a2f6b,#2563eb)',
     hilton_aspire:'linear-gradient(135deg,#5b21b6,#a78bfa)',
     united_quest:'linear-gradient(135deg,#374151,#9ca3af)',united_explorer:'linear-gradient(135deg,#1f2937,#6b7280)',
     delta_gold:'linear-gradient(135deg,#92400e,#d97706)',citi_custom_cash:'linear-gradient(135deg,#155e75,#06b6d4)',
@@ -411,29 +412,16 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
 
   return(
     <div>
-      {/* Back button */}
-      <button type="button" onClick={onBack}
-        style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--blue-primary)',
-          cursor:'pointer',marginBottom:16,border:'none',background:'none',fontFamily:'Plus Jakarta Sans, sans-serif',
-          padding:0,transition:'opacity 0.2s'}}
-        onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
-        onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
-        ← Portfolio
-      </button>
-
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
-        <div style={{display:'flex',alignItems:'center',gap:14}}>
-          <div style={{width:48,height:34,borderRadius:10,background:ecoGradient,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-            {ecoImg&&<img src={ecoImg} alt="" style={{width:30,height:30,objectFit:'contain',filter:'brightness(0) invert(1)',opacity:0.9}} onError={e=>{e.target.style.display='none'}}/>}
-          </div>
-          <div>
-            <div style={{fontSize:20,fontWeight:400,color:'var(--text-primary)',letterSpacing:'-0.3px'}}>{ecoName}</div>
-            {data&&!isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>{data.currency_name}</div>}
-            {data&&isCashBack&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,fontWeight:300}}>All cash-back cards</div>}
-          </div>
-        </div>
-        {/* Period selector */}
+      {/* Top strip: back + period selector */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:12}}>
+        <button type="button" onClick={onBack}
+          style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:400,color:'var(--blue-primary)',
+            cursor:'pointer',border:'none',background:'none',fontFamily:'Plus Jakarta Sans, sans-serif',
+            padding:0,transition:'opacity 0.2s'}}
+          onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
+          onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+          ← Portfolio
+        </button>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <div style={{display:'flex',gap:16}}>
             {['mtd','qtd','ytd'].map(p=>(
@@ -454,15 +442,73 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
 
       {loading?<div style={{padding:60,textAlign:'center'}}><div className="spinner"/></div>:data&&(
         <>
-          {/* Hero stat */}
-          <div style={{textAlign:'center',padding:'28px 24px 32px',marginBottom:20,borderRadius:14,
-            background:'var(--surface)',border:'1px solid var(--border)',position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',top:-40,right:-30,width:180,height:180,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
-            <div style={{position:'absolute',bottom:-30,left:-20,width:120,height:120,borderRadius:'50%',background:'var(--blue-primary)',opacity:0.06}}/>
-            <div style={{fontSize:42,fontWeight:300,fontFamily:'Plus Jakarta Sans',color:isCashBack?'var(--green)':'var(--blue-primary)',lineHeight:1,letterSpacing:'-2px',position:'relative'}}>
-              {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.total_points.toLocaleString()}
+          {/* Hero / cover — ecosystem-branded banner with a capped fan of
+              real card art (top 3 by points this period, "+N" for the rest)
+              instead of the old plain stat block. Card art comes from
+              /static/cards/{product_key}.png; a card whose product has no
+              art yet just shows its brand gradient underneath (see
+              cardGrads) instead of a blank box — no special-casing needed
+              per new card, this reads straight off data.by_card. */}
+          <div style={{position:'relative',overflow:'hidden',borderRadius:20,padding:'26px 28px',marginBottom:20,minHeight:150,
+            background:ecoGradient,border:'1px solid rgba(255,255,255,0.08)',boxShadow:'0 20px 50px -24px rgba(0,0,0,0.55)'}}>
+            <div style={{position:'absolute',inset:0,opacity:0.08,pointerEvents:'none',
+              backgroundImage:'repeating-linear-gradient(115deg, rgba(255,255,255,.6) 0 1px, transparent 1px 7px)',
+              WebkitMaskImage:'radial-gradient(ellipse 70% 90% at 25% 15%, black 0%, transparent 72%)',
+              maskImage:'radial-gradient(ellipse 70% 90% at 25% 15%, black 0%, transparent 72%)'}}/>
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',position:'relative',zIndex:2,flexWrap:'wrap',gap:14}}>
+              <div style={{display:'flex',alignItems:'center',gap:12}}>
+                <div style={{width:38,height:38,borderRadius:9,background:'#fff',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',boxShadow:'0 4px 14px rgba(0,0,0,0.25)'}}>
+                  {ecoImg?<img src={ecoImg} alt="" style={{width:'100%',height:'100%',objectFit:'contain'}} onError={e=>{e.target.style.display='none'}}/>
+                    :<span style={{fontFamily:'Outfit',fontWeight:700,fontSize:16,color:ecoColor}}>{(ecoName||'?')[0]}</span>}
+                </div>
+                <div>
+                  <div style={{fontFamily:'Outfit',fontWeight:600,fontSize:20,color:'#fff',letterSpacing:'-0.3px',lineHeight:1.15}}>{ecoName}</div>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.68)',marginTop:2}}>
+                    {isCashBack?'All cash-back cards':`${data.by_card.length} card${data.by_card.length===1?'':'s'} linked · ${data.currency_name}`}
+                  </div>
+                </div>
+              </div>
+              {data.by_card.length>0&&<div style={{display:'flex'}}>
+                {data.by_card.slice(0,3).map((c,i)=>{
+                  const pk=c.product_key||'';
+                  const grad=cardGrads[pk]||ecoGradient;
+                  return(
+                    <div key={c.account_id} style={{width:64,borderRadius:7,overflow:'hidden',aspectRatio:'480/304',flexShrink:0,
+                      boxShadow:'0 8px 20px -6px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12)',
+                      marginLeft:i===0?0:-22,background:grad,
+                      transform:`rotate(${(i-1)*4}deg)`,transition:'transform 0.2s ease',position:'relative',zIndex:3-i}}>
+                      <img src={`/static/cards/${pk}.png`} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}} onError={e=>{e.target.style.display='none'}}/>
+                    </div>
+                  );
+                })}
+                {data.by_card.length>3&&
+                  <div style={{width:64,aspectRatio:'480/304',borderRadius:7,marginLeft:-22,background:'rgba(0,0,0,0.35)',
+                    border:'1px solid rgba(255,255,255,0.25)',display:'flex',alignItems:'center',justifyContent:'center',
+                    color:'#fff',fontSize:12,fontWeight:600,flexShrink:0,position:'relative',zIndex:0}}>
+                    +{data.by_card.length-3}
+                  </div>}
+              </div>}
             </div>
-            <div style={{fontSize:13,fontWeight:300,color:'var(--text-secondary)',marginTop:4,position:'relative'}}>{isCashBack?'Cash back earned':data.currency_name}</div>
+            <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginTop:20,position:'relative',zIndex:2,flexWrap:'wrap',gap:12}}>
+              <div>
+                <div style={{fontSize:10.5,letterSpacing:'0.08em',textTransform:'uppercase',color:'rgba(255,255,255,0.6)',marginBottom:4}}>
+                  {isCashBack?'Cash back earned':'Current balance · posted'}
+                </div>
+                <div style={{fontFamily:'Outfit',fontWeight:600,fontSize:38,color:'#fff',letterSpacing:'-1px',lineHeight:1}}>
+                  {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.current_balance.toLocaleString()}
+                </div>
+                {!isCashBack&&data.pending_balance>0&&
+                  <div style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,color:'#FCD34D',marginTop:7,fontWeight:600}}>
+                    <span style={{width:5,height:5,borderRadius:'50%',background:'#FCD34D'}}/>
+                    {Math.round(data.pending_balance).toLocaleString()} pending — posts after next statement close
+                  </div>}
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:13,color:'rgba(255,255,255,0.85)',fontWeight:600}}>
+                  +{isCashBack?`$${data.total_points.toFixed(2)}`:data.total_points.toLocaleString()}{isCashBack?'':' pts'} this {period.toUpperCase()}
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Balance Ledger — per-person (Omer/Daniella) balance tracking
@@ -664,30 +710,34 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
             </div>
           </div>}
 
-          {/* Cards */}
+          {/* Cards — real card art, not the old washed-out (opacity 0.4)
+              gray-box list. Falls back to the product's brand gradient
+              (cardGrads) with the card name overlaid whenever no art file
+              exists yet for that product_key, e.g. a just-linked card. */}
           {data.by_card.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Your Cards</div>
-            <div>
-              {data.by_card.map((c,i)=>{
+            <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:14}}>Your Cards</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))',gap:14}}>
+              {data.by_card.map((c)=>{
                 const pk=c.product_key||'';
-                const grad=cardGrads[pk]||'linear-gradient(135deg,#374151,#6b7280)';
+                const grad=cardGrads[pk]||ecoGradient;
                 return(
-                  <div key={c.account_id}
-                    style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',
-                      borderBottom:i<data.by_card.length-1?'1px solid var(--border)':'none',
-                      cursor:'pointer',transition:'all 0.15s'}}
-                    onClick={()=>onSelectAccount(c.account_id)}
-                    onMouseEnter={e=>{e.currentTarget.style.background='var(--surface-hover)';e.currentTarget.style.margin='0 -8px';e.currentTarget.style.padding='10px 8px';e.currentTarget.style.borderRadius='8px';}}
-                    onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.margin='0';e.currentTarget.style.padding='10px 0';e.currentTarget.style.borderRadius='0';}}>
-                    <div style={{width:40,height:26,borderRadius:6,background:grad,flexShrink:0,overflow:'hidden',position:'relative'}}>
-                      <img src={`/static/cards/${pk}.png`} alt="" style={{width:'100%',height:'100%',objectFit:'cover',opacity:0.4}} onError={e=>{e.target.style.display='none'}}/>
+                  <div key={c.account_id} onClick={()=>onSelectAccount(c.account_id)}
+                    style={{border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',background:'var(--bg)',
+                      cursor:'pointer',transition:'border-color 0.15s ease, transform 0.15s ease'}}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--border-strong)';e.currentTarget.style.transform='translateY(-2px)';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.transform='translateY(0)';}}>
+                    <div style={{aspectRatio:'480/304',position:'relative',background:grad,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <span style={{fontSize:11,fontWeight:600,color:'rgba(255,255,255,0.85)',textAlign:'center',padding:'0 10px'}}>{c.account_name}</span>
+                      <img src={`/static/cards/${pk}.png`} alt="" style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} onError={e=>{e.target.style.display='none'}}/>
                     </div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:400,color:'var(--text-primary)'}}>{c.account_name}</div>
-                      {c.mask&&<div style={{fontSize:11,fontWeight:300,color:'var(--text-muted)'}}>···{c.mask}</div>}
+                    <div style={{padding:'10px 12px 12px'}}>
+                      <div style={{fontSize:12.5,fontWeight:500,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.account_name}</div>
+                      {c.mask&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:1}}>···{c.mask}</div>}
+                      <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginTop:7}}>
+                        <span style={{fontSize:15,fontWeight:700,color:isCashBack?'var(--green)':'var(--blue-primary)'}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
+                        <span style={{fontSize:10.5,color:'var(--text-muted)'}}>pts {period.toUpperCase()}</span>
+                      </div>
                     </div>
-                    <span style={{fontSize:14,fontWeight:300,color:isCashBack?'var(--green)':'var(--blue-primary)',flexShrink:0}}>{isCashBack?`$${(c.points*0.01).toFixed(2)}`:c.points.toLocaleString()}</span>
-                    <span style={{color:'var(--text-muted)',fontSize:14,marginLeft:4,opacity:0.4}}>›</span>
                   </div>
                 );
               })}
