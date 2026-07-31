@@ -1,12 +1,30 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-30
+> Last updated: 2026-07-31
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-07-31 — Amex MR: cover-banner hero implemented for real, new card onboarded
+
+Follow-through on the mockup Omer approved ("ABSOLUTELY gorgeous!!!", one fix requested — drop the CPP "assumed value" line, done). Asked to implement it for real, starting with Amex MR, then extend the pattern to the rest.
+
+**Detour first — Omer had synced a new card, "Amex Biz Gold," and asked why it wasn't showing up + how to make sure new cards always do.** Traced it: genuinely new, unlinked account (`Business Gold Card 1000`, item "American Express (Omer)"), no catalog product existed for it. Answered the "how do we make sure" half directly: once the hero/card-grid reads off `data.by_card` (server-computed, not hardcoded), any correctly-linked card shows up automatically — the real prerequisite is Plaid sync + a `Card` row + a linked `CardProduct`, not frontend code. Used the card-research skill to pull real rates for the American Express® Business Gold Card (web search, not memory — $375/yr, 1x base, 4x on top-2-of-6 categories per billing cycle up to $150K/yr, plus 4 real periodic benefits), added it to the catalog as `amex_business_gold`, then did the now-familiar manual fix for a newly-synced account: created the missing `Card` row, linked the product, relocked its 6 transactions. The 4x-top-2 mechanic doesn't fit the existing `auto_top_category` engine (single category, $500/month cap — built for Citi Custom Cash) — modeled at 1x base only rather than faking the bonus, logged as B29.
+
+**Then the actual implementation.** Found B19's real root cause while wiring the hero's card-art fan up against live data: `by_card_out` in `main.py` (both the regular and cash-back branches of `ecosystem_earn_detail`) never included `product_key`, so `EcosystemDetailPage.jsx`'s art/gradient lookup was always keyed on `''` — every ecosystem page's "Your Cards" list has been silently falling back to a blank box since the art-wiring work on 2026-07-24, not just Amex MR's. One-line fix in each branch. Also found the existing row list rendered card art at `opacity:0.4`, a second, independent cause of the washed-out look.
+
+Implemented in `EcosystemDetailPage.jsx`: a cover-banner hero (ecosystem logo, capped 3-card art fan with a "+N more" chip, current posted balance as the primary figure, pending line beneath, QTD secondary) replacing the old plain stat block, and a real tile grid for "Your Cards" with a graceful brand-gradient-plus-name fallback for any card with no art file yet (verified live against the new, art-less Business Gold card — reads clean, not broken). Also fixed a real, unrelated-to-B19 color bug found in the process: Amex MR's badge/hero was `#059669` (green) against real (blue) Amex card art and logo — corrected to Amex's actual blue.
+
+**Verified live**: dev server rebuilt (`npm run build`) and reloaded — required manually unregistering the service worker + a cache-busting reload to see the new build (SW caching bit again, same class of issue noted in earlier sessions; worth remembering: after any `frontend/` change, verifying via the dev server needs a forced SW/cache clear, not just a normal reload). Hero renders correctly in both themes with the real 4-card fan (Platinum ×2, BBP shown + "+1" for Business Gold), Business Gold's fallback tile shows its name legibly on the gradient, no console errors, the separate Portfolio-page tile grid (different component, untouched) unaffected.
+
+**Not done, both already logged**: B20 (duplicate-looking "Other" categories, still visible, still deferred) and the new B29 (Business Gold's 4x-top-2 bonus not modeled).
+
+**Next**: same hero pattern for the remaining ecosystem pages (Chase UR, Marriott Bonvoy, Citi ThankYou, Hilton Honors, etc.). Both backend fixes (`product_key`, the color-mismatch class of bug) already apply everywhere via the shared endpoint — worth spot-checking each ecosystem's badge color against its real brand before assuming it's fine, since Amex's green was apparently never checked against reality. Full detail in BACKLOG.md's Recently Completed section.
 
 ---
 
