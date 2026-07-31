@@ -980,6 +980,66 @@ def get_account_balance(db: Session, account_id: int, as_of_date: datetime = Non
         return round(anchor - (q.scalar() or 0.0), 2)
 
 
+def get_account_balances_bulk(db: Session, accounts: list) -> dict:
+    """
+    Current balance for many accounts in ONE query.
+
+    get_account_balance() costs two round-trips per account — it re-fetches the
+    Account it was given the id of, then runs a per-account SUM. Calling it in a
+    loop is what made /api/accounts 98 queries / 7.1s (49 account fetches +
+    48 sums) against the remote DB. See B4.
+
+    Same anchor model as get_account_balance(), expressed set-wise:
+      no start_date  → anchor + SUM(all transactions)
+      start_date set → anchor + SUM(transactions on a LATER DAY than the anchor)
+
+    `date(t.date) > date(a.start_date)` is exactly equivalent to the scalar
+    version's `t.date > end-of-anchor-day` comparison, without needing to
+    materialise a per-account timestamp.
+
+    Accounts whose anchor is in the *future* take the scalar function's
+    walk-backward branch, which has no set-wise equivalent here; they're rare,
+    so they fall back to the per-account path rather than complicating this.
+    """
+    from sqlalchemy import func as _func
+    if not accounts:
+        return {}
+    now = datetime.utcnow()
+
+    def _anchor_eod(a):
+        d = a.start_date
+        if d is None:
+            return None
+        return datetime.combine(d.date() if hasattr(d, 'date') else d, datetime.max.time())
+
+    future_ids = {a.id for a in accounts
+                  if (_eod := _anchor_eod(a)) is not None and _eod > now}
+    normal = [a for a in accounts if a.id not in future_ids]
+
+    sums: dict[int, float] = {}
+    if normal:
+        rows = (
+            db.query(Transaction.account_id, _func.sum(Transaction.amount))
+            .join(Account, Account.id == Transaction.account_id)
+            .filter(Transaction.account_id.in_([a.id for a in normal]))
+            .filter(or_(
+                Account.start_date.is_(None),
+                _func.date(Transaction.date) > _func.date(Account.start_date),
+            ))
+            .group_by(Transaction.account_id)
+            .all()
+        )
+        sums = {aid: (total or 0.0) for aid, total in rows}
+
+    out: dict[int, float] = {}
+    for a in accounts:
+        if a.id in future_ids:
+            out[a.id] = get_account_balance(db, a.id)
+        else:
+            out[a.id] = round((a.starting_balance or 0.0) + sums.get(a.id, 0.0), 2)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Balance snapshot helpers (Section 0B)
 # ---------------------------------------------------------------------------
@@ -3420,7 +3480,12 @@ def _build_product_rate_maps(db, product_ids: list[int]) -> dict[int, tuple]:
     eco_ids    = [p.ecosystem_id for p in products.values() if p.ecosystem_id]
     ecosystems = {e.id: e for e in db.query(PointsEcosystem).filter(PointsEcosystem.id.in_(eco_ids)).all()}
 
+    # joinedload the category: the bonus_by_name build below reads
+    # r.points_category.name, which lazy-loads one query per reward row
+    # otherwise (26 queries / 1.9s on a 500-transaction page). See B4.
+    from sqlalchemy.orm import joinedload as _joinedload
     all_rewards = db.query(CardProductReward)\
+        .options(_joinedload(CardProductReward.points_category))\
         .filter(CardProductReward.product_id.in_(product_ids)).all()
     rewards_by_product: dict[int, list] = {}
     for r in all_rewards:
@@ -3728,7 +3793,13 @@ async def get_transactions(
     account_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Transaction).join(Account)
+    # contains_eager, not a bare join: _serialize_txn reads t.account.account_name
+    # and t.account.account_type, which lazy-load one query per distinct account
+    # otherwise (37 queries / 2.6s on limit=500). The join is already here, so
+    # contains_eager populates the relationship from it at no extra cost — unlike
+    # joinedload, which would add a second join. See B4.
+    from sqlalchemy.orm import contains_eager as _contains_eager
+    query = db.query(Transaction).join(Account).options(_contains_eager(Transaction.account))
     if needs_review is not None:
         query = query.filter(Transaction.needs_review == needs_review)
     if start_date:
@@ -5624,6 +5695,7 @@ async def cash_back_earn_detail(
             'bonus_by_name': bonus_by_name,
             'account_name':  acct.account_name,
             'mask':          acct.mask,
+            'product_key':   product.product_key if product else None,
             'card_name':     card.card_name if card else None,
             'issuer':        card.issuer if card else None,
         }
@@ -5686,7 +5758,9 @@ async def cash_back_earn_detail(
         by_acct.setdefault(aid, 0.0)
     by_card_out = sorted(
         [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
-          'mask': acct_info[aid]['mask'], 'points': round(p)}
+          'mask': acct_info[aid]['mask'],
+          'product_key': acct_info[aid].get('product_key'),
+          'points': round(p)}
          for aid, p in by_acct.items()],
         key=lambda x: -x['points'],
     )
@@ -6069,7 +6143,9 @@ async def ecosystem_earn_detail(
         by_acct.setdefault(aid, 0.0)
     by_card_out = sorted(
         [{'account_id': aid, 'account_name': acct_info[aid]['account_name'],
-          'mask': acct_info[aid]['mask'], 'points': round(p)}
+          'mask': acct_info[aid]['mask'],
+          'product_key': acct_info[aid]['product'].product_key if acct_info[aid].get('product') else None,
+          'points': round(p)}
          for aid, p in by_acct.items()],
         key=lambda x: -x['points'],
     )
@@ -8931,10 +9007,11 @@ async def list_accounts(db: Session = Depends(get_db)):
         db.query(Transaction.account_id, _func.count(Transaction.id))
         .group_by(Transaction.account_id).all()
     )
+    balances = get_account_balances_bulk(db, accounts)
     result = []
     for a in accounts:
         d = serialize_account(a, counts.get(a.id, 0))
-        d['balance'] = get_account_balance(db, a.id)
+        d['balance'] = balances.get(a.id, 0.0)
         result.append(d)
     return result
 

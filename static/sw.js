@@ -4,7 +4,7 @@
 // from a CDN — they're bundled into /static/app/assets/*. Bumping the version
 // is what evicts the old shell cache, which would otherwise keep serving the
 // pre-build HTML (exactly the stale-SW trap noted in PLAN.md).
-const CACHE_VERSION = 'v12';
+const CACHE_VERSION = 'v13';
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const API_CACHE = `api-${CACHE_VERSION}`;
 
@@ -94,11 +94,17 @@ self.addEventListener('fetch', event => {
         .catch(() =>
           caches.match(event.request).then(cached => {
             if (cached) return cached;
-            // Return empty JSON so the app doesn't crash
-            return new Response(JSON.stringify([]), {
-              status: 503,
-              headers: { 'Content-Type': 'application/json' }
-            });
+            // Offline with nothing cached. This used to return an empty ARRAY
+            // (`[]`) with status 503, which is actively misleading: any caller
+            // that checked the body before the status saw a perfectly valid
+            // "no results" payload, so a transient network failure rendered as
+            // a confident empty list rather than an error (B28). Return an
+            // explicit error object instead — it can never be mistaken for a
+            // successful empty collection.
+            return new Response(
+              JSON.stringify({ detail: 'Offline — no cached copy of this request.', __swOffline: true }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
           })
         )
     );

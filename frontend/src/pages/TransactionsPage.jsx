@@ -47,6 +47,10 @@ export function TransactionsPage({categories,toast,refreshKey}){
   const toggleSort=col=>{if(sortCol===col){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortCol(col);setSortDir('asc');}};
 
   const[tableLoading,setTableLoading]=useState(false);
+  /* Non-null when the last load failed. Keeps "the fetch broke" distinguishable
+     from "the filters matched nothing" — previously both rendered the same
+     confident "No transactions found" (B28). */
+  const[loadError,setLoadError]=useState(null);
   const _acctKey=useMemo(()=>accountFilter===null?'__all__':[...accountFilter].sort().join(','),[accountFilter]);
   const _catKey=useMemo(()=>catFilter===null?'__all__':[...catFilter].sort().join(','),[catFilter]);
   const _actionKey=useMemo(()=>actionFilter===null?'__all__':[...actionFilter].sort().join(','),[actionFilter]);
@@ -60,9 +64,18 @@ export function TransactionsPage({categories,toast,refreshKey}){
       if(endDate)q+=`&end_date=${endDate}`;
       if(accountFilter&&accountFilter.size===1)q+=`&account_id=${[...accountFilter][0]}`;
       if(catFilter&&catFilter.size===1)q+=`&category=${encodeURIComponent([...catFilter][0])}`;
-      const[t,a]=await Promise.all([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
-      setTxns(t);setAccounts(a);
-    }catch(e){toast('Failed to load','error');}
+      /* allSettled, not all: these were coupled, so a failure on EITHER threw
+         away BOTH results and left the table empty — and because the accounts
+         call is only needed for filter labels, a slow/failed /accounts could
+         blank the transaction list entirely. That is how a backend slowdown
+         surfaced as a confident "No transactions found" (B28). Each result is
+         now applied on its own merits. */
+      const[tRes,aRes]=await Promise.allSettled([apiFetch(`/transactions${q}`),apiFetch('/accounts')]);
+      if(tRes.status==='fulfilled'){setTxns(tRes.value);setLoadError(null);}
+      else{setLoadError(tRes.reason?.message||'Could not load transactions');toast('Failed to load transactions','error');}
+      if(aRes.status==='fulfilled')setAccounts(aRes.value);
+      else console.warn('Accounts fetch failed (filters may be incomplete):',aRes.reason);
+    }catch(e){setLoadError(e?.message||'Could not load transactions');toast('Failed to load','error');}
     finally{if(!silent)setLoading(false);setTableLoading(false);}
   },[needsReview,startDate,endDate,_acctKey,_catKey]);
 
@@ -279,6 +292,12 @@ export function TransactionsPage({categories,toast,refreshKey}){
           <div className="spinner"/>
         </div>}
         {loading&&txns.length===0?<SkeletonTable rows={10}/>
+          :loadError&&txns.length===0?<div className="empty">
+              <div className="empty-icon" style={{color:'var(--red)'}}>!</div>
+              <span>Couldn't load transactions</span>
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:6,maxWidth:420,textAlign:'center'}}>{loadError}</div>
+              <button type="button" className="btn btn-secondary" style={{marginTop:12}} onClick={()=>load()}>Retry</button>
+            </div>
           :visible.length===0&&!tableLoading?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
           :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
         }

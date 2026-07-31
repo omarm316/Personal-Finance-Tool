@@ -10,6 +10,50 @@
 
 ---
 
+## Session 2026-07-30 (cont'd) — B4 + B28: the app is now fast
+
+B28 was the visible symptom of B4, so they were fixed together. Headline: the
+Transactions page went from rendering **"No transactions found"** indefinitely to
+**464 rows in ~1 second**.
+
+**The recorded cause of B4 was wrong, and profiling is what found that.** The backlog
+had said "page loads trigger a synchronous full Plaid sync across all banks." I checked
+every `@app.get` route for sync calls — **none triggers a Plaid sync**. The actual cause
+was ordinary N+1 lazy-loading in two endpoints:
+
+| endpoint | before | after |
+|---|---|---|
+| `/api/accounts` | 98 queries / 7.1s | **3 queries / 0.31s** |
+| `/api/transactions?limit=500` | 70 queries / 5.5s | **8 queries / 1.0s** |
+
+The `/api/accounts` fix is the interesting one: `get_account_balance()` re-fetches the
+`Account` it was handed the id of *and* runs a per-account `SUM`, so calling it in a
+loop cost two round-trips per account. The new `get_account_balances_bulk()` expresses
+the same anchor model set-wise — `date(t.date) > date(a.start_date)` is exactly
+equivalent to the scalar version's end-of-anchor-day comparison. Accounts with a
+*future* anchor take the walk-backward branch, which has no set-wise equivalent, so
+they fall back to the per-account path rather than complicating the query.
+**Checked against all 48 real accounts: zero mismatches, 6.97s → 0.07s.**
+
+For `/api/transactions`, `contains_eager` was the right tool rather than `joinedload`:
+the query already joined `Account`, so `contains_eager` populates the relationship from
+the join that was already being paid for, where `joinedload` would have added a second.
+
+**B28 turned out to be three independent faults**, all worth fixing even now that the
+backend is fast, because each would resurface under any future slowness:
+1. `load()` coupled two fetches in one `Promise.all`, so either failing discarded both.
+2. `sw.js` answered a failed `/api/` fetch with an empty **array** at status 503 — a
+   payload indistinguishable from a legitimate "no results" for any caller that reads
+   the body before the status. Now an explicit error **object**.
+3. The empty state didn't distinguish "no results" from "failed to load."
+
+**Method note that keeps paying off:** three times this session the backlog's *stated*
+cause was wrong (B26's product lookups, B4's Plaid sync, B14 being open at all) and
+profiling or a direct query found the real one in minutes. Treat the backlog's diagnosis
+as a hypothesis, not a finding — especially on items logged weeks earlier.
+
+---
+
 ## Session 2026-07-30 (cont'd) — Vite Phase 2: the component split
 
 `main.jsx` (10,957 lines) → **62 modules**: `lib/` (3), `hooks/` (1), `components/` (44),
