@@ -141,6 +141,93 @@ PLAID_TYPE_FALLBACK = {
     'loan':        'loan',
 }
 
+# Institution name substring → issuer short code, for auto-created Card rows.
+# Same institutions the /api/accounts/product-suggestions matcher already
+# recognizes, kept as a separate map since that one keys off product_key.
+_ISSUER_NAME_MAP = {
+    'chase': 'CHASE', 'american express': 'AMEX', 'amex': 'AMEX',
+    'citibank': 'CITI', 'citi': 'CITI', 'discover': 'DISCOVER',
+    'bank of america': 'BOA', 'capital one': 'CAPITAL ONE',
+    'wells fargo': 'WELLS FARGO', 'us bank': 'US BANK', 'barclays': 'BARCLAYS',
+    'synchrony': 'SYNCHRONY', 'bilt': 'BILT', 'fidelity': 'FIDELITY',
+}
+
+
+def _guess_issuer(institution_name: str | None) -> str | None:
+    name = (institution_name or '').lower()
+    for key, code in _ISSUER_NAME_MAP.items():
+        if key in name:
+            return code
+    return None
+
+
+def _ensure_cards_for_new_accounts(db: Session, new_accounts: list, institution_name: str | None = None) -> int:
+    """
+    Create a `Card` row for each brand-new credit-card `Account` just created
+    by this sync (the caller passes exactly the accounts it added, not every
+    account on the item — deliberately narrow, see below).
+
+    Plaid sync only ever creates/updates the `Account` row — it never creates
+    the `Card` row that earning rates, benefits, and the ecosystem pages all
+    key off. Without one, a newly-synced card silently earns nothing even
+    after its CardProduct is linked (this was previously a manual fixup done
+    by hand for every new card — see BACKLOG B18). Called right after account
+    reconciliation (both first link and "+ Add Account" on an existing item)
+    so new cards work end-to-end without a manual DB step.
+
+    Scoped to accounts created in THIS call, not "every orphaned credit
+    account on the item" — B31 documents a still-open duplicate/mislabeled
+    account (168) sharing a mask with a real one; blindly backfilling every
+    Card-less credit account on an item would hand that duplicate a
+    permanent Card row and complicate its planned cleanup. Pre-existing
+    orphans (B18's West Elm/Fidelity cases) stay manual fixes for now.
+    """
+    accounts = [a for a in new_accounts if 'credit' in (a.account_type or '').lower()]
+    if not accounts:
+        return 0
+    issuer = _guess_issuer(institution_name)
+    created = 0
+    for a in accounts:
+        if db.query(Card).filter_by(account_id=a.id).first():
+            continue
+        base_card_id = (a.account_name or f"Account {a.id}").strip()[:50]
+        card_id = base_card_id
+        suffix = 2
+        while db.query(Card).filter_by(card_id=card_id).first():
+            card_id = f"{base_card_id[:46]} #{suffix}"
+            suffix += 1
+        db.add(Card(
+            card_id=card_id,
+            issuer=issuer,
+            card_name=a.official_name or a.account_name,
+            account_id=a.id,
+            is_active=True,
+        ))
+        created += 1
+    if created:
+        db.commit()
+        logger.info(f"[sync] {institution_name or 'item'}: auto-created {created} Card row(s)")
+    return created
+
+
+def _refresh_product_held_status(db: Session, product_id: int | None) -> None:
+    """
+    A CardProduct's `status` ('active' vs 'not_held') should reflect whether
+    any Account or Card currently links to it, not whatever it was seeded as.
+    Call after every product link/unlink/change so the catalog badge stays
+    truthful without a manual flip.
+    """
+    if not product_id:
+        return
+    product = db.query(CardProduct).filter_by(id=product_id).first()
+    if not product:
+        return
+    still_held = (
+        db.query(Account).filter_by(product_id=product_id).first()
+        or db.query(Card).filter_by(product_id=product_id).first()
+    )
+    product.status = 'active' if still_held else 'not_held'
+
 # Plaid personal_finance_category.primary → (app_category, action)
 # Used as a deterministic fallback when rules don't produce a match.
 # Only applied when Plaid confidence_level is HIGH or VERY_HIGH.
@@ -1706,6 +1793,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         # and clear any stale holder of the same plaid_account_id first (UNIQUE safety).
         # ---------------------------------------------------------------------------
         account_results = []
+        newly_created_accounts = []
 
         for a in accounts:
             # Prefer subtype (checking, savings, credit card) over type (depository, credit)
@@ -1819,6 +1907,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
                 )
                 db.add(new_acct)
                 db.flush()
+                newly_created_accounts.append(new_acct)
 
                 account_results.append({
                     "name": new_acct.account_name,
@@ -1829,6 +1918,13 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
 
         # Commit accounts first so sync failures don't lose the account link
         db.commit()
+
+        # Auto-create the Card row each brand-new credit-card Account needs
+        # (see B18) — failure here shouldn't block the account link/sync above.
+        try:
+            _ensure_cards_for_new_accounts(db, newly_created_accounts, plaid_item.institution_name)
+        except Exception as card_err:
+            logger.warning(f"[exchange-token] auto Card-row creation failed: {card_err}")
 
         # Sync transactions (separate step — errors here won't rollback accounts)
         synced = 0
@@ -2212,6 +2308,7 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             # Re-fetch accounts from Plaid so nothing gets silently skipped
             try:
                 accounts = plaid.get_accounts(item.access_token)
+                newly_created_accounts = []
                 for a in accounts:
                     raw_subtype  = (a.get('subtype') or '').lower().strip()
                     raw_type     = (a.get('type') or '').lower().strip()
@@ -2234,7 +2331,7 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                         existing.plaid_item_id    = item_id
                         existing.is_active        = True
                     else:
-                        db.add(Account(
+                        new_acct = Account(
                             plaid_account_id=a['account_id'],
                             plaid_item_id=item_id,
                             account_name=f"{a['name']} {a.get('mask','') or ''}".strip(),
@@ -2242,9 +2339,15 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
                             official_name=a.get('official_name'),
                             mask=a.get('mask'),
                             is_active=True,
-                        ))
+                        )
+                        db.add(new_acct)
+                        newly_created_accounts.append(new_acct)
                 db.commit()
                 logger.info(f"[sync] {item.institution_name}: {len(accounts)} account(s) reconciled")
+                try:
+                    _ensure_cards_for_new_accounts(db, newly_created_accounts, item.institution_name)
+                except Exception as card_err:
+                    logger.warning(f"[sync] auto Card-row creation failed for {item_id}: {card_err}")
             except Exception as acc_err:
                 logger.error(f"[sync] account refresh failed for {item_id}: {acc_err}")
             item.cursor = None
@@ -7414,7 +7517,13 @@ async def link_account_to_product(account_id: int, body: dict, db: Session = Dep
     product_id = body.get('product_id')
     if product_id is None:
         # Unlink
+        old_product_id = account.product_id
         account.product_id = None
+        card = db.query(Card).filter_by(account_id=account_id).first()
+        if card:
+            card.product_id = None
+        db.commit()
+        _refresh_product_held_status(db, old_product_id)
         db.commit()
         return {"status": "unlinked", "account_id": account_id}
 
@@ -7431,6 +7540,8 @@ async def link_account_to_product(account_id: int, body: dict, db: Session = Dep
         if product.ecosystem_id:
             card.ecosystem_id = product.ecosystem_id
 
+    db.commit()
+    _refresh_product_held_status(db, product_id)
     db.commit()
     return {
         "status": "linked",
@@ -7459,6 +7570,8 @@ async def change_card_product(card_id: int, body: dict, db: Session = Depends(ge
     card = db.query(Card).filter_by(id=card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    old_product_id = card.product_id
 
     new_product_id = body.get('product_id')
     if not new_product_id:
@@ -7517,6 +7630,9 @@ async def change_card_product(card_id: int, body: dict, db: Session = Depends(ge
         if account:
             account.product_id = new_product_id
 
+    db.commit()
+    _refresh_product_held_status(db, old_product_id)
+    _refresh_product_held_status(db, new_product_id)
     db.commit()
     return {
         "status": "changed",

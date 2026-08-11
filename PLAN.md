@@ -1,12 +1,28 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-07-31
+> Last updated: 2026-08-10
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-08-10 — Citi Strata Premier onboarding question → fixed the general "new card" gap (B18)
+
+Omer asked how to make sure his newly-acquired **Citi Strata Premier** shows up on the Citi ThankYou ecosystem page — automatically, or at least without the manual DB fixup every prior new card (Business Gold, Bilt, AA Platinum Select) has needed.
+
+**Checked live production DB first, read-only, before touching anything.** `citi_strata_premier` (product id 44) already exists in the catalog exactly as the 2026-07-30 prep note said — real rates, the $100 hotel credit, card art — but **no `Account` row exists yet**: Omer hasn't linked the physical card via Plaid. So today's actual gap isn't the catalog, it's that even once linked, nothing auto-creates the `Card` row the earn/benefits engine needs (this is the B18 "sync doesn't auto-create a `Card` row" gap, hit by hand for every card so far).
+
+**Fixed the recurring cause rather than doing another one-off manual fix** (Omer's choice when asked): added `_ensure_cards_for_new_accounts()` (`main.py`), called right after account reconciliation in both places `Account` rows get created — `exchange_public_token` (first-time Plaid Link) and `_sync_item_background`'s `clear_cursor` branch (Update Mode / "+ Add Account" on an existing item, the path Omer will actually use). It auto-creates a `Card` row for each brand-new credit-card account only — deliberately not a sweep of every Card-less credit account on an item, because **B31** (found 2026-08-10, same day) documents a still-open duplicate/mislabeled account sharing a mask with a real one on the Amex connection; a blanket backfill would have handed that duplicate a permanent `Card` row and complicated its planned cleanup.
+
+Also fixed, found while doing this: `CardProduct.status` ('active'/'not_held', shown as a badge on the card detail page) was **write-once at seed time and never updated** — linking/unlinking/changing a product never touched it. Added `_refresh_product_held_status()`, called from `link-product` and `change-product`, that recomputes it from whether any `Account`/`Card` actually references the product. Also caught and fixed a small dual-write drift while there: unlinking an account previously cleared `account.product_id` but left `Card.product_id` stale — now clears both.
+
+**Not done — needs Omer to actually run Plaid Link**, this can't be done from the backend: add the Strata Premier account to the Citi connection via Settings → Connected Banks → "+ Add Account". **Important per B30**: that flow re-presents the *full* account checklist for the connection — Omer must re-check every existing Citi account (Double Cash 8475, Custom Cash 3240, AA Platinum 1855, Citi Checking 6816), not just the new card, or they risk silent de-authorization like the Amex/Chase connections did. Once linked, the existing product-suggestion matcher should offer "Citi Strata Premier" as a one-click Confirm on the Cards page, and the new auto-Card-creation should mean no further manual step is needed — worth a live spot-check once Omer actually links it.
+
+**Next**: verify end-to-end once the real Plaid Link happens (does the suggestion match correctly, does the Card row appear, does the ecosystem page pick it up). Also still open: B31 (Amex BBP/Platinum mask-collision cleanup) and the West Elm/Fidelity `Card`-row backfill this fix intentionally left alone.
 
 ---
 
