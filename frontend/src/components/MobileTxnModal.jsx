@@ -9,13 +9,14 @@ export function MobileTxnModal({txn,categories,onSave,onClose,toast}){
   const[action,setAction]=useState(txn.action||'Expense');
   const[descClean,setDescClean]=useState(txn.description_clean||txn.description_display||'');
   const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[forOthers,setForOthers]=useState(txn.is_for_others||false);
   const[saving,setSaving]=useState(false);
   const[ruleCreating,setRuleCreating]=useState(false);
   const handleTypeChange=(newType)=>{setAction(newType);if(!showCategoryForType(newType))setCategory('');};
   const handleSave=async()=>{
     setSaving(true);
     try{
-      const updates={action,needs_review:false,category,is_gcb:gcb};
+      const updates={action,needs_review:false,category,is_gcb:gcb,is_for_others:forOthers};
       if(descClean!==(txn.description_clean||txn.description_display||''))updates.description_clean=descClean;
       await onSave(txn.id,updates);
       onClose();
@@ -74,6 +75,17 @@ export function MobileTxnModal({txn,categories,onSave,onClose,toast}){
               color:gcb?'var(--amber)':'var(--text-muted)',fontSize:14,fontFamily:'inherit'}}>
             <span>{gcb?'⭐':'☆'}</span>
             <span>{gcb?'GCB Tagged':'Not GCB'}</span>
+          </button>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={lblStyle}>For Others Tag</label>
+          <button type="button" onClick={()=>setForOthers(f=>!f)}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
+              border:`1px solid ${forOthers?'rgba(59,130,246,0.5)':'var(--border)'}`,borderRadius:8,
+              background:forOthers?'rgba(59,130,246,0.08)':'var(--elevated)',cursor:'pointer',
+              color:forOthers?'var(--blue-primary)':'var(--text-muted)',fontSize:14,fontFamily:'inherit'}}>
+            <span>👥</span>
+            <span>{forOthers?'For Others':'Not For Others'}</span>
           </button>
         </div>
         <div style={{display:'flex',gap:10,marginTop:20}}>

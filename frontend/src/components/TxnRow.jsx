@@ -6,9 +6,19 @@ import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
 import {fmt,fmtDate,normalizeCat,showCategoryForType,sortedCats} from '../lib/format';
 
-export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
+export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
   const[locked,setLocked]=useState(txn.is_locked);
   const[gcb,setGcb]=useState(txn.is_gcb||false);
+  const[forOthers,setForOthers]=useState(txn.is_for_others||false);
+  /* Merchant category (CSC) — the network-facing classification (Visa,
+     Mastercard, Amex, Discover — not the issuing bank), separate from the
+     personal budget `category` above. Editable here + teachable to a scope
+     (this card / this network / all cards) via /api/merchant-csc. */
+  const[csc,setCsc]=useState(txn.points_category||'');
+  const[showCscEdit,setShowCscEdit]=useState(false);
+  const[cscVal,setCscVal]=useState(txn.points_category||'');
+  const[cscScope,setCscScope]=useState('global');
+  const[cscSaving,setCscSaving]=useState(false);
   const[excluded,setExcluded]=useState(txn.is_excluded||false);
   const[editing,setEditing]=useState(false);
   const[category,setCategory]=useState(txn.category_final);
@@ -51,6 +61,29 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
     try{await onSave(txn.id,{clear_points_earn_override:true});toast&&toast('Reset to auto-classification');setPointsOverrideVal('');setShowPointsOverride(false);}
     catch(e){toast&&toast('Failed to reset: '+e.message,'error');}
     finally{setPointsOverrideSaving(false);}
+  };
+  const saveCsc=async()=>{
+    if(!cscVal){setShowCscEdit(false);return;}
+    setCscSaving(true);
+    try{
+      await onSave(txn.id,{points_category:cscVal});
+      setCsc(cscVal);
+      /* Teach the rule too, scoped as chosen, so future (and past-unclassified)
+         transactions from this merchant pick it up automatically — this is
+         the "establish rules across multiple txns" half of the ask, not just
+         a one-off edit. */
+      if(txn.merchant_name){
+        const body={merchant_pattern:txn.merchant_name,points_category:cscVal,apply_to_existing:true};
+        if(cscScope==='card')body.card_id=txn.card_id;
+        else if(cscScope==='network')body.network=txn.network;
+        const r=await apiFetch('/merchant-csc',{method:'POST',body:JSON.stringify(body)});
+        toast&&toast(`Merchant category saved — ${r.transactions_updated||0} other transaction${r.transactions_updated===1?'':'s'} updated`);
+      }else{
+        toast&&toast('Merchant category saved');
+      }
+      setShowCscEdit(false);
+    }catch(e){toast&&toast('Failed to save merchant category: '+(e?.message||''),'error');}
+    finally{setCscSaving(false);}
   };
   const save=async()=>{
     const updates={category,action,needs_review:false};
@@ -157,26 +190,18 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
             <div style={{width:74,display:'flex',justifyContent:'flex-start'}}>
               {txn.needs_review&&!locked&&<button type="button" className="btn btn-sm btn-primary" style={{background:'var(--blue-neon)', boxShadow: '0 0 10px rgba(56,189,248,0.2)'}} onClick={()=>onReview(txn)}>Review</button>}
             </div>
+            {/* Status chips — tap to open Details, where GCB/Exclude/Lock/Rule live.
+                Keeping this row to just a few controls is what stops the row from
+                needing horizontal space it doesn't have (previously up to 7 buttons
+                here, which is what pushed Save/Cancel off the visible edge in edit
+                mode — see PLAN.md). */}
+            {gcb&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(251,191,36,0.12)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⭐</span>}
+            {forOthers&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',border:'1px solid rgba(59,130,246,0.25)'}}>👥</span>}
+            {excluded&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)'}}>⊘</span>}
+            {locked&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒</span>}
             <button type="button" className="btn btn-sm btn-ghost" style={{padding:6}} onClick={()=>setShowTxnInfo(true)} title="Details"><Icon name="info" size={14}/></button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>selected?onBatchEdit():setEditing(true)}>Edit</button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>onSplit(txn)}>{txn.is_split?'Splits':'Split'}</button>
-            <button type="button" className="btn btn-sm"
-              style={{padding:'4px 8px',fontSize:11,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
-              onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}
-              title={gcb?'Remove GCB tag':'Tag as GCB'}>GCB</button>
-            <button type="button" className="btn btn-sm"
-              style={{padding:'4px 7px',fontSize:11,background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',border:'1px solid rgba(59,130,246,0.2)'}}
-              onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowQuickRule(true);}}
-              title="Create a rule from this transaction">Rule</button>
-            <button type="button" className="btn btn-sm"
-              style={{padding:'4px 7px',fontSize:11,background:excluded?'rgba(248,113,113,0.12)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
-              onClick={toggleExclude}
-              title={excluded?'Re-include: add back to totals and balances':'Exclude: hide from totals and balances (not deleted)'}>
-              {excluded?'↩':'⊘'}
-            </button>
-            <div style={{width:32,display:'flex',justifyContent:'flex-start'}}>
-              {locked && <button type="button" className="btn btn-sm btn-ghost" onClick={toggleLock} title="Unlock">🔓</button>}
-            </div>
           </div>
         }
       </td>
@@ -293,6 +318,7 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
                 ['Account',txn.account_name],
                 ['Type',txn.action_display||cap(txn.action)],
                 ['Category',normalizeCat(txn.category_final)],
+                ...(txn.network?[['Network',txn.network]]:[]),
                 ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
                 ['Import Source',importLabel[src]||cap(src)],
                 ['Enrichment',enr?(enrichLabel[enr]||cap(enr)):'—'],
@@ -312,6 +338,42 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
               <span style={{fontWeight:500}}>Manual override: </span><span>{txn.category_manual}</span>
             </div>
           )}
+          {/* Merchant category (CSC) — how the network codes this merchant,
+              independent of the personal budget category above. Editable here
+              and teachable to future transactions at a chosen scope. */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:showCscEdit?10:0}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Merchant Category</div>
+              <button type="button" onClick={()=>{setCscVal(csc);setShowCscEdit(!showCscEdit);}}
+                style={{fontSize:11,color:'var(--text-muted)',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>
+                {showCscEdit?'Cancel':csc?'Edit':'Set'}
+              </button>
+            </div>
+            {!showCscEdit&&<div style={{fontSize:13,color:'var(--text-primary)',fontWeight:500}}>
+              {csc||<span style={{color:'var(--text-muted)',fontStyle:'italic',fontWeight:400}}>Not classified</span>}
+            </div>}
+            {showCscEdit&&(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <select value={cscVal} onChange={e=>setCscVal(e.target.value)}
+                  style={{fontSize:13,padding:'7px 10px',borderRadius:8,border:'1px solid var(--border-strong)',background:'var(--elevated)',color:'var(--text-primary)'}}>
+                  <option value="">— none —</option>
+                  {(pointsCategories||[]).filter(c=>c.is_active).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                {txn.merchant_name&&<div style={{display:'flex',flexDirection:'column',gap:4}}>
+                  <div style={{fontSize:11,color:'var(--text-muted)'}}>Apply to future "{txn.merchant_name}" transactions from:</div>
+                  <select value={cscScope} onChange={e=>setCscScope(e.target.value)}
+                    style={{fontSize:12,padding:'6px 9px',borderRadius:8,border:'1px solid var(--border)',background:'var(--elevated)',color:'var(--text-primary)'}}>
+                    <option value="global">All cards</option>
+                    {txn.network&&<option value="network">Every {txn.network} card</option>}
+                    <option value="card">This card only</option>
+                  </select>
+                </div>}
+                <button type="button" className="btn btn-sm btn-primary" style={{alignSelf:'flex-start'}} onClick={saveCsc} disabled={cscSaving}>
+                  {cscSaving?'Saving…':'Save'}
+                </button>
+              </div>
+            )}
+          </div>
           {/* Points earn — color/label follow compute_points_earn()'s classification
               rather than always reading as a positive "you earned this" box. */}
           {txn.points_earn&&(()=>{
@@ -372,15 +434,33 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
             </div>
             );
           })()}
-          {/* Flags */}
-          {(locked||txn.is_gcb||excluded||txn.needs_review)&&(
-            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-              {locked&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒 Locked</span>}
-              {txn.is_gcb&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.12)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⭐ GCB</span>}
-              {excluded&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)'}}>⊘ Excluded</span>}
-              {txn.needs_review&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.1)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⚠ Needs Review</span>}
-            </div>
-          )}
+          {/* Tags & flags — toggleable here rather than as always-visible row
+              buttons, which is what crowded the table row (see PLAN.md). */}
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button type="button" className="btn btn-sm"
+              style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:gcb?'rgba(251,191,36,0.12)':'var(--elevated)',color:gcb?'var(--amber)':'var(--text-muted)',border:gcb?'1px solid rgba(251,191,36,0.3)':'1px solid var(--border)'}}
+              onClick={async()=>{const ng=!gcb;await onSave(txn.id,{is_gcb:ng});setGcb(ng);}}>
+              ⭐ {gcb?'GCB Tagged':'Tag as GCB'}
+            </button>
+            <button type="button" className="btn btn-sm"
+              style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:forOthers?'rgba(59,130,246,0.1)':'var(--elevated)',color:forOthers?'var(--blue-primary)':'var(--text-muted)',border:forOthers?'1px solid rgba(59,130,246,0.25)':'1px solid var(--border)'}}
+              onClick={async()=>{const nf=!forOthers;await onSave(txn.id,{is_for_others:nf});setForOthers(nf);}}
+              title="Money spent on behalf of someone else — kept out of your own budget totals, still shown in cash flow">
+              👥 {forOthers?'For Others':'Tag: For Others'}
+            </button>
+            <button type="button" className="btn btn-sm"
+              style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:excluded?'rgba(248,113,113,0.08)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
+              onClick={toggleExclude}
+              title="Hide from totals and balances without deleting it">
+              ⊘ {excluded?'Excluded':'Exclude'}
+            </button>
+            {locked&&<button type="button" className="btn btn-sm"
+              style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}
+              onClick={toggleLock} title="Unlock — allow sync/rules to overwrite this again">
+              🔒 Locked
+            </button>}
+            {txn.needs_review&&<span style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:'rgba(251,191,36,0.1)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⚠ Needs Review</span>}
+          </div>
           {/* Splits breakdown */}
           {txn.is_split&&txn.splits&&txn.splits.length>0&&(
             <div>
@@ -406,6 +486,11 @@ export function TxnRow({txn,categories,onSave,onReview,onSplit,selected,onToggle
                 onClick={()=>{setShowTxnInfo(false);onSplit(txn);}}
                 title={txn.is_split?'Edit existing splits':'Split this transaction into parts'}>
                 {txn.is_split?'✎ Edit Splits':'⊕ Split Transaction'}
+              </button>
+              <button type="button" className="btn btn-sm btn-secondary"
+                onClick={()=>{const d=txn.description_clean||txn.description_raw||'';setRulePattern(d);setRuleDesc(d);setRuleAction(txn.action||'Expense');setRuleCategory(txn.category_final||'');setShowTxnInfo(false);setShowQuickRule(true);}}
+                title="Create a rule from this transaction">
+                Create Rule
               </button>
               <button type="button" className="btn btn-sm"
                 style={{background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)',fontSize:12}}

@@ -25,7 +25,7 @@ export const todayStr=()=>{const d=new Date();return`${d.getFullYear()}-${String
 
 export const localDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
-export const _CATS_LAST=new Set(['For Others','Other','Unclassified','other']);
+export const _CATS_LAST=new Set(['Other','Unclassified','other']);
 
 export const sortedCats=(cats)=>{
   const regular=[...cats].filter(c=>!_CATS_LAST.has(c.name)).sort((a,b)=>a.name.localeCompare(b.name));

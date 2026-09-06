@@ -10,7 +10,7 @@ export const CATEGORY_COLORS={
   'Self Care':'#c026d3','Clothing':'#db2777','Electronics':'#475569',
   'Streaming':'#9333ea','Travel':'#0284c7','Home':'#92400e',
   'Kids':'#65a30d','Entertainment':'#9333ea','Gifts':'#e11d48',
-  'For Others':'#e11d48','Education':'#ca8a04','Fees & Interest':'#475569',
+  'Education':'#ca8a04','Fees & Interest':'#475569',
   'Other':'#6b7280','Business':'#0891b2','Investment Gain (Loss)':'#15803d',
   'Work':'#15803d','Transfer':'#94a3b8','Unclassified':'#9ca3af',
   // ── Legacy aliases ────────────────────────────────────────────────────────

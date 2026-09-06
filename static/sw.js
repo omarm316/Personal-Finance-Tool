@@ -4,7 +4,7 @@
 // from a CDN — they're bundled into /static/app/assets/*. Bumping the version
 // is what evicts the old shell cache, which would otherwise keep serving the
 // pre-build HTML (exactly the stale-SW trap noted in PLAN.md).
-const CACHE_VERSION = 'v13';
+const CACHE_VERSION = 'v14';
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const API_CACHE = `api-${CACHE_VERSION}`;
 

@@ -1406,15 +1406,18 @@ class TransactionResponse(BaseModel):
     needs_review: bool
     is_locked: bool
     is_gcb: bool = False
+    is_for_others: bool = False
     is_split: bool = False
     is_excluded: bool = False
     points_category: Optional[str] = None
+    network: Optional[str] = None
     spender: Optional[str] = None
     # Points earn summary — None when card/product is unknown or txn isn't an expense
     points_earn: Optional[dict] = None
     account_name: str
     account_id: int = 0
     account_type: Optional[str] = None
+    card_id: Optional[int] = None
     enrichment_source: Optional[str] = None
     import_source: Optional[str] = None
     splits: Optional[list] = None
@@ -1430,6 +1433,7 @@ class TransactionUpdate(BaseModel):
     needs_review: Optional[bool] = None
     is_locked: Optional[bool] = None
     is_gcb: Optional[bool] = None
+    is_for_others: Optional[bool] = None
     is_excluded: Optional[bool] = None
     points_category: Optional[str] = None
     description_clean: Optional[str] = None
@@ -1455,6 +1459,7 @@ class SplitCreate(BaseModel):
     category: Optional[str] = None
     action: Optional[str] = None  # Type per split line (Section 4F)
     is_gcb: bool = False
+    is_for_others: bool = False
     notes: Optional[str] = None
 
 
@@ -1504,6 +1509,7 @@ class ManualSplitItem(BaseModel):
     category: Optional[str] = None
     action: Optional[str] = None
     is_gcb: bool = False
+    is_for_others: bool = False
 
 
 class ManualTransactionCreate(BaseModel):
@@ -1997,9 +2003,9 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
     # Pre-load user-taught merchant → CSC mappings (checked before hardcoded patterns)
     _mpm_rows = db.query(MerchantPointsMapping).all()
-    # Tuples: (pattern_lower, category_name, card_id)
-    _mpm_lookup: list[tuple[str, str, int | None]] = [
-        (m.merchant_pattern.lower(), m.points_category.name, m.card_id)
+    # Tuples: (pattern_lower, category_name, card_id, network)
+    _mpm_lookup: list[tuple[str, str, int | None, str | None]] = [
+        (m.merchant_pattern.lower(), m.points_category.name, m.card_id, m.network)
         for m in _mpm_rows
         if m.points_category
     ]
@@ -2095,28 +2101,27 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 account_type=account.account_type or '',
             )
 
-            # Apply GCB auto-tag and points category from rule notes
+            # Apply GCB / For Others auto-tag and points category from rule notes
             desc_upper = txn_data['description_raw'].upper()
-            gcb_auto   = False
+            gcb_auto        = False
+            for_others_auto = False
             points_cat = None
             for rule in rules_with_notes:
                 if rule.pattern and rule.pattern.upper() in desc_upper:
                     if 'gcb:true' in rule.notes:
                         gcb_auto = True
+                    if 'for_others:true' in rule.notes:
+                        for_others_auto = True
                     if 'points:' in rule.notes:
                         points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
             # Check user-taught merchant → CSC mappings first (highest priority
             # after explicit rule notes), then fall back to hardcoded patterns.
             if not points_cat and txn_data.get('merchant_name') and _mpm_lookup:
-                _needle = txn_data['merchant_name'].lower()
-                _global_match = None
-                for _pat, _cat, _cid in _mpm_lookup:
-                    if _pat in _needle:
-                        if _cid is None and _global_match is None:
-                            _global_match = _cat
-                if _global_match:
-                    points_cat = _global_match
+                points_cat = _resolve_merchant_csc(
+                    _mpm_lookup, txn_data['merchant_name'],
+                    linked_card_id, account.card.network if account.card else None,
+                )
 
             # Auto-infer points category from merchant name + Plaid PFC when
             # no categorization rule provided one explicitly.
@@ -2185,7 +2190,9 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 needs_review=needs_review_flag,
                 enrichment_source=final_source,
                 card_id=linked_card_id,
+                is_gcb=gcb_auto,
                 gcb_tagged=gcb_auto,
+                is_for_others=for_others_auto,
                 points_category=points_cat,
                 content_hash=_assign_content_hash(db, account.id, txn_date, amount, txn_data['description_raw']),
                 year=txn_date.year,
@@ -3194,18 +3201,32 @@ async def unclassified_merchants(
 
 @app.post("/api/merchant-csc")
 async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
-    """Save a user-taught merchant → CSC mapping.
+    """Save a user-taught merchant → CSC (merchant category) mapping.
 
-    Body: {merchant_pattern, points_category, card_id (optional), apply_to_existing (bool, default true)}
+    Body: {merchant_pattern, points_category, card_id (optional), network (optional),
+           apply_to_existing (bool, default true)}
 
-    - Upserts into merchant_points_mappings (pattern + card_id = unique key).
-    - If apply_to_existing=True (default), backfills all matching transactions
-      where points_category IS NULL.
-    Returns {saved, pattern, category, transactions_updated}.
+    Scope is exactly one of: card_id (this one physical card), network (every
+    card on that payment network — Visa/Mastercard/Amex/Discover, e.g. "every
+    Mastercard"; NOT the issuing bank), or neither (global, every card).
+    card_id and network are mutually exclusive; card_id wins if both are sent
+    by mistake.
+
+    - Upserts into merchant_points_mappings (pattern + scope = unique key).
+    - If apply_to_existing=True (default), backfills matching transactions
+      that don't have a CSC yet (points_category IS NULL), scoped the same
+      way — a card-scoped rule only backfills that card's transactions, a
+      network-scoped rule only that network's. Previously this backfill (and
+      the sync-time auto-classifier) ignored card_id/network scoping entirely
+      and always applied globally — see _resolve_merchant_csc.
+    Returns {saved, pattern, category, scope, transactions_updated}.
     """
     merchant_pattern = (body.get('merchant_pattern') or '').strip()
     points_category_name = (body.get('points_category') or '').strip()
-    card_id = body.get('card_id')  # None = global (applies to all cards)
+    card_id = body.get('card_id')
+    network = (body.get('network') or '').strip() or None
+    if card_id is not None:
+        network = None  # card_id is more specific; ignore network if both sent
     apply_to_existing = body.get('apply_to_existing', True)
 
     if not merchant_pattern or not points_category_name:
@@ -3215,10 +3236,10 @@ async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
     if not cat:
         raise HTTPException(status_code=404, detail=f'Unknown or inactive points category: {points_category_name}')
 
-    # Upsert — same pattern+card_id pair → update, otherwise insert
+    # Upsert — same pattern+scope triple → update, otherwise insert
     existing_mapping = (
         db.query(MerchantPointsMapping)
-        .filter_by(merchant_pattern=merchant_pattern, card_id=card_id)
+        .filter_by(merchant_pattern=merchant_pattern, card_id=card_id, network=network)
         .first()
     )
     if existing_mapping:
@@ -3227,21 +3248,26 @@ async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
         db.add(MerchantPointsMapping(
             merchant_pattern=merchant_pattern,
             card_id=card_id,
+            network=network,
             points_category_id=cat.id,
         ))
 
     updated = 0
     if apply_to_existing:
         # ilike for case-insensitive substring match (mirrors infer logic)
-        txns_to_update = (
-            db.query(Transaction)
-            .filter(
-                Transaction.merchant_name.ilike(f'%{merchant_pattern}%'),
-                Transaction.points_category == None,   # noqa: E711
-            )
-            .all()
+        query = db.query(Transaction).filter(
+            Transaction.merchant_name.ilike(f'%{merchant_pattern}%'),
+            Transaction.points_category == None,   # noqa: E711
         )
-        for t in txns_to_update:
+        if card_id is not None:
+            query = query.filter(Transaction.card_id == card_id)
+        elif network is not None:
+            network_account_ids = [
+                a.id for a in db.query(Account.id).join(Card, Card.account_id == Account.id)
+                .filter(Card.network == network).all()
+            ]
+            query = query.filter(Transaction.account_id.in_(network_account_ids))
+        for t in query.all():
             t.points_category = points_category_name
             updated += 1
 
@@ -3250,8 +3276,48 @@ async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
         'saved': True,
         'pattern': merchant_pattern,
         'category': points_category_name,
+        'scope': 'card' if card_id is not None else ('network' if network else 'global'),
         'transactions_updated': updated,
     }
+
+
+@app.get("/api/merchant-csc")
+async def list_merchant_csc(db: Session = Depends(get_db)):
+    """List every taught merchant → CSC (merchant category) mapping, most
+    specific scope first (card, then network, then global), for a review/
+    management UI — these rules were previously create-only with no way to
+    see or remove them once taught."""
+    rows = (
+        db.query(MerchantPointsMapping)
+        .order_by(MerchantPointsMapping.merchant_pattern)
+        .all()
+    )
+    card_ids = [r.card_id for r in rows if r.card_id]
+    cards_by_id = {c.id: c for c in db.query(Card).filter(Card.id.in_(card_ids)).all()} if card_ids else {}
+    return [
+        {
+            'id': r.id,
+            'merchant_pattern': r.merchant_pattern,
+            'points_category': r.points_category.name if r.points_category else None,
+            'card_id': r.card_id,
+            'card_name': cards_by_id[r.card_id].card_id if r.card_id in cards_by_id else None,
+            'network': r.network,
+            'scope': 'card' if r.card_id else ('network' if r.network else 'global'),
+        }
+        for r in rows
+    ]
+
+
+@app.delete("/api/merchant-csc/{mapping_id}")
+async def delete_merchant_csc(mapping_id: int, db: Session = Depends(get_db)):
+    """Remove a taught merchant → CSC mapping. Does not touch transactions
+    already backfilled by it — only stops it from applying going forward."""
+    row = db.query(MerchantPointsMapping).filter_by(id=mapping_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    db.delete(row)
+    db.commit()
+    return {"message": "Mapping deleted"}
 
 
 @app.post("/api/transactions/backfill-content-hashes")
@@ -3652,6 +3718,49 @@ def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
     return points_lookup, cat_parent_map
 
 
+def _resolve_merchant_csc(
+    mpm_lookup: list[tuple[str, str, int | None, str | None]],
+    merchant_name: str,
+    card_id: int | None,
+    network: str | None,
+) -> str | None:
+    """Resolve a merchant name to a taught merchant-category (CSC) mapping,
+    most-specific-wins: a rule scoped to this exact card beats one scoped to
+    every card on this payment network (Visa/Mastercard/Amex/Discover —
+    Card.network, not the issuing bank), which beats a global (card_id and
+    network both null) rule. Previously this only ever checked the global
+    tier — card_id/network on MerchantPointsMapping were stored but silently
+    never consulted, so a mapping taught "for this card only" or "for this
+    network" never actually applied to new transactions (see PLAN.md).
+    """
+    needle = merchant_name.lower()
+    card_match = network_match = global_match = None
+    for pat, cat, m_card_id, m_network in mpm_lookup:
+        if pat not in needle:
+            continue
+        if card_id is not None and m_card_id == card_id and card_match is None:
+            card_match = cat
+        elif network is not None and m_card_id is None and m_network == network and network_match is None:
+            network_match = cat
+        elif m_card_id is None and m_network is None and global_match is None:
+            global_match = cat
+    return card_match or network_match or global_match
+
+
+def _build_network_lookup(db, account_ids: list[int]) -> dict[int, str | None]:
+    """{account_id: network} for every linked Card, regardless of whether the
+    card has a product/reward structure attached — unlike _build_points_lookup,
+    which skips product-less cards since it exists for earn-rate display, not
+    identity. Network (Visa/Mastercard/Amex/Discover — Card.network) is what
+    actually determines how a merchant gets coded; the issuing bank
+    (Card.issuer, e.g. Chase or Bilt) doesn't.
+    """
+    if not account_ids:
+        return {}
+    cards = db.query(Card).filter(Card.account_id.in_(account_ids)).all()
+    return {c.account_id: c.network for c in cards}
+
+
 def _resolve_product_for_date(db, card_id: int, txn_date) -> int | None:
     """
     Which CardProduct was in effect for this card on this date. Checks
@@ -3809,7 +3918,7 @@ def _backfill_product_history_and_locked_points(session):
         logger.info(f"  Migration: locked points_earned for {len(unlocked)} pre-existing transaction(s)")
 
 
-def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat_parent_map=None):
+def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat_parent_map=None, network_lookup=None):
     """Serialize a Transaction with inline splits and computed display fields."""
     splits = splits_map.get(t.id, []) if splits_map else []
     is_split = bool(t.is_split or False)
@@ -3866,14 +3975,17 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
         "needs_review": t.needs_review,
         "is_locked": bool(t.is_locked or False),
         "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
+        "is_for_others": bool(t.is_for_others or False),
         "is_excluded": bool(t.is_excluded or False),
         "is_split": is_split,
         "splits": [
             {"id": s.id, "amount": s.amount, "description": s.description,
-             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb)}
+             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb),
+             "is_for_others": bool(s.is_for_others)}
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,
+        "network": (network_lookup or {}).get(t.account_id),
         "spender":         t.spender,
         "points_earn":     points_earn,
         "enrichment_source": t.enrichment_source,
@@ -3882,6 +3994,7 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
         "account_name": t.account.account_name,
         "account_id": t.account_id,
         "account_type": t.account.account_type,
+        "card_id": t.card_id,
     }
 
 
@@ -3920,7 +4033,11 @@ async def get_transactions(
     if account_id is not None:
         query = query.filter(Transaction.account_id == account_id)
 
-    txns = query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
+    # Secondary sort on id: without a tie-breaker, Postgres doesn't guarantee a
+    # stable order among same-`date` rows, so a plain refetch (e.g. right after
+    # editing one transaction) can silently reorder same-day rows relative to
+    # each other — which read as the whole table "jumping" on every edit.
+    txns = query.order_by(Transaction.date.desc(), Transaction.id.desc()).offset(skip).limit(limit).all()
 
     # Batch-load splits for all split transactions in one query
     split_ids = [t.id for t in txns if t.is_split]
@@ -3935,7 +4052,8 @@ async def get_transactions(
     categorizer = CategorizationEngine(db)
     account_ids = list({t.account_id for t in txns})
     points_lookup, cat_parent_map = _build_points_lookup(db, account_ids)
-    return [_serialize_txn(t, splits_map, categorizer, points_lookup, cat_parent_map) for t in txns]
+    network_lookup = _build_network_lookup(db, account_ids)
+    return [_serialize_txn(t, splits_map, categorizer, points_lookup, cat_parent_map, network_lookup) for t in txns]
 
 
 @app.get("/api/transactions/spenders")
@@ -3971,7 +4089,8 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all() if t.is_split else []
     categorizer = CategorizationEngine(db)
     points_lookup, cat_parent_map = _build_points_lookup(db, [t.account_id])
-    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer, points_lookup, cat_parent_map)
+    network_lookup = _build_network_lookup(db, [t.account_id])
+    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer, points_lookup, cat_parent_map, network_lookup)
 
 
 # ---------------------------------------------------------------------------
@@ -4022,6 +4141,8 @@ async def update_transaction(
     if update.is_gcb is not None:
         t.is_gcb = update.is_gcb
         t.gcb_tagged = update.is_gcb  # Keep legacy column in sync
+    if update.is_for_others is not None:
+        t.is_for_others = update.is_for_others
     if update.points_category is not None:
         t.points_category = update.points_category
         _relock = True
@@ -4051,7 +4172,16 @@ async def update_transaction(
         _lock_points_for_transaction(db, t)
 
     db.commit()
-    return {"message": "Transaction updated"}
+    # Return the updated row (same shape as GET /transactions/{id}) so the
+    # frontend can patch its local list in place instead of refetching the
+    # whole (up to 500-row) list — that refetch-and-replace was what made
+    # editing one transaction visually reshuffle/jump the rest of the table.
+    db.refresh(t)
+    splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all() if t.is_split else []
+    categorizer2 = CategorizationEngine(db)
+    points_lookup, cat_parent_map = _build_points_lookup(db, [t.account_id])
+    network_lookup = _build_network_lookup(db, [t.account_id])
+    return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer2, points_lookup, cat_parent_map, network_lookup)
 
 
 @app.post("/api/transactions/batch-update")
@@ -4108,6 +4238,9 @@ async def batch_update_transactions(
             t.is_gcb = update.is_gcb
             t.gcb_tagged = update.is_gcb
 
+        if update.is_for_others is not None:
+            t.is_for_others = update.is_for_others
+
         if update.spender is not None:
             t.spender = update.spender or None
             t.updated_at = datetime.utcnow()
@@ -4156,6 +4289,7 @@ async def get_stats(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
         Transaction.gcb_tagged != True,   # noqa: E712
+        Transaction.is_for_others != True,  # noqa: E712
     )
     if year:
         query = query.filter(Transaction.year == year)
@@ -4201,7 +4335,7 @@ async def get_stats(
             continue
         if t.is_split:
             for s in splits_map.get(t.id, []):
-                if s.is_gcb:
+                if s.is_gcb or s.is_for_others:
                     continue
                 cat = s.category or t.category_final or 'Other'
                 if t.action == 'Expense':
@@ -4216,7 +4350,7 @@ async def get_stats(
                 elif t.action == 'Income':
                     total_income += s.amount
         else:
-            if t.is_gcb or t.gcb_tagged:
+            if t.is_gcb or t.gcb_tagged or t.is_for_others:
                 continue
             cat = t.category_final or 'Other'
             if t.action == 'Expense':
@@ -4257,6 +4391,7 @@ async def get_stats_detail(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
         Transaction.gcb_tagged != True,   # noqa: E712
+        Transaction.is_for_others != True,  # noqa: E712
         Transaction.action.in_(BUDGET_TYPES),
     )
     if year:
@@ -4283,11 +4418,11 @@ async def get_stats_detail(
     rows = []
     total = 0.0
     for t in transactions:
-        if t.is_gcb or t.gcb_tagged:
+        if t.is_gcb or t.gcb_tagged or t.is_for_others:
             continue
         if t.is_split:
             for s in splits_map.get(t.id, []):
-                if s.is_gcb:
+                if s.is_gcb or s.is_for_others:
                     continue
                 cat = s.category or t.category_final or 'Other'
                 if cat != category:
@@ -8617,6 +8752,16 @@ async def import_transactions(
         CategorizationRule.notes != '',
     ).all()
 
+    # Pre-load user-taught merchant → CSC mappings — CSV/OFX imports previously
+    # never consulted these at all (only Plaid sync did), so a taught mapping
+    # silently didn't apply to imported history. See _resolve_merchant_csc.
+    _mpm_rows = db.query(MerchantPointsMapping).all()
+    _mpm_lookup: list[tuple[str, str, int | None, str | None]] = [
+        (m.merchant_pattern.lower(), m.points_category.name, m.card_id, m.network)
+        for m in _mpm_rows
+        if m.points_category
+    ]
+
     imported = 0
     skipped  = 0
     llm_calls = 0
@@ -8637,14 +8782,17 @@ async def import_transactions(
             account_type=account.account_type or '',
         )
 
-        # Apply GCB / points tags from rule notes
+        # Apply GCB / For Others / points tags from rule notes
         desc_upper = desc_raw.upper()
-        gcb_auto   = False
+        gcb_auto        = False
+        for_others_auto = False
         points_cat = None
         for rule in rules_with_notes:
             if rule.pattern and rule.pattern.upper() in desc_upper:
                 if 'gcb:true' in (rule.notes or ''):
                     gcb_auto = True
+                if 'for_others:true' in (rule.notes or ''):
+                    for_others_auto = True
                 if 'points:' in (rule.notes or ''):
                     points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
@@ -8667,6 +8815,15 @@ async def import_transactions(
                     llm_calls        += 1
             except Exception:
                 logger.debug('Suppressed exception', exc_info=True)
+
+        # Check user-taught merchant → CSC mappings next (before the generic
+        # inference fallback), same precedence as the Plaid sync path.
+        if not points_cat and merchant_name and _mpm_lookup:
+            points_cat = _resolve_merchant_csc(
+                _mpm_lookup, merchant_name,
+                account.card.id if account.card else None,
+                account.card.network if account.card else None,
+            )
 
         # Auto-infer points category from merchant name when no rule provided one.
         # CSV imports have no Plaid PFC, so merchant_name is the only signal here.
@@ -8706,6 +8863,7 @@ async def import_transactions(
             enrichment_source    = final_source,
             is_gcb               = gcb_auto,
             gcb_tagged           = gcb_auto,
+            is_for_others        = for_others_auto,
             points_category      = points_cat,
             card_id              = linked_card_id,
             is_locked            = False,
@@ -9093,6 +9251,7 @@ async def export_csv(
             'Date': t.date.strftime('%Y-%m-%d'), 'Description': t.description_raw,
             'Amount': t.amount, 'Action': t.action, 'Category': t.category_final,
             'Account': t.account.account_name, 'GCB': t.gcb_tagged,
+            'For Others': t.is_for_others,
             'Year': t.year, 'Month': t.month,
         }
         for t in query.order_by(Transaction.date).all()
@@ -9935,6 +10094,7 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
                     category=split_item.category or '',
                     action=split_item.action or data.action,
                     is_gcb=split_item.is_gcb,
+                    is_for_others=split_item.is_for_others,
                 ))
             db.flush()
 
@@ -9980,6 +10140,7 @@ async def create_splits(transaction_id: int, data: SplitsRequest, db: Session = 
             category=s.category,
             action=s.action,
             is_gcb=s.is_gcb,
+            is_for_others=s.is_for_others,
             notes=s.notes,
         ))
 
@@ -10003,6 +10164,7 @@ async def get_splits(transaction_id: int, db: Session = Depends(get_db)):
             "category": s.category,
             "action": s.action,
             "is_gcb": bool(s.is_gcb),
+            "is_for_others": bool(s.is_for_others),
             "notes": s.notes,
         }
         for s in splits
@@ -10111,7 +10273,7 @@ async def bulk_upsert_budget_targets(data: BudgetTargetBulk, db: Session = Depen
 async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     """
     Get actual spending per category per month for a given year.
-    - Excludes GCB-tagged transactions (is_gcb = True)
+    - Excludes GCB-tagged and For-Others-tagged transactions
     - Excludes transfers
     - For split transactions: uses split amounts/categories instead of parent
     Returns a dict keyed by category, each containing month→amount mappings.
@@ -10119,12 +10281,13 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     from sqlalchemy import and_
 
     # Get only BUDGET_TYPES transactions (Expense, Income) for the year
-    # Exclude is_excluded, GCB-tagged, and Transfer transactions
+    # Exclude is_excluded, GCB-tagged, For-Others-tagged, and Transfer transactions
     txns = db.query(Transaction).filter(
         Transaction.year == year,
         Transaction.action.in_(BUDGET_TYPES),
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
+        Transaction.is_for_others != True,  # noqa: E712
     ).all()
 
     # Build actuals: {category: {month: net_amount}}
@@ -10152,7 +10315,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                 parent_transaction_id=t.id
             ).all()
             for s in splits:
-                if s.is_gcb:
+                if s.is_gcb or s.is_for_others:
                     continue
                 cat = s.category or t.category_final or 'Other'
                 month = str(t.month)
@@ -10167,7 +10330,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                     actuals[cat] = {}
                 actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
         else:
-            if t.is_gcb or t.gcb_tagged:
+            if t.is_gcb or t.gcb_tagged or t.is_for_others:
                 continue
             cat = t.category_final or 'Other'
             month = str(t.month)
@@ -10203,7 +10366,8 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             y -= 1
         trailing.append((y, m))
 
-    # Fetch actuals for each of those months (net signed amounts, excluding is_excluded + GCB)
+    # Fetch actuals for each of those months (net signed amounts, excluding
+    # is_excluded + GCB + For Others)
     totals: dict[str, list] = {}
     for ty, tm in trailing:
         txns = db.query(Transaction).filter(
@@ -10212,6 +10376,7 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             Transaction.action.in_(BUDGET_TYPES),
             Transaction.is_excluded != True,  # noqa: E712
             Transaction.is_gcb != True,       # noqa: E712
+            Transaction.is_for_others != True,  # noqa: E712
         ).all()
         month_totals: dict[str, float] = {}
         for t in txns:
@@ -10220,13 +10385,13 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
                     parent_transaction_id=t.id
                 ).all()
                 for s in splits:
-                    if s.is_gcb:
+                    if s.is_gcb or s.is_for_others:
                         continue
                     cat = s.category or t.category_final or 'Other'
                     contrib = (-s.amount) if t.action == 'Expense' else s.amount
                     month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
             else:
-                if t.is_gcb or t.gcb_tagged:
+                if t.is_gcb or t.gcb_tagged or t.is_for_others:
                     continue
                 cat = t.category_final or 'Other'
                 contrib = (-t.amount) if t.action == 'Expense' else t.amount
@@ -11754,6 +11919,8 @@ def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
                 if not txn.category_manual:
                     txn.category_auto = enriched["category"]
                 txn.enrichment_source = enriched["source"]
+                if enriched.get("is_for_others"):
+                    txn.is_for_others = True
                 db.add(txn)
                 db.commit()
 
@@ -11911,6 +12078,8 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
     txn.description_clean = enriched["description_clean"]
     if not txn.category_manual:
         txn.category_auto = enriched["category"]
+    if enriched.get("is_for_others"):
+        txn.is_for_others = True
 
     db.commit()
     return {

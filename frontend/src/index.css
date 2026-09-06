@@ -344,7 +344,7 @@ tr:hover td { background: var(--surface-hover); }
 .sel-drop:focus { border-color: var(--blue-primary); }
 
 /* ── Button variants ── */
-.edit-actions { display: flex; align-items: center; gap: 8px; }
+.edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-primary { background: var(--accent-gradient); color: white; border: 1px solid rgba(var(--blue-primary-rgb), 0.4); }
 .btn-success { background: var(--green); color: white; border: 1px solid rgba(16, 185, 129, 0.4); }
 .btn-xs { padding: 4px 10px; border-radius: 8px; font-size: 11px; }

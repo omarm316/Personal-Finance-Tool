@@ -15,15 +15,15 @@ export function ManualTransactionModal({accounts,categories,onClose,onSaved,toas
   const[dates,setDates]=useState([date]);
   const[useSplits,setUseSplits]=useState(false);
   const[splits,setSplits]=useState([
-    {amount:'',description:'',category:'',action:'Expense',is_gcb:false},
-    {amount:'',description:'',category:'',action:'Expense',is_gcb:false},
+    {amount:'',description:'',category:'',action:'Expense',is_gcb:false,is_for_others:false},
+    {amount:'',description:'',category:'',action:'Expense',is_gcb:false,is_for_others:false},
   ]);
   /* Use the same canonical list as the filter dropdown and everywhere else */
   const actions=TXN_TYPES;
   const addDate=()=>setDates(d=>[...d,'']);
   const removeDate=i=>setDates(d=>d.filter((_,idx)=>idx!==i));
   const updateDate=(i,v)=>setDates(d=>{const n=[...d];n[i]=v;return n;});
-  const addSplit=()=>setSplits(s=>[...s,{amount:'',description:'',category:'',action:'Expense',is_gcb:false}]);
+  const addSplit=()=>setSplits(s=>[...s,{amount:'',description:'',category:'',action:'Expense',is_gcb:false,is_for_others:false}]);
   const removeSplit=i=>setSplits(s=>s.filter((_,j)=>j!==i));
   const updateSplit=(i,field,val)=>setSplits(s=>{const n=[...s];n[i]={...n[i],[field]:val};return n;});
 
@@ -46,7 +46,7 @@ export function ManualTransactionModal({accounts,categories,onClose,onSaved,toas
       if(useSplits){
         body.splits=splits.map(s=>({
           amount:parseFloat(s.amount),description:s.description||null,
-          category:s.category||null,action:s.action||action,is_gcb:!!s.is_gcb,
+          category:s.category||null,action:s.action||action,is_gcb:!!s.is_gcb,is_for_others:!!s.is_for_others,
         }));
       }
       await apiFetch('/transactions/manual',{method:'POST',body:JSON.stringify(body)});
@@ -109,6 +109,7 @@ export function ManualTransactionModal({accounts,categories,onClose,onSaved,toas
             <th style={{textAlign:'left',padding:'6px 8px'}}>Type</th>
             <th style={{textAlign:'left',padding:'6px 8px'}}>Category</th>
             <th style={{textAlign:'center',padding:'6px 8px'}}>GCB</th>
+            <th style={{textAlign:'center',padding:'6px 8px'}}>For Others</th>
             <th style={{width:32}}></th>
           </tr></thead><tbody>{splits.map((s,i)=>(
             <tr key={i}>
@@ -124,6 +125,7 @@ export function ManualTransactionModal({accounts,categories,onClose,onSaved,toas
                 :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
               </td>
               <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateSplit(i,'is_gcb',e.target.checked)}/></td>
+              <td style={{textAlign:'center',padding:'4px'}}><input type="checkbox" checked={!!s.is_for_others} onChange={e=>updateSplit(i,'is_for_others',e.target.checked)}/></td>
               <td style={{padding:'4px'}}>{splits.length>1&&<button type="button" className="btn btn-sm btn-ghost" onClick={()=>removeSplit(i)} style={{padding:'2px 6px',fontSize:13}}>×</button>}</td>
             </tr>
           ))}</tbody></table>

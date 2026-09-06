@@ -22,15 +22,18 @@ export function TransactionsPage({categories,toast,refreshKey}){
   const[maxAmount,setMaxAmount]=useState('');
   const[catFilter,setCatFilter]=useState(null);       // null=all, Set=specific
   const[actionFilter,setActionFilter]=useState(null);  // null=all, Set=specific
+  const[networkFilter,setNetworkFilter]=useState(null);   // null=all, Set=specific — e.g. "show me every Visa txn"
   /* Draft copies for the type/category/account dropdowns — only take effect (copied into
      the applied state above) when the user clicks Apply, so toggling checkboxes doesn't
      re-filter/re-fetch on every click. */
   const[draftCatFilter,setDraftCatFilter]=useState(null);
   const[draftActionFilter,setDraftActionFilter]=useState(null);
+  const[draftNetworkFilter,setDraftNetworkFilter]=useState(null);
   const[reviewTxn,setReviewTxn]=useState(null);
   const[showManual,setShowManual]=useState(false);
   const[splitTxn,setSplitTxn]=useState(null);
   const[accounts,setAccounts]=useState([]);
+  const[pointsCategories,setPointsCategories]=useState([]);
   const[accountFilter,setAccountFilter]=useState(null); // null=all, Set=specific
   const[draftAccountFilter,setDraftAccountFilter]=useState(null);
   const[showImport,setShowImport]=useState(false);
@@ -80,12 +83,20 @@ export function TransactionsPage({categories,toast,refreshKey}){
   },[needsReview,startDate,endDate,_acctKey,_catKey]);
 
   useEffect(()=>{load();},[load,refreshKey]);
+  /* Merchant category (CSC) options — same list the Cards pages use to teach
+     network/rewards rules, now also editable from here (Section: merchant
+     category, 2026-09-05). Fetched once; doesn't change during a session. */
+  useEffect(()=>{apiFetch('/points-categories').then(setPointsCategories).catch(()=>{});},[]);
 
   const handleSave=async(id,updates)=>{
     if(updates.__deleted){await load();return;}
     try{
-      await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
-      await load({silent:true});
+      const updated=await apiFetch(`/transactions/${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+      /* Patch the one row in place — no full-list refetch. Reloading all 500
+         rows after every edit was what made the table visually reshuffle/jump
+         (backend order isn't guaranteed stable across requests, and virtual
+         scroll windows by scroll position, not by transaction id) — see PLAN.md. */
+      setTxns(prev=>prev.map(t=>t.id===id?updated:t));
       toast('Saved');
     }
     catch(e){toast('Failed to save','error');}
@@ -105,7 +116,9 @@ export function TransactionsPage({categories,toast,refreshKey}){
     }catch(e){toast('Batch update failed: '+e.message,'error');}
   };
   /* Clear selection whenever the visible set changes (filter applied) */
-  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,minAmount,maxAmount,showDupes,showExcluded]);
+  useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,minAmount,maxAmount,showDupes,showExcluded,networkFilter]);
+  /* Distinct card networks seen in the loaded transactions — e.g. "show me every Visa txn" */
+  const networkOptions=useMemo(()=>[...new Set(txns.map(t=>t.network).filter(Boolean))].sort(),[txns]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
      A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
@@ -133,6 +146,7 @@ export function TransactionsPage({categories,toast,refreshKey}){
   if(catFilter!==null)visible=visible.filter(t=>catFilter.has(t.category_final));
   if(actionFilter!==null)visible=visible.filter(t=>actionFilter.has(t.action));
   if(accountFilter!==null)visible=visible.filter(t=>accountFilter.has(String(t.account_id)));
+  if(networkFilter!==null)visible=visible.filter(t=>networkFilter.has(t.network));
   const _minAmt=minAmount!==''?Math.abs(parseFloat(minAmount)):null;
   const _maxAmt=maxAmount!==''?Math.abs(parseFloat(maxAmount)):null;
   if(_minAmt!==null&&!isNaN(_minAmt))visible=visible.filter(t=>Math.abs(t.amount)>=_minAmt);
@@ -143,7 +157,7 @@ export function TransactionsPage({categories,toast,refreshKey}){
   }
 
   const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
-  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
+  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&!t.is_for_others&&(t.action==='Expense'||t.action==='Income'));
   const visibleExpenses=_budgetVisible.filter(t=>t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(t.category_final))).reduce((s,t)=>s+(-t.amount),0);
   const visibleIncome=_budgetVisible.filter(t=>t.action==='Income'&&!_expCatSet.has(t.category_final)).reduce((s,t)=>s+t.amount,0);
   const visibleNet=visibleIncome-visibleExpenses;
@@ -201,6 +215,8 @@ export function TransactionsPage({categories,toast,refreshKey}){
               selected={draftCatFilter} onChange={setDraftCatFilter} onApply={()=>setCatFilter(draftCatFilter)}/>
             <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name}))}
               selected={draftAccountFilter} onChange={setDraftAccountFilter} onApply={()=>setAccountFilter(draftAccountFilter)}/>
+            {networkOptions.length>0&&<MultiSelectFilter label="All networks" options={networkOptions.map(i=>({value:i,label:i}))}
+              selected={draftNetworkFilter} onChange={setDraftNetworkFilter} onApply={()=>setNetworkFilter(draftNetworkFilter)}/>}
             <button type="button" className="btn btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
             <button type="button" className="btn btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           </div>
@@ -241,8 +257,8 @@ export function TransactionsPage({categories,toast,refreshKey}){
           </div>
           
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null)&&
-              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
+            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||networkFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null||draftNetworkFilter!==null)&&
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setNetworkFilter(null);setDraftNetworkFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
             {showMoreMenu&&<div style={{position:'absolute',right:24,top:'100%',marginTop:4,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:8,zIndex:20,boxShadow:'var(--card-shadow)',minWidth:180}}
               onMouseLeave={()=>setShowMoreMenu(false)}>
@@ -299,7 +315,7 @@ export function TransactionsPage({categories,toast,refreshKey}){
               <button type="button" className="btn btn-secondary" style={{marginTop:12}} onClick={()=>load()}>Retry</button>
             </div>
           :visible.length===0&&!tableLoading?<div className="empty"><div className="empty-icon">◎</div><span>No transactions found</span></div>
-          :<MobileTxnList visible={visible} categories={categories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
+          :<MobileTxnList visible={visible} categories={categories} pointsCategories={pointsCategories} onSave={handleSave} onReview={setReviewTxn} onSplit={setSplitTxn} selectedIds={selectedIds} toggleSelect={toggleSelect} selectAll={selectAll} setSelectedIds={setSelectedIds} sortCol={sortCol} sortDir={sortDir} toggleSort={toggleSort} setShowBatchEdit={setShowBatchEdit} toast={toast}/>
         }
         </div>
       </div>

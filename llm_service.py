@@ -29,7 +29,7 @@ VALID_CATEGORIES = [
     "Groceries", "Dining", "Transportation", "Housing", "Utilities",
     "Healthcare", "Insurance", "Vehicle", "Fitness", "Self Care",
     "Clothing", "Electronics", "Streaming", "Travel", "Home",
-    "Kids", "Entertainment", "Gifts", "For Others", "Education",
+    "Kids", "Entertainment", "Gifts", "Education",
     "Fees & Interest", "Other",
     # Both (expense or income depending on sign)
     "Business", "Investment Gain (Loss)",
@@ -54,8 +54,6 @@ _CATEGORY_REMAP: dict[str, str] = {
     "Music Lessons":     "Education",
     "Tutoring":          "Education",
     "Studies":           "Education",
-    "Parents":           "For Others",
-    "Siblings":          "For Others",
     "Consulting":        "Business",
     "Dry Cleaning":      "Self Care",
     "Investments":       "Investment Gain (Loss)",
@@ -66,6 +64,14 @@ _CATEGORY_REMAP: dict[str, str] = {
     "Paycheck":          "Work",
     "Income":            "Work",
 }
+
+# "For Others" was removed as a category (2026-09-05) in favor of the
+# is_for_others tag (see Transaction.is_for_others) — money spent on behalf
+# of family/others, excluded from budget but kept for cash flow. When the LLM
+# still reaches for one of these old names, resolve the category to
+# Unclassified (real category TBD) and surface the tag via enrich_transaction's
+# "is_for_others" return key instead of remapping to a dead category name.
+_FOR_OTHERS_CATEGORY_ALIASES = {"For Others", "Parents", "Siblings"}
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = f"""You are an expert at decoding raw bank transaction strings into clean merchant names and categories.
@@ -181,8 +187,9 @@ def enrich_transaction(
         description_clean = str(result.get("description_clean") or "").strip()[:500]
         category          = str(result.get("category") or "").strip()
 
+        is_for_others = category in _FOR_OTHERS_CATEGORY_ALIASES
         category = _CATEGORY_REMAP.get(category, category)
-        if category not in VALID_CATEGORIES:
+        if is_for_others or category not in VALID_CATEGORIES:
             category = "Unclassified"
         if not merchant_name:
             merchant_name = description_raw[:200]
@@ -194,6 +201,7 @@ def enrich_transaction(
             "description_clean": description_clean,
             "category":          category,
             "source":            "llm",
+            "is_for_others":     is_for_others,
         }
 
     return _fallback(description_raw)
@@ -206,4 +214,5 @@ def _fallback(description_raw: str) -> dict:
         "description_clean": description_raw[:500],
         "category":          "Unclassified",
         "source":            "fallback",
+        "is_for_others":     False,
     }

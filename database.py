@@ -157,6 +157,12 @@ class Transaction(Base):
     gcb_tagged = Column(Boolean, default=False, index=True)  # Legacy — kept for backward compat
     is_gcb = Column(Boolean, default=False, index=True)       # New canonical GCB flag (Section 3b)
 
+    # "For Others" tagging — replaces the old "For Others" *category* (money spent
+    # on behalf of family/others). Same shape as is_gcb: excluded from budget/stats
+    # totals but kept in cash-flow tracking, since the money still actually moved.
+    # The transaction keeps a normal category describing what the spend was for.
+    is_for_others = Column(Boolean, default=False, index=True)
+
     # Points tracking
     points_category = Column(String(100), nullable=True)   # From PointsCategory table
     card_id = Column(Integer, ForeignKey('cards.id'), nullable=True)  # Which card was used
@@ -305,6 +311,7 @@ class TransactionSplit(Base):
     category = Column(String(100))
     action = Column(String(50), nullable=True)  # Type per split line (Section 4F)
     is_gcb = Column(Boolean, default=False)  # GCB tag per split
+    is_for_others = Column(Boolean, default=False)  # "For Others" tag per split
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -824,12 +831,29 @@ CardEarningRate = CardProductReward
 
 
 class MerchantPointsMapping(Base):
-    """Maps merchant + card to points category for points calculation"""
+    """Maps a merchant to a merchant category (points_category / "CSC") for points
+    calculation — this is the "how does the network code this merchant" rule
+    engine (Section: merchant category, 2026-09-05).
+
+    Scope, most to least specific — a merchant can have rules at more than one
+    scope at once, and lookup picks the most specific match:
+      1. card_id set  — applies only to that one physical card
+      2. network set  — applies to every card on that payment network
+                         (Visa/Mastercard/Amex/Discover — Card.network, NOT
+                         Card.issuer; the issuing bank, e.g. Chase or Bilt,
+                         doesn't assign the merchant code, the network does)
+      3. neither set  — global, applies to all cards
+    card_id and network are mutually exclusive in practice (card_id already
+    implies a network) — network exists for rules that should follow "every
+    Mastercard", not just one, since the same merchant can be coded
+    differently by different networks for the same real-world purchase.
+    """
     __tablename__ = 'merchant_points_mappings'
 
     id = Column(Integer, primary_key=True)
     merchant_pattern = Column(String(200), nullable=False, index=True)  # Merchant name/pattern
-    card_id = Column(Integer, ForeignKey('cards.id'), nullable=True)    # Null = applies to all cards
+    card_id = Column(Integer, ForeignKey('cards.id'), nullable=True)    # Most specific: one card
+    network = Column(String(20), nullable=True, index=True)             # Mid: every card on this network
     points_category_id = Column(Integer, ForeignKey('points_categories.id'), nullable=False)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -959,9 +983,13 @@ _CAT_REMAP = [
     ('Investments',       'Investment Gain (Loss)'),
     ('Investment Income', 'Investment Gain (Loss)'),
     ('Interest Income',   'Investment Gain (Loss)'),
-    # Family support
-    ('Siblings',          'For Others'),
-    ('Parents',           'For Others'),
+    # Family support — "For Others" is retired as a category (2026-09-05, now
+    # the is_for_others tag instead); these old aliases resolve to Unclassified
+    # rather than resurrecting a dead category name. Same for any straggler
+    # literally still holding the old "For Others" category string.
+    ('Siblings',          'Unclassified'),
+    ('Parents',           'Unclassified'),
+    ('For Others',        'Unclassified'),
     # Misc
     ('Lottery',           'Other'),
     ('Dry Cleaning',      'Self Care'),
@@ -1068,6 +1096,7 @@ def run_migrations(engine):
             ('parent_transaction_id', 'INTEGER'),
             ('gcb_tagged',      'BOOLEAN DEFAULT FALSE'),
             ('is_gcb',          'BOOLEAN DEFAULT FALSE'),
+            ('is_for_others',   'BOOLEAN DEFAULT FALSE'),
             ('points_category', 'VARCHAR(100)'),
             ('card_id',         'INTEGER'),
             ('reviewed_at',       'TIMESTAMP'),
@@ -1128,6 +1157,7 @@ def run_migrations(engine):
         ],
         'transaction_splits': [
             ('action', 'VARCHAR(50)'),
+            ('is_for_others', 'BOOLEAN DEFAULT FALSE'),
         ],
         'points_ecosystems': [
             ('eco_type',           'VARCHAR(20)'),
@@ -1135,6 +1165,16 @@ def run_migrations(engine):
         ],
         'points_categories': [
             ('parent_key', 'VARCHAR(100)'),
+        ],
+        'merchant_points_mappings': [
+            # 'issuer' below was this session's first pass at scoped rules,
+            # briefly live before realizing "issuer" should mean the payment
+            # NETWORK (Visa/Mastercard/Amex/Discover — Card.network), not the
+            # issuing bank (Card.issuer, e.g. Chase/Bilt) — kept as an unused
+            # column rather than dropped, matching this table's additive-only
+            # migration convention (see gcb_tagged elsewhere for precedent).
+            ('issuer', 'VARCHAR(50)'),
+            ('network', 'VARCHAR(20)'),
         ],
         'spend_challenges': [
             ('activation_date',  'DATE'),
@@ -1504,7 +1544,11 @@ def seed_categories(session):
         ("Kids",                   None, "expense", 16),
         ("Entertainment",          None, "expense", 17),  # events, leisure, books, lottery
         ("Gifts",                  None, "expense", 18),  # presents
-        ("For Others",             None, "expense", 19),  # financial support for family/others
+        # "For Others" removed as a category (2026-09-05) — it's now the
+        # is_for_others tag instead (money spent on behalf of family/others,
+        # excluded from budget but kept for cash-flow tracking). Transactions
+        # that were categorized "For Others" keep a real category describing
+        # the actual spend now. Seeder marks the old row inactive automatically.
         ("Education",              None, "expense", 20),  # incl. lessons, tutoring, studies
         ("Fees & Interest",        None, "expense", 21),
         ("Other",                  None, "expense", 22),

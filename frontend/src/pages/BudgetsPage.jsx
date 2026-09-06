@@ -64,7 +64,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
   const getActual=(cat,m)=>actuals[cat]?.[String(m)]||0;
 
   const alphaCats=useMemo(()=>(list)=>[...new Set(list)].sort((a,b)=>{
-    const BOTTOM=['Unclassified','Other','For Others'];
+    const BOTTOM=['Unclassified','Other'];
     const aB=BOTTOM.includes(a),bB=BOTTOM.includes(b);
     if(aB&&!bB)return 1;if(!aB&&bB)return -1;
     return a.localeCompare(b);

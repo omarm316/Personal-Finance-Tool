@@ -56,4 +56,4 @@ export function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCo
   );
 }
 
-/* Sort categories: alphabetical, with "For Others", "Other", "Unclassified" pinned to the bottom */
+/* Sort categories: alphabetical, with "Other", "Unclassified" pinned to the bottom */

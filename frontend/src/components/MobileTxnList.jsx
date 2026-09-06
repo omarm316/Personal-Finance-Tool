@@ -5,12 +5,21 @@ import {TxnRow} from './TxnRow';
 import {useIsMobile,useVirtualScroll} from '../hooks/index';
 import {fmt,fmtDate} from '../lib/format';
 
-export function MobileTxnList({visible,categories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
+export function MobileTxnList({visible,categories,pointsCategories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
   const isMobile=useIsMobile();
   // Desktop: full table with virtual scroll for large lists
   const desktopScrollRef=useRef(null);
   const ROW_H=56;
   const virt=useVirtualScroll(desktopScrollRef,visible.length,ROW_H);
+  // Mobile-only state, but declared unconditionally — these used to sit below
+  // the `if(!isMobile)` early return, so the desktop branch called 4 hooks
+  // and the mobile branch called 6. Harmless until `isMobile` flips value
+  // between renders of the SAME mount (e.g. a resize event right after
+  // initial paint), at which point React throws "Rendered fewer hooks than
+  // expected" and the whole page goes blank. Hooks must run the same every
+  // render regardless of which branch's JSX gets returned.
+  const[editTxn,setEditTxn]=useState(null);
+  const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
   if(!isMobile){
     const useVirt=visible.length>80;
     const rows=useVirt?visible.slice(virt.start,virt.end):visible;
@@ -33,7 +42,7 @@ export function MobileTxnList({visible,categories,onSave,onReview,selectedIds,to
           </tr></thead>
           <tbody>
             {useVirt&&<tr style={{height:virt.offsetY}}><td colSpan="8"/></tr>}
-            {rows.map(t=><TxnRow key={t.id} txn={t} categories={categories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}
+            {rows.map(t=><TxnRow key={t.id} txn={t} categories={categories} pointsCategories={pointsCategories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}
             {useVirt&&<tr style={{height:Math.max(0,virt.totalHeight-virt.end*ROW_H)}}><td colSpan="8"/></tr>}
           </tbody>
         </table>
@@ -41,8 +50,6 @@ export function MobileTxnList({visible,categories,onSave,onReview,selectedIds,to
     );
   }
   // Mobile: card list with swipe-to-reveal actions
-  const[editTxn,setEditTxn]=useState(null);
-  const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
   return(
     <div>
       {editTxn&&<MobileTxnModal txn={editTxn} categories={categories} onSave={onSave} onClose={()=>setEditTxn(null)} toast={toast}/>}
