@@ -298,6 +298,103 @@ waiting for Omer to say go.
 
 ---
 
+## Session 2026-09-06 (cont'd, 3) — H7: `plaid_routes.py` assigned and split out
+
+Omer said to assign `plaid_routes.py` to a phase and continue. **Decision: its own
+standalone extraction, not folded into batch 2's `accounts.py`.** Reasoning: its
+~450-line sync engine (`_sync_item`/`_sync_item_background`) is needed by plaid
+routes *and* by one not-yet-split `accounts.py` route
+(`reset_and_resync_account`) *and* by three still-unassigned routes
+(`/api/reset-all`, `/api/nuke`, `/api/accounts/backfill-balances`) — rather than
+wait for accounts.py to decide the engine's home, promoted it straight to
+`core/plaid_sync.py` now (same shape as `_compute_ecosystem_balance()` and this
+session's earlier `_reapply_rules` promotion: a function needed by call sites on
+both sides of a not-yet-drawn router boundary goes to `core/`, full stop). This
+also means whichever session does batch 2's `accounts.py` next inherits a
+already-solved dependency rather than having to solve it under batch 2's own
+time pressure.
+
+**Method**: same as batch 1 — AST dependency-graph script extended to this
+domain's 18 routes + 2 Pydantic models + the 2-function sync engine, then the
+scope-aware unresolved-name checker on each assembled file, then the reverse
+grep-for-leftover-references check against the edited `main.py`.
+
+**The scope-aware checker earned its keep again**: the AST reference-detector
+(the one that intersects a function's `Name` loads against main.py's top-level
+symbol table) silently missed that `_sync_item_background` calls
+`SessionLocal()` directly — because `SessionLocal` is bound via
+`engine, SessionLocal = init_db()`, a **tuple-unpacking assignment**, and the
+detector's top-level-assign collector only recognized `ast.Name` targets, not
+`ast.Tuple` targets, so `SessionLocal` was invisible to it as a top-level name
+at all. The stricter unresolved-name checker (which walks real nested scopes
+rather than a flat name-set) caught it immediately when run against the
+assembled `core/plaid_sync.py`. Recorded as a known gap in the first script for
+whoever runs this method again in batch 2/3 — the second-pass checker is not
+optional, it is what actually catches this class of miss.
+
+**New import-order landmine, same root cause as `routers/llm.py`'s in batch 1
+but now touching `main.py` itself**: `core/plaid_sync.py` does
+`from database import SessionLocal` at its own top level (needed because
+`_sync_item_background` grabs its own session for a background task). Main.py's
+*own* `reset_all`/`reset_and_resync_account` need `_sync_item_background` too,
+so `main.py` now also does `from core.plaid_sync import _sync_item_background` —
+and that import was first written into `main.py`'s top-of-file import block,
+alongside all the other `core/*` imports, which run **before**
+`engine, SessionLocal = init_db()`. Caught by re-running the live check this
+session already relies on (`database.SessionLocal is core.plaid_sync.SessionLocal
+and is not None`, checked after import) rather than by either static checker —
+neither AST tool can see "this import happens too early," only a live import
+does. Fixed by moving that one import down next to the router imports, all of
+which already run after `init_db()`. Worth remembering as its own rule for
+future phases: **any core/ module that touches `SessionLocal` directly (not
+through `get_db`) must only ever be imported after `init_db()`, in main.py or
+in any router** — `get_db()` itself is exempt (it resolves `SessionLocal` lazily
+inside the generator body, at first request, by which time `init_db()` has
+always already run).
+
+**Verified the same way as every prior batch:**
+1. **Route parity** — 177/177 across `main.py` + all 5 `routers/*.py` files,
+   diffed against the pre-session committed state (had to include the
+   already-existing `routers/*.py` files from batch 1 in the "before" set too,
+   not just `main.py` — comparing against `main.py`-alone at HEAD would have
+   shown 38 false "EXTRA" routes purely from batch 1 already having moved them
+   out before this session started).
+2. **No circular imports.**
+3. **Reverse-reference check** — zero leftover calls to any of the 24 moved
+   names in the edited `main.py` (one hit was a comment mentioning `_sync_item()`
+   by name, not a real reference).
+4. **Test suite**: 53 passed / 4 failed, identical to every prior baseline.
+5. **Live smoke test against production** — `git stash`ed to the pre-session
+   commit and diffed `/api/plaid/items` (pure DB read, no live Plaid call) and
+   `/api/accounts` old vs new. `/api/accounts` was byte-identical.
+   `/api/plaid/items` differed only in `last_synced_at` timestamps on 5 items —
+   traced to Omer's own long-running local dev server (been running since
+   before this session) periodically syncing in the background between the two
+   curl calls; `account_count`/`transaction_count`/every other field matched
+   exactly, confirming this was real background activity, not a code
+   difference. Deliberately did **not** smoke-test any state-mutating plaid
+   endpoint (sync-transactions, reset-and-resync, exchange-token, etc.) against
+   production — the DB-read comparison plus the other four checks were enough
+   without touching live Plaid state for a verification exercise.
+
+**Result:** `main.py` 8,489 → 6,989 lines. New: `routers/plaid_routes.py` (18
+routes: link-token creation, item CRUD, sync triggers, diagnostics, account
+recovery), `core/plaid_sync.py` (the shared sync engine + its two Plaid-code
+lookup tables, `PLAID_TYPE_FALLBACK`/`_PLAID_PFC_MAP`, which turned out to be
+used by nothing else and moved along with the engine).
+
+**Not done / next**: the three still-unassigned routes (`/api/reset-all`,
+`/api/nuke`, `/api/accounts/backfill-balances`) remain in `main.py`, now calling
+`core.plaid_sync._sync_item_background` — still no home decided; likeliest is
+`accounts.py` given `backfill-balances`, but `reset-all`/`nuke` touch every
+domain's tables and might be better as their own `admin.py` rather than forced
+into accounts.py. Worth deciding at the start of batch 2 rather than guessing
+now. Batch 2 (`budgets.py`, `net_worth.py`, `accounts.py`, `transactions.py`,
+`rules.py`) and batch 3 (`cards.py`, `ecosystems.py`, `challenges.py`, together)
+remain unstarted.
+
+---
+
 ## Session 2026-09-05 — Transactions: edit UX, "For Others" tag, merchant category/network engine
 
 Omer's brief, framed as "our big focus": (1) editing a transaction visually "jumps" the table, (2) the row is too cramped — buttons bleed off-screen in edit mode, (3) "For Others" should stop being a category and become a tag (excluded from budget, kept for cash flow — same shape as GCB), (4) bring the Cards pages' merchant-category (CSC) logic into the main engine so every transaction can show a personal category *and* a merchant category, plus an identifier for which payment network coded it that way, and (5) a general visual/back-end cleanup pass, rules-based auto-classification included. Confirmed two defaults up front via AskUserQuestion before touching schema: existing "For Others" transactions reset to Unclassified + tagged (none existed live), and "merchant category" = the existing CSC/points_category system, extended rather than duplicated.
