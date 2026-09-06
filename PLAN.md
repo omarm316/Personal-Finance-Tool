@@ -1,12 +1,187 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-09-05
+> Last updated: 2026-09-06
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-09-06 — Scoping only: `main.py` → domain routers split (backend token-usage refactor)
+
+Omer asked how to cut token usage per session; the frontend is already fine (each page is
+its own file under `frontend/src/pages/`, one per Vite-split component — see the
+2026-07-30 writeup below). The actual monolith is the **backend**: `main.py` is
+**12,196 lines / 177 routes**, so any backend-touching session — regardless of which
+page it's for — has the whole file in play. Scoped the split below; **nothing has been
+touched yet**, this is planning only, to be executed as its own dedicated session(s) per
+the one-session-per-module convention.
+
+### Proposed structure
+
+`main.py` shrinks to app setup only: `FastAPI()`, static mount, `CORSMiddleware`,
+`PasswordMiddleware`/`RequestLoggingMiddleware` (both defined here), the login page +
+`/api/auth/*` (small, tied to the password gate), `get_db`, the `@app.on_event("startup")`
+seed call, and one `app.include_router(...)` per domain module below. Target ~300-400 lines.
+
+**`core/` — shared modules every router imports, extracted first:**
+- `core/serializers.py` — `serialize_account`, `_serialize_txn`, `_serialize_card`,
+  `_serialize_challenge`, `_serialize_redemption`, `_serialize_balance_snapshot`,
+  `_serialize_adjustment`, `_serialize_transfer_ratio`, `_serialize_transfer`,
+  `_serialize_person_transfer`, `_serialize_benefit`, `serialize_loan`,
+  `_overlay_to_dict`, `_salary_to_dict`
+- `core/points_engine.py` — `infer_points_category`, `calc_earn_rate`,
+  `compute_points_earn`, `calc_auto_top_category_points`, `_build_product_rate_maps`,
+  `_build_points_lookup`, `_resolve_merchant_csc`, `_build_network_lookup`,
+  `_resolve_product_for_date`, `_lock_points_for_transaction`,
+  `_compute_ecosystem_balance`, `_statement_close_date`, `_points_pending`,
+  `_load_products_by_id`. **This is the module that has to exist** — Architecture Notes
+  already flags `_compute_ecosystem_balance()` as deliberately shared between
+  `/api/cards/earn-summary` and `/api/ecosystems/{id}/earn-detail` "so the two can't
+  diverge"; cards.py and ecosystems.py cannot each get their own copy.
+- `core/accounts_helpers.py` — `classify_account`, `get_account_balance`,
+  `get_account_balances_bulk`, `ACCOUNT_TYPE_MAP`, `_account_hash`,
+  `_content_base_hash`, `_assign_content_hash`, `_sign_plaid_balance`,
+  `_plaid_anchor_date`, `rebuild_monthly_snapshots`, `_refresh_current_month_snapshot`,
+  `_ensure_cards_for_new_accounts`, `_refresh_product_held_status`
+- `core/challenges_helpers.py` — `_challenge_progress`, `_recalc_challenge`,
+  `_challenge_spend_for_card`, `_sync_challenge_links`, `_current_cycle`, `_cycles_for_year`
+- `core/import_helpers.py` — `_compute_import_hash`, `_parse_csv_rows`,
+  `_parse_ofx_rows`, `_build_preview` (shared by `/api/transactions/import` and the
+  `/api/init/*` bulk-import routes)
+
+**`routers/` — one file per domain, Pydantic request/response models colocated with
+their own router (they're declarations, not logic — no token-cost reason to split
+them out separately):**
+1. `plaid_routes.py` — `/api/plaid/*`, `/plaid/oauth-return`
+2. `accounts.py` — `/api/accounts/*` (incl. duplicates/merge/sync-balances),
+   `/api/accounts/{id}/card-detail`, `/balance-timeline`, `/reconcile`,
+   `/api/reconciliation/*`, `/api/balances/monthly`
+3. `transactions.py` — `/api/transactions/*` (splits, manual, batch-update, import)
+4. `cards.py` — `/api/cards/*`, `/api/card-products/*`, `/api/benefits/*`,
+   `/api/points-categories`
+5. `ecosystems.py` — `/api/ecosystems/*`, `/api/redemptions`, `/api/transfer-ratios`,
+   `/api/transfers`, `/api/person-transfers`, `/api/balance-snapshots`,
+   `/api/points-adjustments`
+6. `challenges.py` — `/api/challenges/*`
+7. `rules.py` — `/api/rules/*`, `/api/merchant-csc`, `/api/init/*`
+8. `budgets.py` — `/api/budget/*`
+9. `net_worth.py` — `/api/net-worth/*`
+10. `loans.py` — `/api/loans/*`
+11. `cash_flow.py` — `/api/cash-flow*`, `/api/cash-flow-overlays`,
+    `/api/salary-payments`, `/api/daily-balances`, `/api/forecast/{account_id}`
+12. `llm.py` — `/api/llm/*`
+13. `misc.py` — `/health`, `/mockup`, `/v2`, `/api/stats*`, `/api/categories`,
+    `/api/transaction-types`, `/api/export/csv`, `/api/planned-purchases`
+
+### Method (reusing what worked for the Vite Phase 2 split)
+
+The `main.jsx` → 62-module split (below) worked because it was **scripted, not
+hand-copied**: a dependency graph was built, checked for cycles (Tarjan SCC, zero
+found), and imports were computed from the graph rather than typed by hand. Do the
+same here — build the graph over ~180 route handlers + ~70 helper functions (which
+helper calls which, which globals/models each touches), assign each helper to `core/`
+if ≥2 domains use it, then move code by script per the graph rather than by hand.
+**Over-detect references, don't under-detect** — the Vite split's real bug was a regex
+that under-matched (stripped string literals containing an apostrophe) and silently
+dropped a real dependency; an unused import here is harmless, a missing one is a
+runtime `NameError`.
+
+**Verify by:** route count identical before/after (177 in, 177 out, same
+path+method set), existing tests still pass (`tests/`), and live smoke-test each
+migrated domain against production data the same way every session in this backlog
+already does.
+
+### Phasing (not started)
+
+Do `core/` first — every router depends on it. Then split domains in order of
+coupling, cheapest/lowest-risk first, since each phase proves the method before the
+riskiest one:
+1. `loans.py`, `cash_flow.py`, `llm.py`, `misc.py` — self-contained, few/no
+   cross-domain helper calls
+2. `budgets.py`, `net_worth.py`, `accounts.py`, `transactions.py`, `rules.py` —
+   moderate, mostly depend on `core/accounts_helpers.py` + `core/serializers.py`
+3. `cards.py`, `ecosystems.py`, `challenges.py` — do last, together — this is the
+   cluster that shares `core/points_engine.py` most heavily and has the least clean
+   boundary (see the `_compute_ecosystem_balance()` note above)
+
+Not scheduled yet — flagged in BACKLOG.md (H7) for a future dedicated session, likely
+several given the phasing above.
+
+---
+
+## Session 2026-09-06 (cont'd) — H7 Phase 0 executed: `core/` extraction
+
+Did the Phase 0 extraction scoped above in the same session (Omer asked to continue
+past scoping). **Router split (Phase 1+) is still not started** — this was `core/`
+only, `main.py` keeps every one of its 177 routes, just importing helpers instead of
+defining them inline.
+
+**Method, per the scoped plan:** built the dependency graph with an AST script rather
+than by hand — for each of the 51 target functions/constants (the ones named in the
+`core/` breakdown above), walked its AST for every `Name` reference and intersected
+against main.py's top-level symbol table, then closed the graph transitively. That
+closure surfaced **8 additional helpers the original scoping pass didn't name**:
+`_best_description`, `_compute_pmt_split`, `_guess_issuer`, `_ISSUER_NAME_MAP`,
+`_CC_PAYMENT_KW`, `_MERCHANT_POINTS_PATTERNS`, `_NON_EARNING_CATS`, `_PFC_POINTS_MAP` —
+each pulled in by a named target (e.g. `_serialize_txn` calls `_best_description`,
+`_ensure_cards_for_new_accounts` calls `_guess_issuer`). All 8 moved alongside their
+callers into the same core module. Two of them (`_CC_PAYMENT_KW`, `_compute_pmt_split`)
+are *also* called from route code staying in `main.py`, so `main.py` re-imports those
+two from `core/` as well.
+
+After writing each core module, ran a second, stricter static check — a scope-aware
+AST walker (not just a flat name-intersection) that resolves every `Name` load against
+a real nested-scope model (function params, comprehension/for/with targets, except
+handlers, walrus, etc.) — over each finished `core/*.py` file in isolation, looking
+for any name with no binding anywhere in scope. First pass found exactly one:
+`core/challenges_helpers.py`'s `_sync_challenge_links` used `ChallengeCardLink` /
+`ChallengeCategoryLink` (both SQLAlchemy models from `database.py`) that hadn't been
+added to that module's import line — caught before it ever ran, fixed, re-checked
+clean. This is the same class of bug the Vite split's postmortem flagged (a
+under-detecting regex silently dropping a real reference) — over-detecting here (the
+8 extra helpers, plus this stricter unresolved-name pass) is what caught it instead.
+
+**Result:** `main.py` 12,196 → 10,129 lines. Five new modules: `core/serializers.py`,
+`core/points_engine.py`, `core/accounts_helpers.py`, `core/challenges_helpers.py`,
+`core/import_helpers.py`. Internal cross-core imports needed: `serializers.py` imports
+`classify_account` from `accounts_helpers` and `_challenge_progress`/`_current_cycle`
+from `challenges_helpers`; `challenges_helpers.py` imports `_NON_EARNING_CATS` from
+`points_engine`. No core module imports from `main.py` (checked via AST, not
+substring-grep — a substring check false-positived on every module's own "Extracted
+from main.py" docstring).
+
+**Verified clean, all four ways specified in scope:**
+1. **Route parity** — AST-extracted every `@app.<method>(path)` decorator from both
+   old and new `main.py`: 177 routes in both, identical (method, path) set.
+2. **No circular imports** — confirmed via AST (`ImportFrom.module` / `Import.names`
+   never starts with `main` in any `core/*.py`), and by actually importing all five
+   modules plus `main` itself in one process with no error.
+3. **Test suite** — `tests/` uses an in-memory SQLite DB (never touches production),
+   but its `client` fixture triggers FastAPI's real `@app.on_event("startup")` per
+   test, which runs seeding against the **production** Postgres via the module-level
+   `SessionLocal` (pre-existing main.py behavior, confirmed byte-identical between old
+   and new `main.py` — not something this session introduced, but worth knowing: it's
+   why the suite takes ~23 min against the remote DB's per-call latency). Ran the full
+   suite before and after (via `git stash`/`stash pop` to isolate `main.py` while
+   keeping `core/` on disk): **53 passed, 4 failed both times, same 4 tests**
+   (`tests/test_earn_rates.py`'s `TestProductLookup`/`TestCashBackEarnRate`/
+   `TestParentCategoryFallbackIntegration` — all integration tests hitting
+   `/api/cards/earn-summary` through `client`). Confirmed pre-existing, not a
+   regression — this is the already-tracked B27, re-confirmed against this
+   refactor rather than a new find.
+4. **Live smoke test against production** — started the real server (old `main.py`
+   via `git stash`, then new `main.py`) on the same data and diffed
+   `json.dumps(resp, sort_keys=True)` for `/api/transactions`, `/api/accounts`,
+   `/api/cards/earn-summary`, `/api/ecosystems`, `/api/ecosystems/11/earn-detail`,
+   `/api/challenges`, `/api/net-worth` — **byte-identical on every endpoint**.
+
+**Not done / next**: Phase 1 (splitting `main.py`'s 177 routes into the 13
+`routers/*.py` files listed above) — explicitly not started per Omer's instruction to
+stop after Phase 0 verification.
 
 ---
 

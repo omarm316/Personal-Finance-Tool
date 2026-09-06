@@ -37,6 +37,34 @@ from database import (
     AccountMonthlySnapshot, UserCorrection, DuplicateIgnore, CashFlowOverlay,
     SalaryPayment, SalaryAllocation, BalanceObservation, PlannedPurchase,
 )
+from core.accounts_helpers import (
+    ACCOUNT_TYPE_MAP, classify_account, _account_hash, _content_base_hash,
+    _assign_content_hash, _sign_plaid_balance, _plaid_anchor_date,
+    get_account_balance, get_account_balances_bulk,
+    rebuild_monthly_snapshots, _refresh_current_month_snapshot,
+    _ensure_cards_for_new_accounts, _refresh_product_held_status,
+)
+from core.points_engine import (
+    infer_points_category, calc_earn_rate, compute_points_earn,
+    calc_auto_top_category_points, _build_product_rate_maps, _build_points_lookup,
+    _resolve_merchant_csc, _build_network_lookup, _resolve_product_for_date,
+    _lock_points_for_transaction, _compute_ecosystem_balance, _statement_close_date,
+    _points_pending, _load_products_by_id, _NON_EARNING_CATS, _CC_PAYMENT_KW,
+)
+from core.challenges_helpers import (
+    _challenge_progress, _recalc_challenge, _challenge_spend_for_card,
+    _sync_challenge_links, _current_cycle, _cycles_for_year,
+)
+from core.serializers import (
+    serialize_account, _serialize_txn, _serialize_card, _serialize_challenge,
+    _serialize_redemption, _serialize_balance_snapshot, _serialize_adjustment,
+    _serialize_transfer_ratio, _serialize_transfer, _serialize_person_transfer,
+    _serialize_benefit, serialize_loan, _overlay_to_dict, _salary_to_dict,
+    _compute_pmt_split,
+)
+from core.import_helpers import (
+    _compute_import_hash, _parse_csv_rows, _parse_ofx_rows, _build_preview,
+)
 from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review, find_overlapping_rules
 from plaid_integration import setup_plaid_from_env
@@ -60,77 +88,15 @@ logger = logging.getLogger('moresheth')
 
 # Bucket mapping: account_type → (bucket_name, is_asset, is_liability)
 # Keys match Plaid subtypes (checking, savings, credit card) and manual types
-ACCOUNT_TYPE_MAP = {
-    # Assets — Cash & Savings (included in Cash Flow)
-    'checking':       ('Cash & Savings', True, False),
-    'savings':        ('Cash & Savings', True, False),
-    'cash':           ('Cash & Savings', True, False),
-    'gift card':      ('Cash & Savings', True, False),
-    'money market':   ('Cash & Savings', True, False),
-    'cd':             ('Cash & Savings', True, False),
-    'hsa':            ('Cash & Savings', True, False),
-    'fsa':            ('Cash & Savings', True, False),
-    # Assets — Investments
-    'investment':     ('Investments', True, False),
-    '401k':           ('Investments', True, False),
-    'ira':            ('Investments', True, False),
-    'brokerage':      ('Investments', True, False),
-    # Assets — Other
-    'real_estate':    ('Real Estate', True, False),
-    'vehicle':        ('Other Assets', True, False),
-    'business_owned': ('Other Assets', True, False),
-    'other':          ('Other Assets', True, False),
-    # Liabilities
-    'credit card':    ('Credit Cards', False, True),
-    'credit':         ('Credit Cards', False, True),
-    'mortgage':       ('Mortgage', False, True),
-    'loan':           ('Personal Loans', False, True),
-    'student':        ('Personal Loans', False, True),
-    'auto':           ('Personal Loans', False, True),
-    'business_loan':  ('Business Loans', False, True),
-}
 
 # ---------------------------------------------------------------------------
 # Content-hash helpers — stable transaction identity across Plaid re-links
 # ---------------------------------------------------------------------------
 
-def _account_hash(institution_id: str, mask: str, account_type: str) -> str:
-    """
-    Stable 12-char identity hash for an account.
-    Formula: SHA256(institution_id|mask|normalised_type)[:12]
-
-    Written once at exchange-token time and stored on the account row.
-    Because it uses Plaid's immutable institution_id (e.g. "ins_3" for Chase)
-    plus the last-4 mask, it survives sever-plaid and is the primary matching
-    key when a user re-links a bank — no database JOIN required.
-    """
-    raw = f"{(institution_id or '').strip()}|{(mask or '').strip()}|{(account_type or '').lower().strip()}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
-def _content_base_hash(account_id: int, date, amount: float, description_raw: str) -> str:
-    """
-    14-character prefix of SHA-256(account_id|date|amount|description_raw).
-    Stable: uses the raw bank string (not enriched merchant name), normalised
-    amount (2 dp), and uppercase description so minor spacing/case changes
-    don't break the match.
-    """
-    raw = f"{account_id}|{date}|{amount:.2f}|{(description_raw or '').strip().upper()}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:14]
 
 
-def _assign_content_hash(db: Session, account_id: int, date, amount: float, description_raw: str) -> str:
-    """
-    Assign a unique content_hash for a new transaction.
-    Counts existing transactions that share the same base hash to determine
-    the next suffix: -00, -01, -02 …
-    Thread-safe within a single DB session (flush before calling if needed).
-    """
-    base  = _content_base_hash(account_id, date, amount, description_raw)
-    count = db.query(Transaction).filter(
-        Transaction.content_hash.like(f'{base}-%')
-    ).count()
-    return f'{base}-{count:02d}'
 
 
 # Map Plaid top-level types to our types (fallback when subtype is missing)
@@ -144,89 +110,12 @@ PLAID_TYPE_FALLBACK = {
 # Institution name substring → issuer short code, for auto-created Card rows.
 # Same institutions the /api/accounts/product-suggestions matcher already
 # recognizes, kept as a separate map since that one keys off product_key.
-_ISSUER_NAME_MAP = {
-    'chase': 'CHASE', 'american express': 'AMEX', 'amex': 'AMEX',
-    'citibank': 'CITI', 'citi': 'CITI', 'discover': 'DISCOVER',
-    'bank of america': 'BOA', 'capital one': 'CAPITAL ONE',
-    'wells fargo': 'WELLS FARGO', 'us bank': 'US BANK', 'barclays': 'BARCLAYS',
-    'synchrony': 'SYNCHRONY', 'bilt': 'BILT', 'fidelity': 'FIDELITY',
-}
 
 
-def _guess_issuer(institution_name: str | None) -> str | None:
-    name = (institution_name or '').lower()
-    for key, code in _ISSUER_NAME_MAP.items():
-        if key in name:
-            return code
-    return None
 
 
-def _ensure_cards_for_new_accounts(db: Session, new_accounts: list, institution_name: str | None = None) -> int:
-    """
-    Create a `Card` row for each brand-new credit-card `Account` just created
-    by this sync (the caller passes exactly the accounts it added, not every
-    account on the item — deliberately narrow, see below).
-
-    Plaid sync only ever creates/updates the `Account` row — it never creates
-    the `Card` row that earning rates, benefits, and the ecosystem pages all
-    key off. Without one, a newly-synced card silently earns nothing even
-    after its CardProduct is linked (this was previously a manual fixup done
-    by hand for every new card — see BACKLOG B18). Called right after account
-    reconciliation (both first link and "+ Add Account" on an existing item)
-    so new cards work end-to-end without a manual DB step.
-
-    Scoped to accounts created in THIS call, not "every orphaned credit
-    account on the item" — B31 documents a still-open duplicate/mislabeled
-    account (168) sharing a mask with a real one; blindly backfilling every
-    Card-less credit account on an item would hand that duplicate a
-    permanent Card row and complicate its planned cleanup. Pre-existing
-    orphans (B18's West Elm/Fidelity cases) stay manual fixes for now.
-    """
-    accounts = [a for a in new_accounts if 'credit' in (a.account_type or '').lower()]
-    if not accounts:
-        return 0
-    issuer = _guess_issuer(institution_name)
-    created = 0
-    for a in accounts:
-        if db.query(Card).filter_by(account_id=a.id).first():
-            continue
-        base_card_id = (a.account_name or f"Account {a.id}").strip()[:50]
-        card_id = base_card_id
-        suffix = 2
-        while db.query(Card).filter_by(card_id=card_id).first():
-            card_id = f"{base_card_id[:46]} #{suffix}"
-            suffix += 1
-        db.add(Card(
-            card_id=card_id,
-            issuer=issuer,
-            card_name=a.official_name or a.account_name,
-            account_id=a.id,
-            is_active=True,
-        ))
-        created += 1
-    if created:
-        db.commit()
-        logger.info(f"[sync] {institution_name or 'item'}: auto-created {created} Card row(s)")
-    return created
 
 
-def _refresh_product_held_status(db: Session, product_id: int | None) -> None:
-    """
-    A CardProduct's `status` ('active' vs 'not_held') should reflect whether
-    any Account or Card currently links to it, not whatever it was seeded as.
-    Call after every product link/unlink/change so the catalog badge stays
-    truthful without a manual flip.
-    """
-    if not product_id:
-        return
-    product = db.query(CardProduct).filter_by(id=product_id).first()
-    if not product:
-        return
-    still_held = (
-        db.query(Account).filter_by(product_id=product_id).first()
-        or db.query(Card).filter_by(product_id=product_id).first()
-    )
-    product.status = 'active' if still_held else 'not_held'
 
 # Plaid personal_finance_category.primary → (app_category, action)
 # Used as a deterministic fallback when rules don't produce a match.
@@ -262,983 +151,53 @@ _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
 # Checked in order — put more-specific patterns first so "Uber Eats" wins
 # over the plain "Uber" rideshare match.
 # Each entry: (substring_to_match_lowercased, points_category_name)
-_MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
-    # ── Food delivery (before rideshare so "uber eats" hits here first) ──
-    ("uber eats",        "Food Delivery"),
-    ("doordash",         "Food Delivery"),
-    ("door dash",        "Food Delivery"),
-    ("grubhub",          "Food Delivery"),
-    ("postmates",        "Food Delivery"),
-    ("seamless",         "Food Delivery"),
-    ("instacart",        "Groceries"),       # grocery delivery → Groceries
-    # ── Rideshare ─────────────────────────────────────────────────────────
-    ("lyft",             "Rideshare: Lyft"),
-    ("uber",             "Rideshare: Uber"),
-    # ── Airlines ──────────────────────────────────────────────────────────
-    ("united air",       "United"),
-    ("united airline",   "United"),
-    ("united.com",       "United"),
-    ("ual ",             "United"),          # United Airlines IATA code in merchant names
-    ("delta air",        "Delta"),
-    ("delta.com",        "Delta"),
-    ("american airline", "American Airlines"),
-    ("aa.com",           "American Airlines"),
-    ("southwest air",    "Southwest"),
-    ("southwest.com",    "Southwest"),
-    ("jetblue",          "JetBlue"),
-    ("alaska air",       "Alaska Airlines"),
-    ("alaskaair",        "Alaska Airlines"),
-    # ── Hotels ────────────────────────────────────────────────────────────
-    ("hilton",           "Hilton"),          # matches Hampton Inn, DoubleTree, etc.
-    ("marriott",         "Marriott"),
-    ("sheraton",         "Marriott"),
-    ("westin",           "Marriott"),
-    ("w hotel",          "Marriott"),
-    ("ritz-carlton",     "Marriott"),
-    ("ritz carlton",     "Marriott"),
-    ("courtyard",        "Marriott"),
-    ("hyatt",            "Hyatt"),           # matches Park Hyatt, Grand Hyatt, Andaz, etc.
-    ("intercontinental", "IHG"),
-    ("holiday inn",      "IHG"),
-    ("crowne plaza",     "IHG"),
-    ("kimpton",          "IHG"),
-    ("ihg",              "IHG"),
-    # ── Retail / grocery ─────────────────────────────────────────────────
-    ("walmart",          "Walmart"),
-    ("wal-mart",         "Walmart"),
-    ("target",           "Target"),
-    ("amazon",           "Amazon"),          # also catches Amazon Fresh
-    ("whole foods",      "Groceries"),
-    ("trader joe",       "Groceries"),
-    ("costco",           "Wholesale Clubs"),
-    ("sam's club",       "Wholesale Clubs"),
-    ("sams club",        "Wholesale Clubs"),
-    ("best buy",         "Best Buy"),
-    # ── Gas stations ─────────────────────────────────────────────────────
-    ("shell",            "Gas Stations"),
-    ("exxon",            "Gas Stations"),
-    ("mobil",            "Gas Stations"),
-    ("bp ",              "Gas Stations"),
-    ("chevron",          "Gas Stations"),
-    ("sunoco",           "Gas Stations"),
-    ("circle k",         "Gas Stations"),
-    ("speedway",         "Gas Stations"),
-    # ── Streaming ─────────────────────────────────────────────────────────
-    ("netflix",          "Streaming"),
-    ("spotify",          "Streaming"),
-    ("hulu",             "Streaming"),
-    ("disney+",          "Streaming"),
-    ("disneyplus",       "Streaming"),
-    ("peacock",          "Streaming"),
-    ("hbomax",           "Streaming"),
-    ("hbo max",          "Streaming"),
-    ("paramount+",       "Streaming"),
-    ("paramountplus",    "Streaming"),
-    ("apple tv",         "Streaming"),
-    ("apple music",      "Streaming"),
-    ("siriusxm",         "Streaming"),
-    ("youtube premium",  "Streaming"),
-    # ── Drugstore ─────────────────────────────────────────────────────────
-    ("cvs",              "Drugstore"),
-    ("walgreen",         "Drugstore"),
-    ("rite aid",         "Drugstore"),
-    # ── Grocery chains not covered above ─────────────────────────────────
-    ("kings",            "Groceries"),   # Kings Food Markets / Kings Supermarkets
-    ("kroger",           "Groceries"),
-    ("safeway",          "Groceries"),
-    ("publix",           "Groceries"),
-    ("stop & shop",      "Groceries"),
-    ("stop and shop",    "Groceries"),
-    ("shoprite",         "Groceries"),
-    ("h-e-b",            "Groceries"),
-    ("wegmans",          "Groceries"),
-    ("aldi",             "Groceries"),
-    ("sprouts",          "Groceries"),
-    ("fresh market",     "Groceries"),
-    # ── Dining: coffee, fast food, restaurants ────────────────────────────
-    ("starbucks",        "Dining"),
-    ("shake shack",      "Dining"),
-    ("pruplaza",         "Dining"),    # Pru Plaza Cafe (72 txns)
-    ("pru plaza",        "Dining"),
-    ("blue angel",       "Dining"),    # Blue Angel Cafe & Bakery (multiple Plaid variants)
-    ("shokudo",          "Dining"),
-    ("juicylicious",     "Dining"),
-    ("emanu el",         "Dining"),    # Emanu El Deli, Tenafly NJ
-    ("hellas retail",    "Dining"),    # Hellas Retail Bakery
-    ("chipotle",         "Dining"),
-    ("panera",           "Dining"),
-    ("chick-fil-a",      "Dining"),
-    ("mcdonald",         "Dining"),
-    ("dunkin",           "Dining"),
-    ("subway",           "Dining"),
-    ("taco bell",        "Dining"),
-    ("domino",           "Dining"),
-    ("five guys",        "Dining"),
-    ("sweetgreen",       "Dining"),
-    ("chill bros",       "Dining"),    # ice cream
-    ("kilwin",           "Dining"),    # Kilwin's ice cream & candy
-    ("stix restaurant",  "Dining"),
-    # ── Spa & Salon ───────────────────────────────────────────────────────
-    ("hudson cuts",      "Spa & Salon"),   # barbershop
-    # ── Food delivery variants ────────────────────────────────────────────
-    ("doordasan",        "Food Delivery"),  # Plaid normalization of DoorDash
-    # ── Ground transportation ─────────────────────────────────────────────
-    ("nj transit",       "Ground Transportation"),
-    ("njtransit",        "Ground Transportation"),
-    ("e-zpass",          "Ground Transportation"),
-    ("ezpass",           "Ground Transportation"),
-    ("paybyphone",       "Ground Transportation"),   # parking app
-    ("parkmobile",       "Ground Transportation"),   # parking app
-    ("mta",              "Ground Transportation"),   # NYC/NJ Transit Authority
-    ("pay parking by phone", "Ground Transportation"),  # alternate Plaid normalization of PayByPhone
-    ("las olas",         "Ground Transportation"),   # Las Olas parking, Fort Lauderdale
-    # ── Car rental ────────────────────────────────────────────────────────
-    ("sixt",             "Car Rental"),
-    ("enterprise",       "Car Rental"),
-    ("national car",     "Car Rental"),
-    ("avis",             "Car Rental"),
-    ("budget car",       "Car Rental"),
-    ("alamo",            "Car Rental"),
-    ("dollar rent",      "Car Rental"),
-    ("thrifty",          "Car Rental"),
-    # ── Hotel brands: Hilton family ───────────────────────────────────────
-    ("conrad",           "Hilton"),    # Conrad Hotels & Resorts — Hilton luxury brand
-    # ── Hotel brands: Marriott family ─────────────────────────────────────
-    ("the edition",      "Marriott"),  # The EDITION — Marriott luxury brand
-    ("tampa edit",       "Marriott"),  # truncated Plaid variant of Tampa EDITION
-    ("edition hotel",    "Marriott"),
-    ("st. regis",        "Marriott"),
-    ("st regis",         "Marriott"),
-    ("w hotel",          "Marriott"),
-    # ── Streaming ─────────────────────────────────────────────────────────
-    ("espn",             "Streaming"),   # covers ESPN+
-    ("new york times",   "Streaming"),   # digital subscription
-    ("nytimes",          "Streaming"),
-    ("wsj",              "Streaming"),   # Wall Street Journal
-    ("washington post",  "Streaming"),
-    # ── Online shopping ───────────────────────────────────────────────────
-    ("newegg",           "Online Shopping"),
-    ("ebay",             "Online Shopping"),
-    ("etsy",             "Online Shopping"),
-    ("rakuten",          "Online Shopping"),
-]
 
 # Plaid pfc_detailed → points category (L1 fallback when no merchant match)
-_PFC_POINTS_MAP: dict[str, str] = {
-    "TRAVEL_AIRLINES":                           "Airlines",
-    "TRAVEL_LODGING":                            "Hotels",
-    "TRAVEL_CAR_RENTALS":                        "Car Rental",
-    "TRANSPORTATION_TAXIS":                      "Ground Transportation",
-    "TRANSPORTATION_PUBLIC_TRANSIT":             "Ground Transportation",
-    "TRANSPORTATION_GAS_STATIONS":               "Gas Stations",
-    "FOOD_AND_DRINK_RESTAURANTS":                "Dining",
-    "FOOD_AND_DRINK_FAST_FOOD":                  "Dining",
-    "FOOD_AND_DRINK_BAR":                        "Dining",
-    "FOOD_AND_DRINK_COFFEE":                     "Dining",
-    "FOOD_AND_DRINK_FOOD_DELIVERY_SERVICES":     "Food Delivery",
-    "SHOPS_GROCERIES":                           "Groceries",
-    "SHOPS_PHARMACIES":                          "Drugstore",
-    "ENTERTAINMENT_STREAMING_SERVICES":          "Streaming",
-    "ENTERTAINMENT_MUSIC_AND_AUDIO":             "Streaming",
-}
 
 
-def infer_points_category(
-    merchant_name: str | None,
-    pfc_detailed: str | None = None,
-    pfc_primary: str | None = None,
-) -> str | None:
-    """
-    Infer the points_category name for a transaction using a two-step approach:
-
-    1. Merchant name substring match → L2 (brand-specific) or L1 result.
-       This is preferred because it's the most precise signal.
-    2. Plaid pfc_detailed → L1 fallback when no merchant pattern fires.
-
-    Returns None if we can't confidently classify — callers should leave
-    points_category as NULL rather than guess.
-    """
-    if merchant_name:
-        needle = merchant_name.lower()
-        for pattern, cat in _MERCHANT_POINTS_PATTERNS:
-            if pattern in needle:
-                return cat
-
-    if pfc_detailed:
-        cat = _PFC_POINTS_MAP.get(pfc_detailed)
-        if cat:
-            return cat
-
-    # pfc_primary gives a coarser signal — only use it for unambiguous mappings
-    if pfc_primary == "GROCERIES":
-        return "Groceries"
-
-    return None
 
 
 # Expense categories that are fees/charges and do NOT earn points
-_NON_EARNING_CATS: frozenset[str] = frozenset({
-    'Annual Fee',
-    'Late Fee',
-    'Card Interest Expense',
-    'Interest Charge',
-    'Finance Charges',
-    'Bank Fees',
-    'P2P Payments',   # Venmo/Zelle/Cash App — no points, no SUB spend credit
-})
 
 # Credit-card-payment description keywords — the categorization pipeline
 # doesn't consistently tag these action='Transfer' (some land as action=
 # 'Expense'/category 'Fees & Interest' instead), so compute_points_earn()
 # also checks description text directly rather than relying on action alone.
 # Same list used by the cash-flow calc's own CC-payment detection.
-_CC_PAYMENT_KW = ('CREDIT CRD', 'CREDIT CARD', 'AUTOPAY', 'CC PAYMENT', 'CARD PAYMENT')
 
 
-def calc_earn_rate(
-    bonus_by_name: dict[str, float],
-    base_rate: float,
-    points_category_name: str | None,
-    cat_parent_map: dict[str, str | None],
-) -> float:
-    """
-    Waterfall earn-rate lookup: L2 (brand) → L1 (broad) → base.
 
-    bonus_by_name    : {category_name: additional_multiplier} — pre-built from
-                       the card product's CardProductReward rows (non-base only).
-    base_rate        : the card's base earn rate (e.g. 1.5 for CFU).
-    points_category_name : the transaction's assigned points category, or None.
-    cat_parent_map   : {category_name: parent_key} — from PointsCategory table.
 
-    Returns the total earn rate (base + bonus).
-    """
-    if not points_category_name:
-        return base_rate
-    # L2: card has an explicit rate for this brand/category
-    if points_category_name in bonus_by_name:
-        return base_rate + bonus_by_name[points_category_name]
-    # L1: fall back to parent category (e.g. "United" → "Airlines")
-    parent = cat_parent_map.get(points_category_name)
-    if parent and parent in bonus_by_name:
-        return base_rate + bonus_by_name[parent]
-    return base_rate
 
 
-def compute_points_earn(t, base_rate: float, bonus_by_name: dict, cat_parent_map: dict, issuer: str = None) -> dict:
-    """
-    Signed points-earn for a single transaction — the one place every
-    earn-rate call site routes through. Deliberately simple, per Omer's
-    design (2026-07-16, replacing an earlier fuzzy-matching version — see
-    MARGIN-MORESHETH-INTEGRATION.md for why): sign + category rules only,
-    no purchase-matching, no auto-detected benefit credits.
 
-    1. Expense, negative amount (a normal purchase) → earn at the category rate.
-    2. Expense, positive amount (a credit) → same category rate, subtracted.
-    3. Category is a fee/interest type (_NON_EARNING_CATS) → 0.
-    4. It's a payment (by action or description) → 0.
-    5. Anything else that shouldn't move points — a genuine benefit credit,
-       an adjustment, a balance transfer, a cash advance, etc. — is the
-       user's call via the existing `is_excluded` toggle, checked first
-       below so it always wins.
 
-    Only `action == 'Expense'` transactions ever earn or lose points —
-    Income/Transfer/other action types are out of scope (rare on credit
-    cards, not worth handling here).
 
-    Amex-issued cards round the dollar amount to the NEAREST whole dollar
-    (standard rounding, not always up) before applying the multiplier —
-    confirmed 2026-07-18 against a real statement ($4.66 dining spend at 7x
-    earned 35 points, i.e. rounded to $5) and corrected 2026-07-20 after
-    that example turned out to round the same way under ceil() or round()
-    ($4.66 rounds to $5 either way — not actually a distinguishing case).
-    Scoped to issuer == 'AMEX' only since that's the only issuer this has
-    been verified against — other issuers keep the raw fractional-dollar
-    calculation until confirmed.
 
-    Returns {'points': float, 'classification': str, 'earn_rate': float|None}.
-    """
-    def _zero(cls):
-        return {'points': 0.0, 'classification': cls, 'earn_rate': None}
 
-    if t.points_earn_override is not None:
-        return {'points': t.points_earn_override, 'classification': 'manual_override', 'earn_rate': None}
 
-    if t.is_excluded:
-        return _zero('excluded')
 
-    if t.action != 'Expense':
-        return _zero('excluded')
 
-    # Payments aren't consistently tagged action='Transfer' by the
-    # categorization pipeline, so this also checks description text —
-    # the known-keyword list, plus the broader "PAYMENT"+"THANK"
-    # co-occurrence (issuer payment-confirmation descriptions vary by
-    # channel — "MOBILE PAYMENT - THANK YOU", "PAYMENT THANK YOU", "ONLINE
-    # PAYMENT, THANK YOU" — but consistently include both words).
-    _desc_upper = (t.description_raw or '').upper()
-    if (any(kw in _desc_upper for kw in _CC_PAYMENT_KW)
-            or ('PAYMENT' in _desc_upper and 'THANK' in _desc_upper)):
-        return _zero('excluded')
 
-    if t.points_category in _NON_EARNING_CATS:
-        return _zero('excluded')
 
-    if t.amount is None or t.amount == 0:
-        return _zero('excluded')
 
-    rate = calc_earn_rate(bonus_by_name, base_rate, t.points_category, cat_parent_map)
-    # math.floor(x + 0.5) rather than round() — round() uses banker's rounding
-    # (round-half-to-even), which would silently round some .50 amounts down.
-    dollars = math.floor(abs(t.amount) + 0.5) if issuer == 'AMEX' else abs(t.amount)
-    if t.amount < 0:
-        return {'points': dollars * rate, 'classification': 'earn', 'earn_rate': rate}
-    else:
-        return {'points': -(dollars * rate), 'classification': 'clawback', 'earn_rate': rate}
 
 
-def calc_auto_top_category_points(db, account_id, product, start_date, end_date):
-    """
-    For auto_top_category cards (e.g. Citi Custom Cash):
-    Each calendar month within [start_date, end_date]:
-      - Find eligible categories (CardProductReward rows with reward_type='auto_top_category')
-      - Group account transactions by category for that month
-      - Top category (by absolute spend) gets 5x on first $500, 1x above $500
-      - All other eligible categories get 1x (same as base)
-      - Non-eligible categories get base earn rate
-    Returns total points earned.
-    """
-    # Get eligible categories for auto_top_category
-    auto_rewards = [r for r in product.rewards if getattr(r, 'reward_type', 'fixed') == 'auto_top_category']
-    base_reward  = next((r for r in product.rewards if r.is_base_rate), None)
-    base_rate    = float(base_reward.multiplier if base_reward else 1)
 
-    eligible_cat_names = set()
-    for r in auto_rewards:
-        if r.points_category:
-            eligible_cat_names.add(r.points_category.name)
 
-    bonus_multiplier = base_rate + (float(auto_rewards[0].multiplier) if auto_rewards else 4)
-    spend_cap = 500.0
 
-    # One query for the whole range, then bucket by calendar month in Python.
-    # This used to issue a separate query *per month* while walking the range.
-    # _compute_balance_bucket() calls this with start_date=2000-01-01 whenever
-    # the bucket has no baseline snapshot, so a single auto-top account cost
-    # ~318 round-trips (Jan 2000 → today) — the dominant cost in
-    # /api/cards/earn-summary's ~43s. Months with no activity contribute
-    # nothing, so skipping them entirely is equivalent. See BACKLOG B26.
-    #
-    # Range note: the original walked from start_date.replace(day=1), so
-    # transactions earlier in start_date's own month were included. Preserved
-    # deliberately rather than silently narrowing the window.
-    range_start = start_date.replace(day=1)
-    all_txns = db.query(Transaction).filter(
-        Transaction.account_id == account_id,
-        Transaction.date >= range_start,
-        Transaction.date <= end_date,
-        Transaction.action == 'Expense',
-        Transaction.amount < 0,
-        Transaction.is_excluded != True,
-    ).all()
-
-    # month key (year, month) → {category → spend}
-    by_month: dict[tuple, dict] = {}
-    for t in all_txns:
-        key = (t.date.year, t.date.month)
-        cat = t.points_category or 'Other'
-        m = by_month.setdefault(key, {})
-        m[cat] = m.get(cat, 0.0) + abs(float(t.amount))
-
-    total_points = 0.0
-    for cat_spend in by_month.values():
-        # Find top eligible category by spend
-        top_cat = None
-        top_amt = 0.0
-        for cat, amt in cat_spend.items():
-            if cat in eligible_cat_names and amt > top_amt:
-                top_cat = cat
-                top_amt = amt
-
-        # Calculate points for this month
-        for cat, amt in cat_spend.items():
-            if cat == top_cat:
-                bonus_spend = min(amt, spend_cap)
-                over_spend = max(0.0, amt - spend_cap)
-                total_points += bonus_spend * bonus_multiplier + over_spend * base_rate
-            else:
-                total_points += amt * base_rate
-
-    return round(total_points, 1)
-
-
-def _challenge_progress(c, current_spend: float) -> dict:
-    """Single source of truth for a challenge's payout + progress, given its
-    (already-computed) cumulative eligible spend for the window. Pure function,
-    no DB access — used identically whether current_spend comes from the cached
-    aggregate column or a per-card spend_override, so the two never drift.
-
-    bonus_type shapes:
-      'per_dollar'                              — scales with spend, capped by spend_cap.
-      'flat' / 'statement_credit' / 'benefit'    — fixed payout once unlocked; the
-                                                     latter two are semantically not
-                                                     points (dollars / a non-numeric
-                                                     reward like a free-night cert) but
-                                                     numerically identical to 'flat'
-                                                     here — only the frontend label
-                                                     differs (see bonus_currency in
-                                                     _serialize_challenge). Previously
-                                                     'benefit' fell through to the
-                                                     per_dollar branch below by accident
-                                                     (e.g. a "1 free night cert" challenge
-                                                     reporting bonus_pts_earned as
-                                                     1 x current_spend) — fixed here.
-
-    Repeatable challenges (c.max_occurrences > 1, requires spend_threshold): the
-    threshold can be hit more than once — bonus_pts scales by how many times, and
-    the progress bar reflects the *current lap* (spend since the last occurrence),
-    not raw cumulative spend, so it never shows past 100%.
-    """
-    threshold = c.spend_threshold
-    cap = c.spend_cap
-    max_occ = c.max_occurrences or 1
-    repeatable = bool(threshold and max_occ > 1)
-    occurrences = None
-
-    if c.bonus_type == 'per_dollar':
-        eligible = current_spend
-        if cap:
-            eligible = min(eligible, cap)
-        bonus_unlocked = eligible > 0
-        bonus_pts = round(eligible * float(c.bonus_amount or 0), 1) if bonus_unlocked else 0.0
-    elif repeatable:
-        occurrences = min(max_occ, int(current_spend // threshold))
-        bonus_unlocked = occurrences > 0
-        bonus_pts = occurrences * float(c.bonus_amount or 0)
-    else:
-        bonus_unlocked = threshold is None or current_spend >= float(threshold or 0)
-        bonus_pts = float(c.bonus_amount or 0) if bonus_unlocked else 0.0
-
-    # lap_spend is what the Progress bar's numerator should show — for a
-    # repeatable challenge that's spend since the last occurrence, not the raw
-    # cumulative total (which would read as "spent more than the goal").
-    lap_spend = current_spend
-    if repeatable and occurrences < max_occ:
-        progress_target = threshold
-        lap_spend = current_spend - occurrences * threshold
-        progress_pct = min(100, round(lap_spend / threshold * 100, 1))
-        remaining = round(threshold - lap_spend, 2) if lap_spend < threshold else None
-    elif repeatable:
-        # All occurrences earned — show the final lap as complete, not overflowing.
-        progress_target = threshold
-        lap_spend = threshold
-        progress_pct = 100
-        remaining = None
-    elif cap:
-        progress_target = cap
-        progress_pct = min(100, round(current_spend / cap * 100, 1))
-        remaining = round(cap - current_spend, 2) if current_spend < cap else None
-    elif threshold:
-        progress_target = threshold
-        progress_pct = min(100, round(current_spend / threshold * 100, 1))
-        remaining = round(threshold - current_spend, 2) if current_spend < threshold else None
-    else:
-        progress_target = progress_pct = remaining = None
-
-    return {
-        'bonus_pts': bonus_pts,
-        'bonus_unlocked': bonus_unlocked,
-        'occurrences_earned': occurrences,
-        'max_occurrences': max_occ if repeatable else None,
-        'progress_target': progress_target,
-        'progress_pct': progress_pct,
-        'remaining_spend': remaining,
-        'lap_spend': round(lap_spend, 2),
-    }
-
-
-def _recalc_challenge(db, challenge):
-    """
-    Recompute current_spend and bonus_unlocked for a SpendChallenge from
-    actual transactions. Mutates the challenge object; caller must commit.
-
-    Effective start = max(start_date, activation_date) — handles the case where
-    a card was opened after the challenge period started (e.g. SUB clock begins
-    at card activation, not at start of the year).
-
-    Unions the primary card's account with all additional_cards accounts so that
-    e.g. two Freedom cards on the same household contribute jointly to one quarterly cap.
-
-    For category challenges, uses the challenge.categories junction rows and
-    expands each selected L1 category to include its L2 children.
-    """
-    from sqlalchemy import func as _func
-
-    # Normalise: old DB schema stored these as TIMESTAMP; current model uses DATE.
-    # Calling .date() on a datetime is safe; a plain date passes through unchanged.
-    def _d(v):
-        return v.date() if isinstance(v, datetime) else v
-
-    # Effective start date
-    effective_start = _d(challenge.start_date)
-    if challenge.activation_date:
-        act = _d(challenge.activation_date)
-        if act > effective_start:
-            effective_start = act
-
-    # Cap at today — for active challenges the end_date is in the future, so
-    # capping ensures we only count posted transactions, not phantom future ones.
-    # For expired challenges end_date <= today so min() keeps the challenge window.
-    today = datetime.utcnow().date()
-    end_date = min(_d(challenge.end_date), today)
-
-    # Collect account IDs: primary card + all additional cards
-    account_ids = []
-    primary_card = db.query(Card).filter_by(id=challenge.card_id).first()
-    if primary_card and primary_card.account_id:
-        account_ids.append(primary_card.account_id)
-    # Additional cards via direct link table (avoids complex secondary join)
-    for lnk in challenge.card_links:
-        extra_card = db.query(Card).filter_by(id=lnk.card_id).first()
-        if extra_card and extra_card.account_id and extra_card.account_id not in account_ids:
-            account_ids.append(extra_card.account_id)
-
-    # Expenses are stored as negative amounts (Plaid sign is flipped on import).
-    # Sum the absolute value by negating the sum of negative amounts.
-    # Exclude fee/charge categories that should not count toward challenge spend.
-    q = db.query(_func.sum(Transaction.amount)).filter(
-        Transaction.date >= effective_start,
-        Transaction.date <= end_date,
-        Transaction.action == 'Expense',
-        Transaction.amount < 0,           # expenses stored as negative
-        Transaction.is_excluded != True,  # exclude soft-deleted dupes
-        or_(
-            Transaction.points_category == None,
-            ~Transaction.points_category.in_(_NON_EARNING_CATS),
-        ),
-    )
-    if account_ids:
-        q = q.filter(Transaction.account_id.in_(account_ids))
-
-    # Category filter — use direct link table
-    cat_names = [lnk.category_name for lnk in challenge.category_links]
-    if cat_names:
-        children = [c.name for c in db.query(PointsCategory)
-                    .filter(PointsCategory.parent_key.in_(cat_names)).all()]
-        valid_cats = list(set(cat_names + children))
-        q = q.filter(Transaction.points_category.in_(valid_cats))
-
-    # Spender filter — for shared/employee-card accounts where a challenge's
-    # terms require spend from one specific person (e.g. an authorized-user
-    # SUB). NULL/blank means "anyone's spend counts" (the pre-existing behavior).
-    if challenge.spender_filter:
-        q = q.filter(Transaction.spender == challenge.spender_filter)
-
-    raw = q.scalar() or 0
-    current_spend = float(abs(raw))   # negate to get positive spend total
-    challenge.current_spend = current_spend
-    # Cosmetic/consistency only — _serialize_challenge always recomputes fresh
-    # via _challenge_progress(), nothing reads this cached column for display.
-    challenge.bonus_unlocked = _challenge_progress(challenge, current_spend)['bonus_unlocked']
-    return challenge
-
-
-def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
-    """
-    Eligible spend for a SINGLE account only — used for per-card display.
-
-    Identical date/category logic to _recalc_challenge but scoped to one
-    account so linked-card challenges show each card's own spend rather than
-    the multi-card aggregate stored in challenge.current_spend.
-    """
-    from sqlalchemy import func as _func
-
-    def _d(v):
-        return v.date() if isinstance(v, datetime) else v
-
-    effective_start = _d(challenge.start_date)
-    if challenge.activation_date:
-        act = _d(challenge.activation_date)
-        if act > effective_start:
-            effective_start = act
-
-    today = datetime.utcnow().date()
-    end_date = min(_d(challenge.end_date), today)
-
-    q = db.query(_func.sum(Transaction.amount)).filter(
-        Transaction.date >= effective_start,
-        Transaction.date <= end_date,
-        Transaction.action == 'Expense',
-        Transaction.amount < 0,
-        Transaction.is_excluded != True,
-        Transaction.account_id == account_id,
-        or_(
-            Transaction.points_category == None,
-            ~Transaction.points_category.in_(_NON_EARNING_CATS),
-        ),
-    )
-    cat_names = [lnk.category_name for lnk in challenge.category_links]
-    if cat_names:
-        children = [c.name for c in db.query(PointsCategory)
-                    .filter(PointsCategory.parent_key.in_(cat_names)).all()]
-        valid_cats = list(set(cat_names + children))
-        q = q.filter(Transaction.points_category.in_(valid_cats))
-
-    if challenge.spender_filter:
-        q = q.filter(Transaction.spender == challenge.spender_filter)
-
-    return float(abs(q.scalar() or 0))
-
-
-def _serialize_challenge(c, eco=None, spend_override: float = None):
-    """Serialize a SpendChallenge to a dict for API responses.
-
-    spend_override: when provided, substitutes c.current_spend for display.
-                    Pass the result of _challenge_spend_for_card() when
-                    rendering a challenge in a single card's context so the
-                    card sees its own spend rather than the aggregate across
-                    all linked cards.
-    """
-    # Guard against NULL values left by failed recalc on old rows
-    current_spend = float(spend_override) if spend_override is not None else float(c.current_spend or 0)
-    prog = _challenge_progress(c, current_spend)
-    bonus_unlocked  = prog['bonus_unlocked']
-    bonus_pts       = prog['bonus_pts']
-    progress_target = prog['progress_target']
-    progress_pct    = prog['progress_pct']
-    remaining       = prog['remaining_spend']
-
-    _cd = lambda v: v.date() if isinstance(v, datetime) else v
-    today = datetime.utcnow().date()
-    if today < _cd(c.start_date):
-        status = 'upcoming'
-    elif today > _cd(c.end_date):
-        status = 'expired'
-    elif bonus_unlocked and not c.spend_cap:
-        status = 'unlocked'
-    else:
-        status = 'active'
-
-    # Multi-card and multi-category info via direct link tables
-    additional_card_ids = [lnk.card_id      for lnk in c.card_links]
-    category_names      = [lnk.category_name for lnk in c.category_links]
-
-    return {
-        'id': c.id,
-        'card_id': c.card_id,
-        'name': c.name,
-        'challenge_type': c.challenge_type,
-        'start_date': c.start_date.isoformat(),
-        'end_date': c.end_date.isoformat(),
-        'activation_date': c.activation_date.isoformat() if c.activation_date else None,
-        'bonus_type': c.bonus_type,
-        'bonus_amount': c.bonus_amount,
-        'bonus_currency': 'usd' if c.bonus_type == 'statement_credit' else ('benefit' if c.bonus_type == 'benefit' else 'points'),
-        'spend_cap': c.spend_cap,
-        'spend_threshold': c.spend_threshold,
-        'spender_filter': c.spender_filter,
-        'max_occurrences': prog['max_occurrences'],
-        'occurrences_earned': prog['occurrences_earned'],
-        'category_names': category_names,
-        'additional_card_ids': additional_card_ids,
-        'current_spend': round(current_spend, 2),
-        'lap_spend': prog['lap_spend'],
-        'bonus_unlocked': bonus_unlocked,
-        'bonus_pts_earned': bonus_pts,
-        'progress_pct': progress_pct,
-        'progress_target': progress_target,
-        'remaining_spend': remaining,
-        'status': status,
-        'is_active': c.is_active,
-        'notes': c.notes,
-        'currency': eco.currency_name if eco else 'Points',
-        'your_cpp': eco.your_cpp if eco else 1.0,
-    }
-
-
-def classify_account(account_type: str) -> dict:
-    """
-    Compute classification flags for an account based on its type.
-    Returns is_asset, is_liability, is_credit, and bucket name.
-    """
-    acct_type = (account_type or 'other').lower().strip()
-    bucket, is_asset, is_liability = ACCOUNT_TYPE_MAP.get(acct_type, ('Other Assets', True, False))
-    return {
-        'is_asset': is_asset,
-        'is_liability': is_liability,
-        'is_credit': acct_type == 'credit',
-        'bucket': bucket,
-    }
-
-
-def serialize_account(a: Account, transaction_count: int = 0) -> dict:
-    """
-    Standard serialization for an Account object, including classification flags.
-    Used by all endpoints that return account data.
-    """
-    flags = classify_account(a.account_type)
-    return {
-        'id': a.id,
-        'plaid_account_id': a.plaid_account_id,
-        'persistent_account_id': getattr(a, 'persistent_account_id', None),
-        'institution_id': getattr(a, 'institution_id', None),
-        'plaid_item_id': a.plaid_item_id,
-        'account_name': a.account_name,
-        'account_type': a.account_type,
-        'official_name': a.official_name,
-        'mask': a.mask,
-        'is_manual': bool(a.is_manual),
-        'is_active': a.is_active,
-        'starting_balance': a.starting_balance or 0,
-        'start_date': a.start_date.strftime('%Y-%m-%d') if a.start_date else None,
-        'notes': a.notes,
-        'is_asset': flags['is_asset'],
-        'is_liability': flags['is_liability'],
-        'is_credit': flags['is_credit'],
-        'bucket': flags['bucket'],
-        'transaction_count': transaction_count,
-        # Plaid Liabilities product — populated by POST /api/plaid/sync-liabilities
-        'liability_min_payment':      getattr(a, 'liability_min_payment', None),
-        'liability_next_due_date':    a.liability_next_due_date.strftime('%Y-%m-%d') if getattr(a, 'liability_next_due_date', None) else None,
-        'liability_last_statement_bal': getattr(a, 'liability_last_statement_bal', None),
-        'liability_last_payment':     getattr(a, 'liability_last_payment', None),
-        'liability_last_payment_date': a.liability_last_payment_date.strftime('%Y-%m-%d') if getattr(a, 'liability_last_payment_date', None) else None,
-        'liability_purchase_apr':     getattr(a, 'liability_purchase_apr', None),
-        'product_id':                 getattr(a, 'product_id', None),
-    }
-
-
-def get_account_balance(db: Session, account_id: int, as_of_date: datetime = None) -> float:
-    """
-    Compute account balance at a given date (or now if not specified).
-
-    Uses the same anchor model as get_daily_balances() to ensure consistency:
-      anchor_balance + SUM(transactions from anchor_date through as_of_date)
-
-    Anchor model (start_date is set):
-      starting_balance = Plaid balance AT start_date (end of that day).
-      Transactions AFTER start_date are accumulated forward.
-
-    Legacy model (start_date is None):
-      starting_balance is a pre-all-transactions offset.
-      ALL transactions are accumulated forward.
-
-    NOTE: Monthly snapshots are used for charting and historical analysis only.
-    Balance Observations are used for RECONCILIATION MONITORING only.
-    """
-    from sqlalchemy import func as _func
-
-    account = db.query(Account).filter_by(id=account_id).first()
-    if not account:
-        return 0.0
-
-    anchor = account.starting_balance or 0.0
-    anchor_dt = account.start_date
-
-    if anchor_dt is None:
-        # Legacy: starting_balance = pre-all-transactions offset
-        q = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-        )
-        if as_of_date:
-            q = q.filter(Transaction.date <= as_of_date)
-        return round(anchor + (q.scalar() or 0.0), 2)
-
-    # Anchor model: starting_balance = Plaid balance at end of start_date
-    anchor_eod = datetime.combine(anchor_dt.date() if hasattr(anchor_dt, 'date') else anchor_dt,
-                                   datetime.max.time())
-    as_of_cmp = as_of_date if as_of_date else datetime.utcnow()
-
-    if as_of_cmp >= anchor_eod:
-        # Normal: accumulate transactions after anchor through as_of
-        q = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-            Transaction.date > anchor_eod,
-        )
-        if as_of_date:
-            q = q.filter(Transaction.date <= as_of_date)
-        return round(anchor + (q.scalar() or 0.0), 2)
-    else:
-        # as_of is before anchor: walk backward
-        q = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-            Transaction.date > as_of_date,
-            Transaction.date <= anchor_eod,
-        )
-        return round(anchor - (q.scalar() or 0.0), 2)
-
-
-def get_account_balances_bulk(db: Session, accounts: list) -> dict:
-    """
-    Current balance for many accounts in ONE query.
-
-    get_account_balance() costs two round-trips per account — it re-fetches the
-    Account it was given the id of, then runs a per-account SUM. Calling it in a
-    loop is what made /api/accounts 98 queries / 7.1s (49 account fetches +
-    48 sums) against the remote DB. See B4.
-
-    Same anchor model as get_account_balance(), expressed set-wise:
-      no start_date  → anchor + SUM(all transactions)
-      start_date set → anchor + SUM(transactions on a LATER DAY than the anchor)
-
-    `date(t.date) > date(a.start_date)` is exactly equivalent to the scalar
-    version's `t.date > end-of-anchor-day` comparison, without needing to
-    materialise a per-account timestamp.
-
-    Accounts whose anchor is in the *future* take the scalar function's
-    walk-backward branch, which has no set-wise equivalent here; they're rare,
-    so they fall back to the per-account path rather than complicating this.
-    """
-    from sqlalchemy import func as _func
-    if not accounts:
-        return {}
-    now = datetime.utcnow()
-
-    def _anchor_eod(a):
-        d = a.start_date
-        if d is None:
-            return None
-        return datetime.combine(d.date() if hasattr(d, 'date') else d, datetime.max.time())
-
-    future_ids = {a.id for a in accounts
-                  if (_eod := _anchor_eod(a)) is not None and _eod > now}
-    normal = [a for a in accounts if a.id not in future_ids]
-
-    sums: dict[int, float] = {}
-    if normal:
-        rows = (
-            db.query(Transaction.account_id, _func.sum(Transaction.amount))
-            .join(Account, Account.id == Transaction.account_id)
-            .filter(Transaction.account_id.in_([a.id for a in normal]))
-            .filter(or_(
-                Account.start_date.is_(None),
-                _func.date(Transaction.date) > _func.date(Account.start_date),
-            ))
-            .group_by(Transaction.account_id)
-            .all()
-        )
-        sums = {aid: (total or 0.0) for aid, total in rows}
-
-    out: dict[int, float] = {}
-    for a in accounts:
-        if a.id in future_ids:
-            out[a.id] = get_account_balance(db, a.id)
-        else:
-            out[a.id] = round((a.starting_balance or 0.0) + sums.get(a.id, 0.0), 2)
-    return out
 
 
 # ---------------------------------------------------------------------------
 # Balance snapshot helpers (Section 0B)
 # ---------------------------------------------------------------------------
 
-def _sign_plaid_balance(raw: Optional[float], account_type_str: str) -> Optional[float]:
-    """Apply sign convention: credit/loan balances stored as negative (Plaid reports amount-owed as positive)."""
-    if raw is None:
-        return None
-    t = (account_type_str or '').lower().strip()
-    # Match both Plaid type ("credit") and stored subtype ("credit card")
-    return -raw if t.startswith('credit') or t in ('loan',) else raw
 
 
-def _plaid_anchor_date(account_type_str: str) -> datetime:
-    """
-    Return the effective anchor date for a Plaid balance snapshot.
-
-    Plaid's `current` balance lags behind real-time:
-      - Checking/Savings: typically 1-2 business days lag
-      - Credit cards/Loans: typically near real-time (same-day)
-
-    Instead of using datetime.utcnow() (which creates a gap where recent
-    transactions fall BEFORE the anchor and never get counted), we step
-    back to account for the lag, anchoring at end-of-day.
-    """
-    from datetime import timedelta, time as _time
-    t = (account_type_str or '').lower().strip()
-    is_liability = t.startswith('credit') or t in ('loan',)
-    lag_days = 0 if is_liability else 2
-    effective = datetime.utcnow() - timedelta(days=lag_days)
-    return datetime.combine(effective.date(), _time(23, 59, 59))
 
 
-def rebuild_monthly_snapshots(db: Session, account_id: int) -> int:
-    """
-    Full rebuild of monthly opening/closing snapshots for one account.
-    Uses account.starting_balance as the baseline before the earliest transaction.
-    Returns the number of months built.
-    """
-    from collections import defaultdict
-    from sqlalchemy import func as _func
-    account = db.query(Account).filter_by(id=account_id).first()
-    if not account:
-        return 0
-    txns = db.query(Transaction).filter(
-        Transaction.account_id == account_id,
-    ).order_by(Transaction.date).all()
-    if not txns:
-        return 0
-    by_month: dict = defaultdict(float)
-    for t in txns:
-        by_month[(t.date.year, t.date.month)] += t.amount
-    db.query(AccountMonthlySnapshot).filter_by(account_id=account_id).delete(synchronize_session=False)
-
-    if account.start_date:
-        # Anchor model: starting_balance = Plaid balance AT start_date.
-        pre_anchor_sum = db.query(_func.sum(Transaction.amount)).filter(
-            Transaction.account_id == account_id,
-            Transaction.date <= account.start_date,
-        ).scalar() or 0.0
-        running = round((account.starting_balance or 0.0) - pre_anchor_sum, 4)
-    else:
-        # Legacy: starting_balance is already the pre-all-transactions offset
-        running = account.starting_balance or 0.0
-    sorted_months = sorted(by_month.keys())
-    for (year, month) in sorted_months:
-        opening = running
-        closing = round(running + by_month[(year, month)], 2)
-        db.add(AccountMonthlySnapshot(
-            account_id=account_id,
-            year=year,
-            month=month,
-            opening_balance=round(opening, 2),
-            closing_balance=closing,
-        ))
-        running = closing
-    return len(sorted_months)
 
 
-def _refresh_current_month_snapshot(db: Session, account_id: int) -> None:
-    """
-    Lightweight post-sync update: recalculate only the current month's closing_balance.
-    Creates the current-month snapshot if it doesn't exist yet (month rollover handled).
-    Does NOT commit — caller is responsible for committing.
-    """
-    from sqlalchemy import func as _func
-    now = datetime.utcnow()
-    year, month = now.year, now.month
-    snapshot = db.query(AccountMonthlySnapshot).filter_by(
-        account_id=account_id, year=year, month=month
-    ).first()
-    if snapshot is None:
-        prev_m, prev_y = (month - 1, year) if month > 1 else (12, year - 1)
-        prev = db.query(AccountMonthlySnapshot).filter_by(
-            account_id=account_id, year=prev_y, month=prev_m
-        ).first()
-        if prev is None:
-            return  # No snapshot base yet — Balance Sync hasn't been run
-        snapshot = AccountMonthlySnapshot(
-            account_id=account_id, year=year, month=month,
-            opening_balance=round(prev.closing_balance, 2),
-            closing_balance=round(prev.closing_balance, 2),
-        )
-        db.add(snapshot)
-    # ALL transactions — must match the filter used when starting_balance was anchored.
-    month_sum = db.query(_func.sum(Transaction.amount)).filter(
-        Transaction.account_id == account_id,
-        Transaction.year == year,
-        Transaction.month == month,
-    ).scalar() or 0.0
-    snapshot.closing_balance = round(snapshot.opening_balance + month_sum, 2)
-    snapshot.synced_at = datetime.utcnow()
 
 
 # ---------------------------------------------------------------------------
@@ -3590,252 +2549,18 @@ async def recover_plaid_accounts_for_item(item_id: str, db: Session = Depends(ge
 # Transactions: list
 # ---------------------------------------------------------------------------
 
-def _best_description(raw: str, stored_clean, enrichment_source=None, categorizer=None) -> str:
-    """
-    Compute the best human-readable description for a transaction.
-
-    Design principle: only two trustworthy sources for display names —
-      (a) an explicit Rule with set_description (user-controlled, deterministic)
-      (b) the noise-stripper (deterministic regex, never hallucinates)
-
-    LLM-written description_clean is intentionally SKIPPED because the LLM
-    sometimes produces garbled output (e.g. 'CONRADFT LAUDERDALEFT LAUDERDALE').
-    It is only trusted when a rule explicitly set it (enrichment_source == 'rule').
-
-    Priority:
-      1. Rule set_description  — rule matched AND has a display name != raw
-      2. Noise-stripped raw    — deterministic: removes PPD IDs, long numbers,
-                                 PAYROLL/DIR DEP suffixes, etc.
-      3. Raw fallback
-    """
-    raw = (raw or "").strip()
-    if not raw:
-        return raw
-    raw_upper = raw.upper()
-
-    if categorizer:
-        # Priority 1: rule with an explicit custom display name
-        rule = categorizer.match_rule(raw, 0)
-        if rule and rule.set_description:
-            sd = rule.set_description.strip()
-            if sd.upper() != raw_upper:
-                return sd
-
-        # Priority 2: noise-stripper (always deterministic)
-        cleaned = categorizer.clean_description(raw)
-        if cleaned and cleaned != raw_upper:
-            return cleaned
-
-    # Priority 3: fall back to raw (or rule-written stored_clean if source is 'rule')
-    if enrichment_source == 'rule' and stored_clean:
-        return stored_clean.strip() or raw
-    return raw
 
 
-def _build_product_rate_maps(db, product_ids: list[int]) -> dict[int, tuple]:
-    """
-    The per-product half of the rate lookup, shared by _build_points_lookup()
-    (keyed by account, for "what does this card currently earn" displays) and
-    _lock_points_for_transaction() (keyed by whichever product was actually in
-    effect on one specific transaction's date).
-
-    Returns {product_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp)}
-    where bonus_by_name = {category_name: additional_multiplier}.
-    """
-    if not product_ids:
-        return {}
-
-    products   = {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(product_ids)).all()}
-    eco_ids    = [p.ecosystem_id for p in products.values() if p.ecosystem_id]
-    ecosystems = {e.id: e for e in db.query(PointsEcosystem).filter(PointsEcosystem.id.in_(eco_ids)).all()}
-
-    # joinedload the category: the bonus_by_name build below reads
-    # r.points_category.name, which lazy-loads one query per reward row
-    # otherwise (26 queries / 1.9s on a 500-transaction page). See B4.
-    from sqlalchemy.orm import joinedload as _joinedload
-    all_rewards = db.query(CardProductReward)\
-        .options(_joinedload(CardProductReward.points_category))\
-        .filter(CardProductReward.product_id.in_(product_ids)).all()
-    rewards_by_product: dict[int, list] = {}
-    for r in all_rewards:
-        rewards_by_product.setdefault(r.product_id, []).append(r)
-
-    rate_maps: dict[int, tuple] = {}
-    for product_id, product in products.items():
-        eco     = ecosystems.get(product.ecosystem_id) if product.ecosystem_id else None
-        rewards = rewards_by_product.get(product_id, [])
-        base    = next((r.multiplier for r in rewards if r.is_base_rate), 1.0)
-        bonus_by_name = {
-            r.points_category.name: r.multiplier
-            for r in rewards
-            if not r.is_base_rate and r.points_category
-        }
-        rate_maps[product_id] = (
-            base,
-            bonus_by_name,
-            eco.currency_name if eco else 'Points',
-            eco.name if eco else None,
-            eco.your_cpp if eco else 1.0,
-        )
-    return rate_maps
 
 
-def _build_points_lookup(db, account_ids: list[int]) -> tuple[dict, dict]:
-    """
-    Pre-build the data structures needed to display a card's CURRENT earn
-    structure for a batch of accounts without N+1 queries. NOTE: this answers
-    "what does this account's card earn today" — it is no longer used to
-    compute any specific transaction's points (those are locked, see
-    Transaction.points_earned / _lock_points_for_transaction below); it's for
-    "current rate" displays like the portfolio and benefits pages.
-
-    Returns:
-      points_lookup  : {account_id: (base_rate, bonus_by_name, currency_name, eco_name, your_cpp, issuer)}
-                       where bonus_by_name = {category_name: additional_multiplier}
-      cat_parent_map : {category_name: parent_key}  — for the L2→L1 waterfall
-    """
-    cat_parent_map = {c.name: c.parent_key for c in db.query(PointsCategory).all()}
-
-    if not account_ids:
-        return {}, cat_parent_map
-
-    cards = db.query(Card).filter(Card.account_id.in_(account_ids)).all()
-    acct_to_card = {c.account_id: c for c in cards}
-
-    product_ids = [c.product_id for c in cards if c.product_id]
-    if not product_ids:
-        return {}, cat_parent_map
-
-    rate_maps = _build_product_rate_maps(db, product_ids)
-
-    points_lookup: dict[int, tuple] = {}
-    for acct_id, card in acct_to_card.items():
-        if not card.product_id or card.product_id not in rate_maps:
-            continue
-        base, bonus_by_name, currency_name, eco_name, your_cpp = rate_maps[card.product_id]
-        points_lookup[acct_id] = (base, bonus_by_name, currency_name, eco_name, your_cpp, card.issuer)
-
-    return points_lookup, cat_parent_map
 
 
-def _resolve_merchant_csc(
-    mpm_lookup: list[tuple[str, str, int | None, str | None]],
-    merchant_name: str,
-    card_id: int | None,
-    network: str | None,
-) -> str | None:
-    """Resolve a merchant name to a taught merchant-category (CSC) mapping,
-    most-specific-wins: a rule scoped to this exact card beats one scoped to
-    every card on this payment network (Visa/Mastercard/Amex/Discover —
-    Card.network, not the issuing bank), which beats a global (card_id and
-    network both null) rule. Previously this only ever checked the global
-    tier — card_id/network on MerchantPointsMapping were stored but silently
-    never consulted, so a mapping taught "for this card only" or "for this
-    network" never actually applied to new transactions (see PLAN.md).
-    """
-    needle = merchant_name.lower()
-    card_match = network_match = global_match = None
-    for pat, cat, m_card_id, m_network in mpm_lookup:
-        if pat not in needle:
-            continue
-        if card_id is not None and m_card_id == card_id and card_match is None:
-            card_match = cat
-        elif network is not None and m_card_id is None and m_network == network and network_match is None:
-            network_match = cat
-        elif m_card_id is None and m_network is None and global_match is None:
-            global_match = cat
-    return card_match or network_match or global_match
 
 
-def _build_network_lookup(db, account_ids: list[int]) -> dict[int, str | None]:
-    """{account_id: network} for every linked Card, regardless of whether the
-    card has a product/reward structure attached — unlike _build_points_lookup,
-    which skips product-less cards since it exists for earn-rate display, not
-    identity. Network (Visa/Mastercard/Amex/Discover — Card.network) is what
-    actually determines how a merchant gets coded; the issuing bank
-    (Card.issuer, e.g. Chase or Bilt) doesn't.
-    """
-    if not account_ids:
-        return {}
-    cards = db.query(Card).filter(Card.account_id.in_(account_ids)).all()
-    return {c.account_id: c.network for c in cards}
 
 
-def _resolve_product_for_date(db, card_id: int, txn_date) -> int | None:
-    """
-    Which CardProduct was in effect for this card on this date. Checks
-    CardProductHistory (effective-dated, mirrors TransferRatio) first; falls
-    back to the card's CURRENT product_id if no history row exists yet
-    (every card before its first product change, and legacy data before this
-    feature shipped).
-    """
-    if not card_id:
-        return None
-    d = txn_date.date() if hasattr(txn_date, 'date') else txn_date
-    hist = (
-        db.query(CardProductHistory)
-        .filter(
-            CardProductHistory.card_id == card_id,
-            CardProductHistory.effective_from <= d,
-        )
-        .filter(or_(CardProductHistory.effective_to.is_(None), CardProductHistory.effective_to > d))
-        .order_by(CardProductHistory.effective_from.desc())
-        .first()
-    )
-    if hist:
-        return hist.product_id
-    card = db.query(Card).filter_by(id=card_id).first()
-    return card.product_id if card else None
 
 
-def _lock_points_for_transaction(db, t) -> None:
-    """
-    Compute this transaction's points-earn ONCE, using whichever product was
-    actually in effect on the transaction's own date, and freeze the result
-    onto the row (points_earned/points_earn_classification/points_product_id/
-    points_locked_at). Nothing else re-derives this later on read — see the
-    module docstring near Transaction.points_earned in database.py.
-
-    Call this at creation (sync/import/manual) and again whenever an edit
-    changes a field compute_points_earn() depends on (category, is_excluded,
-    points_earn_override, action). Re-locking still resolves the product as
-    of the transaction's OWN date, so correcting an old transaction's category
-    today doesn't pull in today's (possibly changed) product's rates.
-    """
-    t.points_locked_at = datetime.utcnow()
-
-    if not t.card_id:
-        t.points_earned = None
-        t.points_earn_classification = None
-        t.points_earn_rate = None
-        t.points_product_id = None
-        return
-
-    product_id = _resolve_product_for_date(db, t.card_id, t.date)
-    if not product_id:
-        t.points_earned = None
-        t.points_earn_classification = None
-        t.points_earn_rate = None
-        t.points_product_id = None
-        return
-
-    rate_info = _build_product_rate_maps(db, [product_id]).get(product_id)
-    if not rate_info:
-        t.points_earned = None
-        t.points_earn_classification = None
-        t.points_earn_rate = None
-        t.points_product_id = product_id
-        return
-
-    base_rate, bonus_by_name = rate_info[0], rate_info[1]
-    card = db.query(Card).filter_by(id=t.card_id).first()
-    cat_parent_map = {c.name: c.parent_key for c in db.query(PointsCategory).all()}
-    result = compute_points_earn(t, base_rate, bonus_by_name, cat_parent_map, card.issuer if card else None)
-
-    t.points_earned = result['points']
-    t.points_earn_classification = result['classification']
-    t.points_earn_rate = result['earn_rate']
-    t.points_product_id = product_id
 
 
 def _backfill_product_history_and_locked_points(session):
@@ -3918,84 +2643,6 @@ def _backfill_product_history_and_locked_points(session):
         logger.info(f"  Migration: locked points_earned for {len(unlocked)} pre-existing transaction(s)")
 
 
-def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat_parent_map=None, network_lookup=None):
-    """Serialize a Transaction with inline splits and computed display fields."""
-    splits = splits_map.get(t.id, []) if splits_map else []
-    is_split = bool(t.is_split or False)
-
-    # Compute display values for split transactions
-    if is_split and splits:
-        actions = {s.action for s in splits if s.action}
-        cats    = {s.category for s in splits if s.category}
-        action_display   = next(iter(actions)) if len(actions) == 1 else "Multiple"
-        category_display = next(iter(cats))    if len(cats)    == 1 else "Multiple"
-    else:
-        action_display   = t.action
-        category_display = t.category_final
-
-    description_display = _best_description(
-        t.description_raw, t.description_clean,
-        enrichment_source=t.enrichment_source,
-        categorizer=categorizer
-    )
-
-    # Points earn — LOCKED at write time (see _lock_points_for_transaction()),
-    # never recomputed here. currency/eco_name/cpp are still read from
-    # points_lookup (the account's CURRENT product) purely for display
-    # metadata — they don't affect the frozen points_earned value itself.
-    points_earn = None
-    if t.points_earned is not None:
-        parent = cat_parent_map.get(t.points_category) if (cat_parent_map and t.points_category) else None
-        currency = eco_name = your_cpp = None
-        if points_lookup is not None and t.account_id in points_lookup:
-            _, _, currency, eco_name, your_cpp, _ = points_lookup[t.account_id]
-        points_earn = {
-            'points_category':    t.points_category,       # e.g. "Drugstore" or "United"
-            'points_category_l1': parent,                  # e.g. None or "Airlines"
-            'earn_rate':          t.points_earn_rate,        # total multiplier, e.g. 3.0 (None when N/A)
-            'points_estimated':   round(t.points_earned, 1),  # signed — negative for clawbacks
-            'classification':     t.points_earn_classification,
-            'currency':           currency,                # e.g. "Ultimate Rewards"
-            'eco_name':           eco_name,
-            'cpp':                your_cpp,                # for value estimate in UI
-        }
-
-    return {
-        "id": t.id, "date": t.date,
-        "description_raw": t.description_raw,
-        "description_clean": t.description_clean,
-        "description_display": description_display,
-        "merchant_name": t.merchant_name,
-        "amount": t.amount, "action": t.action,
-        "action_display": action_display,
-        "category_auto": t.category_auto,
-        "category_manual": t.category_manual,
-        "category_final": category_display,
-        "category_confidence": t.category_confidence,
-        "needs_review": t.needs_review,
-        "is_locked": bool(t.is_locked or False),
-        "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
-        "is_for_others": bool(t.is_for_others or False),
-        "is_excluded": bool(t.is_excluded or False),
-        "is_split": is_split,
-        "splits": [
-            {"id": s.id, "amount": s.amount, "description": s.description,
-             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb),
-             "is_for_others": bool(s.is_for_others)}
-            for s in splits
-        ] if is_split else [],
-        "points_category": t.points_category,
-        "network": (network_lookup or {}).get(t.account_id),
-        "spender":         t.spender,
-        "points_earn":     points_earn,
-        "enrichment_source": t.enrichment_source,
-        "import_source": t.import_source or ('plaid' if t.plaid_transaction_id else None),
-        "import_hash": t.import_hash,
-        "account_name": t.account.account_name,
-        "account_id": t.account_id,
-        "account_type": t.account.account_type,
-        "card_id": t.card_id,
-    }
 
 
 @app.get("/api/transactions", response_model=List[TransactionResponse])
@@ -4458,32 +3105,6 @@ async def get_stats_detail(
 # Cards
 # ---------------------------------------------------------------------------
 
-def _serialize_card(c: Card) -> dict:
-    """Standard card serialization including linked account info."""
-    linked_account_name = None
-    if c.account_id and c.account:
-        linked_account_name = c.account.account_name
-    elif c.plaid_account_id:
-        # Legacy fallback
-        linked_account_name = c.plaid_account_id
-    payment_account_name = None
-    if c.payment_account_id and c.payment_account:
-        payment_account_name = c.payment_account.account_name
-    return {
-        "id": c.id, "card_id": c.card_id, "last_four": c.last_four,
-        "issuer": c.issuer, "brand": c.brand, "card_name": c.card_name,
-        "network": c.network, "issue_date": c.issue_date,
-        "annual_fee": c.annual_fee, "credit_limit": c.credit_limit,
-        "statement_close_day": c.statement_close_day,
-        "payment_due_day": c.payment_due_day,
-        "plaid_account_id": c.plaid_account_id,
-        "account_id": c.account_id,
-        "linked_account_name": linked_account_name,
-        "payment_account_id": c.payment_account_id,
-        "payment_account_name": payment_account_name,
-        "primary_user": c.primary_user,
-        "is_active": c.is_active, "notes": c.notes,
-    }
 
 
 @app.get("/api/cards")
@@ -5176,287 +3797,12 @@ async def cards_portfolio(db: Session = Depends(get_db)):
     }
 
 
-def _statement_close_date(txn_date, close_day):
-    """The close date of the billing cycle a transaction on `txn_date` falls
-    into, given a card's `statement_close_day` (1-31). Clamps to the last
-    real day of the month (e.g. close_day=31 in February -> Feb 28/29),
-    same convention as every other day-of-month field in this app."""
-    import calendar
-    last_day = calendar.monthrange(txn_date.year, txn_date.month)[1]
-    this_close = txn_date.replace(day=min(close_day, last_day))
-    if txn_date.day <= this_close.day:
-        return this_close
-    year, month = (txn_date.year + 1, 1) if txn_date.month == 12 else (txn_date.year, txn_date.month + 1)
-    last_day_next = calendar.monthrange(year, month)[1]
-    return txn_date.replace(year=year, month=month, day=min(close_day, last_day_next))
 
 
-def _points_pending(txn_date, close_day, today):
-    """Points sit "pending" in the loyalty program from the purchase date
-    until the day after the statement closes — this app's flat +1-day
-    posting rule (Omer's call: applies uniformly, no per-issuer variation
-    modeled). A card with no known statement_close_day is treated as
-    posting immediately (can't compute a cycle without one — expected to
-    become rare as close days get filled in for every active card)."""
-    if not close_day:
-        return False
-    from datetime import timedelta as _td
-    posts_on = _statement_close_date(txn_date, close_day) + _td(days=1)
-    return today < posts_on
 
 
-def _load_products_by_id(db, credit_accounts, card_by_acct):
-    """
-    Batch-load every CardProduct reachable from these accounts/cards in ONE
-    query. Replaces a per-account `.filter_by(id=...).first()` that ran inside
-    the account loop in three separate handlers (cards_earn_summary,
-    cash_back_earn_detail, ecosystem_earn_detail) — ~40 round-trips each,
-    against a remote DB, for a set of rows that mostly repeat. See BACKLOG B26.
-    """
-    pids = {a.product_id for a in credit_accounts if a.product_id}
-    pids |= {c.product_id for c in card_by_acct.values() if c.product_id}
-    if not pids:
-        return {}
-    return {p.id: p for p in db.query(CardProduct).filter(CardProduct.id.in_(pids)).all()}
 
 
-def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
-                                redemption_rows, transfers_out, transfers_in,
-                                adjustment_rows, person_transfer_rows, known_people):
-    """
-    Current balance, split per-person (Omer / Daniella / "Shared" for
-    untagged legacy data) with a combined Total. Shared by
-    /api/ecosystems/{id}/earn-detail (full ledger detail, the source of
-    truth) and /api/cards/earn-summary (Portfolio tile headline number) so
-    the two can never silently diverge on what "current balance" means —
-    they did exactly that (period-earned vs. all-time balance) before this
-    was factored out, which is what prompted this refactor.
-
-    A manual PointsBalanceSnapshot (if any exists FOR THAT BUCKET) is its
-    baseline — corrects for drift the computed math can't see (unlogged
-    promo bonuses, benefit credits, redemptions made outside this app,
-    etc.). Only activity after the snapshot's date is added on top;
-    everything before it is assumed already folded into the snapshotted
-    value. Each bucket can have its own baseline date (Omer might set his
-    balance today, Daniella's might still be unset) — there is
-    deliberately no single shared "as of" date at the Total level.
-    """
-    from datetime import date as _date, timedelta as _timedelta, datetime as _datetime, time as _dtime
-
-    def _bucket_matches(row_person, bucket):
-        if bucket is None:  # "Shared" — untagged/legacy rows
-            return not row_person
-        return row_person == bucket
-
-    # Card.primary_user is the fallback owner for any transaction with no
-    # spender manually tagged — a card's whole history belongs to its
-    # cardholder by default, "Shared" is now only for cards with genuinely
-    # no assigned owner (or a joint card left that way on purpose). spender
-    # still wins whenever it's set (e.g. one specific purchase on a joint
-    # card actually made by the other person).
-    card_primary_user: dict[int, str] = {}
-    # Statement close day per card — drives the pending-vs-posted split
-    # below (points sit "pending" from purchase date until the day after
-    # the card's statement closes; a card with no close day set is treated
-    # as posting immediately, see _points_pending()).
-    card_close_day: dict[int, int] = {}
-    if eco_accts:
-        for c in db.query(Card).filter(Card.account_id.in_(eco_accts)).all():
-            if c.primary_user:
-                card_primary_user[c.id] = c.primary_user
-            if c.statement_close_day:
-                card_close_day[c.id] = c.statement_close_day
-
-    _today = _date.today()
-
-    # ── Prefetched once, partitioned per bucket in Python ────────────────────
-    # This used to issue one snapshot query AND one full transaction query per
-    # bucket (per person, plus Shared) — and this whole helper is itself called
-    # once per ecosystem by /api/cards/earn-summary. That fanned out to 357
-    # transaction round-trips and 48 snapshot round-trips on a ~12-ecosystem
-    # portfolio. Against the remote Railway Postgres (~70ms per round-trip)
-    # that alone was ~28s of the endpoint's ~43s. Every per-bucket filter is on
-    # `spender` / `card_id` / date, all of which are just as easy to evaluate
-    # in Python, so we fetch once and slice in memory instead. See BACKLOG B26.
-    _all_snaps = db.query(PointsBalanceSnapshot).filter_by(ecosystem_id=eco_id).all()
-    _all_txns = []
-    if eco_accts:
-        _all_txns = db.query(Transaction).filter(
-            Transaction.account_id.in_(eco_accts),
-            Transaction.is_excluded != True,
-        ).all()
-    _owner_card_ids = set(card_primary_user.keys())
-
-    def _txn_in_bucket(t, bucket):
-        """Python equivalent of the per-bucket spender/card_id SQL filter."""
-        sp = t.spender or ''          # matches `spender IS NULL OR spender = ''`
-        if bucket is None:
-            # Shared: untagged AND not claimed by any owned card's default.
-            return (not sp) and (t.card_id is None or t.card_id not in _owner_card_ids)
-        if sp == bucket:
-            return True
-        # Untagged transactions fall back to the card's primary_user.
-        return (not sp) and t.card_id is not None and card_primary_user.get(t.card_id) == bucket
-
-    def _compute_balance_bucket(bucket):
-        if bucket is None:
-            _snaps = [s for s in _all_snaps if not s.person]
-        else:
-            _snaps = [s for s in _all_snaps if s.person == bucket]
-        latest = max(_snaps, key=lambda s: s.snapshot_date) if _snaps else None
-        b_baseline = latest.balance if latest else 0.0
-        b_baseline_date = latest.snapshot_date if latest else None
-
-        b_earned = 0.0
-        # Points earned but not yet posted to the loyalty account (still
-        # within the card's current billing cycle + 1 day) — subtracted out
-        # of current_balance below, since they aren't actually redeemable
-        # yet. Auto-top-category accounts (Citi Custom Cash-style) are
-        # deliberately excluded from this — their bonus is computed monthly,
-        # not per-transaction, so there's no single purchase date to check
-        # against a statement cycle; treated as posted immediately, a known
-        # simplification (same class of limitation as B11).
-        b_pending = 0.0
-        if eco_accts:
-            # Transaction.date is a timestamp, snapshot_date a plain date.
-            # SQL's `timestamp > date` coerces the date to midnight, so do the
-            # same here — comparing a datetime to a date directly is a
-            # TypeError in Python, and truncating t.date to a date instead
-            # would silently drop any same-day-after-midnight transaction that
-            # the original query counted.
-            _baseline_dt = _datetime.combine(b_baseline_date, _dtime.min) if b_baseline_date else None
-            for t in _all_txns:
-                if not _txn_in_bucket(t, bucket):
-                    continue
-                if _baseline_dt and not (t.date > _baseline_dt):
-                    continue
-                if t.action != 'Expense':
-                    continue
-                # auto_top_category accounts can't be read from the locked
-                # column (it can't express the "top category" waterfall) —
-                # handled separately below. See B11.
-                if acct_info.get(t.account_id, {}).get('has_auto_top'):
-                    continue
-                # Locked at write time — see _lock_points_for_transaction().
-                pts = t.points_earned or 0
-                b_earned += pts
-                if pts and _points_pending(t.date.date(), card_close_day.get(t.card_id), _today):
-                    b_pending += pts
-
-            # auto_top_category accounts (e.g. Citi Custom Cash), Shared
-            # bucket only: calc_auto_top_category_points() computes a whole
-            # account's bonus month-by-month and has no per-spender
-            # breakdown, so this only attributes correctly as long as no
-            # transaction on that account has ever been tagged to a specific
-            # person (true for every such account today). See B11.
-            if bucket is None:
-                for acct_id in eco_accts:
-                    a_info = acct_info.get(acct_id, {})
-                    if not a_info.get('has_auto_top'):
-                        continue
-                    product = a_info.get('product')
-                    if not product:
-                        continue
-                    auto_start = (b_baseline_date + _timedelta(days=1)) if b_baseline_date else _date(2000, 1, 1)
-                    try:
-                        b_earned += calc_auto_top_category_points(db, acct_id, product, auto_start, _date.today())
-                    except Exception:
-                        pass
-
-        b_redeemed = sum(
-            r.points_redeemed for r in redemption_rows
-            if _bucket_matches(r.person, bucket) and (not b_baseline_date or r.redemption_date > b_baseline_date)
-        )
-        b_transferred_out = sum(
-            t['points_sent'] for t in transfers_out
-            if _bucket_matches(t.get('person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
-        )
-        b_transferred_in = sum(
-            t['points_received'] for t in transfers_in
-            if _bucket_matches(t.get('to_person'), bucket) and (not b_baseline_date or _date.fromisoformat(t['transfer_date']) > b_baseline_date)
-        )
-        b_adjusted = sum(
-            a.points_delta for a in adjustment_rows
-            if _bucket_matches(a.person, bucket) and (not b_baseline_date or a.adjustment_date > b_baseline_date)
-        )
-        # Person-to-person transfers only ever move between two named
-        # people — "Shared" can't send or receive one.
-        b_person_out = 0.0
-        b_person_in = 0.0
-        if bucket is not None:
-            b_person_out = sum(
-                pt.points for pt in person_transfer_rows
-                if pt.from_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
-            )
-            b_person_in = sum(
-                pt.points for pt in person_transfer_rows
-                if pt.to_person == bucket and (not b_baseline_date or pt.transfer_date > b_baseline_date)
-            )
-
-        # current_balance only counts POSTED points — pending ones aren't
-        # actually redeemable yet. earned_since_baseline stays the full
-        # accrual figure (period-earned stats elsewhere in the app want
-        # "how much did I earn," not "how much can I spend right now").
-        b_posted = b_earned - b_pending
-        b_current = round(
-            b_baseline + b_posted - b_redeemed - b_transferred_out + b_transferred_in
-            + b_adjusted - b_person_out + b_person_in
-        )
-        return {
-            'starting_balance': round(b_baseline, 2),
-            'earned_since_baseline': round(b_earned, 2),
-            'pending_since_baseline': round(b_pending, 2),
-            'posted_since_baseline': round(b_posted, 2),
-            'redeemed_since_baseline': round(b_redeemed, 2),
-            'transferred_out_since_baseline': round(b_transferred_out, 2),
-            'transferred_in_since_baseline': round(b_transferred_in, 2),
-            'adjusted_since_baseline': round(b_adjusted, 2),
-            'person_transfer_out_since_baseline': round(b_person_out, 2),
-            'person_transfer_in_since_baseline': round(b_person_in, 2),
-            'current_balance': b_current,
-            'balance_as_of': b_baseline_date.isoformat() if b_baseline_date else None,
-        }
-
-    balance_by_person = {person: _compute_balance_bucket(person) for person in known_people}
-    shared_bucket = _compute_balance_bucket(None)
-    # Only surface "Shared" if it actually holds something — otherwise every
-    # ecosystem would show a pointless all-zero third row forever.
-    if any(shared_bucket[f] for f in (
-        'starting_balance', 'earned_since_baseline', 'redeemed_since_baseline',
-        'transferred_out_since_baseline', 'transferred_in_since_baseline',
-        'adjusted_since_baseline', 'current_balance',
-    )):
-        balance_by_person['Shared'] = shared_bucket
-
-    def _total_field(field):
-        return round(sum(b[field] for b in balance_by_person.values()), 2)
-
-    current_balance = round(sum(b['current_balance'] for b in balance_by_person.values()))
-    # No single shared "as of" date makes sense once buckets can each have
-    # their own — surface the most recent one that exists as a summary
-    # label (None if not a single bucket has a snapshot yet).
-    _bucket_dates = [b['balance_as_of'] for b in balance_by_person.values() if b['balance_as_of']]
-    baseline_date = max((_date.fromisoformat(d) for d in _bucket_dates), default=None)
-
-    balance_breakdown = {
-        'starting_balance': _total_field('starting_balance'),
-        'earned_since_baseline': _total_field('earned_since_baseline'),
-        'pending_since_baseline': _total_field('pending_since_baseline'),
-        'posted_since_baseline': _total_field('posted_since_baseline'),
-        'redeemed_since_baseline': _total_field('redeemed_since_baseline'),
-        'transferred_out_since_baseline': _total_field('transferred_out_since_baseline'),
-        'transferred_in_since_baseline': _total_field('transferred_in_since_baseline'),
-        'adjusted_since_baseline': _total_field('adjusted_since_baseline'),
-    }
-    pending_balance = _total_field('pending_since_baseline')
-
-    return {
-        'current_balance': current_balance,
-        'pending_balance': pending_balance,
-        'balance_as_of': baseline_date.isoformat() if baseline_date else None,
-        'balance_breakdown': balance_breakdown,
-        'balance_by_person': balance_by_person,
-    }
 
 
 @app.get("/api/cards/earn-summary")
@@ -6606,20 +4952,6 @@ async def update_ecosystem(eco_id: int, data: dict = Body(...), db: Session = De
 # compared against an ecosystem's assumed your_cpp.
 # ---------------------------------------------------------------------------
 
-def _serialize_redemption(r: Redemption) -> dict:
-    realized_cpp = round((r.cash_value_usd / r.points_redeemed) * 100, 4) if r.points_redeemed else 0
-    return {
-        'id': r.id,
-        'ecosystem_id': r.ecosystem_id,
-        'ecosystem_name': r.ecosystem.name if r.ecosystem else None,
-        'points_redeemed': r.points_redeemed,
-        'redemption_date': r.redemption_date.isoformat(),
-        'description': r.description,
-        'cash_value_usd': r.cash_value_usd,
-        'realized_cpp': realized_cpp,
-        'notes': r.notes,
-        'person': r.person,
-    }
 
 
 @app.get("/api/redemptions")
@@ -6694,16 +5026,6 @@ async def delete_redemption(redemption_id: int, db: Session = Depends(get_db)):
 # ecosystem_earn_detail, instead of always summing from account-opening.
 # ---------------------------------------------------------------------------
 
-def _serialize_balance_snapshot(s: PointsBalanceSnapshot) -> dict:
-    return {
-        'id': s.id,
-        'ecosystem_id': s.ecosystem_id,
-        'ecosystem_name': s.ecosystem.name if s.ecosystem else None,
-        'balance': s.balance,
-        'snapshot_date': s.snapshot_date.isoformat(),
-        'notes': s.notes,
-        'person': s.person,
-    }
 
 
 @app.get("/api/ecosystems/{eco_id}/balance-snapshots")
@@ -6776,17 +5098,6 @@ async def delete_balance_snapshot(snapshot_id: int, db: Session = Depends(get_db
 # from a PointsBalanceSnapshot (a delta from its date forward, not a reset).
 # ---------------------------------------------------------------------------
 
-def _serialize_adjustment(a: PointsAdjustment) -> dict:
-    return {
-        'id': a.id,
-        'ecosystem_id': a.ecosystem_id,
-        'ecosystem_name': a.ecosystem.name if a.ecosystem else None,
-        'points_delta': a.points_delta,
-        'adjustment_date': a.adjustment_date.isoformat(),
-        'description': a.description,
-        'notes': a.notes,
-        'person': a.person,
-    }
 
 
 @app.get("/api/ecosystems/{eco_id}/points-adjustments")
@@ -6861,17 +5172,6 @@ async def delete_points_adjustment(adjustment_id: int, db: Session = Depends(get
 # never overwrites history, since Transfers snapshot their own ratio anyway.
 # ---------------------------------------------------------------------------
 
-def _serialize_transfer_ratio(tr: TransferRatio) -> dict:
-    return {
-        'id': tr.id,
-        'source_ecosystem_id': tr.source_ecosystem_id,
-        'source_ecosystem_name': tr.source_ecosystem.name if tr.source_ecosystem else None,
-        'destination_ecosystem_id': tr.destination_ecosystem_id,
-        'destination_ecosystem_name': tr.destination_ecosystem.name if tr.destination_ecosystem else None,
-        'base_ratio': tr.base_ratio,
-        'effective_from': tr.effective_from.isoformat(),
-        'effective_to': tr.effective_to.isoformat() if tr.effective_to else None,
-    }
 
 
 @app.get("/api/transfer-ratios")
@@ -6923,22 +5223,6 @@ async def create_transfer_ratio(data: dict = Body(...), db: Session = Depends(ge
 # historical Transfers.
 # ---------------------------------------------------------------------------
 
-def _serialize_transfer(t: Transfer) -> dict:
-    return {
-        'id': t.id,
-        'source_ecosystem_id': t.source_ecosystem_id,
-        'source_ecosystem_name': t.source_ecosystem.name if t.source_ecosystem else None,
-        'destination_ecosystem_id': t.destination_ecosystem_id,
-        'destination_ecosystem_name': t.destination_ecosystem.name if t.destination_ecosystem else None,
-        'points_sent': t.points_sent,
-        'base_ratio_used': t.base_ratio_used,
-        'bonus_pct': t.bonus_pct,
-        'points_received': t.points_received,
-        'transfer_date': t.transfer_date.isoformat(),
-        'notes': t.notes,
-        'person': t.person,
-        'to_person': t.to_person or t.person,
-    }
 
 
 @app.get("/api/transfers")
@@ -7044,17 +5328,6 @@ async def delete_transfer(transfer_id: int, db: Session = Depends(get_db)):
 # judgment call made when logging one, not something enforced here.
 # ---------------------------------------------------------------------------
 
-def _serialize_person_transfer(pt: PersonPointsTransfer) -> dict:
-    return {
-        'id': pt.id,
-        'ecosystem_id': pt.ecosystem_id,
-        'ecosystem_name': pt.ecosystem.name if pt.ecosystem else None,
-        'from_person': pt.from_person,
-        'to_person': pt.to_person,
-        'points': pt.points,
-        'transfer_date': pt.transfer_date.isoformat(),
-        'notes': pt.notes,
-    }
 
 
 @app.get("/api/ecosystems/{eco_id}/person-transfers")
@@ -7191,20 +5464,6 @@ async def get_challenges(
         raise HTTPException(status_code=500, detail=f"challenges error: {e}\n{traceback.format_exc()}")
 
 
-def _sync_challenge_links(db, challenge, additional_card_ids, category_names):
-    """Helper: replace junction-table rows for a challenge after create/update.
-    Uses the direct relationship collections so SQLAlchemy stays in sync."""
-    # Replace card links
-    db.query(ChallengeCardLink).filter_by(challenge_id=challenge.id)\
-        .delete(synchronize_session=False)
-    for cid in (additional_card_ids or []):
-        db.add(ChallengeCardLink(challenge_id=challenge.id, card_id=int(cid)))
-    # Replace category links
-    db.query(ChallengeCategoryLink).filter_by(challenge_id=challenge.id)\
-        .delete(synchronize_session=False)
-    for name in (category_names or []):
-        if name:
-            db.add(ChallengeCategoryLink(challenge_id=challenge.id, category_name=name))
 
 
 @app.get("/api/challenges/suggestions")
@@ -7353,59 +5612,10 @@ async def recalc_challenge(challenge_id: int, db: Session = Depends(get_db)):
 # Benefits (CardBenefit + BenefitUsage)
 # ---------------------------------------------------------------------------
 
-def _current_cycle(frequency: str) -> str:
-    """Return the current period key for a benefit's reset_frequency.
-    annual / calendar_year → "2026"
-    semi-annual           → "2026-H1" or "2026-H2"
-    quarterly             → "2026-Q1" … "2026-Q4"
-    monthly               → "2026-03"
-    """
-    from datetime import date as _date
-    now = _date.today()
-    if frequency in ('annual', 'calendar_year'):
-        return str(now.year)
-    if frequency == 'semi-annual':
-        return f"{now.year}-{'H1' if now.month <= 6 else 'H2'}"
-    if frequency == 'quarterly':
-        return f"{now.year}-Q{(now.month - 1) // 3 + 1}"
-    if frequency == 'monthly':
-        return f"{now.year}-{now.month:02d}"
-    return str(now.year)
 
 
-def _cycles_for_year(frequency: str, year: int) -> list[str]:
-    """All cycle keys for a given year at this benefit's reset_frequency.
-    Only meaningful for sub-annual frequencies — used to build the multi-period
-    usage grid for 'periodic' benefits (e.g. 12 boxes for a monthly credit).
-    """
-    if frequency == 'monthly':
-        return [f"{year}-{m:02d}" for m in range(1, 13)]
-    if frequency == 'quarterly':
-        return [f"{year}-Q{q}" for q in range(1, 5)]
-    if frequency == 'semi-annual':
-        return [f"{year}-H1", f"{year}-H2"]
-    return [str(year)]
 
 
-def _serialize_benefit(b: CardBenefit, usage: BenefitUsage | None) -> dict:
-    amt_used = round(usage.amount_used if usage else 0.0, 2)
-    pct      = round(amt_used / b.amount * 100, 1) if b.amount else 0.0
-    return {
-        'id':               b.id,
-        'product_id':       b.product_id,
-        'benefit_name':     b.benefit_name,
-        'amount':           b.amount,
-        'reset_frequency':  b.reset_frequency or 'annual',
-        'trigger_category': b.trigger_category,
-        'notes':            b.notes,
-        'tracking_type':    b.tracking_type or 'periodic',
-        'cycle':            _current_cycle(b.reset_frequency or 'annual'),
-        'amount_used':      amt_used,
-        'confirmed':        usage.confirmed if usage else False,
-        'usage_id':         usage.id if usage else None,
-        'pct_used':         pct,
-        'remaining':        round((b.amount or 0) - amt_used, 2),
-    }
 
 
 @app.get("/api/cards/{card_id}/benefits")
@@ -8467,208 +6677,12 @@ async def upload_rules(file: UploadFile = File(...), db: Session = Depends(get_d
 # CSV / OFX Transaction Import  (Option B + preview)
 # ---------------------------------------------------------------------------
 
-def _compute_import_hash(account_id: int, date_str: str, amount: float, description: str, occurrence: int) -> str:
-    """
-    Stable dedup key: SHA-256 of pipe-joined key fields.
-    occurrence handles true duplicate rows (same day/amount/desc within one account).
-    """
-    import hashlib
-    raw = f"{account_id}|{date_str}|{round(amount, 2):.2f}|{description.strip().lower()}|{occurrence}"
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _parse_csv_rows(content: bytes, account_id: int, sign_convention: str) -> list[dict]:
-    """
-    Parse CSV bytes into normalised row dicts.
-    Tries to auto-detect common column name patterns used by major banks/cards.
-    sign_convention: 'plaid' (expenses negative), 'bank' (expenses positive, income negative),
-                     'auto' (detect from amount values — if most non-zero amounts are positive, flip)
-    Returns list of {date, amount, description, raw_row}.
-    """
-    import csv, io as _io
-
-    text = content.decode("utf-8-sig", errors="replace")  # handle BOM
-    reader = csv.DictReader(_io.StringIO(text))
-    headers = [h.strip().lower() for h in (reader.fieldnames or [])]
-
-    # Column name aliases for common banks
-    DATE_ALIASES   = ['date', 'transaction date', 'trans date', 'posted date', 'posting date', 'settlement date']
-    AMT_ALIASES    = ['amount', 'transaction amount', 'debit/credit', 'net amount']
-    DEBIT_ALIASES  = ['debit', 'debit amount', 'withdrawal', 'withdrawals']
-    CREDIT_ALIASES = ['credit', 'credit amount', 'deposit', 'deposits']
-    DESC_ALIASES   = ['description', 'transaction description', 'merchant', 'merchant name',
-                      'name', 'memo', 'payee', 'details', 'narrative']
-
-    def pick(aliases):
-        for a in aliases:
-            if a in headers:
-                return reader.fieldnames[[h.strip().lower() for h in reader.fieldnames].index(a)]
-        return None
-
-    date_col   = pick(DATE_ALIASES)
-    amt_col    = pick(AMT_ALIASES)
-    debit_col  = pick(DEBIT_ALIASES)
-    credit_col = pick(CREDIT_ALIASES)
-    desc_col   = pick(DESC_ALIASES)
-
-    if not date_col or not desc_col:
-        raise ValueError(f"Cannot find date/description columns. Headers found: {reader.fieldnames}")
-    if not amt_col and not (debit_col and credit_col):
-        raise ValueError(f"Cannot find amount column(s). Headers found: {reader.fieldnames}")
-
-    rows = []
-    for row in reader:
-        raw_date = row.get(date_col, '').strip()
-        raw_desc = row.get(desc_col, '').strip()
-        if not raw_date or not raw_desc:
-            continue
-
-        # Parse date — try common formats
-        parsed_date = None
-        for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%d/%m/%Y', '%Y/%m/%d', '%m-%d-%Y', '%d-%m-%Y'):
-            try:
-                parsed_date = datetime.strptime(raw_date, fmt)
-                break
-            except ValueError:
-                continue
-        if not parsed_date:
-            continue  # skip unparseable dates
-
-        # Parse amount
-        def clean_num(s):
-            return float(s.replace('$', '').replace(',', '').strip() or '0')
-
-        if amt_col:
-            try:
-                amount = clean_num(row.get(amt_col, '0'))
-            except ValueError:
-                continue
-        else:
-            try:
-                debit  = clean_num(row.get(debit_col,  '') or '0')
-                credit = clean_num(row.get(credit_col, '') or '0')
-                # Debit = money out (expense), credit = money in (income)
-                amount = credit - debit  # result: positive = income, negative = expense
-            except ValueError:
-                continue
-
-        # Apply sign convention
-        if sign_convention == 'bank':
-            # Bank statements: debits shown as positive → flip to our negative-expense convention
-            amount = -amount
-        elif sign_convention == 'auto':
-            # Will be resolved after full parse; store as-is for now
-            pass
-        # 'plaid' → no flip needed (already negative for expenses)
-
-        rows.append({
-            'date': parsed_date,
-            'date_str': parsed_date.strftime('%Y-%m-%d'),
-            'amount': round(amount, 2),
-            'description': raw_desc,
-        })
-
-    # Auto sign detection: if most expenses look positive, flip all
-    if sign_convention == 'auto' and rows:
-        positives = sum(1 for r in rows if r['amount'] > 0)
-        if positives > len(rows) * 0.6:
-            # Majority positive → likely bank convention, flip
-            for r in rows:
-                r['amount'] = -r['amount']
-
-    return rows
 
 
-def _parse_ofx_rows(content: bytes, account_id: int) -> list[dict]:
-    """
-    Parse OFX/QFX bytes into normalised row dicts.
-    OFX uses SGML-like tags: <DTPOSTED>, <TRNAMT>, <NAME>/<MEMO>.
-    OFX sign convention: negative = debit/expense, positive = credit/income — matches ours.
-    """
-    import re
-    text = content.decode("utf-8-sig", errors="replace")
-
-    def extract(tag, block):
-        m = re.search(rf'<{tag}>(.*?)(?:<|$)', block, re.IGNORECASE | re.DOTALL)
-        return m.group(1).strip() if m else ''
-
-    # Find all STMTTRN blocks
-    blocks = re.findall(r'<STMTTRN>(.*?)</STMTTRN>', text, re.IGNORECASE | re.DOTALL)
-    rows = []
-    for block in blocks:
-        raw_date = extract('DTPOSTED', block) or extract('DTUSER', block)
-        raw_amt  = extract('TRNAMT', block)
-        name     = extract('NAME', block) or extract('MEMO', block) or extract('PAYEE', block)
-
-        if not raw_date or not raw_amt:
-            continue
-
-        # OFX date: YYYYMMDD[HHMMSS[.mmm][ZZZ]]
-        date_str = raw_date[:8]
-        try:
-            parsed_date = datetime.strptime(date_str, '%Y%m%d')
-        except ValueError:
-            continue
-
-        try:
-            amount = round(float(raw_amt.replace(',', '')), 2)
-        except ValueError:
-            continue
-
-        rows.append({
-            'date': parsed_date,
-            'date_str': parsed_date.strftime('%Y-%m-%d'),
-            'amount': amount,
-            'description': name or 'Unknown',
-        })
-
-    return rows
 
 
-def _build_preview(rows: list[dict], account_id: int, db: Session) -> dict:
-    """
-    Given normalised rows, compute import hashes, check against existing transactions,
-    and return a preview dict: {to_import, duplicates, rows}.
-    """
-    # Count occurrences of (date_str, amount, description) within this batch
-    from collections import Counter
-    seen_counter: Counter = Counter()
-    result_rows = []
-
-    # Pre-load existing hashes for this account for fast lookup
-    existing_hashes = {
-        h for (h,) in db.query(Transaction.import_hash)
-        .filter(Transaction.account_id == account_id, Transaction.import_hash != None)
-        .all()
-    }
-    # Also consider hashes we've already generated in this batch (within-batch dedup)
-    batch_hashes: set[str] = set()
-
-    for row in rows:
-        key = (row['date_str'], round(row['amount'], 2), row['description'].strip().lower())
-        occurrence = seen_counter[key]
-        seen_counter[key] += 1
-
-        h = _compute_import_hash(account_id, row['date_str'], row['amount'], row['description'], occurrence)
-
-        is_duplicate = (h in existing_hashes) or (h in batch_hashes)
-        batch_hashes.add(h)
-
-        result_rows.append({
-            **row,
-            'import_hash': h,
-            'duplicate': is_duplicate,
-        })
-
-    to_import  = [r for r in result_rows if not r['duplicate']]
-    duplicates = [r for r in result_rows if r['duplicate']]
-
-    return {
-        'total_rows': len(result_rows),
-        'to_import': len(to_import),
-        'duplicates': len(duplicates),
-        'rows': result_rows,
-    }
 
 
 @app.post("/api/transactions/import")
@@ -10758,59 +8772,8 @@ class CashFlowOverlayUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-def _compute_pmt_split(balance: float, annual_rate: float, monthly_payment: float,
-                        property_tax: float = 0.0, insurance: float = 0.0) -> dict:
-    """
-    Split a single loan payment into P / I / Tax / Insurance components.
-    Uses standard amortization: interest = balance × (annual_rate/12/100).
-    """
-    monthly_rate = (annual_rate or 0.0) / 100.0 / 12.0
-    interest = round(balance * monthly_rate, 2) if monthly_rate > 0 else 0.0
-    escrow = round((property_tax or 0.0) + (insurance or 0.0), 2)
-    principal = round(monthly_payment - interest - escrow, 2)
-    if principal < 0:
-        principal = 0.0  # Edge case: payment doesn't cover interest yet
-    return {
-        'interest': interest,
-        'principal': principal,
-        'property_tax': round(property_tax or 0.0, 2),
-        'insurance': round(insurance or 0.0, 2),
-        'total': round(monthly_payment, 2),
-    }
 
 
-def serialize_loan(loan: Loan) -> dict:
-    """Standard serialization for a Loan object."""
-    return {
-        'id': loan.id,
-        'account_id': loan.account_id,
-        'lender': loan.lender,
-        'loan_type': loan.loan_type,
-        'original_principal': loan.original_principal,
-        'current_balance': loan.current_balance,
-        'balance_date': loan.balance_date.strftime('%Y-%m-%d') if loan.balance_date else None,
-        'remaining_term_months': loan.remaining_term_months,
-        'interest_rate': loan.interest_rate,
-        'term_months': loan.term_months,
-        'monthly_payment': loan.monthly_payment,
-        'property_tax_monthly': loan.property_tax_monthly,
-        'insurance_monthly': loan.insurance_monthly,
-        'payment_account_id': loan.payment_account_id,
-        'payment_due_day': loan.payment_due_day,
-        'start_date': loan.start_date.strftime('%Y-%m-%d') if loan.start_date else None,
-        'maturity_date': loan.maturity_date.strftime('%Y-%m-%d') if loan.maturity_date else None,
-        'is_active': loan.is_active,
-        'notes': loan.notes,
-        'created_at': loan.created_at.isoformat() if loan.created_at else None,
-        # Computed: next payment split (based on current_balance)
-        'next_split': _compute_pmt_split(
-            loan.current_balance or 0,
-            loan.interest_rate or 0,
-            loan.monthly_payment or 0,
-            loan.property_tax_monthly or 0,
-            loan.insurance_monthly or 0,
-        ) if loan.monthly_payment else None,
-    }
 
 
 @app.get("/api/loans")
@@ -11267,19 +9230,6 @@ def todayStr_py():
 # Cash Flow Overlays
 # ---------------------------------------------------------------------------
 
-def _overlay_to_dict(o: CashFlowOverlay) -> dict:
-    return {
-        "id":             o.id,
-        "description":    o.description,
-        "amount":         o.amount,
-        "flow_date":      o.flow_date.isoformat() if o.flow_date else None,
-        "source":         o.source,
-        "account_id":     o.account_id,
-        "account_name":   o.account.account_name if o.account else None,
-        "is_recurring":   o.is_recurring,
-        "recurrence_day": o.recurrence_day,
-        "is_active":      o.is_active,
-    }
 
 
 @app.get("/api/cash-flow-overlays")
@@ -11496,23 +9446,6 @@ class SalaryPaymentUpdate(BaseModel):
     allocations:  Optional[List[SalaryAllocationIn]] = None
 
 
-def _salary_to_dict(sp: SalaryPayment) -> dict:
-    return {
-        "id":           sp.id,
-        "payment_date": sp.payment_date.isoformat(),
-        "description":  sp.description,
-        "person":       sp.person,
-        "is_active":    sp.is_active,
-        "allocations":  [
-            {
-                "id":           a.id,
-                "account_id":   a.account_id,
-                "account_name": a.account.account_name if a.account else None,
-                "amount":       a.amount,
-            }
-            for a in (sp.allocations or [])
-        ],
-    }
 
 
 @app.get("/api/salary-payments")
