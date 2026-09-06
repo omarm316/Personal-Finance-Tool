@@ -1502,8 +1502,17 @@ def _run_migrations_pg(engine, required_columns):
             print('  Migration: dropped unused merchant_overrides table')
 
 # Database initialization
+# `engine`/`SessionLocal` are also kept as module globals (not just returned)
+# so `get_db()` below — and any router module doing `from database import
+# SessionLocal` — has a live handle usable without importing from main.py
+# (which would be circular once main.py imports routers/*.py).
+engine = None
+SessionLocal = None
+
+
 def init_db(database_url=None):
     """Initialize the database with schema. Reads DATABASE_URL from env, falls back to SQLite."""
+    global engine, SessionLocal
     if database_url is None:
         database_url = os.getenv('DATABASE_URL', 'sqlite:///./finance.db')
     # Railway/Heroku may provide postgres:// but SQLAlchemy 2.x needs postgresql://
@@ -1516,6 +1525,17 @@ def init_db(database_url=None):
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     return engine, SessionLocal
+
+
+def get_db():
+    """FastAPI dependency — yields a request-scoped Session. Lives here (not
+    main.py) so every router module can depend on it without importing from
+    main.py, which would be circular once main.py imports routers/*.py."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def seed_categories(session):

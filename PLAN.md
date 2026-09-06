@@ -185,6 +185,119 @@ stop after Phase 0 verification.
 
 ---
 
+## Session 2026-09-06 (cont'd, 2) — H7 Phase 1 batch 1: `loans.py`, `cash_flow.py`,
+## `llm.py`, `misc.py` split out of `main.py`
+
+Omer said to go ahead and start Phase 1. Did the first phasing batch exactly as
+scoped ("self-contained, few/no cross-domain helper calls"): `routers/loans.py`,
+`routers/cash_flow.py`, `routers/llm.py`, `routers/misc.py` — 38 routes total. The
+other 9 domains (including `plaid_routes.py`, see gap noted below) are still inline
+in `main.py`, unstarted.
+
+**Method:** same AST dependency-graph script as Phase 0, extended from
+function-level to route-level — for the ~38 target routes/Pydantic models, walked
+each one's AST for every top-level name it references, closed the graph
+transitively, then also ran the *reverse* check (grep every moved name against the
+post-edit `main.py` to confirm nothing left behind still calls it) — that reverse
+check is new this round and is a cheap, high-value net given the scale.
+
+**This phase surfaced a structural problem Phase 0 didn't have to deal with:**
+a router module cannot `from main import X` for anything, since `main.py` imports
+the router modules to call `app.include_router(...)` — any helper a moved route
+needs that (a) isn't already in `core/` and (b) is *also* needed by a route still
+in `main.py` creates an unavoidable circular import unless it moves somewhere
+neither side has to import from the other. Four such items surfaced, each fixed by
+promotion rather than duplication:
+
+- **`get_db`** — every future router needs `Depends(get_db)`; moved from `main.py`
+  into `database.py` (right next to `SessionLocal`, which it wraps — its natural
+  home, not really a `core/` concern). `database.py` also now keeps `engine`/
+  `SessionLocal` as live module globals (`init_db()` sets them via `global`, in
+  addition to still returning them so `main.py`'s existing
+  `engine, SessionLocal = init_db()` line needs no change) — needed because
+  `routers/llm.py`'s background enrichment worker grabs `SessionLocal` directly
+  (no request to scope a `Depends()` to). **This only works because the router
+  imports in `main.py` are placed *after* `engine, SessionLocal = init_db()` runs**
+  — a router doing `from database import SessionLocal` at its own top level would
+  otherwise permanently bind the pre-`init_db()` `None` placeholder if imported
+  first. Documented inline in `main.py` at the import site since it's a real
+  footgun for whoever adds the next router.
+- **`core/app_helpers.py`** (new) — `_frontend_index()`, needed by both `main.py`'s
+  `/` route and `routers/misc.py`'s `/v2`. Also fixed a latent bug while moving it:
+  it (and `routers/misc.py`'s `/mockup`) built its file path from
+  `os.path.dirname(os.path.abspath(__file__))` — correct in `main.py`, silently
+  wrong one directory level off once copied into `core/` or `routers/`. Added a
+  `PROJECT_ROOT` constant computed once, correctly, from `core/app_helpers.py`'s
+  own location, and pointed both call sites at it. This class of bug compiles,
+  imports, and passes the in-memory-SQLite test suite cleanly — only a live
+  request against the real filesystem layout would ever surface it, which is
+  exactly why the live-smoke-test step below exists.
+- **`core/constants.py`** (new) — `BUDGET_TYPES` is read by `routers/misc.py`'s
+  `/api/stats*` (moved) *and* transaction/budget routes still in `main.py` (not
+  yet split). `TRANSACTION_TYPES`/`BALANCE_TYPES` only need `routers/misc.py` today
+  but were kept alongside it as one related trio rather than splitting them
+  across two homes.
+- **`core/rules_helpers.py`** (new) — `_reapply_rules` is called by 3 not-yet-split
+  `/api/rules/*` routes (still in `main.py`) and by `routers/llm.py`'s
+  `create_rule_from_transaction` (moved now). Same shape as the `_compute_ecosystem_balance()`
+  precedent from the original `core/` scoping — a function two not-yet-siblinged
+  call sites both need, so it goes to `core/` rather than either one importing
+  from the other.
+
+None of these four were named in the original Phase 0 `core/` scoping — expected,
+per the plan's own "over-detect, don't under-detect" framing: the scoping pass was
+done once, up front, before any router had actually been cut loose from `main.py`,
+so it could name the *big* shared engines (`points_engine`, `serializers`, etc.) but
+not every small infra seam a real split would expose. Recorded here rather than
+silently patched so the pattern is visible for Phase 1's remaining batches.
+
+**Gap found, not resolved:** `plaid_routes.py` is item 1 in the original router
+list but was never assigned to any of the three phasing batches (1: loans/cash_flow/
+llm/misc, 2: budgets/net_worth/accounts/transactions/rules, 3: cards/ecosystems/
+challenges) — a plan omission, not a deliberate deferral. Its two biggest helpers
+(`_sync_item`, `_sync_item_background`, ~450 lines combined) are called by plaid
+routes *and* by `/api/accounts/{id}/reset-and-resync` (accounts.py, Phase 2) *and*
+by `/api/reset-all` / `/api/nuke` / `/api/accounts/backfill-balances` (three routes
+that also aren't assigned to any listed domain). Left entirely untouched this
+session — deliberately didn't guess at a phase for it. Needs a decision before
+Phase 1 continues: which batch plaid_routes.py belongs to, and where those three
+orphan routes go (accounts.py looks likeliest given backfill-balances, but reset-all/
+nuke touch every domain's tables).
+
+**Verified the same four ways as Phase 0:**
+1. **Route parity** — AST-diffed `(method, path)` across `main.py` +
+   `routers/misc.py` + `routers/loans.py` + `routers/cash_flow.py` + `routers/llm.py`
+   against the pre-Phase-1 commit: 177 in both, zero missing, zero extra.
+2. **No circular imports** — confirmed via AST (no `routers/*.py` or `core/*.py`
+   imports `main`) and by importing every new module plus `main` in one process.
+3. **Reverse-reference check** (new this round) — grepped all 51 moved names
+   against the edited `main.py`: zero remaining references, confirming nothing was
+   left calling a name that no longer exists there.
+4. **Test suite**: 53 passed / 4 failed, identical to the Phase 0 baseline (same
+   B27 failures).
+5. **Live smoke test against production** — `git stash`ed to the pre-Phase-1 commit,
+   hit `/health`, `/api/categories`, `/api/transaction-types`, `/api/stats`,
+   `/api/stats/detail`, `/api/loans`, `/api/cash-flow`, `/api/cash-flow-overlays`,
+   `/api/salary-payments`, `/api/daily-balances`, `/api/planned-purchases`, `/v2`
+   (raw HTML), `/api/llm/test-groq` on both old and new `main.py` — **byte-identical
+   on every endpoint, including the HTML page** (which is what caught whether the
+   `PROJECT_ROOT` fix above actually worked, since the in-memory test suite alone
+   couldn't have).
+
+**Result:** `main.py` 10,129 → 8,489 lines. New: `routers/__init__.py`,
+`routers/misc.py`, `routers/loans.py`, `routers/cash_flow.py`, `routers/llm.py`,
+`core/app_helpers.py`, `core/constants.py`, `core/rules_helpers.py`. `database.py`
+gained `get_db()` plus module-level `engine`/`SessionLocal`.
+
+**Not done / next**: the plaid_routes.py phasing decision above, then the rest of
+Phase 1 batch 1's remaining domains don't exist (batch 1 is now fully done: loans,
+cash_flow, llm, misc). Batch 2 (`budgets.py`, `net_worth.py`, `accounts.py`,
+`transactions.py`, `rules.py`) and batch 3 (`cards.py`, `ecosystems.py`,
+`challenges.py`, together) are unstarted — same stop-and-verify convention applies,
+waiting for Omer to say go.
+
+---
+
 ## Session 2026-09-05 — Transactions: edit UX, "For Others" tag, merchant category/network engine
 
 Omer's brief, framed as "our big focus": (1) editing a transaction visually "jumps" the table, (2) the row is too cramped — buttons bleed off-screen in edit mode, (3) "For Others" should stop being a category and become a tag (excluded from budget, kept for cash flow — same shape as GCB), (4) bring the Cards pages' merchant-category (CSC) logic into the main engine so every transaction can show a personal category *and* a merchant category, plus an identifier for which payment network coded it that way, and (5) a general visual/back-end cleanup pass, rules-based auto-classification included. Confirmed two defaults up front via AskUserQuestion before touching schema: existing "For Others" transactions reset to Unclassified + tagged (none existed live), and "merchant category" = the existing CSC/points_category system, extended rather than duplicated.

@@ -24,7 +24,7 @@ from typing import List, Optional, Union
 from datetime import datetime
 
 from database import (
-    init_db, Account, Transaction, Category,
+    init_db, get_db, Account, Transaction, Category,
     CategorizationRule, PlaidItem, seed_categories,
     Card, PointsCategory, MerchantPointsMapping,
     PointsEcosystem, CardProduct, CardProductReward, CardEarningRate, CardProductHistory,
@@ -65,6 +65,9 @@ from core.serializers import (
 from core.import_helpers import (
     _compute_import_hash, _parse_csv_rows, _parse_ofx_rows, _build_preview,
 )
+from core.app_helpers import _frontend_index
+from core.constants import TRANSACTION_TYPES, BUDGET_TYPES, BALANCE_TYPES
+from core.rules_helpers import _reapply_rules
 from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
 from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review, find_overlapping_rules
 from plaid_integration import setup_plaid_from_env
@@ -204,23 +207,6 @@ _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
 # Transaction Type System (Section 2A)
 # ---------------------------------------------------------------------------
 
-# The 8 canonical transaction types
-TRANSACTION_TYPES = [
-    'Expense', 'Income', 'Transfer',
-    'Investment Gain (Loss)', 'Purchase', 'Sale',
-    'Depreciation', 'Other',
-]
-
-# Types that count toward budget actuals
-BUDGET_TYPES = {'Expense', 'Income'}
-
-# Types that affect account balances / net worth
-BALANCE_TYPES = {
-    'Expense', 'Income', 'Transfer',
-    'Investment Gain (Loss)', 'Purchase', 'Sale',
-    'Depreciation', 'Other',
-}
-
 # ---------------------------------------------------------------------------
 # App + DB init
 # ---------------------------------------------------------------------------
@@ -335,14 +321,6 @@ async def auth_check(request: Request):
     return {"authenticated": token == APP_PASSWORD}
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -435,21 +413,8 @@ class PublicTokenExchange(BaseModel):
     public_token: str
 
 
-class CategoryResponse(BaseModel):
-    id: int
-    name: str
-    category_type: str
-
-    class Config:
-        from_attributes = True
 
 
-class StatsResponse(BaseModel):
-    total_transactions: int
-    needs_review: int
-    total_income: float
-    total_expenses: float
-    by_category: dict
 
 
 class AccountCreate(BaseModel):
@@ -587,26 +552,6 @@ async def startup_event():
 # ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
-
-def _frontend_index() -> str:
-    """
-    Path to the HTML entry point.
-
-    Prefers the Vite build output (static/app/index.html, produced by
-    `cd frontend && npm run build` — the Dockerfile does this in a Node build
-    stage). Falls back to the legacy single-file v2.html so a checkout with no
-    build still runs, and logs loudly when it does, because silently serving
-    the old bundle would hide a broken build in production.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    built = os.path.join(here, "static", "app", "index.html")
-    if os.path.exists(built):
-        return built
-    logger.warning(
-        "Vite build not found at static/app/index.html — falling back to the "
-        "legacy v2.html. Run `cd frontend && npm run build`."
-    )
-    return os.path.join(here, "v2.html")
 
 
 @app.get("/")
@@ -2905,200 +2850,16 @@ async def batch_update_transactions(
 # Categories
 # ---------------------------------------------------------------------------
 
-@app.get("/api/categories", response_model=List[CategoryResponse])
-async def get_categories(db: Session = Depends(get_db)):
-    return db.query(Category).filter_by(is_active=True).order_by(Category.display_order).all()
 
 
-@app.get("/api/transaction-types")
-async def get_transaction_types():
-    """Return the canonical transaction types and which ones affect budgets/balances."""
-    return {
-        'types': TRANSACTION_TYPES,
-        'budget_types': sorted(BUDGET_TYPES),
-        'balance_types': sorted(BALANCE_TYPES),
-    }
 
 
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 
-@app.get("/api/stats", response_model=StatsResponse)
-async def get_stats(
-    year: Optional[int] = None,
-    month: Optional[int] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    query = db.query(Transaction).filter(
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
-        Transaction.gcb_tagged != True,   # noqa: E712
-        Transaction.is_for_others != True,  # noqa: E712
-    )
-    if year:
-        query = query.filter(Transaction.year == year)
-    if month:
-        query = query.filter(Transaction.month == month)
-    if start_date:
-        query = query.filter(Transaction.date >= datetime.strptime(start_date, "%Y-%m-%d"))
-    if end_date:
-        # Inclusive of entire day
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
-        query = query.filter(Transaction.date <= end_dt)
-
-    transactions = query.all()
-
-    # Batch-load splits for all split transactions in one query
-    split_txn_ids = [t.id for t in transactions if t.is_split]
-    splits_map: dict = {}
-    if split_txn_ids:
-        all_splits = db.query(TransactionSplit).filter(
-            TransactionSplit.parent_transaction_id.in_(split_txn_ids)
-        ).all()
-        for s in all_splits:
-            splits_map.setdefault(s.parent_transaction_id, []).append(s)
-
-    # Compute totals & by-category, handling split transactions correctly.
-    # For split parents (is_split=True): skip the parent's own amount and instead
-    # accumulate from the individual TransactionSplit line items (each with their own category).
-    # Income-action transactions in expense-type categories (e.g. a "Dining" refund
-    # coded as Income) are treated as expense offsets so totals match /budget/actuals.
-    total_income = 0.0
-    total_expenses = 0.0
-    by_category: dict = {}
-
-    # Expense-type categories: used to detect refunds that should offset expenses
-    _expense_cats = set(
-        c.name for c in db.query(Category).filter(
-            Category.category_type.in_(['expense', 'both'])
-        ).all()
-    )
-
-    for t in transactions:
-        if t.action not in BUDGET_TYPES:
-            continue
-        if t.is_split:
-            for s in splits_map.get(t.id, []):
-                if s.is_gcb or s.is_for_others:
-                    continue
-                cat = s.category or t.category_final or 'Other'
-                if t.action == 'Expense':
-                    contrib = -s.amount
-                    total_expenses += contrib
-                    by_category[cat] = by_category.get(cat, 0) + contrib
-                elif t.action == 'Income' and cat in _expense_cats:
-                    # Refund in expense category → offset expenses
-                    contrib = -s.amount
-                    total_expenses += contrib
-                    by_category[cat] = by_category.get(cat, 0) + contrib
-                elif t.action == 'Income':
-                    total_income += s.amount
-        else:
-            if t.is_gcb or t.gcb_tagged or t.is_for_others:
-                continue
-            cat = t.category_final or 'Other'
-            if t.action == 'Expense':
-                contrib = -t.amount
-                total_expenses += contrib
-                by_category[cat] = by_category.get(cat, 0) + contrib
-            elif t.action == 'Income' and cat in _expense_cats:
-                # Refund in expense category → offset expenses
-                contrib = -t.amount
-                total_expenses += contrib
-                by_category[cat] = by_category.get(cat, 0) + contrib
-            elif t.action == 'Income':
-                total_income += t.amount
-
-    return {
-        "total_transactions": len(transactions),
-        "needs_review":       sum(1 for t in transactions if t.needs_review),
-        "total_income":       total_income,
-        "total_expenses":     total_expenses,
-        "by_category":        by_category,
-    }
 
 
-@app.get("/api/stats/detail")
-async def get_stats_detail(
-    category: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    year: Optional[int] = None,
-    month: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
-    """
-    Return individual transactions (and split line items) that contribute to a
-    given category's total in /api/stats — useful for debugging overstatement.
-    """
-    query = db.query(Transaction).filter(
-        Transaction.is_excluded != True,  # noqa: E712
-        Transaction.is_gcb != True,       # noqa: E712
-        Transaction.gcb_tagged != True,   # noqa: E712
-        Transaction.is_for_others != True,  # noqa: E712
-        Transaction.action.in_(BUDGET_TYPES),
-    )
-    if year:
-        query = query.filter(Transaction.year == year)
-    if month:
-        query = query.filter(Transaction.month == month)
-    if start_date:
-        query = query.filter(Transaction.date >= datetime.strptime(start_date, "%Y-%m-%d"))
-    if end_date:
-        # Inclusive of entire day
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
-        query = query.filter(Transaction.date <= end_dt)
-
-    transactions = query.all()
-    split_txn_ids = [t.id for t in transactions if t.is_split]
-    splits_map: dict = {}
-    if split_txn_ids:
-        all_splits = db.query(TransactionSplit).filter(
-            TransactionSplit.parent_transaction_id.in_(split_txn_ids)
-        ).all()
-        for s in all_splits:
-            splits_map.setdefault(s.parent_transaction_id, []).append(s)
-
-    rows = []
-    total = 0.0
-    for t in transactions:
-        if t.is_gcb or t.gcb_tagged or t.is_for_others:
-            continue
-        if t.is_split:
-            for s in splits_map.get(t.id, []):
-                if s.is_gcb or s.is_for_others:
-                    continue
-                cat = s.category or t.category_final or 'Other'
-                if cat != category:
-                    continue
-                contrib = -s.amount if t.action == 'Expense' else s.amount
-                total += contrib
-                rows.append({
-                    "id": t.id, "date": str(t.date)[:10],
-                    "description": t.description_clean or t.description_raw,
-                    "action": t.action, "is_split": True,
-                    "split_description": s.description,
-                    "split_category": cat,
-                    "split_amount": s.amount, "contrib": round(contrib, 2),
-                })
-        else:
-            cat = t.category_final or 'Other'
-            if cat != category:
-                continue
-            contrib = -t.amount if t.action == 'Expense' else t.amount
-            total += contrib
-            rows.append({
-                "id": t.id, "date": str(t.date)[:10],
-                "description": t.description_clean or t.description_raw,
-                "action": t.action, "is_split": False,
-                "amount": t.amount, "contrib": round(contrib, 2),
-            })
-
-    rows.sort(key=lambda r: r["date"], reverse=True)
-    return {"category": category, "total": round(total, 2), "count": len(rows), "rows": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -6978,121 +6739,6 @@ async def list_rules(
     } for r in rules]
 
 
-def _reapply_rules(db: Session, force_unlock: bool = False,
-                    pattern: Optional[Union[str, List[str]]] = None,
-                    dry_run: bool = False) -> dict:
-    """
-    Re-run the categorization engine on transactions.
-
-    Normal mode (force_unlock=False):
-      - Only processes non-locked, non-manually-edited transactions.
-
-    Force mode (force_unlock=True):
-      - Also processes locked/manual transactions IF a rule now matches them.
-        Clears category_manual and is_locked so the rule takes over,
-        exactly as if the rule had been in place from the start.
-
-    pattern: when given (a string, or a list of strings), scopes BOTH
-        branches to transactions whose description_raw OR description_clean
-        contains at least one of the given substrings (case-insensitive),
-        instead of a full-table scan. Used when a single rule was just
-        created/edited — there's no reason to re-examine every transaction
-        in the database for a change that can only possibly affect rows
-        matching the new/changed pattern (pass both old and new pattern as a
-        list on update, so rows affected by either are reconsidered).
-        Checking both raw and clean descriptions (not raw alone) matters
-        because clean_description() can make text contiguous in the cleaned
-        form that wasn't contiguous in the original raw text.
-
-    dry_run: when True, computes and reports what would change without
-        writing anything (no attribute mutation, no db.commit()). Use this to
-        validate scoping/behavior before trusting it, or as a general safety
-        net given there's no separate test database.
-
-    Returns {'updated': N, 'total': M, 'unlocked': K}.
-    """
-    categorizer = CategorizationEngine(db)
-    patterns = [pattern] if isinstance(pattern, str) else (pattern or [])
-    patterns = [p for p in patterns if p]
-
-    def _scope(query):
-        if not patterns:
-            return query
-        clauses = [
-            (Transaction.description_raw.ilike(f"%{p}%")) | (Transaction.description_clean.ilike(f"%{p}%"))
-            for p in patterns
-        ]
-        combined = clauses[0]
-        for c in clauses[1:]:
-            combined = combined | c
-        return query.filter(combined)
-
-    # Always process unlocked, non-manual transactions
-    txns = _scope(db.query(Transaction).filter(
-        Transaction.is_locked == False,
-        Transaction.category_manual == None,
-    )).all()
-
-    # In force mode also check system-locked transactions (transfer corrections) for new
-    # rule matches.  Transactions where the user explicitly set category_manual are always
-    # respected — a new rule never clobbers a conscious user edit.
-    locked_txns = []
-    if force_unlock:
-        locked_txns = _scope(db.query(Transaction).filter(
-            Transaction.is_locked == True,
-            Transaction.category_manual == None,   # system-locked only, not user-manual edits
-        )).all()
-
-    updated = 0
-    unlocked = 0
-
-    for t in txns:
-        action, category, confidence, display_desc = categorizer.categorize(
-            t.description_raw, t.amount, t.merchant_name,
-            account_type=(t.account.account_type if t.account else ''),
-        )
-        desc_clean = display_desc or categorizer.clean_description(t.description_raw)
-        llm_category = category  # categorize() already clears this for Transfer
-        source = 'rule' if confidence >= 0.85 else 'fallback'
-        if (t.description_clean != desc_clean or
-                t.category_auto != llm_category or
-                t.action != action or
-                t.enrichment_source != source):
-            updated += 1
-            if not dry_run:
-                t.description_clean = desc_clean
-                t.category_auto     = llm_category
-                t.action            = action
-                t.category_confidence = confidence
-                t.enrichment_source   = source
-
-    for t in locked_txns:
-        matched_rule = categorizer.match_rule(t.description_raw, t.amount)
-        if not matched_rule:
-            continue  # Rule doesn't match — keep manual override intact
-        action, category, confidence, display_desc = categorizer.categorize(
-            t.description_raw, t.amount, t.merchant_name,
-            account_type=(t.account.account_type if t.account else ''),
-        )
-        desc_clean = display_desc or categorizer.clean_description(t.description_raw)
-        llm_category = category  # categorize() already clears this for Transfer
-        unlocked += 1
-        updated += 1
-        if not dry_run:
-            # Clear the manual override so the rule governs this transaction going forward
-            t.category_manual   = None
-            t.is_locked         = False
-            t.description_clean = desc_clean
-            t.category_auto     = llm_category
-            t.action            = action
-            t.category_confidence = confidence
-            t.enrichment_source   = 'rule'
-
-    if dry_run:
-        db.rollback()
-    else:
-        db.commit()
-    return {'updated': updated, 'total': len(txns) + len(locked_txns), 'unlocked': unlocked}
 
 
 @app.post("/api/rules/reapply")
@@ -7245,41 +6891,6 @@ async def delete_rule(rule_id: int, db: Session = Depends(get_db)):
 # Export
 # ---------------------------------------------------------------------------
 
-@app.get("/api/export/csv")
-async def export_csv(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    import pandas as pd
-    query = db.query(Transaction).join(Account)
-    if start_date:
-        query = query.filter(Transaction.date >= datetime.fromisoformat(start_date))
-    if end_date:
-        # Inclusive of entire day
-        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999)
-        query = query.filter(Transaction.date <= end_dt)
-
-    data = [
-        {
-            'Date': t.date.strftime('%Y-%m-%d'), 'Description': t.description_raw,
-            'Amount': t.amount, 'Action': t.action, 'Category': t.category_final,
-            'Account': t.account.account_name, 'GCB': t.gcb_tagged,
-            'For Others': t.is_for_others,
-            'Year': t.year, 'Month': t.month,
-        }
-        for t in query.order_by(Transaction.date).all()
-    ]
-
-    output = io.StringIO()
-    import pandas as pd
-    pd.DataFrame(data).to_csv(output, index=False)
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=transactions.csv"},
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -8730,499 +8341,42 @@ async def get_net_worth_timeline(months: int = 24, db: Session = Depends(get_db)
 # Loans (Section 1)
 # ---------------------------------------------------------------------------
 
-class LoanCreate(BaseModel):
-    """Request body for creating/updating a loan."""
-    lender: str
-    loan_type: str  # mortgage, auto, student, personal, other
-    original_principal: float
-    current_balance: Optional[float] = None
-    balance_date: Optional[str] = None              # YYYY-MM-DD — when current_balance was recorded
-    remaining_term_months: Optional[int] = None     # Remaining months as of balance_date
-    interest_rate: Optional[float] = None           # Annual % (e.g. 6.5)
-    term_months: Optional[int] = None               # Original total term
-    monthly_payment: Optional[float] = None         # Total PITI payment
-    property_tax_monthly: Optional[float] = None    # Escrow: property tax portion
-    insurance_monthly: Optional[float] = None       # Escrow: insurance portion
-    payment_account_id: Optional[int] = None        # Checking account that makes the payment
-    payment_due_day: Optional[int] = None           # Day of month (1-31)
-    start_date: Optional[str] = None                # YYYY-MM-DD
-    maturity_date: Optional[str] = None             # YYYY-MM-DD
-    account_id: Optional[int] = None                # Linked liability account
-    notes: Optional[str] = None
-
-
-class CashFlowOverlayCreate(BaseModel):
-    description: str
-    amount: float                          # positive = inflow, negative = outflow
-    flow_date: str                         # YYYY-MM-DD
-    source: str = 'manual'                 # manual | cc_payment | loan_payment
-    account_id: Optional[int] = None
-    is_recurring: bool = False
-    recurrence_day: Optional[int] = None   # 1–31
-
-
-class CashFlowOverlayUpdate(BaseModel):
-    description: Optional[str] = None
-    amount: Optional[float] = None
-    flow_date: Optional[str] = None
-    source: Optional[str] = None
-    account_id: Optional[int] = None
-    is_recurring: Optional[bool] = None
-    recurrence_day: Optional[int] = None
-    is_active: Optional[bool] = None
 
 
 
 
 
 
-@app.get("/api/loans")
-async def list_loans(db: Session = Depends(get_db)):
-    """List all active loans."""
-    loans = db.query(Loan).filter_by(is_active=True).order_by(Loan.lender).all()
-    return [serialize_loan(l) for l in loans]
 
 
-@app.get("/api/loans/{loan_id}")
-async def get_loan(loan_id: int, db: Session = Depends(get_db)):
-    """Get a single loan with linked account balance info."""
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    result = serialize_loan(loan)
-    # Include linked account balance if available
-    if loan.account_id:
-        result['account_balance'] = get_account_balance(db, loan.account_id)
-        account = db.query(Account).filter_by(id=loan.account_id).first()
-        result['account_name'] = account.account_name if account else None
-    return result
 
 
-@app.post("/api/loans")
-async def create_loan(data: LoanCreate, db: Session = Depends(get_db)):
-    """Create a new loan."""
-    loan = Loan(
-        lender=data.lender,
-        loan_type=data.loan_type,
-        original_principal=data.original_principal,
-        current_balance=data.current_balance,
-        balance_date=datetime.strptime(data.balance_date, "%Y-%m-%d") if data.balance_date else None,
-        remaining_term_months=data.remaining_term_months,
-        interest_rate=data.interest_rate,
-        term_months=data.term_months,
-        monthly_payment=data.monthly_payment,
-        property_tax_monthly=data.property_tax_monthly,
-        insurance_monthly=data.insurance_monthly,
-        payment_account_id=data.payment_account_id,
-        payment_due_day=data.payment_due_day,
-        start_date=datetime.strptime(data.start_date, "%Y-%m-%d") if data.start_date else None,
-        maturity_date=datetime.strptime(data.maturity_date, "%Y-%m-%d") if data.maturity_date else None,
-        account_id=data.account_id,
-        notes=data.notes,
-        is_active=True,
-    )
-    db.add(loan)
-    db.commit()
-    db.refresh(loan)
-    return {'id': loan.id, 'message': 'Loan created'}
 
 
-@app.patch("/api/loans/{loan_id}")
-async def update_loan(loan_id: int, updates: dict, db: Session = Depends(get_db)):
-    """Update loan fields."""
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    _date_fields = ('start_date', 'maturity_date', 'balance_date')
-    allowed = ['lender', 'loan_type', 'original_principal', 'current_balance',
-               'balance_date', 'remaining_term_months',
-               'interest_rate', 'term_months', 'monthly_payment',
-               'property_tax_monthly', 'insurance_monthly',
-               'payment_account_id', 'payment_due_day',
-               'start_date', 'maturity_date', 'account_id', 'notes', 'is_active']
-    _int_fields = ('payment_account_id', 'payment_due_day', 'remaining_term_months',
-                   'term_months', 'account_id')
-    _float_fields = ('original_principal', 'current_balance', 'interest_rate',
-                      'monthly_payment', 'property_tax_monthly', 'insurance_monthly')
-    for k, v in updates.items():
-        if k in allowed:
-            if k in _date_fields:
-                setattr(loan, k, datetime.strptime(v, "%Y-%m-%d") if v else None)
-            elif k in _int_fields:
-                setattr(loan, k, int(v) if v not in (None, '', 'null') else None)
-            elif k in _float_fields:
-                setattr(loan, k, float(v) if v not in (None, '', 'null') else None)
-            else:
-                setattr(loan, k, v)
-    loan.updated_at = datetime.utcnow()
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"Failed to save loan: {e}")
-    return {'message': 'Loan updated'}
 
 
-@app.delete("/api/loans/{loan_id}")
-async def delete_loan(loan_id: int, db: Session = Depends(get_db)):
-    """Deactivate a loan (soft delete)."""
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    loan.is_active = False
-    loan.updated_at = datetime.utcnow()
-    db.commit()
-    return {'message': 'Loan deactivated'}
 
 
-@app.get("/api/loans/{loan_id}/compute-split")
-async def compute_loan_split(loan_id: int, db: Session = Depends(get_db)):
-    """
-    Compute the P/I/Tax/Insurance split for the next payment on this loan,
-    based on current_balance, interest_rate, monthly_payment, property_tax_monthly,
-    and insurance_monthly. Returns a preview the user can confirm before linking.
-    """
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    if not loan.monthly_payment:
-        raise HTTPException(status_code=400, detail="monthly_payment not set on loan")
-    split = _compute_pmt_split(
-        loan.current_balance or 0,
-        loan.interest_rate or 0,
-        loan.monthly_payment,
-        loan.property_tax_monthly or 0,
-        loan.insurance_monthly or 0,
-    )
-    return {**split, 'current_balance': loan.current_balance,
-            'balance_after': round((loan.current_balance or 0) - split['principal'], 2)}
 
 
-@app.get("/api/loans/{loan_id}/linked-transactions")
-async def get_linked_transactions(loan_id: int, db: Session = Depends(get_db)):
-    """Return all transactions linked to this loan, with their split breakdown."""
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    txns = db.query(Transaction).filter_by(loan_id=loan_id).order_by(Transaction.date.desc()).all()
-    result = []
-    for t in txns:
-        splits = db.query(TransactionSplit).filter_by(parent_transaction_id=t.id).all()
-        result.append({
-            'id': t.id,
-            'date': str(t.date),
-            'description': t.description_clean or t.description_raw,
-            'amount': t.amount,
-            'splits': [{'description': s.description, 'amount': s.amount, 'category': s.category} for s in splits],
-        })
-    return result
 
 
-@app.get("/api/loans/{loan_id}/candidate-transactions")
-async def get_loan_candidate_transactions(
-    loan_id: int, limit: int = 6, db: Session = Depends(get_db)
-):
-    """
-    Return recent transactions from the loan's payment_account that are
-    close in amount to monthly_payment and not yet linked to any loan.
-    These are candidates for the user to link as a loan payment.
-    """
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    if not loan.payment_account_id or not loan.monthly_payment:
-        return []
-
-    target = loan.monthly_payment
-    tolerance = max(target * 0.15, 50.0)  # ±15% or $50, whichever is larger
-
-    # Transactions from the payment account matching the payment amount
-    # In Plaid sign convention stored: outflow = negative for liabilities... but checking
-    # account outflows can be either sign depending on setup. We look for amount near ±target.
-    txns = (
-        db.query(Transaction)
-        .filter(
-            Transaction.account_id == loan.payment_account_id,
-            Transaction.loan_id.is_(None),
-            Transaction.amount.between(-(target + tolerance), -(target - tolerance)),
-        )
-        .order_by(Transaction.date.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            'id': t.id,
-            'date': t.date.strftime('%Y-%m-%d'),
-            'amount': t.amount,
-            'description_raw': t.description_raw,
-            'description_clean': t.description_clean,
-            'action': t.action,
-            'is_split': t.is_split,
-        }
-        for t in txns
-    ]
 
 
-@app.post("/api/loans/{loan_id}/link-transaction")
-async def link_loan_transaction(
-    loan_id: int, body: dict, db: Session = Depends(get_db)
-):
-    """
-    Link an existing checking-account transaction to this loan as a payment.
-
-    Steps:
-    1. Compute P/I/Tax/Insurance split from current loan state
-    2. Delete any existing splits on the transaction
-    3. Create new TransactionSplit rows for each component
-    4. Mark transaction is_split=True, loan_id=loan_id, action='Transfer'
-    5. Subtract principal from loan.current_balance
-    6. Decrement loan.remaining_term_months by 1
-    7. Update loan.balance_date to this transaction's date
-    """
-    transaction_id = body.get('transaction_id')
-    if not transaction_id:
-        raise HTTPException(status_code=400, detail="transaction_id required")
-
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-
-    txn = db.query(Transaction).filter_by(id=transaction_id).first()
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    split = _compute_pmt_split(
-        loan.current_balance or 0,
-        loan.interest_rate or 0,
-        loan.monthly_payment or abs(txn.amount),
-        loan.property_tax_monthly or 0,
-        loan.insurance_monthly or 0,
-    )
-
-    # Remove any existing splits on this transaction
-    db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete()
-
-    # Create split records
-    components = [
-        (split['principal'],    'Transfer',  '',                 'Mortgage Principal'),
-        (split['interest'],     'Expense',   'Fees and Interest','Mortgage Interest'),
-    ]
-    if split['property_tax'] > 0:
-        components.append((split['property_tax'], 'Expense', 'Housing', 'Property Tax'))
-    if split['insurance'] > 0:
-        components.append((split['insurance'], 'Expense', 'Insurance', "Homeowner's Insurance"))
-
-    for amt, action, category, desc in components:
-        if amt <= 0:
-            continue
-        db.add(TransactionSplit(
-            parent_transaction_id=transaction_id,
-            amount=amt,
-            description=desc,
-            category=category,
-            action=action,
-        ))
-
-    # Update the parent transaction
-    txn.is_split = True
-    txn.loan_id = loan_id
-    txn.action = 'Transfer'
-    txn.description_clean = f'{loan.lender} payment'
-    txn.needs_review = False
-    txn.is_locked = True
-    _lock_points_for_transaction(db, txn)
-
-    # Update the loan
-    loan.current_balance = round((loan.current_balance or 0) - split['principal'], 2)
-    loan.balance_date = txn.date
-    if loan.remaining_term_months and loan.remaining_term_months > 0:
-        loan.remaining_term_months -= 1
-    loan.updated_at = datetime.utcnow()
-
-    db.commit()
-    return {
-        'message': 'Transaction linked',
-        'split': split,
-        'new_balance': loan.current_balance,
-        'remaining_term_months': loan.remaining_term_months,
-    }
 
 
-@app.delete("/api/loans/{loan_id}/unlink-transaction/{transaction_id}")
-async def unlink_loan_transaction(
-    loan_id: int, transaction_id: int, db: Session = Depends(get_db)
-):
-    """Reverse a loan payment link: restore splits, unlink, and add principal back to balance."""
-    loan = db.query(Loan).filter_by(id=loan_id).first()
-    txn = db.query(Transaction).filter_by(id=transaction_id).first()
-    if not loan or not txn:
-        raise HTTPException(status_code=404, detail="Not found")
 
-    # Find principal split to reverse the balance update
-    principal_split = (
-        db.query(TransactionSplit)
-        .filter_by(parent_transaction_id=transaction_id, action='Transfer')
-        .first()
-    )
-    if principal_split:
-        loan.current_balance = round((loan.current_balance or 0) + principal_split.amount, 2)
-        if loan.remaining_term_months is not None:
-            loan.remaining_term_months += 1
-        loan.updated_at = datetime.utcnow()
 
-    db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete()
-    txn.is_split = False
-    txn.loan_id = None
-    txn.is_locked = False
-    txn.needs_review = True
-    db.commit()
-    return {'message': 'Transaction unlinked'}
+
+
 
 
 # ---------------------------------------------------------------------------
 # Cash Flow (Section 2)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/cash-flow")
-async def get_cash_flow(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    """
-    Compute cash flow for depository (cash) accounts only:
-    checking, savings, money market, cd, cash.
-    Reflects true cash movement: income, expenses paid from cash,
-    liability payments, and inter-account transfers.
-    Returns categorised inflows/outflows with CC payment and loan breakdowns.
-    """
-    # Default to current month
-    if not start_date:
-        now = datetime.utcnow()
-        start_date = f"{now.year}-{now.month:02d}-01"
-    if not end_date:
-        end_date = todayStr_py()
-
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-
-    # Cash accounts = checking, savings, money market, cd, cash.
-    # Matched case-insensitively: account_type is stored capitalized
-    # ('Checking', 'Savings', 'HSA', 'FSA'), so a plain .in_() against these
-    # lowercase literals matched *nothing* — cash_id_list came back empty and
-    # the endpoint short-circuited to `empty`, which is why every range
-    # reported $0 income/expenses with transaction_count 0 (BACKLOG B5).
-    from sqlalchemy import func as _func
-    cash_types = {'checking', 'savings', 'money market', 'cd', 'cash', 'hsa', 'fsa'}
-    cash_accounts = db.query(Account).filter(
-        Account.is_active == True,
-        _func.lower(Account.account_type).in_(cash_types),
-    ).all()
-    cash_ids = set(a.id for a in cash_accounts)
-    cash_id_list = list(cash_ids)
-
-    empty = {
-        'start_date': start_date, 'end_date': end_date,
-        'inflows': 0, 'outflows': 0, 'net': 0,
-        'income': 0, 'expenses': 0,
-        'cc_payments': 0, 'loan_repayments': 0, 'transfers_between': 0,
-        'by_inflow': {}, 'by_outflow': {},
-        'transaction_count': 0,
-    }
-    if not cash_id_list:
-        return empty
-
-    txns = db.query(Transaction).filter(
-        Transaction.account_id.in_(cash_id_list),
-        Transaction.date >= start_dt,
-        Transaction.date <= end_dt,
-        Transaction.is_excluded != True,
-        Transaction.is_gcb != True,
-    ).order_by(Transaction.date.desc()).all()
-
-    inflows = 0.0
-    outflows = 0.0
-    income_total = 0.0
-    expense_total = 0.0
-    cc_payments = 0.0
-    loan_repayments = 0.0
-    transfers_between = 0.0  # net-zero transfers between own cash accounts
-    by_inflow: dict[str, float] = {}   # category/description → positive amount
-    by_outflow: dict[str, float] = {}  # category/description → positive amount
-
-    # Pre-load all account IDs to detect internal transfers
-    all_account_ids = set(a.id for a in db.query(Account).filter(
-        Account.is_active == True
-    ).all())
-
-    # CC and Loan keywords for detection
-    _CC_KW = _CC_PAYMENT_KW
-    _LOAN_KW = ('LOAN', 'MORTGAGE', 'STUDENT', 'SLS SERVICING', 'FREEDOM MORTGAGE',
-                'LAKEVIEW', 'DOVENMUEHLE', 'ESCROW')
-
-    for t in txns:
-        desc_upper = (t.description_raw or '').upper()
-        action = t.action or ''
-        cat = t.category_final or 'Other'
-
-        if t.amount > 0:
-            # Inflow: income, refunds, or incoming transfers
-            inflows += t.amount
-            if action == 'Income':
-                income_total += t.amount
-                key = cat if cat != 'Other' else 'Other Income'
-                by_inflow[key] = by_inflow.get(key, 0) + t.amount
-            elif action == 'Transfer':
-                # Transfer in — could be from own account or external
-                by_inflow['Transfers In'] = by_inflow.get('Transfers In', 0) + t.amount
-            else:
-                key = f"Refund / {cat}" if cat != 'Other' else 'Refunds'
-                by_inflow[key] = by_inflow.get(key, 0) + t.amount
-        else:
-            amt = abs(t.amount)
-            outflows += t.amount  # keep negative
-
-            if action == 'Transfer':
-                # Detect CC payments vs loan payments vs internal transfers
-                if any(kw in desc_upper for kw in _CC_KW):
-                    cc_payments += amt
-                    by_outflow['Credit Card Payments'] = by_outflow.get('Credit Card Payments', 0) + amt
-                elif any(kw in desc_upper for kw in _LOAN_KW):
-                    loan_repayments += amt
-                    by_outflow['Loan / Mortgage'] = by_outflow.get('Loan / Mortgage', 0) + amt
-                else:
-                    by_outflow['Other Transfers'] = by_outflow.get('Other Transfers', 0) + amt
-            elif action == 'Expense':
-                expense_total += amt
-                by_outflow[cat] = by_outflow.get(cat, 0) + amt
-            else:
-                by_outflow['Other'] = by_outflow.get('Other', 0) + amt
-
-    # Sort breakdowns by amount descending
-    by_inflow_sorted = dict(sorted(by_inflow.items(), key=lambda x: -x[1]))
-    by_outflow_sorted = dict(sorted(by_outflow.items(), key=lambda x: -x[1]))
-
-    return {
-        'start_date': start_date,
-        'end_date': end_date,
-        'inflows': round(inflows, 2),
-        'outflows': round(outflows, 2),
-        'net': round(inflows + outflows, 2),
-        'income': round(income_total, 2),
-        'expenses': round(expense_total, 2),
-        'cc_payments': round(cc_payments, 2),
-        'loan_repayments': round(loan_repayments, 2),
-        'transfers_between': round(transfers_between, 2),
-        'by_inflow': {k: round(v, 2) for k, v in by_inflow_sorted.items()},
-        'by_outflow': {k: round(v, 2) for k, v in by_outflow_sorted.items()},
-        'transaction_count': len(txns),
-    }
 
 
-def todayStr_py():
-    """Return today's date as YYYY-MM-DD string."""
-    return datetime.utcnow().strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------
@@ -9232,892 +8386,98 @@ def todayStr_py():
 
 
 
-@app.get("/api/cash-flow-overlays")
-async def list_cash_flow_overlays(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    """Return all active cash flow overlays, optionally filtered by date range."""
-    from sqlalchemy import Date as SA_Date
-    q = db.query(CashFlowOverlay).filter(CashFlowOverlay.is_active == True)
-    if start_date:
-        q = q.filter(CashFlowOverlay.flow_date >= start_date)
-    if end_date:
-        q = q.filter(CashFlowOverlay.flow_date <= end_date)
-    overlays = q.order_by(CashFlowOverlay.flow_date, CashFlowOverlay.id).all()
-    return [_overlay_to_dict(o) for o in overlays]
 
 
-@app.post("/api/cash-flow-overlays")
-async def create_cash_flow_overlay(
-    payload: CashFlowOverlayCreate,
-    db: Session = Depends(get_db),
-):
-    from datetime import date as _date
-    o = CashFlowOverlay(
-        description    = payload.description,
-        amount         = payload.amount,
-        flow_date      = _date.fromisoformat(payload.flow_date),
-        source         = payload.source or 'manual',
-        account_id     = payload.account_id,
-        is_recurring   = payload.is_recurring,
-        recurrence_day = payload.recurrence_day,
-        is_active      = True,
-    )
-    db.add(o)
-    db.commit()
-    db.refresh(o)
-    return _overlay_to_dict(o)
 
 
-@app.patch("/api/cash-flow-overlays/{overlay_id}")
-async def update_cash_flow_overlay(
-    overlay_id: int,
-    payload: CashFlowOverlayUpdate,
-    db: Session = Depends(get_db),
-):
-    from datetime import date as _date
-    o = db.query(CashFlowOverlay).filter_by(id=overlay_id).first()
-    if not o:
-        raise HTTPException(status_code=404, detail="Overlay not found")
-    if payload.description  is not None: o.description    = payload.description
-    if payload.amount        is not None: o.amount         = payload.amount
-    if payload.flow_date     is not None: o.flow_date      = _date.fromisoformat(payload.flow_date)
-    if payload.source        is not None: o.source         = payload.source
-    if payload.account_id    is not None: o.account_id     = payload.account_id
-    if payload.is_recurring  is not None: o.is_recurring   = payload.is_recurring
-    if payload.recurrence_day is not None: o.recurrence_day = payload.recurrence_day
-    if payload.is_active     is not None: o.is_active      = payload.is_active
-    o.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(o)
-    return _overlay_to_dict(o)
 
 
-@app.delete("/api/cash-flow-overlays/{overlay_id}")
-async def delete_cash_flow_overlay(
-    overlay_id: int,
-    db: Session = Depends(get_db),
-):
-    o = db.query(CashFlowOverlay).filter_by(id=overlay_id).first()
-    if not o:
-        raise HTTPException(status_code=404, detail="Overlay not found")
-    o.is_active = False
-    db.commit()
-    return {"deleted": overlay_id}
 
 
-@app.post("/api/cash-flow-overlays/generate")
-async def generate_cash_flow_overlays(db: Session = Depends(get_db)):
-    """
-    Auto-generate ONE upcoming overlay entry per card/loan:
-    - Credit cards: uses balance at the most recent statement close date as
-      the payment amount, scheduled on the next upcoming payment_due_day.
-      Close-date logic: if today.day > close_day → close = this month's close_day,
-      else → close = last month's close_day.
-    - Loans: fixed monthly_payment scheduled on next upcoming payment_due_day.
-    Skips entries that already exist (same source + description + flow_date).
-    """
-    from datetime import date as _date
-    import calendar
-
-    today = _date.today()
-    created = 0
-    skipped = 0
-
-    # Build set of existing (source, description, flow_date ISO) to avoid duplicates
-    existing = db.query(CashFlowOverlay).filter(
-        CashFlowOverlay.is_active == True,
-        CashFlowOverlay.source.in_(['cc_payment', 'loan_payment']),
-    ).all()
-    existing_keys = {
-        (o.source, o.description, o.flow_date.isoformat())
-        for o in existing if o.flow_date
-    }
-
-    def _safe_date(y, m, day):
-        last = calendar.monthrange(y, m)[1]
-        return _date(y, m, min(day, last))
-
-    def _next_due(due_day: int) -> _date:
-        """Return the next upcoming date matching due_day (today or later)."""
-        this_month = _safe_date(today.year, today.month, due_day)
-        if this_month >= today:
-            return this_month
-        # Move to next month
-        nm = today.month + 1 if today.month < 12 else 1
-        ny = today.year if today.month < 12 else today.year + 1
-        return _safe_date(ny, nm, due_day)
-
-    # ── Credit cards: ONE upcoming payment per card ────────────────────────
-    cards = db.query(Card).filter(
-        Card.is_active == True,
-        Card.account_id != None,
-        Card.payment_account_id != None,
-        Card.payment_due_day != None,
-    ).all()
-
-    for card in cards:
-        desc = f"{card.card_name or 'Card'} Payment"
-        close_day = card.statement_close_day or 25  # fallback if not configured
-
-        # Most recent statement close date
-        if today.day > close_day:
-            close_date = _safe_date(today.year, today.month, close_day)
-        else:
-            pm = today.month - 1 or 12
-            py = today.year if today.month > 1 else today.year - 1
-            close_date = _safe_date(py, pm, close_day)
-
-        balance_at_close = get_account_balance(
-            db, card.account_id,
-            as_of_date=datetime.combine(close_date, datetime.max.time()),
-        )
-        if balance_at_close >= -1.0:       # no meaningful balance, skip
-            continue
-        payment_amount = -abs(balance_at_close)  # outflow → negative
-
-        due = _next_due(card.payment_due_day)
-        key = ('cc_payment', desc, due.isoformat())
-        if key in existing_keys:
-            skipped += 1
-            continue
-        db.add(CashFlowOverlay(
-            description = desc,
-            amount      = payment_amount,
-            flow_date   = due,
-            source      = 'cc_payment',
-            account_id  = card.payment_account_id,
-            is_active   = True,
-        ))
-        existing_keys.add(key)
-        created += 1
-
-    # ── Loans: ONE upcoming payment per loan ──────────────────────────────
-    loans = db.query(Loan).filter(
-        Loan.is_active == True,
-        Loan.payment_account_id != None,
-        Loan.payment_due_day != None,
-        Loan.monthly_payment != None,
-    ).all()
-
-    for loan in loans:
-        desc = f"{loan.lender} Payment"
-        payment_amount = -(loan.monthly_payment or 0)  # outflow → negative
-
-        due = _next_due(loan.payment_due_day)
-        key = ('loan_payment', desc, due.isoformat())
-        if key in existing_keys:
-            skipped += 1
-            continue
-        db.add(CashFlowOverlay(
-            description = desc,
-            amount      = payment_amount,
-            flow_date   = due,
-            source      = 'loan_payment',
-            account_id  = loan.payment_account_id,
-            is_active   = True,
-        ))
-        existing_keys.add(key)
-        created += 1
-
-    db.commit()
-    return {"created": created, "skipped": skipped}
 
 
 # Salary Payments
 # ---------------------------------------------------------------------------
 
-class SalaryAllocationIn(BaseModel):
-    account_id: int
-    amount: float
-
-class SalaryPaymentCreate(BaseModel):
-    payment_date: str          # YYYY-MM-DD
-    description: str
-    person: str
-    allocations: List[SalaryAllocationIn]
-
-class SalaryPaymentUpdate(BaseModel):
-    payment_date: Optional[str] = None
-    description:  Optional[str] = None
-    person:       Optional[str] = None
-    allocations:  Optional[List[SalaryAllocationIn]] = None
 
 
 
 
-@app.get("/api/salary-payments")
-async def list_salary_payments(db: Session = Depends(get_db)):
-    """Return all active salary payments with their per-account allocations."""
-    rows = (
-        db.query(SalaryPayment)
-        .filter(SalaryPayment.is_active == True)
-        .order_by(SalaryPayment.payment_date.desc(), SalaryPayment.id)
-        .all()
-    )
-    return [_salary_to_dict(r) for r in rows]
 
 
-@app.post("/api/salary-payments")
-async def create_salary_payment(body: SalaryPaymentCreate, db: Session = Depends(get_db)):
-    from datetime import date as _date
-    sp = SalaryPayment(
-        payment_date = _date.fromisoformat(body.payment_date),
-        description  = body.description,
-        person       = body.person,
-        is_active    = True,
-    )
-    db.add(sp)
-    db.flush()   # get sp.id before adding child rows
-    for a in body.allocations:
-        if a.amount and a.amount != 0:
-            db.add(SalaryAllocation(
-                salary_payment_id = sp.id,
-                account_id        = a.account_id,
-                amount            = abs(a.amount),   # always stored positive
-            ))
-    db.commit()
-    db.refresh(sp)
-    return _salary_to_dict(sp)
 
 
-@app.patch("/api/salary-payments/{payment_id}")
-async def update_salary_payment(
-    payment_id: int, body: SalaryPaymentUpdate, db: Session = Depends(get_db)
-):
-    from datetime import date as _date
-    sp = db.query(SalaryPayment).filter_by(id=payment_id).first()
-    if not sp:
-        raise HTTPException(404, "Salary payment not found")
-    if body.payment_date is not None:
-        sp.payment_date = _date.fromisoformat(body.payment_date)
-    if body.description is not None:
-        sp.description = body.description
-    if body.person is not None:
-        sp.person = body.person
-    if body.allocations is not None:
-        db.query(SalaryAllocation).filter_by(salary_payment_id=sp.id).delete()
-        for a in body.allocations:
-            if a.amount and a.amount != 0:
-                db.add(SalaryAllocation(
-                    salary_payment_id = sp.id,
-                    account_id        = a.account_id,
-                    amount            = abs(a.amount),
-                ))
-    db.commit()
-    db.refresh(sp)
-    return _salary_to_dict(sp)
 
 
-@app.delete("/api/salary-payments/{payment_id}")
-async def delete_salary_payment(payment_id: int, db: Session = Depends(get_db)):
-    sp = db.query(SalaryPayment).filter_by(id=payment_id).first()
-    if not sp:
-        raise HTTPException(404, "Salary payment not found")
-    db.delete(sp)
-    db.commit()
-    return {"deleted": payment_id}
+
+
 
 
 # Daily Balances
 # ---------------------------------------------------------------------------
 
-@app.get("/api/daily-balances")
-async def get_daily_balances(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    client_today: Optional[str] = None,   # client's local YYYY-MM-DD (avoids UTC drift)
-    db: Session = Depends(get_db),
-):
-    """
-    Daily end-of-day balance table for all active accounts.
-
-    Returns accounts grouped by type (Checking & Savings, Investments,
-    Other Assets, Credit Cards, Loans, Other Liabilities) with a balance
-    value for each day in the requested range.
-
-    Future balance projections are driven exclusively by active CashFlowOverlay
-    entries — auto CC/loan projections have been replaced by explicit user-managed
-    overlays (created manually or via POST /api/cash-flow-overlays/generate).
-    """
-    from datetime import date, timedelta
-    import calendar as _cal
-    from sqlalchemy import func
-
-    # Prefer the client's local date — avoids UTC midnight rollover shifting "today"
-    try:
-        today = date.fromisoformat(client_today) if client_today else datetime.utcnow().date()
-    except ValueError:
-        today = datetime.utcnow().date()
-
-    if not start_date:
-        start_date = f"{today.year}-{today.month:02d}-01"
-    if not end_date:
-        last = _cal.monthrange(today.year, today.month)[1]
-        end_date = f"{today.year}-{today.month:02d}-{last:02d}"
-
-    start_dt = date.fromisoformat(start_date)
-    end_dt = date.fromisoformat(end_date)
-    num_days = (end_dt - start_dt).days + 1
-    dates = [(start_dt + timedelta(days=i)).isoformat() for i in range(num_days)]
-    dates_set = set(dates)
-
-    accounts = db.query(Account).filter(Account.is_active == True).all()
-    if not accounts:
-        return {"start_date": start_date, "end_date": end_date,
-                "today": today.isoformat(), "dates": dates, "groups": []}
-
-    # ── Per-account daily balances ─────────────────────────────────────────
-    acct_balances = {}  # {account_id: [float per day]}
-
-    for acct in accounts:
-        anchor_balance = acct.starting_balance or 0.0
-        anchor_date = acct.start_date.date() if acct.start_date else date(2000, 1, 1)
-        range_start_dt = datetime.combine(start_dt, datetime.min.time())
-        range_end_dt = datetime.combine(end_dt, datetime.max.time())
-        # Use end-of-day for anchor so transactions ON anchor_date are considered
-        # "already in the Plaid snapshot" (anchor_balance includes them).
-        anchor_dt = datetime.combine(anchor_date, datetime.max.time())
-
-        # Compute balance at EOD(range_start - 1) using the anchor.
-        #
-        # Anchor model (start_date is set):
-        #   anchor_balance = Plaid balance AT anchor_dt (end of anchor day).
-        #   If anchor is WITHIN or AFTER the display range: go backward —
-        #     subtract transactions from range_start through anchor_dt
-        #     to get the balance just before range_start.
-        #   If anchor is BEFORE the display range: go forward —
-        #     add transactions from anchor_dt up to (but not including) range_start.
-        #
-        # Legacy model (start_date is None, anchor_dt = year 2000):
-        #   pre_sum forward from year 2000 to range_start (same as before).
-        if anchor_dt >= range_start_dt:
-            # Anchor within or after range: walk backward to range_start - 1
-            pre_sum = -(
-                db.query(func.sum(Transaction.amount))
-                .filter(
-                    Transaction.account_id == acct.id,
-                    Transaction.date >= range_start_dt,
-                    Transaction.date <= anchor_dt,
-                )
-                .scalar() or 0.0
-            )
-        else:
-            # Anchor before range: walk forward to range_start - 1
-            pre_sum = (
-                db.query(func.sum(Transaction.amount))
-                .filter(
-                    Transaction.account_id == acct.id,
-                    Transaction.date >= anchor_dt,
-                    Transaction.date < range_start_dt,
-                )
-                .scalar() or 0.0
-            )
-
-        # Fetch ALL transactions within the range (same reasoning).
-        txns = (
-            db.query(Transaction.date, Transaction.amount)
-            .filter(
-                Transaction.account_id == acct.id,
-                Transaction.date >= range_start_dt,
-                Transaction.date <= range_end_dt,
-            )
-            .all()
-        )
-
-        # Group by date string (EOD balance: sum all txns on that day)
-        daily_delta: dict[str, float] = {}
-        for txn_date, txn_amount in txns:
-            d_obj = txn_date.date() if hasattr(txn_date, 'date') else txn_date
-            d_str = d_obj.isoformat()
-            daily_delta[d_str] = daily_delta.get(d_str, 0.0) + txn_amount
-
-        running = anchor_balance + pre_sum
-        daily: list[float] = []
-        for d in dates:
-            running += daily_delta.get(d, 0.0)
-            daily.append(round(running, 2))
-
-        acct_balances[acct.id] = daily
-
-    # ── Snapshot raw balances (before any projections) ───────────────────
-    # Stored per-account so the balance-detail modal can show "system balance"
-    # (what the balance would be without any overlay / salary projections).
-    raw_balances: dict[int, list] = {aid: list(bal) for aid, bal in acct_balances.items()}
-
-    # ── Projection step: CashFlowOverlays + SalaryAllocations ────────────
-    # Both types are applied as step-changes: the amount is added to every day
-    # from flow_date forward.  projection_details records per-account per-date
-    # entries so the frontend modal can break down each projected cell.
-    projected_dates:    dict[int, set]  = {}   # {account_id: {date_str, …}}
-    projection_details: dict[int, dict] = {}   # {account_id: {date_str: [entries]}}
-
-    def _apply_projection(acct_id: int, pdate_str: str, entry: dict):
-        date_idx = dates.index(pdate_str)
-        for i in range(date_idx, num_days):
-            acct_balances[acct_id][i] = round(acct_balances[acct_id][i] + entry["amount"], 2)
-        projected_dates.setdefault(acct_id, set()).add(pdate_str)
-        projection_details.setdefault(acct_id, {}).setdefault(pdate_str, []).append(entry)
-
-    # CashFlowOverlay entries
-    overlays = (
-        db.query(CashFlowOverlay)
-        .filter(
-            CashFlowOverlay.is_active == True,
-            CashFlowOverlay.flow_date >= today,
-        )
-        .all()
-    )
-    for ov in overlays:
-        if not ov.account_id or ov.account_id not in acct_balances:
-            continue
-        pdate_str = ov.flow_date.isoformat()
-        if pdate_str not in dates_set:
-            continue
-        _apply_projection(ov.account_id, pdate_str, {
-            "description": ov.description,
-            "amount":      ov.amount,
-            "source":      ov.source,
-        })
-
-    # SalaryAllocation entries (future pay dates only)
-    from sqlalchemy.orm import joinedload as _jl
-    salary_allocs = (
-        db.query(SalaryAllocation)
-        .options(_jl(SalaryAllocation.salary_payment))
-        .join(SalaryPayment)
-        .filter(
-            SalaryPayment.is_active   == True,
-            SalaryPayment.payment_date >= today,
-        )
-        .all()
-    )
-    for alloc in salary_allocs:
-        if alloc.account_id not in acct_balances:
-            continue
-        pdate_str = alloc.salary_payment.payment_date.isoformat()
-        if pdate_str not in dates_set:
-            continue
-        desc = f"{alloc.salary_payment.description} ({alloc.salary_payment.person})"
-        _apply_projection(alloc.account_id, pdate_str, {
-            "description": desc,
-            "amount":      alloc.amount,   # always positive
-            "source":      "salary",
-        })
-
-    # ── Group by account type ─────────────────────────────────────────────
-    GROUP_ORDER = [
-        ("Checking & Savings", {"Checking", "Savings", "checking", "savings",
-                                 "money market", "Money Market", "cd", "CD",
-                                 "HSA", "hsa", "FSA", "fsa"}),
-        ("Investments",        {"Brokerage", "Investment", "brokerage", "investment",
-                                 "401k", "401K", "ira", "IRA"}),
-        ("Other Assets",       {"vehicle", "Vehicle", "real_estate", "business_owned", "Other"}),
-        ("Credit Cards",       {"Credit Card", "credit card", "credit"}),
-        ("Loans",              {"Loan", "loan", "mortgage", "Mortgage", "student", "auto"}),
-        ("Other Liabilities",  set()),
-    ]
-
-    def _get_group(acct_type: str) -> str:
-        t = (acct_type or 'other').strip()
-        t_lower = t.lower()
-        for grp_name, types in GROUP_ORDER:
-            if t in types or t_lower in {x.lower() for x in types}:
-                return grp_name
-        flags = classify_account(t)
-        return "Other Liabilities" if flags['is_liability'] else "Other Assets"
-
-    groups_map: dict[str, list] = {grp: [] for grp, _ in GROUP_ORDER}
-
-    for acct in accounts:
-        grp = _get_group(acct.account_type)
-        p_dates = projected_dates.get(acct.id, set())
-        groups_map[grp].append({
-            "id":              acct.id,
-            "account_name":    acct.account_name,
-            "account_type":    acct.account_type,
-            "mask":            acct.mask,
-            "balances":        acct_balances[acct.id],
-            "raw_balances":    raw_balances[acct.id],
-            "projected_dates": sorted(p_dates),
-        })
-
-    _ASSET_GROUPS = {"Checking & Savings", "Investments", "Other Assets"}
-    result_groups = []
-    for grp_name, _ in GROUP_ORDER:
-        accts = groups_map.get(grp_name, [])
-        if not accts:
-            continue
-        totals = [round(sum(a["balances"][i] for a in accts), 2) for i in range(num_days)]
-        result_groups.append({
-            "group": grp_name,
-            "is_asset": grp_name in _ASSET_GROUPS,
-            "accounts": accts,
-            "totals": totals,
-        })
-
-    return {
-        "start_date":         start_date,
-        "end_date":           end_date,
-        "today":              today.isoformat(),
-        "dates":              dates,
-        "groups":             result_groups,
-        # projection_details: {str(account_id): {date_str: [{description, amount, source}]}}
-        # Used by the frontend balance-detail modal.
-        "projection_details": {str(k): v for k, v in projection_details.items()},
-    }
 
 
 # ---------------------------------------------------------------------------
 # LLM Merchant Enrichment (Section LLM)
 # ---------------------------------------------------------------------------
 
-class LLMEnrichRequest(BaseModel):
-    limit: int = 50                  # Max transactions to process in one call
-    overwrite_existing: bool = False # Re-process even if already enriched
 
 
-@app.get("/api/llm/test-groq")
-async def test_groq():
-    """Diagnostic: test Anthropic API key with one real Claude call. Shows raw error if any."""
-    import urllib.request, urllib.error, json as _json
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return {"status": "error", "detail": "ANTHROPIC_API_KEY env var is empty or not set"}
-    key_preview = api_key[:8] + "..." + api_key[-4:]
-    payload = _json.dumps({
-        "model": "claude-haiku-4-5",
-        "max_tokens": 50,
-        "system": "You are a helpful assistant. Reply with valid JSON only.",
-        "messages": [
-            {"role": "user", "content": "Transaction: Walmart. Reply with JSON: {\"merchant_name\":\"Walmart\",\"category\":\"Groceries\"}"}
-        ],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = _json.loads(resp.read().decode("utf-8"))
-            return {"status": "ok", "key_preview": key_preview, "response": body}
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        return {"status": "http_error", "key_preview": key_preview, "code": e.code, "detail": error_body}
-    except Exception as e:
-        return {"status": "exception", "key_preview": key_preview, "detail": str(e)}
 
 
 import threading as _threading
 import uuid as _uuid
 
 # In-memory job status store (resets on redeploy, which is fine)
-_enrich_jobs: dict = {}
-
-def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
-    """Background worker — runs in a thread, uses its own DB session."""
-    db = SessionLocal()
-    job = _enrich_jobs[job_id]
-    try:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            job["status"] = "error"
-            job["error"] = "ANTHROPIC_API_KEY not configured"
-            return
-
-        from sqlalchemy import or_
-        query = db.query(Transaction).filter(Transaction.is_locked == False)
-        if not overwrite_existing:
-            query = query.filter(or_(
-                Transaction.description_clean == None,
-                Transaction.description_clean == "",
-                Transaction.category_auto == None,
-                Transaction.category_auto == "Unclassified",
-            ))
-        txns = query.order_by(Transaction.date.desc()).limit(limit).all()
-        job["total"] = len(txns)
-
-        for txn in txns:
-            try:
-                enriched = enrich_transaction(
-                    description_raw=txn.description_raw,
-                    api_key=api_key,
-                )
-                txn.merchant_name     = enriched["merchant_name"]
-                txn.description_clean = enriched["description_clean"]
-                if not txn.category_manual:
-                    txn.category_auto = enriched["category"]
-                txn.enrichment_source = enriched["source"]
-                if enriched.get("is_for_others"):
-                    txn.is_for_others = True
-                db.add(txn)
-                db.commit()
-
-                job["processed"] += 1
-                if enriched["source"] == "override":
-                    job["override_hits"] += 1
-                elif enriched["source"] == "llm":
-                    job["llm_calls"] += 1
-                job["last"] = {"id": txn.id, "raw": txn.description_raw,
-                               "merchant": enriched["merchant_name"],
-                               "category": enriched["category"], "source": enriched["source"]}
-            except Exception as e:
-                job["errors"] += 1
-                logger.error(f"Enrich error txn {txn.id}: {e}")
-
-        job["status"] = "done"
-    except Exception as e:
-        job["status"] = "error"
-        job["error"] = str(e)
-    finally:
-        db.close()
 
 
-@app.post("/api/llm/enrich-transactions")
-async def llm_enrich_transactions(
-    req: LLMEnrichRequest,
-    background_tasks: BackgroundTasks,
-):
-    """
-    Start a background enrichment job. Returns a job_id immediately.
-    Poll GET /api/llm/enrich-status/{job_id} to check progress.
-    """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-
-    job_id = str(_uuid.uuid4())[:8]
-    _enrich_jobs[job_id] = {
-        "status": "running", "processed": 0, "total": 0,
-        "llm_calls": 0, "override_hits": 0, "errors": 0, "last": None,
-    }
-
-    t = _threading.Thread(target=_run_enrich_job,
-                          args=(job_id, req.overwrite_existing, req.limit),
-                          daemon=True)
-    t.start()
-
-    return {"job_id": job_id, "message": f"Enrichment started for up to {req.limit} transactions. Poll /api/llm/enrich-status/{job_id}"}
 
 
-@app.get("/api/llm/enrich-status/{job_id}")
-async def llm_enrich_status(job_id: str):
-    """Poll enrichment job status."""
-    job = _enrich_jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return {"job_id": job_id, **job}
 
 
-@app.post("/api/llm/create-rule-from-transaction/{transaction_id}")
-async def create_rule_from_transaction(
-    transaction_id: int,
-    db: Session = Depends(get_db),
-):
-    """
-    Create a categorization rule from an LLM-enriched transaction that the
-    user has accepted. Uses the clean merchant name as the pattern so future
-    transactions from the same merchant are handled by rules (free, instant)
-    instead of the LLM.
-
-    Only useful when enrichment_source is 'llm' or 'override'.
-    Safe to call multiple times — checks for duplicate patterns first.
-    """
-    txn = db.query(Transaction).filter_by(id=transaction_id).first()
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    # Use cleaned merchant name as pattern; fall back to description_clean
-    pattern = (txn.merchant_name or txn.description_clean or txn.description_raw or "").strip()
-    if not pattern:
-        raise HTTPException(status_code=400, detail="Transaction has no usable pattern")
-
-    category = txn.category_final
-    action = txn.action
-
-    if not category or category == "Unclassified":
-        raise HTTPException(status_code=400, detail="Transaction must have a valid category before creating a rule")
-
-    # Avoid creating duplicate rules for the same pattern
-    existing = db.query(CategorizationRule).filter(
-        CategorizationRule.pattern.ilike(pattern),
-        CategorizationRule.is_active == True,
-        CategorizationRule.set_category == category,
-    ).first()
-    if existing:
-        return {"status": "exists", "rule_id": existing.id, "message": f"Rule for '{pattern}' already exists"}
-
-    # Non-blocking: warn if this pattern overlaps an existing active rule
-    # that disagrees on category/action.
-    conflicts = find_overlapping_rules(db, pattern, category, action)
-
-    rule = CategorizationRule(
-        priority=200,           # Below Excel rules (100) so manual rules override them
-        priority_order=0,
-        match_type="contains",
-        pattern=pattern,
-        set_action=action,
-        set_category=category,
-        set_description=txn.description_clean or pattern,
-        is_active=True,
-        notes=f"Auto-created from LLM enrichment (txn #{transaction_id})",
-    )
-    db.add(rule)
-    db.commit()
-    db.refresh(rule)
-    # This is the review UI's actual rule-creation path (the "Save as auto-
-    # categorization rule" checkbox and the inline-edit "Create rule?" prompt
-    # both call this endpoint) — without a reapply here, closing a review by
-    # creating a rule only benefited *future* transactions; other backlog
-    # transactions matching the same merchant sat unresolved until someone
-    # separately ran a full reapply. Scoped to this rule's own pattern, same
-    # reasoning as create_rule.
-    reapplied = _reapply_rules(db, force_unlock=True, pattern=pattern)
-    response = {"status": "created", "rule_id": rule.id, "pattern": pattern, "category": category,
-                "action": action, "reapplied": reapplied}
-    if conflicts:
-        response['warning'] = (
-            f"Pattern overlaps {len(conflicts)} existing rule(s) with a different category/action: "
-            + ", ".join(f"#{c['rule_id']} '{c['pattern']}' -> {c['set_category'] or c['set_action']}" for c in conflicts)
-        )
-        response['conflicts'] = conflicts
-    return response
 
 
-@app.post("/api/llm/enrich-single/{transaction_id}")
-async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
-    """
-    Enrich a single transaction by ID. Useful for on-demand enrichment
-    when a user opens a transaction detail view.
-    """
-    txn = db.query(Transaction).filter_by(id=transaction_id).first()
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-
-    enriched = enrich_transaction(
-        description_raw=txn.description_raw,
-        api_key=api_key,
-    )
-
-    txn.merchant_name = enriched["merchant_name"]
-    txn.description_clean = enriched["description_clean"]
-    if not txn.category_manual:
-        txn.category_auto = enriched["category"]
-    if enriched.get("is_for_others"):
-        txn.is_for_others = True
-
-    db.commit()
-    return {
-        "id": txn.id,
-        "merchant_name": enriched["merchant_name"],
-        "description_clean": enriched["description_clean"],
-        "category": enriched["category"],
-        "source": enriched["source"],
-    }
 
 
 # ---------------------------------------------------------------------------
 # V2 Sandbox & Liquidity Forecasting
 # ---------------------------------------------------------------------------
 
-class PlannedPurchaseCreate(BaseModel):
-    name: str
-    amount: float
-    expected_date: str  # ISO format
-    vendor_tag: Optional[str] = None
 
-@app.get("/mockup", response_class=HTMLResponse)
-async def serve_mockup():
-    """Serve the Premium Glassy Blue mockup."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mockup.html")
-    with open(path, "r") as f:
-        return f.read()
 
-@app.get("/v2")
-async def serve_v2():
-    """
-    Legacy alias for the app. Kept because it is bookmarked and appears in
-    older notes; serves the exact same entry point as "/".
-    """
-    return FileResponse(_frontend_index(), media_type="text/html")
 
-@app.get("/api/forecast/{account_id}")
-async def get_liquidity_forecast(account_id: int, days: int = 30, db: Session = Depends(get_db)):
-    """Execute the calculate_liquidity_shortfall SQL function."""
-    from sqlalchemy import text
-    
-    # We use a raw SQL execution to call the function
-    sql = text("SELECT * FROM calculate_liquidity_shortfall(:acct_id, :days)")
-    result = db.execute(sql, {"acct_id": account_id, "days": days})
-    
-    forecast = [
-        {
-            "date": row.forecast_date.isoformat(),
-            "balance": float(row.projected_balance),
-            "shortfall": bool(row.shortfall_flag)
-        }
-        for row in result
-    ]
-    return forecast
 
-@app.get("/api/planned-purchases")
-async def get_planned_purchases(db: Session = Depends(get_db)):
-    """List all pending planned purchases."""
-    purchases = db.query(PlannedPurchase).filter_by(status='pending').order_by(PlannedPurchase.expected_date).all()
-    return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "amount": p.amount,
-            "expected_date": p.expected_date.isoformat(),
-            "vendor_tag": p.vendor_tag,
-            "status": p.status
-        }
-        for p in purchases
-    ]
 
-@app.post("/api/planned-purchases")
-async def create_planned_purchase(data: PlannedPurchaseCreate, db: Session = Depends(get_db)):
-    """Create a new planned purchase."""
-    from datetime import date
-    p = PlannedPurchase(
-        name=data.name,
-        amount=data.amount,
-        expected_date=date.fromisoformat(data.expected_date),
-        vendor_tag=data.vendor_tag,
-        status='pending'
-    )
-    db.add(p)
-    db.commit()
-    db.refresh(p)
-    return {"id": p.id, "status": "created"}
 
-@app.delete("/api/planned-purchases/{purchase_id}")
-async def delete_planned_purchase(purchase_id: int, db: Session = Depends(get_db)):
-    """Delete (cancel) a planned purchase."""
-    p = db.query(PlannedPurchase).filter_by(id=purchase_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Purchase not found")
-    db.delete(p)
-    db.commit()
-    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "version": "1.0.0"}
+
+
+# ---------------------------------------------------------------------------
+# Domain routers (Phase 1 of the backend token-usage refactor — see
+# PLAN.md "main.py -> domain routers split"). Imported here, after
+# `init_db()` above, not at module top: routers/llm.py does
+# `from database import SessionLocal` at its own top level, and that name
+# must already be the real sessionmaker (not the `None` placeholder
+# database.py defines before init_db() runs) by the time that import
+# executes, or the module would bind the stale None permanently.
+# ---------------------------------------------------------------------------
+from routers.misc import router as misc_router
+from routers.loans import router as loans_router
+from routers.cash_flow import router as cash_flow_router
+from routers.llm import router as llm_router
+
+app.include_router(misc_router)
+app.include_router(loans_router)
+app.include_router(cash_flow_router)
+app.include_router(llm_router)
+
 
 
 # ---------------------------------------------------------------------------
