@@ -395,6 +395,122 @@ remain unstarted.
 
 ---
 
+## Session 2026-09-06 (cont'd, 4) — H7 Phase 1 batch 2: `budgets.py`,
+## `net_worth.py`, `transactions.py`, `rules.py`, `accounts.py`, `+admin.py`
+
+Omer said to continue with batch 2. Much bigger than batch 1 or plaid_routes —
+~56 routes across 5 named domains, plus the reset-all/nuke/backfill-balances
+orphans flagged last session as needing a decision. `main.py`: 6,989 → 3,802
+lines. What's left in `main.py` now is entirely the batch-3 cluster
+(cards/ecosystems/challenges) plus app setup — nothing from batch 2 remains
+inline.
+
+**Orphan routes, resolved:** `backfill_account_balances` went into
+`routers/accounts.py` (grouped with `sync_account_balances` — same "anchor this
+account's balance from Plaid" job, just a one-time variant, regardless of where
+it originally sat in the file). `reset_all` and `nuke_everything` got a new
+**`routers/admin.py`** — neither is really accounts business logic (both wipe
+data across accounts/transactions/plaid_items at once), and forcing them into
+`accounts.py` would have muddied that router's actual domain boundary.
+
+**Domain-assignment call not explicit in the original router list:**
+`upload_and_import_cards` (`/api/cards/upload-and-import`) and
+`upload_and_import_points` (`/api/points/upload-and-import`) went into
+`routers/rules.py`, not a `cards.py`/`points.py` of their own — they're
+Excel-catalog-import routes doing the exact same job as `import_cards_endpoint`
+(`/api/init/import-cards`, already listed under rules.py) two routes below them
+in the original file. Grouped by what the code does, not by URL prefix — same
+reasoning as the plaid_routes.py `_sync_item`/`_sync_item_background` call.
+`account_transactions` (`/api/accounts/{id}/transactions`) went into
+`accounts.py` alongside `account_card_detail`, both per-account detail views
+under the `/api/accounts/` prefix.
+
+**Two more Pydantic models found by the closure, not the original per-route
+scan:** `SplitCreate` (used only inside `SplitsRequest`'s own field
+declaration, not by any route body directly) and `ManualSplitItem` (same shape,
+nested inside `ManualTransactionCreate`). Neither route-level dependency script
+run this project has used checks a model's OWN field-type references — only
+route bodies — so a model referenced solely from inside another model's type
+annotation is invisible to it. Caught by grepping each candidate model name
+before finalizing the file, now flagged explicitly for whoever runs this method
+in batch 3: check every Pydantic model moving with a domain for further models
+in its own field types, not just what the routes reference directly.
+
+**Same `__file__`-relative-path class of bug as batch 1, worse this time — 4
+occurrences, not 1:** `import_cards_endpoint`, `upload_and_import_cards`,
+`upload_and_import_points`, and `import_rules` all built their Excel-file paths
+from `os.path.dirname(os.path.abspath(__file__))`, correct in `main.py`, wrong
+one directory level deeper in `routers/rules.py`. Fixed the same way as
+`serve_mockup` in batch 1 — replaced all 4 with `core.app_helpers.PROJECT_ROOT`.
+Grep for `__file__` across every block being moved before assembling a router
+file, every batch, going forward — it is the single highest-value check for
+catching bugs that no import-checker or test suite (in-memory SQLite has no
+`cards.xlsx` to find) will ever surface, only a live filesystem check will.
+
+**Two genuine pre-existing bugs found by this session's own verification
+tooling, confirmed present in the original pre-Phase-0 commit (9e49571) via
+`git show`, not caused by this refactor — logged to BACKLOG.md rather than
+fixed (both are in the not-yet-touched batch-3 `cards.py` domain / a
+cross-cutting query, out of scope for a router-split session):**
+- `get_card_detail`'s "last N months" branch calls `timedelta(...)` with no
+  `timedelta` import anywhere in `main.py` (only `datetime` is imported) — a
+  `NameError` waiting to fire the first time that code path actually runs.
+  Found by running the scope-aware unresolved-name checker (built for
+  verifying router extractions) against the *whole* remaining `main.py`, not
+  just the newly-written files — worth doing again after every future batch,
+  since it can only ever surface pre-existing dead code once enough of the file
+  has been extracted around it to make the checker's job small enough to run
+  whole-file.
+- `get_net_worth`'s account query has no `ORDER BY`, so Postgres does not
+  guarantee row order across calls — showed up as the *only* diff in this
+  session's own `/api/net-worth` live smoke-test comparison (one account's
+  position shifted in the "Cash & Savings" bucket list; every account's actual
+  data was byte-identical). Confirmed non-deterministic-order, not a data
+  bug, by running both old and new one more time and observing the same class
+  of reordering happen even without any code difference at all — this is
+  exactly the class of bug `/api/transactions` was already fixed for (stable
+  `ORDER BY date DESC, id DESC`, see the 2026-09-05 session) but `get_net_worth`
+  was missed.
+
+**Verified the same four ways as every prior batch:**
+1. **Route parity** — 177/177 across `main.py` + all 11 `routers/*.py` files,
+   diffed against the pre-session committed state (again including the
+   already-existing router files in the "before" set, not just `main.py`).
+2. **No circular imports.**
+3. **Reverse-reference check** — zero leftover calls to any of the 78 moved
+   names in the edited `main.py`.
+4. **Test suite**: 53 passed / 4 failed, identical to every prior baseline.
+5. **Live smoke test against production** — `git stash`ed to the pre-session
+   commit and diffed 9 endpoints (accounts, transactions, rules, budget
+   targets/actuals, net-worth, reconciliation, duplicate-detection,
+   merchant-csc) old vs new. 7 byte-identical; the 2 that differed
+   (`net-worth`, `reconciliation`) were both traced to causes unrelated to this
+   session's code (the pre-existing missing-ORDER-BY above, and — same as the
+   plaid_routes.py session — Omer's own already-running dev server recording a
+   new balance observation in the gap between the two curl calls).
+
+**Result:** `main.py` 6,989 → 3,802 lines. New: `routers/budgets.py`,
+`routers/net_worth.py`, `routers/transactions.py`, `routers/rules.py`,
+`routers/admin.py`, `routers/accounts.py`. Also removed now-dead imports from
+`main.py`'s top-of-file block (`asyncio`, `io`, `math`, `hashlib`, `and_`,
+`Union`, `BaseModel`, `UploadFile`, `File`, `Response`, `BackgroundTasks`,
+`StreamingResponse`, `CardEarningRate`, `import_cards_from_excel`,
+`import_points_from_excel`, `TransactionSplit`, `BudgetTarget`,
+`UserCorrection`, `DuplicateIgnore`, `CashFlowOverlay`, `SalaryPayment`,
+`SalaryAllocation`, `PlannedPurchase`, `ChallengeCategoryLink`) — all became
+dead specifically because of routes this session moved out, not unrelated
+cleanup, and re-verified the whole-file unresolved-name checker stayed clean
+afterward.
+
+**Not done / next**: what remains in `main.py` (~99 routes) is entirely batch 3
+— `cards.py`, `ecosystems.py`, `challenges.py`, the cluster the original
+phasing plan flagged as riskiest (heaviest shared use of
+`core/points_engine.py`, least clean boundary around
+`_compute_ecosystem_balance()`) — plus the two bugs above logged to
+BACKLOG.md for a separate fix session. Not started; needs Omer to say go.
+
+---
+
 ## Session 2026-09-05 — Transactions: edit UX, "For Others" tag, merchant category/network engine
 
 Omer's brief, framed as "our big focus": (1) editing a transaction visually "jumps" the table, (2) the row is too cramped — buttons bleed off-screen in edit mode, (3) "For Others" should stop being a category and become a tag (excluded from budget, kept for cash flow — same shape as GCB), (4) bring the Cards pages' merchant-category (CSC) logic into the main engine so every transaction can show a personal category *and* a merchant category, plus an identifier for which payment network coded it that way, and (5) a general visual/back-end cleanup pass, rules-based auto-classification included. Confirmed two defaults up front via AskUserQuestion before touching schema: existing "For Others" transactions reset to Unclassified + tagged (none existed live), and "merchant category" = the existing CSC/points_category system, extended rather than duplicated.
