@@ -24,7 +24,13 @@ Started as "best card for general travel spend?" — answering it surfaced three
 - `_PFC_POINTS_MAP` travel/transport keys were never real Plaid PFC values (`TRAVEL_AIRLINES`, `TRAVEL_CAR_RENTALS`, `TRANSPORTATION_TAXIS`, `TRANSPORTATION_GAS_STATIONS`). Replaced with Plaid's published names, plus `TRAVEL_OTHER_TRAVEL` → `Travel` and parking/tolls → `Ground Transportation`. Explains why Air Canada, Air France and Shlomo Rent A Car rows had no points category.
 - New `_DESCRIPTION_POINTS_PATTERNS` checked against the raw description first (Amex Travel rows have no `merchant_name`). Wired into Plaid sync and CSV import. The "Platinum Hotel Credit" statement credit doesn't match it.
 
-**Not done — forward-only.** Points are locked per transaction, so past rows keep their old rates: the 6 `AMEX Fine Hotels andAmexTravel.com` rows are still tagged `Hotels` (1x), and older untagged travel rows are still NULL. Needs a retag + re-lock if Omer wants history corrected (B36). Tests: 4 new unit tests pass; the 4 failing `test_earn_rates.py` integration tests fail identically on the unchanged code (B27).
+**History corrected (same session, Omer's go-ahead).** Points are locked per transaction, so the 52 affected rows were retagged with `PATCH /api/transactions/{id}` `{points_category}`, which re-locks each row as of its own date (script: one curl per row, all 200, verified in the DB afterward):
+- 6 Amex Travel rows → `Amex Travel Hotels` (5x; the July bookings and their August refunds net to zero) — **+6,236 MR**; Air France ×2 → `Airlines` — **+304 MR**.
+- Shlomo Rent A Car ×3 (Aspire) → `Car Rental` 7x — **+5,636 Hilton**. Shlomo is the Sixt franchise in Israel. The 7x assumes Amex counts it as a "select" rental company, so check the statement.
+- Gett taxi ×6 (CSP) → `Ground Transportation` 2x — **+160 UR**. Thompson Houston ×2 → `Hyatt` 4x — **+333 Hyatt**. Tampa EDITION $100 refund → `Marriott`, so it now claws back at 6x — **−400 Marriott**. United refunds on Quest — **−17 United**.
+- Zero-impact hygiene tags: parking/tolls/transit → `Ground Transportation`, Sixt refunds → `Car Rental`, Air Canada → `Airlines`, CLEAR/Allianz → `Travel`.
+- Hyatt and Marriott balances show no change, because they're anchored on July 2026 snapshots taken after those rows. MR/UR/United have no snapshots; the Hilton rows are after its snapshot.
+- **Left untagged on purpose**: statement credits (Amex rideshare/airline-fee credits, Chase "Offer:Sixt"), gas (Raymond Truck Stop, Paz Oil, BP), Amex Premium Car Rental Protection fees, "Aer Nolita" (looks like the Aer bag store, not an airline), RPG Gift Cards, unclear merchants (American Dream ×2, CBPDEVELOP, 817 S Federal), and CSP Sixt refund id 6845, whose purchase isn't in the data (tagging it would claw back 2x with nothing to offset). Tests: 4 new unit tests pass; the 4 failing `test_earn_rates.py` integration tests fail identically on the unchanged code (B27).
 
 ---
 
