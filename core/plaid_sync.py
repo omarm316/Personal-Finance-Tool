@@ -214,6 +214,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                     txn_data.get('merchant_name'),
                     txn_data.get('pfc_detailed'),
                     txn_data.get('pfc_primary'),
+                    txn_data.get('description_raw'),
                 )
 
             txn_date = txn_data['date']

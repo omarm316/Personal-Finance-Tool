@@ -632,9 +632,10 @@ async def import_transactions(
             )
 
         # Auto-infer points category from merchant name when no rule provided one.
-        # CSV imports have no Plaid PFC, so merchant_name is the only signal here.
+        # CSV imports have no Plaid PFC, so merchant_name (plus the raw
+        # description, for booking-channel descriptors) is the only signal here.
         if not points_cat:
-            points_cat = infer_points_category(merchant_name)
+            points_cat = infer_points_category(merchant_name, description=desc_raw)
 
         # Determine enrichment source
         if llm_source:

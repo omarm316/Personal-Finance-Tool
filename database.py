@@ -1640,6 +1640,7 @@ def seed_points_categories(session):
         ("Drugstore",              13, None),
         ("Streaming",              26, None),
         ("Chase Travel",           25, None),   # booking-channel L1 (Chase portal)
+        ("Travel",                 43, None),   # "other travel" catch-all — Plaid TRAVEL_OTHER_TRAVEL (cruises, agencies, trains, etc.)
         ("Spa & Salon",            24, None),
         ("Transit",                36, None),
         ("Home Improvement",       37, None),
@@ -1669,6 +1670,7 @@ def seed_points_categories(session):
         ("United Purchases",       34, "Airlines"),   # United-operated flights, bags, upgrades, etc.
         # ── L2: luxury hotel channel → Hotels ─────────────────────────────
         ("Renowned Hotels & Resorts", 35, "Hotels"),  # Prepaid bookings via United's Renowned Hotels
+        ("Amex Travel Hotels",     44, "Hotels"),     # Prepaid hotels via AmexTravel.com (FHR/THC) — Platinum 5x
         # ── L2: co-branded retail (no meaningful L1 parent) ───────────────
         ("Best Buy",               20, None),
         ("Marshalls",              21, None),
@@ -1790,7 +1792,11 @@ def seed_card_products(session):
             ("$10/mo DoorDash Credit", 120, "annual", "Food Delivery"),
         ], {"_base": 1, "Chase Travel": 4, "Dining": 2, "Food Delivery": 2, "Groceries": 2,
             "Streaming": 2, "Airlines": 1, "Ground Transportation": 1, "Hotels": 1,
-            "Car Rental": 1, "Rideshare: Lyft": 4}),
+            "Car Rental": 1, "Travel": 1, "Transit": 1, "Rideshare: Lyft": 4}),
+        # 2x covers ALL other travel (Chase's travel category: flights, hotels,
+        # car rental, cruises, agencies, trains, transit, rideshare, parking,
+        # tolls) — "Travel"/"Transit" catch the rows not tagged with one of the
+        # specific L1s. Verified against chase.com 2026-10-25.
 
         ("chase_sapphire_reserve", "Chase Sapphire Reserve", "Chase UR", "not_held", 795, [
             ("$300 Travel Credit", 300, "annual", None),
@@ -1839,7 +1845,9 @@ def seed_card_products(session):
             ("$100 Saks Credit", 100, "annual", None),
             ("Global Entry/TSA PreCheck", 100, "every_4.5_years", None),
             ("Centurion Lounge Access", 0, "annual", None),
-        ], {"_base": 1, "Airlines": 4}),
+        ], {"_base": 1, "Airlines": 4, "Amex Travel Hotels": 4}),
+        # 5x flights (direct or Amex Travel, $500K/yr cap not enforced) and 5x
+        # prepaid hotels via Amex Travel; hotels booked directly earn 1x.
 
         ("amex_gold", "Amex Gold", "Amex MR", "not_held", 325, [
             ("$120 Uber Cash", 10, "monthly", "Rideshare: Uber"),
@@ -2107,7 +2115,10 @@ def seed_card_products(session):
         # holder correction — the card lets you pick ONE bonus category, not
         # both): 3x on Groceries (his choice over Dining), capped at $25K/yr
         # (cap not enforced — no per-category annual-cap mechanism on
-        # CardProductReward), 1x on everything else. Portal-boosted rates
+        # CardProductReward), 2x on other travel (bilt.com/card/obsidian,
+        # verified 2026-10-25), 1x on everything else. Bilt doesn't publish
+        # what counts as "travel", so Ground Transportation (rideshare/transit/
+        # parking) stays at 1x until a statement shows otherwise. Portal-boosted rates
         # (4x hotels/3x flights via Bilt Travel), the separate "4% Bilt Cash"
         # currency, and any temporary "points accelerator" promo all
         # deliberately NOT modeled here — the accelerator is tracked as its
@@ -2122,6 +2133,7 @@ def seed_card_products(session):
              "Up to 1x points on rent/mortgage payments via Bilt, up to 100,000 pts/yr — not a spend category this app tracks."),
         ], {
             "_base": 1, "Groceries": 2,
+            "Airlines": 1, "Hotels": 1, "Car Rental": 1, "Travel": 1,
         }),
 
         # Real rates verified via web search 2026-07-26 (not memory): 2x

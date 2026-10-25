@@ -181,13 +181,25 @@ _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     ("etsy",             "Online Shopping"),
     ("rakuten",          "Online Shopping"),
 ]
+# Booking-channel descriptors matched against the raw description rather than
+# merchant_name — Plaid leaves merchant_name null on these. Checked first: the
+# booking channel, not the underlying hotel, decides the earn rate.
+_DESCRIPTION_POINTS_PATTERNS: list[tuple[str, str]] = [
+    ("amextravel.com",   "Amex Travel Hotels"),   # "AMEX Fine Hotels andAmexTravel.com" — prepaid FHR/THC/Amex Travel stays
+]
 _PFC_POINTS_MAP: dict[str, str] = {
-    "TRAVEL_AIRLINES":                           "Airlines",
+    # Travel/transportation keys follow Plaid's published PFC taxonomy
+    # (checked 2026-10-25) — the earlier TRAVEL_AIRLINES / TRAVEL_CAR_RENTALS /
+    # TRANSPORTATION_TAXIS / TRANSPORTATION_GAS_STATIONS keys never matched.
+    "TRAVEL_FLIGHTS":                            "Airlines",
     "TRAVEL_LODGING":                            "Hotels",
-    "TRAVEL_CAR_RENTALS":                        "Car Rental",
-    "TRANSPORTATION_TAXIS":                      "Ground Transportation",
+    "TRAVEL_RENTAL_CARS":                        "Car Rental",
+    "TRAVEL_OTHER_TRAVEL":                       "Travel",
+    "TRANSPORTATION_TAXIS_AND_RIDE_SHARES":      "Ground Transportation",
     "TRANSPORTATION_PUBLIC_TRANSIT":             "Ground Transportation",
-    "TRANSPORTATION_GAS_STATIONS":               "Gas Stations",
+    "TRANSPORTATION_PARKING":                    "Ground Transportation",
+    "TRANSPORTATION_TOLLS":                      "Ground Transportation",
+    "TRANSPORTATION_GAS":                        "Gas Stations",
     "FOOD_AND_DRINK_RESTAURANTS":                "Dining",
     "FOOD_AND_DRINK_FAST_FOOD":                  "Dining",
     "FOOD_AND_DRINK_BAR":                        "Dining",
@@ -202,17 +214,26 @@ def infer_points_category(
     merchant_name: str | None,
     pfc_detailed: str | None = None,
     pfc_primary: str | None = None,
+    description: str | None = None,
 ) -> str | None:
     """
-    Infer the points_category name for a transaction using a two-step approach:
+    Infer the points_category name for a transaction using a three-step approach:
 
-    1. Merchant name substring match → L2 (brand-specific) or L1 result.
+    1. Booking-channel descriptor in the raw description (e.g. Amex Travel) —
+       the channel sets the rate, and these rows usually have no merchant_name.
+    2. Merchant name substring match → L2 (brand-specific) or L1 result.
        This is preferred because it's the most precise signal.
-    2. Plaid pfc_detailed → L1 fallback when no merchant pattern fires.
+    3. Plaid pfc_detailed → L1 fallback when no merchant pattern fires.
 
     Returns None if we can't confidently classify — callers should leave
     points_category as NULL rather than guess.
     """
+    if description:
+        desc = description.lower()
+        for pattern, cat in _DESCRIPTION_POINTS_PATTERNS:
+            if pattern in desc:
+                return cat
+
     if merchant_name:
         needle = merchant_name.lower()
         for pattern, cat in _MERCHANT_POINTS_PATTERNS:

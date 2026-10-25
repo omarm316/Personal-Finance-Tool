@@ -256,3 +256,40 @@ class TestParentCategoryFallbackIntegration:
         assert ur is not None
         # 300 * (1.0 base + 2.0 Airlines bonus) = 900 points
         assert ur["points_earned"] == 900
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for infer_points_category — travel tagging
+# ---------------------------------------------------------------------------
+
+from core.points_engine import infer_points_category
+
+
+class TestInferTravelCategory:
+    """Travel rows must land in a category the travel earn rates key off."""
+
+    def test_plaid_travel_keys(self):
+        """Plaid's real PFC detailed values map to the travel L1s."""
+        assert infer_points_category(None, "TRAVEL_FLIGHTS") == "Airlines"
+        assert infer_points_category(None, "TRAVEL_RENTAL_CARS") == "Car Rental"
+        assert infer_points_category(None, "TRAVEL_OTHER_TRAVEL") == "Travel"
+        assert infer_points_category(None, "TRANSPORTATION_TOLLS") == "Ground Transportation"
+
+    def test_amex_travel_descriptor(self):
+        """The Amex Travel descriptor wins over Plaid's generic lodging tag."""
+        cat = infer_points_category(
+            None, "TRAVEL_LODGING", description="AMEX Fine Hotels andAmexTravel.com",
+        )
+        assert cat == "Amex Travel Hotels"
+
+    def test_amex_hotel_credit_not_tagged(self):
+        """The Platinum hotel statement credit is not an Amex Travel booking."""
+        assert infer_points_category(None, description="Platinum Hotel Credit") is None
+
+    def test_amex_travel_hotels_earns_platinum_5x(self):
+        """Amex Travel Hotels hits Platinum's 5x; other cards fall back to Hotels."""
+        parents = {"Amex Travel Hotels": "Hotels"}
+        plat = calc_earn_rate({"Airlines": 4, "Amex Travel Hotels": 4}, 1, "Amex Travel Hotels", parents)
+        csp = calc_earn_rate({"Hotels": 1, "Travel": 1}, 1, "Amex Travel Hotels", parents)
+        assert plat == 5
+        assert csp == 2

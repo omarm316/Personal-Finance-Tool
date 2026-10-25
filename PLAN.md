@@ -1,12 +1,30 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-09-06
+> Last updated: 2026-10-25
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-10-25 — Missing travel earn rates (Sapphire Preferred, Platinum, Bilt Obsidian)
+
+Started as "best card for general travel spend?" — answering it surfaced three travel rates missing from the seed catalog. Terms re-checked on the web today (chase.com, bilt.com, Amex benefits page via search — the Amex card page itself wouldn't load).
+
+**Seed changes (`seed_card_products` / `seed_points_categories`, `database.py`)** — earn rates are re-seeded on every startup, so the seed is the only write path:
+- **Sapphire Preferred**: added `Travel` +1 and `Transit` +1 so "all other travel" is 2x, not just the four specific L1s.
+- **Amex Platinum**: new L2 `Amex Travel Hotels` (parent `Hotels`) at +4 → 5x prepaid hotels via AmexTravel.com. Hotels booked directly stay 1x.
+- **Bilt Obsidian**: 2x on `Airlines`/`Hotels`/`Car Rental`/`Travel`. Bilt doesn't define "travel", so `Ground Transportation` was deliberately left at 1x.
+- New L1 `Travel` added to the category seed (the row already existed in prod as a legacy id 5; this keeps it stable).
+
+**Tagging fixes (`core/points_engine.py`)** — the new rates only matter if rows get those categories:
+- `_PFC_POINTS_MAP` travel/transport keys were never real Plaid PFC values (`TRAVEL_AIRLINES`, `TRAVEL_CAR_RENTALS`, `TRANSPORTATION_TAXIS`, `TRANSPORTATION_GAS_STATIONS`). Replaced with Plaid's published names, plus `TRAVEL_OTHER_TRAVEL` → `Travel` and parking/tolls → `Ground Transportation`. Explains why Air Canada, Air France and Shlomo Rent A Car rows had no points category.
+- New `_DESCRIPTION_POINTS_PATTERNS` checked against the raw description first (Amex Travel rows have no `merchant_name`). Wired into Plaid sync and CSV import. The "Platinum Hotel Credit" statement credit doesn't match it.
+
+**Not done — forward-only.** Points are locked per transaction, so past rows keep their old rates: the 6 `AMEX Fine Hotels andAmexTravel.com` rows are still tagged `Hotels` (1x), and older untagged travel rows are still NULL. Needs a retag + re-lock if Omer wants history corrected (B36). Tests: 4 new unit tests pass; the 4 failing `test_earn_rates.py` integration tests fail identically on the unchanged code (B27).
 
 ---
 
