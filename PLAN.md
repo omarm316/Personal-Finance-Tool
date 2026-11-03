@@ -914,7 +914,7 @@ Layout comes first, using the `design-gallery` skill for every page; behavior an
 Not designed yet, by choice: the small flows behind the card ⋯ menu (Change product, Product history, Edit card details, Add a challenge, Mark card as closed); design them when building, reusing the side-panel pattern from benefit editing. Phone layouts come later.
 
 Next is functionality (proposed order, 2026-11-03):
-1. Fix the sync bug that drops real same-day repeat charges (content-hash fallback in `core/plaid_sync.py` ~145-170). A fresh start still depends on it.
+1. ~~Fix the sync bug that drops real same-day repeat charges~~ Done 2026-11-03: the content-hash fallback in `core/plaid_sync.py` now only adopts rows with a dead Plaid ID (`_has_dead_plaid_id`); see BACKLOG "Cards module findings".
 2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history.
 3. Program balances: not before 2027-01-01 (Omer, 2026-11-03). Balance syncing starts from that date, anchored to the balances on it; until then, wrong balances like Hilton's are left as they are.
 4. Benefits data model (per-period amounts, uses, purchase links) and Expiring credits.
