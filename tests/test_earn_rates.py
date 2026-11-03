@@ -15,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from main import calc_earn_rate
+from core.points_engine import _lock_points_for_transaction
 from tests.conftest import (
     make_transaction,
     make_card_product,
@@ -22,6 +23,14 @@ from tests.conftest import (
     make_points_category,
 )
 from datetime import datetime
+
+
+def _lock(db_session, t):
+    """Points are locked at write time (_lock_points_for_transaction); the
+    earn summaries only read the locked column, so fixtures must lock too."""
+    _lock_points_for_transaction(db_session, t)
+    db_session.commit()
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -120,29 +129,29 @@ class TestProductLookup:
     Verify both paths.
     """
 
-    def test_account_product_id_used(
+    def test_linked_product_used(
         self, client, db_session, seed_categories,
         credit_card_account, chase_ur_ecosystem,
     ):
-        """When account.product_id is set, its rewards should be used."""
+        """A product linked to the account and card drives the locked points."""
         dining_cat = make_points_category(db_session, "Dining")
         prod = make_card_product(db_session, "chase_sapphire", "Sapphire Preferred",
                                  chase_ur_ecosystem, rewards=[
             {"multiplier": 1.0, "is_base_rate": True},
             {"multiplier": 2.0, "points_category_id": dining_cat.id},
         ])
-        # Link product to the ACCOUNT
+        # Link the product the way the product-link endpoint does: account
+        # and card together. Points are locked from the card's product.
         credit_card_account.product_id = prod.id
         db_session.commit()
-
-        # Create card without product_id
-        make_card(db_session, "VISA-1234", credit_card_account, ecosystem=chase_ur_ecosystem)
+        card = make_card(db_session, "VISA-1234", credit_card_account, product=prod,
+                         ecosystem=chase_ur_ecosystem)
 
         # Create a dining expense
-        make_transaction(
+        _lock(db_session, make_transaction(
             db_session, credit_card_account, -100.00, "Expense", "Dining",
-            date=datetime(2025, 3, 10), points_category="Dining",
-        )
+            date=datetime(2025, 3, 10), points_category="Dining", card_id=card.id,
+        ))
 
         resp = client.get("/api/cards/earn-summary", params={"period": "ytd", "year": 2025})
         assert resp.status_code == 200
@@ -168,13 +177,13 @@ class TestProductLookup:
         ])
         # Do NOT set account.product_id — leave it as None
         # Instead set card.product_id
-        make_card(db_session, "VISA-5678", credit_card_account, product=prod,
-                  ecosystem=chase_ur_ecosystem)
+        card = make_card(db_session, "VISA-5678", credit_card_account, product=prod,
+                         ecosystem=chase_ur_ecosystem)
 
-        make_transaction(
+        _lock(db_session, make_transaction(
             db_session, credit_card_account, -200.00, "Expense", "Groceries",
-            date=datetime(2025, 3, 10), points_category="Groceries",
-        )
+            date=datetime(2025, 3, 10), points_category="Groceries", card_id=card.id,
+        ))
 
         resp = client.get("/api/cards/earn-summary", params={"period": "ytd", "year": 2025})
         assert resp.status_code == 200
@@ -200,13 +209,13 @@ class TestCashBackEarnRate:
         ])
         credit_card_account.product_id = prod.id
         db_session.commit()
-        make_card(db_session, "DISC-0001", credit_card_account, product=prod,
-                  ecosystem=cash_back_ecosystem)
+        card = make_card(db_session, "DISC-0001", credit_card_account, product=prod,
+                         ecosystem=cash_back_ecosystem)
 
-        make_transaction(
+        _lock(db_session, make_transaction(
             db_session, credit_card_account, -500.00, "Expense", "Groceries",
-            date=datetime(2025, 3, 10), points_category="Groceries",
-        )
+            date=datetime(2025, 3, 10), points_category="Groceries", card_id=card.id,
+        ))
 
         resp = client.get("/api/cards/earn-summary", params={"period": "ytd", "year": 2025})
         assert resp.status_code == 200
@@ -238,14 +247,14 @@ class TestParentCategoryFallbackIntegration:
         ])
         credit_card_account.product_id = prod.id
         db_session.commit()
-        make_card(db_session, "VISA-9999", credit_card_account, product=prod,
-                  ecosystem=chase_ur_ecosystem)
+        card = make_card(db_session, "VISA-9999", credit_card_account, product=prod,
+                         ecosystem=chase_ur_ecosystem)
 
         # Transaction tagged as "United" (L2)
-        make_transaction(
+        _lock(db_session, make_transaction(
             db_session, credit_card_account, -300.00, "Expense", "Travel",
-            date=datetime(2025, 3, 10), points_category="United",
-        )
+            date=datetime(2025, 3, 10), points_category="United", card_id=card.id,
+        ))
 
         resp = client.get("/api/cards/earn-summary", params={"period": "ytd", "year": 2025})
         assert resp.status_code == 200

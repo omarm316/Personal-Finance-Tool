@@ -154,6 +154,8 @@ def _recalc_challenge(db, challenge):
             Transaction.points_category == None,
             ~Transaction.points_category.in_(_NON_EARNING_CATS),
         ),
+        # 2027 rows say what they are: only purchases count (rule 8)
+        or_(Transaction.txn_kind == None, Transaction.txn_kind == 'purchase'),
     )
     if account_ids:
         q = q.filter(Transaction.account_id.in_(account_ids))
@@ -212,6 +214,8 @@ def _challenge_spend_for_card(db, challenge, account_id: int) -> float:
             Transaction.points_category == None,
             ~Transaction.points_category.in_(_NON_EARNING_CATS),
         ),
+        # 2027 rows say what they are: only purchases count (rule 8)
+        or_(Transaction.txn_kind == None, Transaction.txn_kind == 'purchase'),
     )
     cat_names = [lnk.category_name for lnk in challenge.category_links]
     if cat_names:

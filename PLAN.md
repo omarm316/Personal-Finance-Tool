@@ -1,12 +1,62 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-10-25
+> Last updated: 2026-11-03
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-11-03 — Cards step 2, stage 1: the 2027 earning engine
+
+Built to the plan Omer approved on 2026-11-03, implementing `docs/cards-categorization-rules.md`. Transactions dated **2027-01-01 or later** get their points from a new engine. Earlier rows keep the old engine and their locked points, untouched: no repair of history.
+
+**How it fits together**
+- **The switch:** `POINTS_FRESH_START` in `core/earn_engine.py`. `_lock_points_for_transaction()` sends 2027 rows to `lock_points_2027()`; everything else runs the old code unchanged. The old tables (`points_categories`, `card_product_rewards`, `merchant_points_mappings`) are frozen for history.
+- **New tables:** `merchant_categories` (two-level tree such as Travel > Hotels; adds Portal, Superstores, Gift Cards, Other), `brands` (with a default category), `merchant_rules` (the one rule list), `earn_rules` (what each product pays), `card_category_selections` (rotating and chosen categories per card and period).
+- **New transaction columns**, filled on 2027 rows: `merchant_category`, `brand`, `txn_kind`, `classification_source`, `merchant_rule_id`, `is_foreign`. The Plaid signals `pfc_detailed`, `payment_channel` and `merchant_country` (new in `plaid_integration.py`) are stored on **every** new Plaid row from deploy on, so their coverage can be checked before January.
+- **Classifier** (`core/merchant_classifier.py`): whole-word matching on merchant name and description, the longest pattern wins, no priority numbers; `contains` is available for glued descriptors like `andAmexTravel.com`. The kind is resolved separately from the path. A fee or interest line on a positive amount is a credit; "CREDIT" on a purchase is ignored. Then come payment keywords, then the sign. If no rule sets a path, Plaid's category is the fallback, using a corrected key map (B34). Otherwise the merchant is unknown: base rate and the review list.
+- **Rates** (`core/earn_engine.py`): total rates, not bonuses on top. Order: brand, then sub-category, then category, then base, with the highest rate first within a level. Conditions: U.S.-only, online-only, foreign-only. Capped rules pay until the period's room runs out, then fall through. Top-N rules rank slots by spend in the billing cycle. Selected rules apply through a card's selections. On cards with caps or top-N rules, every 2027 row is re-scored in date order whenever one is locked, so late arrivals fix themselves. Amex rounding is kept.
+- **Refunds** reverse at the rate stored on the most recent matching purchase: same card, same merchant, within 120 days, at least as large, including 2026 purchases at their old rate. Without a match, the refund uses its own path's rate. Refunds don't give cap room back.
+- **Where rules live:** earn rules are in `core/earn_rules_seed.py`, rewritten every startup, with a `checked` note per product. Merchant rules live in the database, filled **once** at the first deploy (`migrate_merchant_rules_once`) from the old code list (translated), the taught rows, kind rules and new rules. `POST /api/merchant-csc` now also writes `merchant_rules`, and doesn't backfill 2027 rows.
+- **Compatibility:** 2027 rows mirror their brand or category into `points_category`, so existing by-category breakdowns keep working. A `points_category` edit from the old Merchant Category dropdown is translated into the new path on 2027 rows. The Custom Cash monthly calc stops at the start date; from then on summaries read locked points for those accounts. Challenge spend counts only 2027 purchases. The old backfill endpoints skip 2027 rows.
+- **API** (`routers/earning.py`): merchant categories, brands, merchant rules (CRUD), earn rules (read-only), `/api/cards/{id}/category-selections`, `/api/earning/review` (unknown merchants, rule 14) and `/api/earning/recalculate` (preview, then `apply: true`, rule 13). `PATCH /api/transactions/{id}` takes `merchant_category`, `brand`, `txn_kind` and `is_foreign` on 2027 rows only, marking the row manual.
+
+**Taught-rule migration choices:**
+- "King" was dropped; the code rule "Kings" covers the stores and no longer matches "Parking".
+- "DoorDash → Dining" was dropped in favour of Food Delivery.
+- Giftcards.com → Gift Cards; Lululemon → Other.
+- "Aspire", "Liberty Science" and "TPA" are migrated **inactive** for Omer to decide.
+- Old news patterns (NYT, WSJ, Washington Post) → Other, not Streaming.
+- Omer's frequent 2026 manual tags carry forward as rules: Pru Plaza Cafe, Tampa EDITION, Aluma Athina → Hilton, Allianz and CLEAR → Travel, PATH and PASSNY → Transit.
+
+**Verification**
+- `docs/categorization_engine_check.py` now scores 30 scenarios × 7 cards (201 combinations) on the old engine, the 2027 engine and the agreed rules. **The 2027 engine matches all 195 fixed-rate combinations** (the old engine matches 110). The 6 that depend on running totals are covered by tests.
+- Tests: **85 passed, 0 failed** (was 64 passed, 4 failed). The new `tests/test_earning.py` (17 tests) covers the switch date, fees, U.S.-only rates and rounding, a cap with a late-arriving earlier charge, Custom Cash's top category changing mid-cycle, rotating selections, Bilt's seeded choice, refunds (matched, unmatched, 2026 purchase), the capped BBP base rate, the review list and recalculation, PATCH, and the selection slot check. B27's 4 stale tests are fixed: they never set `card_id` or locked points.
+- `docs/earning_dry_run.py` (read-only, raw SQL in a READ ONLY transaction) scored Sep–Oct 2026: 463 card rows, 118,886 old points against 155,262 under 2027 rules. Every difference traced:
+  - Platinum El Al flights at 5x (+27k).
+  - Biz Gold Best Buy at 4x as a top-2 category.
+  - United Quest's United purchases at 3x (the old catalog's bonus sat on a category no row ever had).
+  - Walmart and Target at 1x on grocery cards (rule 4).
+  - Gift cards at base (rule 11).
+  - Fees and credits at 0.
+  - Sapphire Preferred in-store groceries at 1x (online-only 3x, B35).
+  - Custom Cash: +7.5k only once the card is linked to its product.
+  Dry-run limits: no stored Plaid category, channel or country on those rows, so unknown merchants are overcounted ($19.9k, mostly restaurants Plaid would code) and foreign purchases are treated as domestic.
+
+**Not done (next stages of step 2):**
+- **Stage 2, terms research.** Most products are "ported" from the 2026 catalog. Confirm current terms: Platinum and Sapphire Preferred first (the June 2026 refresh, online-only grocery 3x, the Lyft 5x end date), then Boundless's cap period, Amazon Prime, Hyatt and the rest. Atmos Summit needs a product (terms plus a seed entry) and its `foreign_only` 3x.
+- **Data fixes waiting on Omer:**
+  - Link products on Custom Cash 3240, Boundless 3663 and Double Cash 8475 (`card.product_id` is NULL).
+  - Add statement close days for Biz Gold, Strata Premier, Bilt, AA Platinum Select, Double Cash and Atmos Summit. Without one, billing-cycle rules use calendar months.
+  - Add networks for Biz Gold, Strata Premier and Atmos Summit.
+- **Selections:** Q1 2027 rotating categories (Freedom ×2, Freedom Flex, Discover) and the Cash+ and BOA picks go in via the selections API once published.
+- **Plaid country coverage:** check it once rows carry `merchant_country`. U.S.-only rates assume domestic when the country is unknown.
+- **Transactions page session:** show and edit the new fields, and drop the merchant-rule scope selector (rules are global now, rule 1).
+- **Validation:** statement points for 2–3 cards to compare against.
 
 ---
 
@@ -891,6 +941,10 @@ Omer: "let's look closely at the Dashboard page." Read it live at desktop and mo
 - Modals never close on backdrop click or Escape — explicit buttons only.
 
 ### Traps that have bitten more than once
+- **`pytest` without a `DATABASE_URL` override touches production.** Importing
+  `main` runs `init_db()` (migrations) and the `client` fixture's
+  `TestClient(app)` runs the startup seeds, both against whatever `.env`
+  points at. Run tests as `DATABASE_URL=sqlite:///<scratch>/test.db python3 -m pytest`.
 - **`account_type` capitalization.** Stored capitalized (`'Checking'`,
   `'Credit Card'`, `'HSA'`). Lowercase comparisons silently match nothing and
   fail *open* — an empty result reads as "no problems found." Caused B5, and
@@ -915,7 +969,7 @@ Not designed yet, by choice: the small flows behind the card ⋯ menu (Change pr
 
 Next is functionality (proposed order, 2026-11-03):
 1. ~~Fix the sync bug that drops real same-day repeat charges~~ Done 2026-11-03: the content-hash fallback in `core/plaid_sync.py` now only adopts rows with a dead Plaid ID (`_has_dead_plaid_id`); see BACKLOG "Cards module findings".
-2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history.
+2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history. **Stage 1 built 2026-11-03** (the 2027 engine; see the session writeup at the top). Still open: terms research for the held cards, the data fixes, the Q1 2027 selections.
 3. Program balances: not before 2027-01-01 (Omer, 2026-11-03). Balance syncing starts from that date, anchored to the balances on it; until then, wrong balances like Hilton's are left as they are.
 4. Benefits data model (per-period amounts, uses, purchase links) and Expiring credits.
 5. Build the Portfolio, Ecosystem and Card pages to their design docs.

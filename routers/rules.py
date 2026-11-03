@@ -17,9 +17,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from database import (
-    get_db, Account, Card, CategorizationRule, MerchantPointsMapping,
-    PointsCategory, Transaction, import_cards_from_excel, import_points_from_excel,
+    get_db, Account, Brand, Card, CategorizationRule, MerchantCategory, MerchantPointsMapping,
+    MerchantRule, PointsCategory, Transaction, import_cards_from_excel, import_points_from_excel,
 )
+from core.earn_engine import POINTS_FRESH_START_DT
+from core.earn_rules_seed import translate_legacy_category
 from categorization import CategorizationEngine, compute_needs_review, find_overlapping_rules, load_rules_from_excel
 
 from core.app_helpers import PROJECT_ROOT
@@ -81,12 +83,20 @@ async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
             points_category_id=cat.id,
         ))
 
+    # Also teach the 2027 engine's single rule list (merchant_rules), as a
+    # whole-word rule for every card (rule 1: one merchant path per
+    # transaction). 2027 rows are not backfilled here — they change only
+    # through POST /api/earning/recalculate after a before-and-after review
+    # (rule 13).
+    merchant_rule_saved = _teach_merchant_rule(db, merchant_pattern, points_category_name)
+
     updated = 0
     if apply_to_existing:
         # ilike for case-insensitive substring match (mirrors infer logic)
         query = db.query(Transaction).filter(
             Transaction.merchant_name.ilike(f'%{merchant_pattern}%'),
             Transaction.points_category == None,   # noqa: E711
+            Transaction.date < POINTS_FRESH_START_DT,
         )
         if card_id is not None:
             query = query.filter(Transaction.card_id == card_id)
@@ -107,7 +117,32 @@ async def save_merchant_csc(body: dict, db: Session = Depends(get_db)):
         'category': points_category_name,
         'scope': 'card' if card_id is not None else ('network' if network else 'global'),
         'transactions_updated': updated,
+        'merchant_rule_saved': merchant_rule_saved,
     }
+
+
+def _teach_merchant_rule(db, pattern: str, points_category_name: str) -> bool:
+    """Upsert a taught whole-word rule in merchant_rules from an old
+    points-category name. False when the name has no 2027 equivalent."""
+    kind = 'p2p' if points_category_name == 'P2P Payments' else None
+    mapped = None if kind else translate_legacy_category(points_category_name)
+    if not kind and not mapped:
+        return False
+    cat_id = brand_id = None
+    if mapped and mapped[0]:
+        c = db.query(MerchantCategory).filter_by(name=mapped[0]).first()
+        cat_id = c.id if c else None
+    if mapped and mapped[1]:
+        b = db.query(Brand).filter_by(name=mapped[1]).first()
+        brand_id = b.id if b else None
+    if not (cat_id or brand_id or kind):
+        return False
+    rule = db.query(MerchantRule).filter_by(pattern=pattern, match_type='word', source='taught').first()
+    if not rule:
+        rule = MerchantRule(pattern=pattern, match_type='word', source='taught')
+        db.add(rule)
+    rule.merchant_category_id, rule.brand_id, rule.txn_kind, rule.is_active = cat_id, brand_id, kind, True
+    return True
 
 @router.get("/api/merchant-csc")
 async def list_merchant_csc(db: Session = Depends(get_db)):

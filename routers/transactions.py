@@ -19,8 +19,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from core.earn_engine import POINTS_FRESH_START_DT, uses_new_engine
+from core.earn_rules_seed import translate_legacy_category
+from core.merchant_classifier import (
+    EARNING_KINDS, NON_EARNING_KINDS, classify_transaction, get_catalog, get_rule_index,
+)
 from database import (
-    get_db, Account, CategorizationRule, MerchantPointsMapping, Transaction,
+    get_db, Account, Brand, CategorizationRule, MerchantCategory, MerchantPointsMapping, Transaction,
     TransactionSplit, UserCorrection,
 )
 from llm_service import _call_groq, VALID_CATEGORIES
@@ -96,6 +101,13 @@ class TransactionUpdate(BaseModel):
     clear_points_earn_override: Optional[bool] = None
     # Free-text "who spent this" tag — manual only, see Transaction.spender.
     spender: Optional[str] = None
+    # Merchant path and kind for rows dated 2027-01-01 or later (2027 earning
+    # engine). Any of these marks the row's classification as manual. An
+    # empty string clears brand / is_foreign is a plain override.
+    merchant_category: Optional[str] = None
+    brand: Optional[str] = None
+    txn_kind: Optional[str] = None
+    is_foreign: Optional[bool] = None
 
 class BatchTransactionUpdate(BaseModel):
     """Batch-update payload: a list of IDs and the fields to set on all of them."""
@@ -153,6 +165,7 @@ async def backfill_points_categories(db: Session = Depends(get_db)):
         .filter(
             Transaction.points_category == None,   # noqa: E711
             Transaction.merchant_name != None,     # noqa: E711
+            Transaction.date < POINTS_FRESH_START_DT,  # 2027 rows use the 2027 engine
         )
         .all()
     )
@@ -322,6 +335,62 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     network_lookup = _build_network_lookup(db, [t.account_id])
     return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer, points_lookup, cat_parent_map, network_lookup)
 
+def _apply_merchant_path_edit(db, t, update) -> bool:
+    """Apply merchant path / kind edits for a 2027 row (2027 earning engine).
+    Returns True when something changed. The old Merchant Category dropdown
+    still sends points_category; on a 2027 row it is translated into the new
+    path so that dropdown keeps working until the Transactions page moves to
+    the new fields."""
+    new_fields = (update.merchant_category, update.brand, update.txn_kind, update.is_foreign)
+    legacy = update.points_category is not None and uses_new_engine(t.date)
+    if all(v is None for v in new_fields) and not legacy:
+        return False
+    if not uses_new_engine(t.date):
+        raise HTTPException(status_code=400, detail=(
+            "Merchant path fields apply to transactions dated 2027-01-01 or later; "
+            "earlier history keeps its points as they are."))
+
+    if not t.txn_kind:
+        # First edit before the engine ever saw the row: start from the
+        # automatic classification, then apply the edit on top.
+        classify_transaction(t, get_rule_index(db), get_catalog(db))
+
+    cats = db.query(MerchantCategory).all()
+    cat_names = {c.name for c in cats}
+    cat_by_id = {c.id: c.name for c in cats}
+    brand_cat = {b.name: b.default_category_id for b in db.query(Brand).all()}
+    category, brand = update.merchant_category, update.brand
+    kind = update.txn_kind
+
+    if legacy and category is None and brand is None:
+        if update.points_category == 'P2P Payments':
+            kind = kind or 'p2p'
+        else:
+            mapped = translate_legacy_category(update.points_category)
+            if not mapped:
+                raise HTTPException(status_code=400, detail=f"No 2027 merchant path for '{update.points_category}'")
+            category, brand = mapped
+
+    if brand is not None:
+        if brand and brand not in brand_cat:
+            raise HTTPException(status_code=400, detail=f"Unknown brand '{brand}' — add it with POST /api/brands")
+        t.brand = brand or None
+        if brand and category is None:
+            category = cat_by_id.get(brand_cat[brand])
+    if category is not None:
+        if category and category not in cat_names:
+            raise HTTPException(status_code=400, detail=f"Unknown merchant category '{category}'")
+        t.merchant_category = category or None
+    if kind is not None:
+        if kind not in EARNING_KINDS | NON_EARNING_KINDS:
+            raise HTTPException(status_code=400, detail=f"Unknown transaction kind '{kind}'")
+        t.txn_kind = kind
+    if update.is_foreign is not None:
+        t.is_foreign = update.is_foreign
+    t.classification_source = 'manual'
+    t.updated_at = datetime.utcnow()
+    return True
+
 @router.patch("/api/transactions/{transaction_id}")
 async def update_transaction(
     transaction_id: int,
@@ -368,7 +437,9 @@ async def update_transaction(
         t.gcb_tagged = update.is_gcb  # Keep legacy column in sync
     if update.is_for_others is not None:
         t.is_for_others = update.is_for_others
-    if update.points_category is not None:
+    if _apply_merchant_path_edit(db, t, update):
+        _relock = True
+    elif update.points_category is not None:
         t.points_category = update.points_category
         _relock = True
     if update.is_excluded is not None:

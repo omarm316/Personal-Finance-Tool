@@ -43,6 +43,8 @@ from core.points_engine import (
     _lock_points_for_transaction, _compute_ecosystem_balance, _statement_close_date,
     _points_pending, _load_products_by_id, _NON_EARNING_CATS, _CC_PAYMENT_KW,
 )
+from core.earn_engine import POINTS_FRESH_START_DT
+from core.earn_rules_seed import migrate_merchant_rules_once, seed_earning_catalog
 from core.challenges_helpers import (
     _challenge_progress, _recalc_challenge, _challenge_spend_for_card,
     _sync_challenge_links, _current_cycle, _cycles_for_year,
@@ -362,6 +364,19 @@ async def startup_event():
 
         # Product catalog is seeded by seed_card_products() above — no Excel import needed
 
+        # 2027 earning engine: merchant category tree, brands and earn rules
+        # every startup; the merchant rule list only the first time.
+        try:
+            seed_earning_catalog(session)
+            n = migrate_merchant_rules_once(session)
+            if n:
+                logger.info(f"Merchant rules: migrated {n} rules into merchant_rules")
+        except Exception as earn_err:
+            session.rollback()
+            logger.warning(f"seed_earning_catalog failed: {earn_err}")
+            import traceback
+            traceback.print_exc()
+
         try:
             _backfill_product_history_and_locked_points(session)
         except Exception as lock_err:
@@ -562,7 +577,12 @@ def _backfill_product_history_and_locked_points(session):
     # single interactive edit, far too slow here against a remote DB with
     # ~1-2k rows (each iteration is several network round trips). Precompute
     # everything once instead and iterate in pure Python.
-    unlocked = session.query(Transaction).filter(Transaction.points_locked_at.is_(None)).all()
+    # Pre-2027 only: rows from POINTS_FRESH_START are always locked at write
+    # time by the 2027 engine, which this old-engine shortcut must not touch.
+    unlocked = session.query(Transaction).filter(
+        Transaction.points_locked_at.is_(None),
+        Transaction.date < POINTS_FRESH_START_DT,
+    ).all()
     if unlocked:
         cat_parent_map = {c.name: c.parent_key for c in session.query(PointsCategory).all()}
         card_ids = {t.card_id for t in unlocked if t.card_id}
@@ -1477,8 +1497,9 @@ async def cards_earn_summary(
         info = acct_info.get(t.account_id)
         if not info:
             continue
-        # auto_top_category accounts are handled separately below
-        if info.get('has_auto_top'):
+        # auto_top_category accounts are handled separately below, until
+        # POINTS_FRESH_START — from then on the 2027 engine locks them per row
+        if info.get('has_auto_top') and t.date < POINTS_FRESH_START_DT:
             continue
         if t.action != 'Expense':
             continue
@@ -2212,8 +2233,9 @@ async def ecosystem_earn_detail(
             continue
         # auto_top_category accounts are handled separately below, same as
         # /api/cards/earn-summary — compute_points_earn()'s flat base_rate
-        # can't express the "top category gets 5x" waterfall.
-        if acct_info[t.account_id].get('has_auto_top'):
+        # can't express the "top category gets 5x" waterfall. From
+        # POINTS_FRESH_START the 2027 engine locks these rows per row.
+        if acct_info[t.account_id].get('has_auto_top') and t.date < POINTS_FRESH_START_DT:
             continue
         # Locked at write time — see _lock_points_for_transaction().
         pts = t.points_earned or 0
@@ -3778,6 +3800,7 @@ from routers.transactions import router as transactions_router
 from routers.rules import router as rules_router
 from routers.admin import router as admin_router
 from routers.accounts import router as accounts_router
+from routers.earning import router as earning_router
 
 app.include_router(misc_router)
 app.include_router(loans_router)
@@ -3790,6 +3813,7 @@ app.include_router(transactions_router)
 app.include_router(rules_router)
 app.include_router(admin_router)
 app.include_router(accounts_router)
+app.include_router(earning_router)
 
 
 

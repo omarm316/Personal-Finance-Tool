@@ -124,6 +124,11 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,
+        # 2027 earning engine fields (NULL on rows before POINTS_FRESH_START)
+        "merchant_category": t.merchant_category,
+        "brand": t.brand,
+        "txn_kind": t.txn_kind,
+        "is_foreign": t.is_foreign,
         "network": (network_lookup or {}).get(t.account_id),
         "spender":         t.spender,
         "points_earn":     points_earn,

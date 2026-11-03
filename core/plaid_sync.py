@@ -317,6 +317,11 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 gcb_tagged=gcb_auto,
                 is_for_others=for_others_auto,
                 points_category=points_cat,
+                # Raw Plaid signals for the 2027 earning engine (stored on
+                # every new row so their coverage can be checked before then)
+                pfc_detailed=txn_data.get('pfc_detailed'),
+                payment_channel=txn_data.get('payment_channel'),
+                merchant_country=txn_data.get('country'),
                 content_hash=_assign_content_hash(db, account.id, txn_date, amount, txn_data['description_raw']),
                 year=txn_date.year,
                 month=txn_date.month,

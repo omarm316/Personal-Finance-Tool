@@ -410,6 +410,12 @@ class PlaidClient:
             txn_date = datetime.strptime(date_str, '%Y-%m-%d')
 
         pfc = transaction.get('personal_finance_category') or {}
+        # Never let an odd location shape drop the transaction — _safe_format
+        # discards the whole row on any exception.
+        try:
+            country = self._plaid_get(self._plaid_get(transaction, 'location') or {}, 'country')
+        except Exception:
+            country = None
         return {
             'plaid_transaction_id': transaction['transaction_id'],
             'plaid_account_id': transaction['account_id'],
@@ -424,6 +430,7 @@ class PlaidClient:
             'pfc_primary': pfc.get('primary'),       # e.g. 'FOOD_AND_DRINK'
             'pfc_detailed': pfc.get('detailed'),      # e.g. 'FOOD_AND_DRINK_COFFEE'
             'pfc_confidence': pfc.get('confidence_level'),  # 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW'
+            'country': country if isinstance(country, str) and len(country) == 2 else None,  # ISO alpha-2; drives U.S.-only earn rates
         }
 
 

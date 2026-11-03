@@ -1,6 +1,6 @@
 # Cards: categorization and points rules
 
-Agreed in principle with Omer on 2026-11-02. Not implemented, and no data has been changed. The comparison script is `docs/categorization_engine_check.py`; it reads no database.
+Agreed in principle with Omer on 2026-11-02. **Implemented for transactions dated 2027-01-01 or later (stage 1, 2026-11-03):** `core/merchant_classifier.py` (rules 1, 4, 6-8, 10, 14, 15), `core/earn_engine.py` (rules 3, 5, 9, 11-13), earn rules in `core/earn_rules_seed.py`, merchant rules in the `merchant_rules` table. Earlier history is unchanged. The comparison script is `docs/categorization_engine_check.py` (reads no database); `docs/earning_dry_run.py` scores real past rows read-only.
 
 ## The model
 Each transaction has two separate paths and one shared brand.
@@ -33,7 +33,9 @@ Each transaction has two separate paths and one shared brand.
 Bilt Obsidian's 3x category is Groceries (confirmed by Omer), which carries a $25,000 yearly cap.
 
 ## Engine test
-Today's real `infer_points_category()` and `compute_points_earn()` ran against the proposed rules: 23 scenarios from real descriptors on 7 cards, 152 possible combinations.
+**2026-11-03, with the 2027 engine:** 30 scenarios on 7 cards, 201 combinations. The 2027 engine matches all 195 fixed-rate combinations and every agreed merchant path; the old engine matches 110. The 6 that depend on running totals are covered by `tests/test_earning.py`.
+
+**2026-11-02, before implementation:** today's real `infer_points_category()` and `compute_points_earn()` ran against the proposed rules: 23 scenarios from real descriptors on 7 cards, 152 possible combinations.
 
 | Result | Combinations |
 |---|---|

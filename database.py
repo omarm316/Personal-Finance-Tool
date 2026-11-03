@@ -191,6 +191,24 @@ class Transaction(Base):
     points_product_id = Column(Integer, ForeignKey('card_products.id'), nullable=True)
     points_locked_at = Column(DateTime, nullable=True)
 
+    # Merchant path and kind for the 2027 earning engine (core/earn_engine.py).
+    # Filled only for rows dated on or after POINTS_FRESH_START; earlier rows
+    # keep the old points_category system untouched. See
+    # docs/cards-categorization-rules.md for the model.
+    merchant_category = Column(String(100), nullable=True)   # MerchantCategory.name; NULL = unknown
+    brand = Column(String(100), nullable=True)               # Brand.name, shared with Omer's category path
+    # purchase | refund | fee | interest | credit | payment | p2p | adjustment.
+    # Only purchases earn and only refunds reverse (rules 8-10).
+    txn_kind = Column(String(20), nullable=True)
+    # 'rule' | 'plaid' | 'manual' | 'none' — manual survives re-classification
+    classification_source = Column(String(20), nullable=True)
+    merchant_rule_id = Column(Integer, nullable=True)        # MerchantRule that set the path (no FK: rules get deleted)
+    # Raw Plaid signals, kept for the classifier and for rate conditions
+    pfc_detailed = Column(String(100), nullable=True)
+    payment_channel = Column(String(20), nullable=True)      # 'online' | 'in store' | 'other'
+    merchant_country = Column(String(2), nullable=True)      # ISO alpha-2 from Plaid location
+    is_foreign = Column(Boolean, nullable=True)              # True only when known foreign (Plaid or manual)
+
     # Free-text tag for who made this purchase (e.g. "Omer", "Daniella") — manual only,
     # Plaid gives no cardholder-level signal on shared/authorized-user accounts.
     # Lets a SpendChallenge.spender_filter scope its spend calc to one person's purchases.
@@ -862,6 +880,110 @@ class MerchantPointsMapping(Base):
     points_category = relationship("PointsCategory", back_populates="merchant_mappings")
 
 
+# ── 2027 earning engine (docs/cards-categorization-rules.md) ─────────────────
+# These tables serve transactions dated on or after POINTS_FRESH_START only.
+# PointsCategory / CardProductReward / MerchantPointsMapping above stay frozen
+# for earlier history.
+
+class MerchantCategory(Base):
+    """The card network's view of a merchant: a two-level tree such as
+    Travel > Hotels. Seeded from core/earn_rules_seed.py."""
+    __tablename__ = 'merchant_categories'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    parent_id = Column(Integer, ForeignKey('merchant_categories.id'), nullable=True)
+    display_order = Column(Integer, default=100)
+
+
+class Brand(Base):
+    """One brand field shared by Omer's category path and the merchant path
+    (rule 6). default_category_id is the merchant category a brand implies
+    when a rule or manual edit names only the brand."""
+    __tablename__ = 'brands'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    default_category_id = Column(Integer, ForeignKey('merchant_categories.id'), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MerchantRule(Base):
+    """The one list of merchant rules (rule 15). A rule matches whole words in
+    the merchant name or description unless match_type is 'contains', and sets
+    any of merchant category, brand and transaction kind. The longest matching
+    pattern wins; there are no priority numbers."""
+    __tablename__ = 'merchant_rules'
+
+    id = Column(Integer, primary_key=True)
+    pattern = Column(String(200), nullable=False)
+    match_type = Column(String(20), nullable=False, default='word')   # 'word' | 'contains'
+    merchant_category_id = Column(Integer, ForeignKey('merchant_categories.id'), nullable=True)
+    brand_id = Column(Integer, ForeignKey('brands.id'), nullable=True)
+    txn_kind = Column(String(20), nullable=True)
+    source = Column(String(20), nullable=False, default='taught')     # 'migrated' | 'taught'
+    is_active = Column(Boolean, default=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    merchant_category = relationship('MerchantCategory')
+    brand = relationship('Brand')
+
+
+class EarnRule(Base):
+    """What a card product pays on a merchant path (rules 3, 5, 12). Rewritten
+    from core/earn_rules_seed.py on every startup, like CardProductReward.
+
+    rate is the TOTAL points per dollar, not a bonus on top of the base. A row
+    with neither category nor brand is the product's base rate. The most
+    specific matching level wins: brand, then sub-category, then category,
+    then base."""
+    __tablename__ = 'earn_rules'
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('card_products.id', ondelete='CASCADE'), nullable=False, index=True)
+    merchant_category_id = Column(Integer, ForeignKey('merchant_categories.id'), nullable=True)
+    brand_id = Column(Integer, ForeignKey('brands.id'), nullable=True)
+    rate = Column(Float, nullable=False)
+    rule_type = Column(String(20), nullable=False, default='fixed')    # 'fixed' | 'top_n' | 'selected'
+    top_n = Column(Integer, nullable=True)                             # top_n rules: how many categories win
+    slot = Column(String(30), nullable=True)                           # selected rules: CardCategorySelection.slot
+    domestic_only = Column(Boolean, default=False)
+    online_only = Column(Boolean, default=False)
+    foreign_only = Column(Boolean, default=False)                      # e.g. Atmos Summit 3x foreign purchases
+    cap_amount = Column(Float, nullable=True)                          # spend at this rate per cap period
+    cap_period = Column(String(20), nullable=True)                     # calendar_year | card_year | quarter | billing_cycle
+    cap_group = Column(String(50), nullable=True)                      # rules sharing one cap
+    rate_after_cap = Column(Float, nullable=True)                      # None = fall through to the next rule
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    merchant_category = relationship('MerchantCategory')
+    brand = relationship('Brand')
+
+
+class CardCategorySelection(Base):
+    """A rotating or chosen bonus category on one physical card for a period
+    (Freedom and Discover quarters, Cash+ and BOA picks, Bilt's choice).
+    Applies to that card's EarnRule rows of rule_type 'selected' with the
+    same slot. period_end NULL means until changed."""
+    __tablename__ = 'card_category_selections'
+
+    id = Column(Integer, primary_key=True)
+    card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=False, index=True)
+    slot = Column(String(30), nullable=False)
+    merchant_category_id = Column(Integer, ForeignKey('merchant_categories.id'), nullable=True)
+    brand_id = Column(Integer, ForeignKey('brands.id'), nullable=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    merchant_category = relationship('MerchantCategory')
+    brand = relationship('Brand')
+
+
 class DuplicateIgnore(Base):
     """
     Stores pairs of account IDs that the user has confirmed are NOT duplicates
@@ -1113,6 +1235,15 @@ def run_migrations(engine):
             ('points_earn_rate',           'FLOAT'),
             ('points_product_id',          'INTEGER'),
             ('points_locked_at',           'TIMESTAMP'),
+            ('merchant_category',          'VARCHAR(100)'),
+            ('brand',                      'VARCHAR(100)'),
+            ('txn_kind',                   'VARCHAR(20)'),
+            ('classification_source',      'VARCHAR(20)'),
+            ('merchant_rule_id',           'INTEGER'),
+            ('pfc_detailed',               'VARCHAR(100)'),
+            ('payment_channel',            'VARCHAR(20)'),
+            ('merchant_country',           'VARCHAR(2)'),
+            ('is_foreign',                 'BOOLEAN'),
         ],
         'accounts': [
             ('is_manual', 'BOOLEAN DEFAULT FALSE'),

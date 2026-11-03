@@ -20,6 +20,7 @@ from database import (
     Card, PointsCategory, CardProduct, CardProductReward, PointsEcosystem,
     CardProductHistory, PointsBalanceSnapshot, Transaction,
 )
+from core.earn_engine import POINTS_FRESH_START_DT, lock_points_2027, uses_new_engine
 
 _MERCHANT_POINTS_PATTERNS: list[tuple[str, str]] = [
     # ── Food delivery (before rideshare so "uber eats" hits here first) ──
@@ -393,10 +394,13 @@ def calc_auto_top_category_points(db, account_id, product, start_date, end_date)
     # transactions earlier in start_date's own month were included. Preserved
     # deliberately rather than silently narrowing the window.
     range_start = start_date.replace(day=1)
+    # Rows from POINTS_FRESH_START on carry their own locked points from the
+    # 2027 engine (core/earn_engine.py), so this monthly calc stops there.
     all_txns = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.date >= range_start,
         Transaction.date <= end_date,
+        Transaction.date < POINTS_FRESH_START_DT,
         Transaction.action == 'Expense',
         Transaction.amount < 0,
         Transaction.is_excluded != True,
@@ -589,7 +593,13 @@ def _lock_points_for_transaction(db, t) -> None:
     points_earn_override, action). Re-locking still resolves the product as
     of the transaction's OWN date, so correcting an old transaction's category
     today doesn't pull in today's (possibly changed) product's rates.
+
+    Rows dated on or after POINTS_FRESH_START go to the 2027 engine instead
+    (core/earn_engine.py); everything below is the frozen pre-2027 path.
     """
+    if uses_new_engine(t.date):
+        lock_points_2027(db, t)
+        return
     t.points_locked_at = datetime.utcnow()
 
     if not t.card_id:
@@ -775,9 +785,10 @@ def _compute_ecosystem_balance(db, eco_id, eco_accts, acct_info, cat_parent_map,
                 if t.action != 'Expense':
                     continue
                 # auto_top_category accounts can't be read from the locked
-                # column (it can't express the "top category" waterfall) —
-                # handled separately below. See B11.
-                if acct_info.get(t.account_id, {}).get('has_auto_top'):
+                # column before 2027 (it can't express the "top category"
+                # waterfall) — handled separately below. See B11. From
+                # POINTS_FRESH_START the 2027 engine locks them per row.
+                if acct_info.get(t.account_id, {}).get('has_auto_top') and t.date < POINTS_FRESH_START_DT:
                     continue
                 # Locked at write time — see _lock_points_for_transaction().
                 pts = t.points_earned or 0
