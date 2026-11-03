@@ -907,3 +907,16 @@ Omer: "let's look closely at the Dashboard page." Read it live at desktop and mo
   scrolling broke app-wide while landscape worked.
 - **`Transaction.date` is a timestamp; most other date columns are `date`.**
   Comparing them in Python is a `TypeError`; SQL coerces silently.
+
+## Cards module layout work (2026-11-02)
+Layout comes first, using the `design-gallery` skill for every page; behavior and code follow. Portfolio desktop is approved (`docs/cards-portfolio-design.md`). Ecosystem desktop is approved (`docs/cards-ecosystem-design.md`). The individual Card page desktop is approved (`docs/cards-card-design.md`, final after round 8 on 2026-11-03: banner ⋯ menu, Expiring credits beside Active challenges, Benefits under Earnings with per-period tracking, simple Log credit use from a transaction row). Galleries cover desktop only; phone design is a separate exercise for each screen, done later.
+
+Not designed yet, by choice: the small flows behind the card ⋯ menu (Change product, Product history, Edit card details, Add a challenge, Mark card as closed); design them when building, reusing the side-panel pattern from benefit editing. Phone layouts come later.
+
+Next is functionality (proposed order, 2026-11-03):
+1. Fix the sync bug that drops real same-day repeat charges (content-hash fallback in `core/plaid_sync.py` ~145-170). A fresh start still depends on it.
+2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history.
+3. Program balances: not before 2027-01-01 (Omer, 2026-11-03). Balance syncing starts from that date, anchored to the balances on it; until then, wrong balances like Hilton's are left as they are.
+4. Benefits data model (per-period amounts, uses, purchase links) and Expiring credits.
+5. Build the Portfolio, Ecosystem and Card pages to their design docs.
+Editing a transaction's spender and category waits for step 2. See "Cards module findings" in `BACKLOG.md`.
