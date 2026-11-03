@@ -63,6 +63,31 @@ _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
     'EDUCATION':                 ('Education',       'Expense'),
 }
 
+_REMOVED_NOTE = " [removed by Plaid — may reappear with a new ID]"
+
+
+def _has_dead_plaid_id(row: Transaction, live_ids: set, removed_ids: set, full_download: bool) -> bool:
+    """
+    Can the content-hash fallback give this row a new Plaid ID?
+
+    Only if its current ID is no longer live. Otherwise the row belongs to an
+    earlier identical charge (same card, day, amount, description) and the
+    incoming transaction is a real repeat that needs its own row. Dead means:
+      - no Plaid ID (manual / imported row);
+      - removed by Plaid, in this result or (soft-deleted) in an earlier one;
+      - on a full download (cursor reset or re-link), not in this result at
+        all — Plaid sends every live transaction then, so an absent ID is from
+        an old item. Incremental syncs only carry changes, so absence there
+        proves nothing.
+    """
+    pid = row.plaid_transaction_id
+    if not pid or pid in removed_ids:
+        return True
+    if row.is_excluded and _REMOVED_NOTE in (row.description_clean or ''):
+        return True
+    return full_download and pid not in live_ids
+
+
 async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     """Sync transactions for a single PlaidItem. Returns count of new transactions added."""
     categorizer = CategorizationEngine(db)
@@ -96,9 +121,16 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
     skipped = 0
     errors  = 0
-    # Track DB row IDs matched via content_hash this sync so each row is
-    # only adopted once (handles multiple identical transactions on the same day).
+    # Track DB row IDs matched via content_hash (or inserted) this sync so each
+    # row is only adopted once (handles multiple identical transactions on the same day).
     content_matched_ids: set = set()
+    # Plaid IDs this result still reports as live, and the ones it removed —
+    # used by the content-hash fallback to tell a re-linked row (dead ID) from
+    # a row that belongs to an earlier, identical, still-live charge.
+    live_plaid_ids = {t['plaid_transaction_id'] for t in result['added']}
+    live_plaid_ids.update(t['plaid_transaction_id'] for t in result.get('modified', []))
+    removed_plaid_ids = set(result.get('removed', []))
+    full_download = cursor is None
 
     for txn_data in result['added']:
         sp = db.begin_nested()  # savepoint — so a single-row failure only rolls back that row
@@ -161,12 +193,18 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 .all()
             )
             hash_match = next(
-                (r for r in hash_candidates if r.id not in content_matched_ids),
+                (r for r in hash_candidates
+                 if r.id not in content_matched_ids
+                 and _has_dead_plaid_id(r, live_plaid_ids, removed_plaid_ids, full_download)),
                 None,
             )
             if hash_match:
                 # Adopt the new Plaid ID — all user classifications are preserved
                 hash_match.plaid_transaction_id = txn_data['plaid_transaction_id']
+                if hash_match.is_excluded and _REMOVED_NOTE in (hash_match.description_clean or ''):
+                    # Soft-deleted by an earlier Plaid removal; it's back under a new ID.
+                    hash_match.is_excluded = False
+                    hash_match.description_clean = hash_match.description_clean.replace(_REMOVED_NOTE, '')
                 content_matched_ids.add(hash_match.id)
                 logger.info(f"[sync] content-hash match: adopted new plaid_id for '{hash_match.description_raw[:40]}'")
                 sp.commit()
@@ -286,6 +324,7 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             )
             db.add(new_txn)
             db.flush()   # catch constraint errors per-transaction, not at batch commit
+            content_matched_ids.add(new_txn.id)
             _lock_points_for_transaction(db, new_txn)
             sp.commit()  # release savepoint — this row is now safe in the outer transaction
             total_added += 1
@@ -354,9 +393,8 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
             # Soft-delete: exclude from all views but keep the row in the DB
             existing.is_excluded = True
             existing.needs_review = False
-            note = " [removed by Plaid — may reappear with a new ID]"
-            if existing.description_clean and note not in existing.description_clean:
-                existing.description_clean = existing.description_clean + note
+            if existing.description_clean and _REMOVED_NOTE not in existing.description_clean:
+                existing.description_clean = existing.description_clean + _REMOVED_NOTE
             _lock_points_for_transaction(db, existing)
             removed_count += 1
             logger.info(f"[sync] soft-deleted txn {plaid_id} ({existing.description_raw}) — excluded, not hard-deleted")
