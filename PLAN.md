@@ -50,7 +50,7 @@ Built to the plan Omer approved on 2026-11-03, implementing `docs/cards-categori
 **Not done (next stages of step 2):**
 - **Stage 2, terms research.** Most products are "ported" from the 2026 catalog. Confirm current terms: Platinum and Sapphire Preferred first (the June 2026 refresh, online-only grocery 3x, the Lyft 5x end date), then Boundless's cap period, Amazon Prime, Hyatt and the rest. Atmos Summit needs a product (terms plus a seed entry) and its `foreign_only` 3x.
 - **Data fixes waiting on Omer:**
-  - Link products on Custom Cash 3240, Boundless 3663 and Double Cash 8475 (`card.product_id` is NULL).
+  - ~~Link products on Custom Cash 3240, Boundless 3663 and Double Cash 8475~~ Done 2026-11-03 with Omer's go-ahead; their existing rows were left unscored.
   - Add statement close days for Biz Gold, Strata Premier, Bilt, AA Platinum Select, Double Cash and Atmos Summit. Without one, billing-cycle rules use calendar months.
   - Add networks for Biz Gold, Strata Premier and Atmos Summit.
 - **Selections:** Q1 2027 rotating categories (Freedom ×2, Freedom Flex, Discover) and the Cash+ and BOA picks go in via the selections API once published.
