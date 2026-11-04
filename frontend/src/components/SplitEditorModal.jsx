@@ -1,7 +1,8 @@
 import {useState,useEffect} from 'react';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
-import {fmt,showCategoryForType,sortedCats} from '../lib/format';
+import {fmt,showCategoryForType} from '../lib/format';
+import {CategoryOptions} from './CategoryOptions';
 
 export function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
   const[splits,setSplits]=useState([]);
@@ -12,13 +13,13 @@ export function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
   useEffect(()=>{
     (async()=>{
       try{const s=await apiFetch(`/transactions/${txn.id}/splits`);
-        setSplits(s.length?s:[{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,is_for_others:false,notes:''}]);
-      }catch(e){setSplits([{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,is_for_others:false,notes:''}]);}
+        setSplits(s.length?s:[{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
+      }catch(e){setSplits([{amount:txn.amount,description:'',category:txn.category_final||'',action:txn.action||'Expense',is_gcb:false,notes:''}]);}
       finally{setLoading(false);}
     })();
   },[txn.id]);
 
-  const addRow=()=>setSplits([...splits,{amount:0,description:'',category:'',action:txn.action||'Expense',is_gcb:false,is_for_others:false,notes:''}]);
+  const addRow=()=>setSplits([...splits,{amount:0,description:'',category:'',action:txn.action||'Expense',is_gcb:false,notes:''}]);
   const removeRow=(i)=>{if(splits.length>1)setSplits(splits.filter((_,j)=>j!==i));};
   const updateRow=(i,field,val)=>{const s=[...splits];s[i]={...s[i],[field]:val};setSplits(s);};
 
@@ -31,7 +32,7 @@ export function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
     setSaving(true);setError('');
     try{
       await apiFetch(`/transactions/${txn.id}/splits`,{method:'POST',body:JSON.stringify({splits:splits.map(s=>({
-        amount:parseFloat(s.amount),description:s.description,category:s.category,action:s.action||null,is_gcb:!!s.is_gcb,is_for_others:!!s.is_for_others,notes:s.notes
+        amount:parseFloat(s.amount),description:s.description,category:s.category,action:s.action||null,is_gcb:!!s.is_gcb,notes:s.notes
       }))})});
       toast('Splits saved');onSaved();onClose();
     }catch(e){setError(e.message||'Failed to save splits');}
@@ -66,7 +67,6 @@ export function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
               <th>Type</th>
               <th>Category</th>
               <th style={{textAlign:'center'}}>GCB</th>
-              <th style={{textAlign:'center'}}>For Others</th>
               <th style={{width:40}}></th>
             </tr></thead>
             <tbody>{splits.map((s,i)=>(
@@ -81,12 +81,11 @@ export function SplitEditorModal({txn,categories,onClose,onSaved,toast}){
                 <td>
                   {showCategoryForType(s.action||'Expense')
                     ?<select className="filter-select" value={s.category||''} onChange={e=>updateRow(i,'category',e.target.value)}>
-                      <option value="">Unclassified</option>{sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                      <option value="">Unclassified</option><CategoryOptions categories={categories}/>
                     </select>
                     :<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
                 </td>
                 <td style={{textAlign:'center'}}><input type="checkbox" checked={!!s.is_gcb} onChange={e=>updateRow(i,'is_gcb',e.target.checked)} style={{width:16, height:16}}/></td>
-                <td style={{textAlign:'center'}}><input type="checkbox" checked={!!s.is_for_others} onChange={e=>updateRow(i,'is_for_others',e.target.checked)} style={{width:16, height:16}}/></td>
                 <td><button type="button" className="btn btn-ghost btn-sm" onClick={()=>removeRow(i)} style={{color:'var(--red)'}}>✕</button></td>
               </tr>
             ))}</tbody>

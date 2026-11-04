@@ -4,12 +4,13 @@ import {ConfirmModal} from './ConfirmModal';
 import {Icon} from './Icon';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
-import {fmt,fmtDate,normalizeCat,showCategoryForType,sortedCats} from '../lib/format';
+import {fmt,fmtDate,normalizeCat,showCategoryForType} from '../lib/format';
+import {CategoryOptions,CatName} from './CategoryOptions';
+import {catLabel} from '../lib/categories';
 
 export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,selected,onToggleSelect,onBatchEdit,toast}){
   const[locked,setLocked]=useState(txn.is_locked);
   const[gcb,setGcb]=useState(txn.is_gcb||false);
-  const[forOthers,setForOthers]=useState(txn.is_for_others||false);
   /* Merchant category (CSC) — the network-facing classification (Visa,
      Mastercard, Amex, Discover — not the issuing bank), separate from the
      personal budget `category` above. Editable here + teachable to a scope
@@ -165,10 +166,10 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
           :editing
             ?<select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{padding:'4px 8px',width:140}}>
               <option value="">Unclassified</option>
-              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              <CategoryOptions categories={categories}/>
             </select>
             :<span className="badge" style={{background:'rgba(59,130,246,0.08)',color:'var(--blue-vibrant)'}}>
-              {normalizeCat(txn.category_final)}
+              <CatName name={normalizeCat(txn.category_final)}/>
               {txn.category_manual&&<span style={{marginLeft:6,opacity:0.6}}>✎</span>}
             </span>
         }
@@ -196,7 +197,6 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
                 here, which is what pushed Save/Cancel off the visible edge in edit
                 mode — see PLAN.md). */}
             {gcb&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(251,191,36,0.12)',color:'var(--amber)',border:'1px solid rgba(251,191,36,0.3)'}}>⭐</span>}
-            {forOthers&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(59,130,246,0.1)',color:'var(--blue-primary)',border:'1px solid rgba(59,130,246,0.25)'}}>👥</span>}
             {excluded&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'rgba(248,113,113,0.08)',color:'var(--red)',border:'1px solid rgba(248,113,113,0.3)'}}>⊘</span>}
             {locked&&<span style={{fontSize:10,padding:'3px 8px',borderRadius:20,background:'var(--elevated)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>🔒</span>}
             <button type="button" className="btn btn-sm btn-ghost" style={{padding:6}} onClick={()=>setShowTxnInfo(true)} title="Details"><Icon name="info" size={14}/></button>
@@ -213,7 +213,7 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
         <td style={{paddingLeft:32,color:'var(--text-secondary)',fontWeight:500}}>{s.description||<span style={{color:'var(--text-muted)',fontStyle:'italic'}}>—</span>}</td>
         <td><span style={{color:'var(--text-secondary)',fontWeight:600}}>{s.amount<0?'-':'+'}{fmt(s.amount)}</span></td>
         <td><span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:11}}>{s.action||'Expense'}</span></td>
-        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{s.category}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
+        <td>{s.category?<span className="badge badge-category" style={{fontSize:11}}>{catLabel(s.category)}</span>:<span style={{color:'var(--text-muted)'}}>—</span>}</td>
         <td></td>
         <td></td>
       </tr>
@@ -267,7 +267,7 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
                 className="filter-select"
                 style={{fontSize:13,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,background:'var(--bg)',color:'var(--text-primary)'}}>
                 <option value="">No category</option>
-                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                <CategoryOptions categories={categories}/>
               </select>
             </div>
           </div>
@@ -317,8 +317,9 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
                 ['Amount',(txn.amount<0?'– ':'+ ')+fmt(txn.amount)],
                 ['Account',txn.account_name],
                 ['Type',txn.action_display||cap(txn.action)],
-                ['Category',normalizeCat(txn.category_final)],
+                ['Category',catLabel(normalizeCat(txn.category_final))],
                 ...(txn.network?[['Network',txn.network]]:[]),
+                ...(txn.brand?[['Brand',txn.brand]]:[]),
                 ['Confidence',txn.category_confidence!=null?Math.round(txn.category_confidence*100)+'%':'—'],
                 ['Import Source',importLabel[src]||cap(src)],
                 ['Enrichment',enr?(enrichLabel[enr]||cap(enr)):'—'],
@@ -443,12 +444,6 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
               ⭐ {gcb?'GCB Tagged':'Tag as GCB'}
             </button>
             <button type="button" className="btn btn-sm"
-              style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:forOthers?'rgba(59,130,246,0.1)':'var(--elevated)',color:forOthers?'var(--blue-primary)':'var(--text-muted)',border:forOthers?'1px solid rgba(59,130,246,0.25)':'1px solid var(--border)'}}
-              onClick={async()=>{const nf=!forOthers;await onSave(txn.id,{is_for_others:nf});setForOthers(nf);}}
-              title="Money spent on behalf of someone else — kept out of your own budget totals, still shown in cash flow">
-              👥 {forOthers?'For Others':'Tag: For Others'}
-            </button>
-            <button type="button" className="btn btn-sm"
               style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:excluded?'rgba(248,113,113,0.08)':'var(--elevated)',color:excluded?'var(--red)':'var(--text-muted)',border:excluded?'1px solid rgba(248,113,113,0.3)':'1px solid var(--border)'}}
               onClick={toggleExclude}
               title="Hide from totals and balances without deleting it">
@@ -470,7 +465,7 @@ export function TxnRow({txn,categories,pointsCategories,onSave,onReview,onSplit,
                   <div key={i} style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:10,alignItems:'center',padding:'10px 14px',borderBottom:i<txn.splits.length-1?'1px solid var(--border)':'none',background:i%2===0?'var(--bg)':'var(--elevated)'}}>
                     <div>
                       <div style={{fontSize:13,fontWeight:500,color:'var(--text-primary)'}}>{s.description||<span style={{fontStyle:'italic',color:'var(--text-muted)'}}>—</span>}</div>
-                      {s.category&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{s.category}</div>}
+                      {s.category&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{catLabel(s.category)}</div>}
                     </div>
                     <span className={`badge badge-${typeBadge(s.action)}`} style={{fontSize:10}}>{s.action}</span>
                     <span style={{fontWeight:500,fontSize:13,minWidth:70,textAlign:'right',color:'var(--text-primary)'}}>{s.amount<0?'–':'+' }{fmt(s.amount)}</span>

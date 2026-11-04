@@ -8,7 +8,7 @@ PLAN.md "main.py -> domain routers split").
 import io
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
@@ -18,17 +18,10 @@ from sqlalchemy.orm import Session
 from database import get_db, Account, Category, PlannedPurchase, Transaction, TransactionSplit
 from core.constants import TRANSACTION_TYPES, BUDGET_TYPES, BALANCE_TYPES
 from core.app_helpers import PROJECT_ROOT, _frontend_index
+from core.categories import parent_map, rollup, top_level, with_children
 
 router = APIRouter()
 
-
-class CategoryResponse(BaseModel):
-    id: int
-    name: str
-    category_type: str
-
-    class Config:
-        from_attributes = True
 
 class StatsResponse(BaseModel):
     total_transactions: int
@@ -36,16 +29,13 @@ class StatsResponse(BaseModel):
     total_income: float
     total_expenses: float
     by_category: dict
+    by_top_level: dict = {}
 
 class PlannedPurchaseCreate(BaseModel):
     name: str
     amount: float
     expected_date: str  # ISO format
     vendor_tag: Optional[str] = None
-
-@router.get("/api/categories", response_model=List[CategoryResponse])
-async def get_categories(db: Session = Depends(get_db)):
-    return db.query(Category).filter_by(is_active=True).order_by(Category.display_order).all()
 
 @router.get("/api/transaction-types")
 async def get_transaction_types():
@@ -68,7 +58,6 @@ async def get_stats(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
         Transaction.gcb_tagged != True,   # noqa: E712
-        Transaction.is_for_others != True,  # noqa: E712
     )
     if year:
         query = query.filter(Transaction.year == year)
@@ -114,7 +103,7 @@ async def get_stats(
             continue
         if t.is_split:
             for s in splits_map.get(t.id, []):
-                if s.is_gcb or s.is_for_others:
+                if s.is_gcb:
                     continue
                 cat = s.category or t.category_final or 'Other'
                 if t.action == 'Expense':
@@ -129,7 +118,7 @@ async def get_stats(
                 elif t.action == 'Income':
                     total_income += s.amount
         else:
-            if t.is_gcb or t.gcb_tagged or t.is_for_others:
+            if t.is_gcb or t.gcb_tagged:
                 continue
             cat = t.category_final or 'Other'
             if t.action == 'Expense':
@@ -150,6 +139,7 @@ async def get_stats(
         "total_income":       total_income,
         "total_expenses":     total_expenses,
         "by_category":        by_category,
+        "by_top_level":       rollup(by_category, parent_map(db)),
     }
 
 @router.get("/api/stats/detail")
@@ -164,12 +154,13 @@ async def get_stats_detail(
     """
     Return individual transactions (and split line items) that contribute to a
     given category's total in /api/stats — useful for debugging overstatement.
+    A top level includes its sub-categories.
     """
+    wanted = with_children(category, parent_map(db))
     query = db.query(Transaction).filter(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
         Transaction.gcb_tagged != True,   # noqa: E712
-        Transaction.is_for_others != True,  # noqa: E712
         Transaction.action.in_(BUDGET_TYPES),
     )
     if year:
@@ -196,14 +187,14 @@ async def get_stats_detail(
     rows = []
     total = 0.0
     for t in transactions:
-        if t.is_gcb or t.gcb_tagged or t.is_for_others:
+        if t.is_gcb or t.gcb_tagged:
             continue
         if t.is_split:
             for s in splits_map.get(t.id, []):
-                if s.is_gcb or s.is_for_others:
+                if s.is_gcb:
                     continue
                 cat = s.category or t.category_final or 'Other'
-                if cat != category:
+                if cat not in wanted:
                     continue
                 contrib = -s.amount if t.action == 'Expense' else s.amount
                 total += contrib
@@ -217,7 +208,7 @@ async def get_stats_detail(
                 })
         else:
             cat = t.category_final or 'Other'
-            if cat != category:
+            if cat not in wanted:
                 continue
             contrib = -t.amount if t.action == 'Expense' else t.amount
             total += contrib
@@ -246,12 +237,13 @@ async def export_csv(
         end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999)
         query = query.filter(Transaction.date <= end_dt)
 
+    pmap = parent_map(db)
     data = [
         {
             'Date': t.date.strftime('%Y-%m-%d'), 'Description': t.description_raw,
             'Amount': t.amount, 'Action': t.action, 'Category': t.category_final,
+            'Top Level': top_level(t.category_final, pmap),
             'Account': t.account.account_name, 'GCB': t.gcb_tagged,
-            'For Others': t.is_for_others,
             'Year': t.year, 'Month': t.month,
         }
         for t in query.order_by(Transaction.date).all()

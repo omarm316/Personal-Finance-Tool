@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, BudgetTarget, Category, Transaction, TransactionSplit
 from core.constants import BUDGET_TYPES
+from core.categories import check_category, parent_map, top_level
 
 router = APIRouter()
 
@@ -52,6 +53,7 @@ async def upsert_budget_target(data: BudgetTargetCreate, db: Session = Depends(g
     """
     if data.month < 1 or data.month > 12:
         raise HTTPException(status_code=400, detail="Month must be 1-12")
+    check_category(db, data.category)
 
     existing = db.query(BudgetTarget).filter_by(
         year=data.year, month=data.month, category=data.category
@@ -73,6 +75,8 @@ async def bulk_upsert_budget_targets(data: BudgetTargetBulk, db: Session = Depen
     Bulk create/update budget targets.
     Each target is upserted on (year, month, category).
     """
+    for name in {t.category for t in data.targets}:
+        check_category(db, name)
     for t in data.targets:
         existing = db.query(BudgetTarget).filter_by(
             year=t.year, month=t.month, category=t.category
@@ -92,7 +96,7 @@ async def bulk_upsert_budget_targets(data: BudgetTargetBulk, db: Session = Depen
 async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     """
     Get actual spending per category per month for a given year.
-    - Excludes GCB-tagged and For-Others-tagged transactions
+    - Excludes GCB-tagged transactions
     - Excludes transfers
     - For split transactions: uses split amounts/categories instead of parent
     Returns a dict keyed by category, each containing month→amount mappings.
@@ -100,13 +104,12 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
     from sqlalchemy import and_
 
     # Get only BUDGET_TYPES transactions (Expense, Income) for the year
-    # Exclude is_excluded, GCB-tagged, For-Others-tagged, and Transfer transactions
+    # Exclude is_excluded, GCB-tagged, and Transfer transactions
     txns = db.query(Transaction).filter(
         Transaction.year == year,
         Transaction.action.in_(BUDGET_TYPES),
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
-        Transaction.is_for_others != True,  # noqa: E712
     ).all()
 
     # Build actuals: {category: {month: net_amount}}
@@ -134,7 +137,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                 parent_transaction_id=t.id
             ).all()
             for s in splits:
-                if s.is_gcb or s.is_for_others:
+                if s.is_gcb:
                     continue
                 cat = s.category or t.category_final or 'Other'
                 month = str(t.month)
@@ -149,7 +152,7 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                     actuals[cat] = {}
                 actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
         else:
-            if t.is_gcb or t.gcb_tagged or t.is_for_others:
+            if t.is_gcb or t.gcb_tagged:
                 continue
             cat = t.category_final or 'Other'
             month = str(t.month)
@@ -164,7 +167,15 @@ async def get_budget_actuals(year: int, db: Session = Depends(get_db)):
                 actuals[cat] = {}
             actuals[cat][month] = round(actuals[cat].get(month, 0) + contrib, 2)
 
-    return {'year': year, 'categories': actuals}
+    # Each top level's months summed over itself and its sub-categories
+    pmap = parent_map(db)
+    top_levels = {}
+    for cat, months in actuals.items():
+        top = top_levels.setdefault(top_level(cat, pmap), {})
+        for m, amt in months.items():
+            top[m] = round(top.get(m, 0) + amt, 2)
+
+    return {'year': year, 'categories': actuals, 'top_levels': top_levels}
 
 @router.get("/api/budget/suggestions")
 async def get_budget_suggestions(year: int, month: int, db: Session = Depends(get_db)):
@@ -185,7 +196,7 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
         trailing.append((y, m))
 
     # Fetch actuals for each of those months (net signed amounts, excluding
-    # is_excluded + GCB + For Others)
+    # is_excluded + GCB)
     totals: dict[str, list] = {}
     for ty, tm in trailing:
         txns = db.query(Transaction).filter(
@@ -194,7 +205,6 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
             Transaction.action.in_(BUDGET_TYPES),
             Transaction.is_excluded != True,  # noqa: E712
             Transaction.is_gcb != True,       # noqa: E712
-            Transaction.is_for_others != True,  # noqa: E712
         ).all()
         month_totals: dict[str, float] = {}
         for t in txns:
@@ -203,13 +213,13 @@ async def get_budget_suggestions(year: int, month: int, db: Session = Depends(ge
                     parent_transaction_id=t.id
                 ).all()
                 for s in splits:
-                    if s.is_gcb or s.is_for_others:
+                    if s.is_gcb:
                         continue
                     cat = s.category or t.category_final or 'Other'
                     contrib = (-s.amount) if t.action == 'Expense' else s.amount
                     month_totals[cat] = round(month_totals.get(cat, 0) + contrib, 2)
             else:
-                if t.is_gcb or t.gcb_tagged or t.is_for_others:
+                if t.is_gcb or t.gcb_tagged:
                     continue
                 cat = t.category_final or 'Other'
                 contrib = (-t.amount) if t.action == 'Expense' else t.amount

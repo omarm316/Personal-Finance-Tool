@@ -114,13 +114,11 @@ def _serialize_txn(t, splits_map=None, categorizer=None, points_lookup=None, cat
         "needs_review": t.needs_review,
         "is_locked": bool(t.is_locked or False),
         "is_gcb": bool(t.is_gcb or t.gcb_tagged or False),
-        "is_for_others": bool(t.is_for_others or False),
         "is_excluded": bool(t.is_excluded or False),
         "is_split": is_split,
         "splits": [
             {"id": s.id, "amount": s.amount, "description": s.description,
-             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb),
-             "is_for_others": bool(s.is_for_others)}
+             "category": s.category, "action": s.action, "is_gcb": bool(s.is_gcb)}
             for s in splits
         ] if is_split else [],
         "points_category": t.points_category,

@@ -1,7 +1,8 @@
 import {useState} from 'react';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
-import {fmt,fmtDate,showCategoryForType,sortedCats} from '../lib/format';
+import {fmt,fmtDate,showCategoryForType} from '../lib/format';
+import {CategoryOptions} from './CategoryOptions';
 
 export function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
   const[category,setCategory]=useState(txn.category_final||'');
@@ -50,7 +51,7 @@ export function ReviewModal({txn,categories,onSave,onDiscard,onIgnore,onClose}){
               <label>Category</label>
               <select className="filter-select" style={{width:'100%'}} value={category} onChange={e=>setCategory(e.target.value)}>
                 <option value="">— Select category —</option>
-                {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                <CategoryOptions categories={categories}/>
               </select>
             </div>}
           </div>

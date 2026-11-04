@@ -26,6 +26,7 @@ from categorization import CategorizationEngine, compute_needs_review, find_over
 
 from core.app_helpers import PROJECT_ROOT
 from core.rules_helpers import _reapply_rules
+from core.categories import check_category
 
 router = APIRouter()
 
@@ -413,7 +414,7 @@ async def clean_all_descriptions(db: Session = Depends(get_db)):
 async def create_rule(data: dict, db: Session = Depends(get_db)):
     """Create a new categorization rule."""
     pattern = data.get('pattern', '')
-    set_category = data.get('set_category')
+    set_category = check_category(db, data.get('set_category'))
     set_action = data.get('set_action')
 
     # Non-blocking: warn if this pattern overlaps an existing active rule
@@ -461,6 +462,8 @@ async def update_rule(rule_id: int, data: dict, db: Session = Depends(get_db)):
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
     old_pattern = rule.pattern
+    if 'set_category' in data:
+        check_category(db, data['set_category'])
     allowed = ['priority', 'priority_order', 'match_type', 'pattern',
                'set_action', 'set_category', 'set_description', 'clean_description',
                'notes', 'is_active']

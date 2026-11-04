@@ -21,23 +21,10 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL   = "claude-haiku-4-5"   # Fast, cheap, great at structured output
 ANTHROPIC_VERSION = "2023-06-01"
 
-# ── Valid categories (canonical — must match database.py seed_categories) ─────
-# This is the single source of truth for category names used in LLM validation.
-# If you add/remove a category from the DB, update this list to match.
-VALID_CATEGORIES = [
-    # Expense
-    "Groceries", "Dining", "Transportation", "Housing", "Utilities",
-    "Healthcare", "Insurance", "Vehicle", "Fitness", "Self Care",
-    "Clothing", "Electronics", "Streaming", "Travel", "Home",
-    "Kids", "Entertainment", "Gifts", "Education",
-    "Fees & Interest", "Other",
-    # Both (expense or income depending on sign)
-    "Business", "Investment Gain (Loss)",
-    # Income
-    "Work",
-    # System / special
-    "Transfer", "Unclassified",
-]
+# ── Categories ────────────────────────────────────────────────────────────────
+# Omer edits his category list in Settings > Categories, so callers pass the
+# active names (core.categories.active_names) on every call; there is no
+# hard-coded list to drift out of step with the database.
 
 # Remap deprecated or alternate category names → canonical names.
 # Applied to LLM output AND override-table lookups so old data stays valid.
@@ -47,7 +34,6 @@ _CATEGORY_REMAP: dict[str, str] = {
     "Internet":          "Utilities",
     "Water":             "Utilities",
     "Electricity":       "Utilities",
-    "Books":             "Entertainment",
     "Leisure":           "Entertainment",
     "Events":            "Entertainment",
     "Lottery":           "Entertainment",
@@ -63,18 +49,13 @@ _CATEGORY_REMAP: dict[str, str] = {
     "Mortgage":          "Housing",
     "Paycheck":          "Work",
     "Income":            "Work",
+    "Parents":           "For Others",
+    "Siblings":          "For Others",
 }
 
-# "For Others" was removed as a category (2026-09-05) in favor of the
-# is_for_others tag (see Transaction.is_for_others) — money spent on behalf
-# of family/others, excluded from budget but kept for cash flow. When the LLM
-# still reaches for one of these old names, resolve the category to
-# Unclassified (real category TBD) and surface the tag via enrich_transaction's
-# "is_for_others" return key instead of remapping to a dead category name.
-_FOR_OTHERS_CATEGORY_ALIASES = {"For Others", "Parents", "Siblings"}
-
 # ── System prompt ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = f"""You are an expert at decoding raw bank transaction strings into clean merchant names and categories.
+def _system_prompt(categories: list) -> str:
+    return f"""You are an expert at decoding raw bank transaction strings into clean merchant names and categories.
 
 STEP 1 — IDENTIFY THE MERCHANT
 Raw bank descriptions are garbled: uppercase, full of codes, store numbers, terminal IDs, dates, and noise.
@@ -91,8 +72,9 @@ A short, human-readable label a person would write in their own budget spreadshe
 Examples: "Sam's Club Groceries", "Netflix Subscription", "Verizon Bill", "Zelle Transfer"
 
 STEP 3 — ASSIGN A CATEGORY
-Pick the single best category from this list (spelling must match exactly):
-{json.dumps(VALID_CATEGORIES, indent=2)}
+The list below is a two-level tree: each top level is followed by its sub-categories.
+Pick the single most specific category that fits (spelling must match exactly):
+{json.dumps(categories, indent=2)}
 
 OUTPUT RULES:
 - merchant_name: proper-case real business name, no codes/numbers/locations (max 50 chars)
@@ -105,7 +87,7 @@ Respond with valid JSON only, no explanation, no markdown:
 {{"merchant_name": "Sam's Club", "description_clean": "Sam's Club Groceries", "category": "Groceries"}}"""
 
 
-def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
+def _call_llm(description_raw: str, api_key: str, categories: list) -> Optional[dict]:
     """
     Call Claude API and return parsed JSON result.
     Returns None on any failure (network, API error, bad JSON).
@@ -120,7 +102,7 @@ def _call_llm(description_raw: str, api_key: str) -> Optional[dict]:
         "system": [
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": _system_prompt(categories),
                 "cache_control": {"type": "ephemeral"},
             }
         ],
@@ -164,12 +146,14 @@ _call_groq = _call_llm
 
 def enrich_transaction(
     description_raw: str,
+    categories: list,
     api_key: Optional[str] = None,
 ) -> dict:
     """
     Enrich a single transaction with merchant name, clean description, and category
     via a Claude Haiku API call.
 
+    categories: the active category names (core.categories.active_names).
     Returns dict with keys: merchant_name, description_clean, category, source
     source is one of: 'llm', 'fallback'
     """
@@ -180,16 +164,15 @@ def enrich_transaction(
         logger.warning("No ANTHROPIC_API_KEY set — returning fallback")
         return _fallback(description_raw)
 
-    result = _call_llm(description_raw, api_key)
+    result = _call_llm(description_raw, api_key, categories)
 
     if result:
         merchant_name     = str(result.get("merchant_name") or "").strip()[:200]
         description_clean = str(result.get("description_clean") or "").strip()[:500]
         category          = str(result.get("category") or "").strip()
 
-        is_for_others = category in _FOR_OTHERS_CATEGORY_ALIASES
         category = _CATEGORY_REMAP.get(category, category)
-        if is_for_others or category not in VALID_CATEGORIES:
+        if category not in categories:
             category = "Unclassified"
         if not merchant_name:
             merchant_name = description_raw[:200]
@@ -201,7 +184,6 @@ def enrich_transaction(
             "description_clean": description_clean,
             "category":          category,
             "source":            "llm",
-            "is_for_others":     is_for_others,
         }
 
     return _fallback(description_raw)
@@ -214,5 +196,4 @@ def _fallback(description_raw: str) -> dict:
         "description_clean": description_raw[:500],
         "category":          "Unclassified",
         "source":            "fallback",
-        "is_for_others":     False,
     }

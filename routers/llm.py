@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal, CategorizationRule, Transaction
 from core.rules_helpers import _reapply_rules
 from llm_service import enrich_transaction
+from core.categories import active_names
 from categorization import find_overlapping_rules
 
 logger = logging.getLogger('moresheth')
@@ -90,11 +91,13 @@ def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
             ))
         txns = query.order_by(Transaction.date.desc()).limit(limit).all()
         job["total"] = len(txns)
+        category_names = active_names(db)
 
         for txn in txns:
             try:
                 enriched = enrich_transaction(
                     description_raw=txn.description_raw,
+                    categories=category_names,
                     api_key=api_key,
                 )
                 txn.merchant_name     = enriched["merchant_name"]
@@ -102,8 +105,6 @@ def _run_enrich_job(job_id: str, overwrite_existing: bool, limit: int):
                 if not txn.category_manual:
                     txn.category_auto = enriched["category"]
                 txn.enrichment_source = enriched["source"]
-                if enriched.get("is_for_others"):
-                    txn.is_for_others = True
                 db.add(txn)
                 db.commit()
 
@@ -250,6 +251,7 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
 
     enriched = enrich_transaction(
         description_raw=txn.description_raw,
+        categories=active_names(db),
         api_key=api_key,
     )
 
@@ -257,8 +259,6 @@ async def llm_enrich_single(transaction_id: int, db: Session = Depends(get_db)):
     txn.description_clean = enriched["description_clean"]
     if not txn.category_manual:
         txn.category_auto = enriched["category"]
-    if enriched.get("is_for_others"):
-        txn.is_for_others = True
 
     db.commit()
     return {

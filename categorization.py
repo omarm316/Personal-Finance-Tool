@@ -409,7 +409,7 @@ def load_rules_from_excel(excel_path: str, db_session: Session):
     CAT_MAP = {
         'Children':     'Kids',
         'Reading':      'Books',
-        'Housekeeping': 'Home',
+        'Housekeeping': 'Home Maintenance',
         'GCB':          'Other',
         'Work':         'Work',
     }

@@ -281,12 +281,13 @@ class CategorizationRule(Base):
 
 
 class Category(Base):
-    """Master list of expense/income categories"""
+    """Omer's personal categories, a two-level tree (see STARTING_CATEGORY_TREE).
+    Names are unique across the whole tree, because rows store the name."""
     __tablename__ = 'categories'
     
     id = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False, index=True)
-    parent_category = Column(String(100), nullable=True)  # For future subcategories
+    parent_category = Column(String(100), nullable=True)  # Top level's name; NULL = top level
     category_type = Column(String(50), index=True)  # expense, income, or both
     is_active = Column(Boolean, default=True)
     display_order = Column(Integer, default=100)
@@ -1080,44 +1081,10 @@ class SalaryAllocation(Base):
     account        = relationship('Account', foreign_keys=[account_id])
 
 
-# ---------------------------------------------------------------------------
-# Category clean-up remap — old name → new canonical name.
-# Applied once per startup; idempotent (re-running is safe).
-# Covers: transaction category_auto/manual, budget_targets, rules.
-# ---------------------------------------------------------------------------
-_CAT_REMAP = [
-    # Utilities consolidation
-    ('Phone',             'Utilities'),
-    ('Internet',          'Utilities'),
-    ('Water',             'Utilities'),
-    ('Electricity',       'Utilities'),
-    # Entertainment consolidation
-    ('Leisure',           'Entertainment'),
-    ('Books',             'Entertainment'),
-    ('Events',            'Entertainment'),
-    # Education consolidation
-    ('Music Lessons',     'Education'),
-    ('Tutoring',          'Education'),
-    ('Studies',           'Education'),
-    # Business
-    ('Consulting',        'Business'),
-    # Investment / interest
-    ('Investments',       'Investment Gain (Loss)'),
-    ('Investment Income', 'Investment Gain (Loss)'),
-    ('Interest Income',   'Investment Gain (Loss)'),
-    # Family support — "For Others" is retired as a category (2026-09-05, now
-    # the is_for_others tag instead); these old aliases resolve to Unclassified
-    # rather than resurrecting a dead category name. Same for any straggler
-    # literally still holding the old "For Others" category string.
-    ('Siblings',          'Unclassified'),
-    ('Parents',           'Unclassified'),
-    ('For Others',        'Unclassified'),
-    # Misc
-    ('Lottery',           'Other'),
-    ('Dry Cleaning',      'Self Care'),
-    # Name standardisation
-    ('Fees and Interest', 'Fees & Interest'),
-]
+# The startup category remap (_CAT_REMAP) was retired on 2026-11-03: categories
+# are now edited in Settings, and a remap run on every startup would undo those
+# edits (it turned "Books" back into Entertainment, for one). Its last
+# stragglers were moved once by docs/category_tree_migration.py.
 
 
 # ---------------------------------------------------------------------------
@@ -1434,20 +1401,6 @@ def _run_migrations_sqlite(engine, required_columns):
             print('  Migration: normalized account_type casing')
         except Exception:
             pass
-        # ── Category remap (consolidation) ──────────────────────────────────
-        try:
-            for old, new in _CAT_REMAP:
-                conn.execute(
-                    "UPDATE transactions SET category_auto = ? WHERE category_auto = ?", (new, old))
-                conn.execute(
-                    "UPDATE transactions SET category_manual = ? WHERE category_manual = ?", (new, old))
-                conn.execute(
-                    "UPDATE budget_targets SET category = ? WHERE category = ?", (new, old))
-                conn.execute(
-                    "UPDATE categorization_rules SET set_category = ? WHERE set_category = ?", (new, old))
-            print('  Migration: remapped consolidated categories')
-        except Exception:
-            pass
         # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
         try:
             conn.execute("""
@@ -1562,28 +1515,6 @@ def _run_migrations_pg(engine, required_columns):
                     "UPDATE accounts SET account_type = :new WHERE LOWER(account_type) = :old"
                 ), {'new': new_val, 'old': old_val})
             print('  Migration: normalized account_type casing')
-        # ── Category remap (consolidation) ──────────────────────────────────
-        if insp.has_table('transactions'):
-            for old, new in _CAT_REMAP:
-                conn.execute(text(
-                    "UPDATE transactions SET category_auto = :new WHERE category_auto = :old"
-                ), {'new': new, 'old': old})
-                conn.execute(text(
-                    "UPDATE transactions SET category_manual = :new WHERE category_manual = :old"
-                ), {'new': new, 'old': old})
-            print('  Migration: remapped transaction categories')
-        if insp.has_table('budget_targets'):
-            for old, new in _CAT_REMAP:
-                conn.execute(text(
-                    "UPDATE budget_targets SET category = :new WHERE category = :old"
-                ), {'new': new, 'old': old})
-            print('  Migration: remapped budget_targets categories')
-        if insp.has_table('categorization_rules'):
-            for old, new in _CAT_REMAP:
-                conn.execute(text(
-                    "UPDATE categorization_rules SET set_category = :new WHERE set_category = :old"
-                ), {'new': new, 'old': old})
-            print('  Migration: remapped categorization_rules set_category')
         # ── Reclassify CC credits: positive amounts on CC accounts are Expense, not Income ──
         # Drop stale NOT NULL constraints on spend_challenges columns that exist
         # only in older Railway DB schema versions but are absent from the current
@@ -1669,73 +1600,93 @@ def get_db():
         db.close()
 
 
+# Omer's personal categories: a two-level tree, top level > sub-category
+# (agreed 2026-11-03). Rows, splits, rules and budget targets store one name,
+# the most specific one picked; a top level can hold rows itself. The list
+# lives in the database and is edited in Settings > Categories, so this tree
+# only seeds an empty table. Points never read these categories: they use the
+# merchant path (merchant_category, brand, txn_kind) instead.
+# (name, parent, category_type); display order follows the list.
+STARTING_CATEGORY_TREE = [
+    ("Groceries",              None,                "expense"),
+    ("Dining",                 None,                "expense"),
+    ("Food Delivery",          "Dining",            "expense"),
+    ("Housing",                None,                "expense"),
+    ("Utilities",              "Housing",           "expense"),
+    ("HOA",                    "Housing",           "expense"),
+    ("Home Insurance",         "Housing",           "expense"),
+    ("Home Maintenance",       "Housing",           "expense"),
+    ("Transportation",         None,                "expense"),
+    ("Gas",                    "Transportation",    "expense"),
+    ("Ground Transportation",  "Transportation",    "expense"),
+    ("Vehicle",                None,                "expense"),
+    ("Maintenance",            "Vehicle",           "expense"),
+    ("Licensing",              "Vehicle",           "expense"),
+    ("Auto Insurance",         "Vehicle",           "expense"),
+    ("Travel",                 None,                "expense"),
+    ("Airlines",               "Travel",            "expense"),
+    ("Hotels",                 "Travel",            "expense"),
+    ("Car Rental",             "Travel",            "expense"),
+    ("Travel Agencies",        "Travel",            "expense"),
+    ("Health & Wellness",      None,                "expense"),
+    ("Healthcare",             "Health & Wellness", "expense"),
+    ("Fitness",                "Health & Wellness", "expense"),
+    ("Self Care",              "Health & Wellness", "expense"),
+    ("Shopping",               None,                "expense"),
+    ("Clothing",               "Shopping",          "expense"),
+    ("Electronics",            "Shopping",          "expense"),
+    ("Entertainment",          None,                "expense"),
+    ("Streaming",              "Entertainment",     "expense"),
+    ("Books",                  "Entertainment",     "expense"),
+    ("Video Games",            "Entertainment",     "expense"),
+    ("Family",                 None,                "expense"),
+    ("Kids",                   "Family",            "expense"),
+    ("Education",              "Family",            "expense"),
+    ("Gifts",                  "Family",            "expense"),
+    ("Financial",              None,                "both"),
+    ("Fees & Interest",        "Financial",         "expense"),
+    ("Investment Gain (Loss)", "Financial",         "both"),
+    ("Other",                  None,                "expense"),
+    ("Sales",                  "Other",             "both"),
+    ("Taxes",                  "Other",             "both"),
+    # Paid on someone else's behalf and expected back; the reimbursement goes
+    # here too so the two net out. Replaced the is_for_others tag (2026-11-03).
+    ("For Others",             "Other",             "expense"),
+    ("Business",               None,                "both"),     # GCB is the is_gcb tag, not a sub-category
+    ("Work",                   None,                "income"),
+    ("Unclassified",           None,                "both"),
+    ("Transfer",               None,                "both"),
+]
+
+# Names the code relies on, so the Settings editor won't rename, move or hide
+# them: dashboards and budgets skip Work and Transfer by name, rules and the AI
+# fall back to Unclassified, and the card page's annual-fee tile
+# (routers/accounts.py) nets Fees & Interest until it moves to fee and credit
+# transaction kinds.
+LOCKED_CATEGORIES = frozenset({"Work", "Transfer", "Unclassified", "Fees & Interest"})
+
+
 def seed_categories(session):
     """
-    Seed / refresh the category list.
-    Adds new categories if missing; marks removed categories inactive.
+    Seed the starting category tree into an empty table, and make sure the
+    locked categories exist. Never renames, moves or deactivates anything
+    else: after the first run the list is Omer's (Settings > Categories).
     Safe to re-run on every startup.
     """
-    categories_data = [
-        # ── Personal expense categories ───────────────────────────────────────
-        ("Groceries",              None, "expense",  1),
-        ("Dining",                 None, "expense",  2),
-        ("Transportation",         None, "expense",  3),  # gas, parking, transit, rides
-        ("Housing",                None, "expense",  4),  # rent / mortgage cash payment
-        ("Utilities",              None, "expense",  5),  # phone, internet, water, electricity
-        ("Healthcare",             None, "expense",  6),
-        ("Insurance",              None, "expense",  7),
-        ("Vehicle",                None, "expense",  8),  # maintenance, registration
-        ("Fitness",                None, "expense",  9),
-        ("Self Care",              None, "expense", 10),  # grooming, dry cleaning, spa
-        ("Clothing",               None, "expense", 11),
-        ("Electronics",            None, "expense", 12),
-        ("Streaming",              None, "expense", 13),  # subscriptions
-        ("Travel",                 None, "expense", 14),
-        ("Home",                   None, "expense", 15),  # furniture, repairs, maintenance
-        ("Kids",                   None, "expense", 16),
-        ("Entertainment",          None, "expense", 17),  # events, leisure, books, lottery
-        ("Gifts",                  None, "expense", 18),  # presents
-        # "For Others" removed as a category (2026-09-05) — it's now the
-        # is_for_others tag instead (money spent on behalf of family/others,
-        # excluded from budget but kept for cash-flow tracking). Transactions
-        # that were categorized "For Others" keep a real category describing
-        # the actual spend now. Seeder marks the old row inactive automatically.
-        ("Education",              None, "expense", 20),  # incl. lessons, tutoring, studies
-        ("Fees & Interest",        None, "expense", 21),
-        ("Other",                  None, "expense", 22),
-        # ── Both income and expense (use Action to distinguish) ───────────────
-        ("Business",               None, "both",    23),  # GCB + future ventures; Action = Income or Expense
-        ("Investment Gain (Loss)", None, "both",    24),  # gains, losses, interest income
-        # ── Income ───────────────────────────────────────────────────────────
-        ("Work",                   None, "income",   1),  # salary / payroll
-        # ── Special / system ─────────────────────────────────────────────────
-        ("Unclassified",           None, "both",   100),
-        ("Transfer",               None, "both",   101),
-    ]
-
-    active_names = {row[0] for row in categories_data}
-
-    for name, parent, cat_type, order in categories_data:
-        existing = session.query(Category).filter_by(name=name).first()
-        if not existing:
-            session.add(Category(
-                name=name,
-                parent_category=parent,
-                category_type=cat_type,
-                display_order=order,
-                is_active=True,
-            ))
-        else:
-            # Re-activate in case it was marked inactive by a previous migration
-            existing.is_active = True
-            existing.display_order = order
-            existing.category_type = cat_type
-
-    # Deactivate any categories that are no longer in the canonical list
-    for cat in session.query(Category).all():
-        if cat.name not in active_names:
-            cat.is_active = False
-
+    if session.query(Category).count() == 0:
+        for order, (name, parent, cat_type) in enumerate(STARTING_CATEGORY_TREE, start=1):
+            session.add(Category(name=name, parent_category=parent, category_type=cat_type,
+                                 display_order=order, is_active=True))
+    else:
+        tree = {name: (parent, cat_type) for name, parent, cat_type in STARTING_CATEGORY_TREE}
+        for name in LOCKED_CATEGORIES:
+            existing = session.query(Category).filter_by(name=name).first()
+            if not existing:
+                parent, cat_type = tree[name]
+                session.add(Category(name=name, parent_category=parent, category_type=cat_type,
+                                     display_order=100, is_active=True))
+            elif not existing.is_active:
+                existing.is_active = True
     session.commit()
 
 

@@ -16,6 +16,7 @@ import {LoansPage} from './pages/LoansPage';
 import {NetWorthPage} from './pages/NetWorthPage';
 import {SettingsPage} from './pages/SettingsPage';
 import {TransactionsPage} from './pages/TransactionsPage';
+import {setCategoryTree} from './lib/categories';
 
 export function App(){
   const{page,navigate}=useHashRouter();
@@ -40,7 +41,7 @@ export function App(){
   const{ptrState,pullY}=usePullToRefresh(contentRef,handleRefresh);
 
   const loadMeta=useCallback(async()=>{
-    try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategories(c);setBanks(b);}catch(e){}
+    try{const[c,b]=await Promise.all([apiFetch('/categories'),apiFetch('/plaid/items')]);setCategoryTree(c);setCategories(c);setBanks(b);}catch(e){}
   },[]);
 
   // Auto-sync on app open — throttled to once per 20 minutes so refreshing

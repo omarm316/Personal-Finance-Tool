@@ -1,12 +1,11 @@
 import {useState} from 'react';
 import {TXN_TYPES} from '../lib/constants';
-import {sortedCats} from '../lib/format';
+import {CategoryOptions} from './CategoryOptions';
 
 export function BatchEditModal({count,categories,onSave,onClose}){
   const[action,setAction]=useState('');      // '' = keep existing
   const[category,setCategory]=useState(''); // '' = keep existing
   const[gcbAction,setGcbAction]=useState(''); // '' | 'tag' | 'untag'
-  const[forOthersAction,setForOthersAction]=useState(''); // '' | 'tag' | 'untag'
   const[markReviewed,setMarkReviewed]=useState(false);
   const[saving,setSaving]=useState(false);
   const save=async()=>{
@@ -15,8 +14,6 @@ export function BatchEditModal({count,categories,onSave,onClose}){
     if(category) updates.category=category;
     if(gcbAction==='tag') updates.is_gcb=true;
     if(gcbAction==='untag') updates.is_gcb=false;
-    if(forOthersAction==='tag') updates.is_for_others=true;
-    if(forOthersAction==='untag') updates.is_for_others=false;
     if(markReviewed) updates.needs_review=false;
     if(!Object.keys(updates).length){toast('No changes selected','error');return;}
     setSaving(true);
@@ -46,7 +43,7 @@ export function BatchEditModal({count,categories,onSave,onClose}){
             <select value={category} onChange={e=>setCategory(e.target.value)} className="filter-select" style={{width:'100%'}}>
               <option value="">— keep existing —</option>
               <option value="Unclassified">Unclassified</option>
-              {sortedCats(categories).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+              <CategoryOptions categories={categories}/>
             </select>
           </div>
           <div>
@@ -55,14 +52,6 @@ export function BatchEditModal({count,categories,onSave,onClose}){
               <option value="">— keep existing —</option>
               <option value="tag">🟡 Tag as GCB</option>
               <option value="untag">Remove GCB tag</option>
-            </select>
-          </div>
-          <div>
-            <label style={label}>For Others Tag</label>
-            <select value={forOthersAction} onChange={e=>setForOthersAction(e.target.value)} className="filter-select" style={{width:'100%'}}>
-              <option value="">— keep existing —</option>
-              <option value="tag">👥 Tag as For Others</option>
-              <option value="untag">Remove For Others tag</option>
             </select>
           </div>
           <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>

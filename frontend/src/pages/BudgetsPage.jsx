@@ -2,6 +2,8 @@ import {useState,useEffect,useCallback,useMemo} from 'react';
 import {useIsMobile} from '../hooks/index';
 import {apiFetch,parseHash,syncHashParams} from '../lib/api';
 import {fmt,fmtRound} from '../lib/format';
+import {topLevelOf} from '../lib/categories';
+import {CatName} from '../components/CategoryOptions';
 
 export function BudgetsPage({categories,toast,refreshKey}){
   const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -35,7 +37,15 @@ export function BudgetsPage({categories,toast,refreshKey}){
 
   /* ── Category sets ─────────────────────────────────────────────────────── */
   const incomeCats=useMemo(()=>categories.filter(c=>c.category_type==='income').map(c=>c.name),[categories]);
-  const expenseCats=useMemo(()=>categories.filter(c=>c.category_type==='expense').map(c=>c.name),[categories]);
+  /* Budgets can sit on any category. Rows show every sub-category and every
+     top level without sub-categories; a top level that has them shows up only
+     when it holds a target or rows of its own. Grouping the page by top level
+     is a separate design step (design-gallery). */
+  const expenseCats=useMemo(()=>{
+    const hasChildren=new Set(categories.map(c=>c.parent_category).filter(Boolean));
+    return categories.filter(c=>c.category_type==='expense'&&!hasChildren.has(c.name)).map(c=>c.name);
+  },[categories]);
+  const catOrder=useMemo(()=>Object.fromEntries(categories.map((c,i)=>[c.name,i])),[categories]);
 
   /* ── Load data ─────────────────────────────────────────────────────────── */
   const load=useCallback(async()=>{
@@ -63,12 +73,14 @@ export function BudgetsPage({categories,toast,refreshKey}){
   const getBudget=(cat,m)=>targets[cat]?.[String(m)]?.amount||0;
   const getActual=(cat,m)=>actuals[cat]?.[String(m)]||0;
 
+  /* Tree order: top levels in display order, each followed by its sub-categories */
   const alphaCats=useMemo(()=>(list)=>[...new Set(list)].sort((a,b)=>{
-    const BOTTOM=['Unclassified','Other'];
-    const aB=BOTTOM.includes(a),bB=BOTTOM.includes(b);
-    if(aB&&!bB)return 1;if(!aB&&bB)return -1;
-    return a.localeCompare(b);
-  }),[]);
+    const ta=topLevelOf(a),tb=topLevelOf(b);
+    const oa=catOrder[ta]??999,ob=catOrder[tb]??999;
+    if(ta!==tb)return oa-ob||ta.localeCompare(tb);
+    if(a===ta)return -1;if(b===tb)return 1;
+    return (catOrder[a]??999)-(catOrder[b]??999)||a.localeCompare(b);
+  }),[catOrder]);
 
   const allIncomeCats=useMemo(()=>alphaCats([
     ...incomeCats,
@@ -206,7 +218,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
 
     if(isMob&&!isEditing) return(
       <tr key={cat}>
-        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}><CatName name={cat}/></td>
         <td style={{textAlign:'right',fontSize:13,padding:'12px 8px',color:'var(--text-secondary)'}}>{budget>0?fmtRound(budget):'—'}</td>
         <td style={{textAlign:'right',fontSize:13,padding:'12px 8px', color:actualColor, fontWeight:600}}>
           {actual!==0?fmtRound(actual):'—'}
@@ -219,7 +231,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
 
     return(
       <tr key={cat}>
-        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px', color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+        <td style={{fontWeight:600,fontSize:14,padding:'12px 16px', color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}><CatName name={cat}/></td>
         <td style={{textAlign:'right',padding:'12px 8px'}}>
           <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12}}>
             {actual!==0&&<span style={{color:actualColor, fontWeight:600, fontSize:14}}>{fmtRound(actual)}</span>}
@@ -398,7 +410,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
         if(annualBudget===0) return null;
         return(
           <tr key={cat}>
-            <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',minWidth:160,position:'sticky',left:0,background:'var(--surface)',zIndex:1,color:'var(--text-primary)', borderBottom:'1px solid var(--border)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+            <td style={{fontWeight:600,fontSize:14,padding:'12px 16px',minWidth:160,position:'sticky',left:0,background:'var(--surface)',zIndex:1,color:'var(--text-primary)', borderBottom:'1px solid var(--border)', fontFamily:'Outfit, sans-serif'}}><CatName name={cat}/></td>
             {MO.map((mo,i)=>renderAnnualCell(cat,i+1))}
             <td style={{textAlign:'right',fontSize:13,fontWeight:700,padding:'12px 16px',minWidth:100,borderLeft:'1px solid var(--border-strong)', borderBottom:'1px solid var(--border)', color:'var(--text-primary)', background:'var(--surface-hover)'}}>
               {annualBudget>0?fmtRound(annualBudget):'—'}
@@ -500,7 +512,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
         </tr>
         {catList.map(cat=>(
           <tr key={cat} style={{borderBottom:'1px solid var(--border)'}}>
-            <td style={{fontWeight:400,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--surface)',zIndex:1,whiteSpace:'nowrap',color:'var(--text-primary)'}}>{cat}</td>
+            <td style={{fontWeight:400,fontSize:12,paddingLeft:10,minWidth:150,position:'sticky',left:0,background:'var(--surface)',zIndex:1,whiteSpace:'nowrap',color:'var(--text-primary)'}}><CatName name={cat}/></td>
             {MO.map((mo,i)=>{
               const m=i+1;
               const isCur=m===curMonth&&year===curYear;
@@ -663,7 +675,7 @@ export function BudgetsPage({categories,toast,refreshKey}){
                     <tbody>
                       {parsedRows.map(({cat,values})=>(
                         <tr key={cat} style={{borderTop:'1px solid var(--border)'}}>
-                          <td style={{padding:'8px 12px',fontWeight:600,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}>{cat}</td>
+                          <td style={{padding:'8px 12px',fontWeight:600,color:'var(--text-primary)', fontFamily:'Outfit, sans-serif'}}><CatName name={cat}/></td>
                           {values.map((v,i)=>(
                             <td key={i} style={{textAlign:'right',padding:'8px 12px',color:v!=null?'var(--text-primary)':'var(--text-muted)'}}>
                               {v!=null?fmtRound(v):'—'}

@@ -31,6 +31,7 @@ from core.accounts_helpers import (
     _sign_plaid_balance, get_account_balance,
 )
 from core.points_engine import _lock_points_for_transaction, _resolve_merchant_csc, infer_points_category
+from core.categories import active_names, known_or_unclassified
 
 logger = logging.getLogger('moresheth')
 
@@ -56,7 +57,7 @@ _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
     'PERSONAL_CARE':             ('Self Care',       'Expense'),
     'MEDICAL':                   ('Healthcare',      'Expense'),
     'RENT_AND_UTILITIES':        ('Utilities',       'Expense'),
-    'HOME_IMPROVEMENT':          ('Home',            'Expense'),
+    'HOME_IMPROVEMENT':          ('Home Maintenance', 'Expense'),
     'GENERAL_MERCHANDISE':       ('Other',           'Expense'),
     'GENERAL_SERVICES':          ('Other',           'Expense'),
     'GOVERNMENT_AND_NON_PROFIT': ('Other',           'Expense'),
@@ -102,6 +103,9 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
         plaid_item.access_token,
         cursor,
     )
+
+    # Categories the Plaid fallback map may name (Omer can rename or hide them)
+    category_names = set(active_names(db))
 
     # Pre-load rules with notes for GCB/points tagging
     rules_with_notes = db.query(CategorizationRule).filter(
@@ -223,17 +227,14 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 account_type=account.account_type or '',
             )
 
-            # Apply GCB / For Others auto-tag and points category from rule notes
+            # Apply GCB auto-tag and points category from rule notes
             desc_upper = txn_data['description_raw'].upper()
             gcb_auto        = False
-            for_others_auto = False
             points_cat = None
             for rule in rules_with_notes:
                 if rule.pattern and rule.pattern.upper() in desc_upper:
                     if 'gcb:true' in rule.notes:
                         gcb_auto = True
-                    if 'for_others:true' in rule.notes:
-                        for_others_auto = True
                     if 'points:' in rule.notes:
                         points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
@@ -267,7 +268,8 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 if _pfc_primary and _pfc_conf in ('VERY_HIGH', 'HIGH'):
                     _pfc_result = _PLAID_PFC_MAP.get(_pfc_primary)
                     if _pfc_result:
-                        category   = _pfc_result[0]
+                        # Omer may have renamed or hidden the mapped category
+                        category   = known_or_unclassified(_pfc_result[0], category_names)
                         action     = _pfc_result[1]
                         confidence = 0.72   # trustworthy but below a matched rule (0.85)
                         pfc_applied = True
@@ -315,7 +317,6 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
                 card_id=linked_card_id,
                 is_gcb=gcb_auto,
                 gcb_tagged=gcb_auto,
-                is_for_others=for_others_auto,
                 points_category=points_cat,
                 # Raw Plaid signals for the 2027 earning engine (stored on
                 # every new row so their coverage can be checked before then)

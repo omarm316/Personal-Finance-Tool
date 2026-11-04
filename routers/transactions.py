@@ -28,7 +28,7 @@ from database import (
     get_db, Account, Brand, CategorizationRule, MerchantCategory, MerchantPointsMapping, Transaction,
     TransactionSplit, UserCorrection,
 )
-from llm_service import _call_groq, VALID_CATEGORIES
+from llm_service import _call_groq
 from categorization import CategorizationEngine, compute_needs_review
 
 from core.accounts_helpers import _assign_content_hash
@@ -39,6 +39,7 @@ from core.points_engine import (
 )
 from core.serializers import _serialize_txn
 from core.constants import BUDGET_TYPES
+from core.categories import active_names, check_category, parent_map, with_children
 
 import logging
 logger = logging.getLogger('moresheth')
@@ -64,11 +65,11 @@ class TransactionResponse(BaseModel):
     needs_review: bool
     is_locked: bool
     is_gcb: bool = False
-    is_for_others: bool = False
     is_split: bool = False
     is_excluded: bool = False
     points_category: Optional[str] = None
     network: Optional[str] = None
+    brand: Optional[str] = None   # shared with the merchant path; set on rows from 2027-01-01
     spender: Optional[str] = None
     # Points earn summary — None when card/product is unknown or txn isn't an expense
     points_earn: Optional[dict] = None
@@ -90,7 +91,6 @@ class TransactionUpdate(BaseModel):
     needs_review: Optional[bool] = None
     is_locked: Optional[bool] = None
     is_gcb: Optional[bool] = None
-    is_for_others: Optional[bool] = None
     is_excluded: Optional[bool] = None
     points_category: Optional[str] = None
     description_clean: Optional[str] = None
@@ -121,7 +121,6 @@ class SplitCreate(BaseModel):
     category: Optional[str] = None
     action: Optional[str] = None  # Type per split line (Section 4F)
     is_gcb: bool = False
-    is_for_others: bool = False
     notes: Optional[str] = None
 
 class SplitsRequest(BaseModel):
@@ -135,7 +134,6 @@ class ManualSplitItem(BaseModel):
     category: Optional[str] = None
     action: Optional[str] = None
     is_gcb: bool = False
-    is_for_others: bool = False
 
 class ManualTransactionCreate(BaseModel):
     """Request body for manual value-change transactions (Section 2c)."""
@@ -274,10 +272,13 @@ async def get_transactions(
         end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999)
         query = query.filter(Transaction.date <= end_dt)
     if category:
-        # Replicate category_final logic: prefer category_manual, fall back to category_auto
+        # Replicate category_final logic: prefer category_manual, fall back to
+        # category_auto. A top level includes its sub-categories.
+        names = with_children(category, parent_map(db))
         query = query.filter(
-            (Transaction.category_manual == category) |
-            ((Transaction.category_manual == None) & (Transaction.category_auto == category))
+            Transaction.category_manual.in_(names) |
+            (((Transaction.category_manual == None) | (Transaction.category_manual == '')) &  # noqa: E711
+             Transaction.category_auto.in_(names))
         )
     if account_id is not None:
         query = query.filter(Transaction.account_id == account_id)
@@ -406,11 +407,13 @@ async def update_transaction(
     old_action   = t.action
     _relock      = False  # any field below that compute_points_earn() depends on
 
+    # A category edit doesn't re-lock points: points come from the merchant
+    # path, never from the personal category (2026-11-03).
     if update.category is not None and update.category != t.category_manual:
+        check_category(db, update.category)
         t.category_manual = update.category
         t.updated_at      = datetime.utcnow()
         t.is_locked       = True
-        _relock           = True
         if old_category != update.category:
             categorizer.record_correction(t, old_category, update.category, old_action, update.action)
 
@@ -435,8 +438,6 @@ async def update_transaction(
     if update.is_gcb is not None:
         t.is_gcb = update.is_gcb
         t.gcb_tagged = update.is_gcb  # Keep legacy column in sync
-    if update.is_for_others is not None:
-        t.is_for_others = update.is_for_others
     if _apply_merchant_path_edit(db, t, update):
         _relock = True
     elif update.points_category is not None:
@@ -489,6 +490,7 @@ async def batch_update_transactions(
         raise HTTPException(status_code=400, detail="No transaction IDs provided")
 
     update = payload.updates
+    check_category(db, update.category)
     categorizer = CategorizationEngine(db)
     updated = 0
 
@@ -506,7 +508,6 @@ async def batch_update_transactions(
                 t.category_manual = update.category
                 t.updated_at = datetime.utcnow()
                 t.is_locked = True
-                _relock = True
                 if old_category != update.category:
                     categorizer.record_correction(t, old_category, update.category,
                                                   old_action, update.action)
@@ -532,9 +533,6 @@ async def batch_update_transactions(
         if update.is_gcb is not None:
             t.is_gcb = update.is_gcb
             t.gcb_tagged = update.is_gcb
-
-        if update.is_for_others is not None:
-            t.is_for_others = update.is_for_others
 
         if update.spender is not None:
             t.spender = update.spender or None
@@ -621,6 +619,7 @@ async def import_transactions(
     # ── Commit phase ─────────────────────────────────────────────────────────
     categorizer = CategorizationEngine(db)
     llm_key = os.getenv("ANTHROPIC_API_KEY", "")
+    category_names = active_names(db)
 
     # Pre-load GCB/points rules
     rules_with_notes = db.query(CategorizationRule).filter(
@@ -659,17 +658,14 @@ async def import_transactions(
             account_type=account.account_type or '',
         )
 
-        # Apply GCB / For Others / points tags from rule notes
+        # Apply GCB / points tags from rule notes
         desc_upper = desc_raw.upper()
         gcb_auto        = False
-        for_others_auto = False
         points_cat = None
         for rule in rules_with_notes:
             if rule.pattern and rule.pattern.upper() in desc_upper:
                 if 'gcb:true' in (rule.notes or ''):
                     gcb_auto = True
-                if 'for_others:true' in (rule.notes or ''):
-                    for_others_auto = True
                 if 'points:' in (rule.notes or ''):
                     points_cat = rule.notes.split('points:')[1].split(',')[0].strip()
 
@@ -681,12 +677,12 @@ async def import_transactions(
         needs_llm = action != 'Transfer' and (not display_desc or category == 'Unclassified')
         if needs_llm and llm_key:
             try:
-                result_llm = _call_groq(desc_raw, llm_key)
+                result_llm = _call_groq(desc_raw, llm_key, category_names)
                 if result_llm:
                     merchant_name     = str(result_llm.get("merchant_name") or "").strip() or None
                     description_clean = str(result_llm.get("description_clean") or "").strip() or description_clean
                     raw_cat           = str(result_llm.get("category") or "").strip()
-                    category          = raw_cat if raw_cat in VALID_CATEGORIES else 'Unclassified'
+                    category          = raw_cat if raw_cat in category_names else 'Unclassified'
                     llm_source        = 'llm'
                     confidence        = 0.75
                     llm_calls        += 1
@@ -741,7 +737,6 @@ async def import_transactions(
             enrichment_source    = final_source,
             is_gcb               = gcb_auto,
             gcb_tagged           = gcb_auto,
-            is_for_others        = for_others_auto,
             points_category      = points_cat,
             card_id              = linked_card_id,
             is_locked            = False,
@@ -780,6 +775,9 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
     if not date_strings:
         raise HTTPException(status_code=400, detail="At least one date is required")
 
+    check_category(db, data.category)
+    for split_item in data.splits or []:
+        check_category(db, split_item.category)
     linked_card_id = account.card.id if account.card else None
 
     created_ids = []
@@ -820,7 +818,6 @@ async def create_manual_transaction(data: ManualTransactionCreate, db: Session =
                     category=split_item.category or '',
                     action=split_item.action or data.action,
                     is_gcb=split_item.is_gcb,
-                    is_for_others=split_item.is_for_others,
                 ))
             db.flush()
 
@@ -848,6 +845,9 @@ async def create_splits(transaction_id: int, data: SplitsRequest, db: Session = 
             detail=f"Split amounts sum to {split_total}, but parent transaction amount is {parent_amount}. They must be equal."
         )
 
+    for s in data.splits:
+        check_category(db, s.category)
+
     # Delete existing splits for this transaction
     db.query(TransactionSplit).filter_by(parent_transaction_id=transaction_id).delete()
 
@@ -860,7 +860,6 @@ async def create_splits(transaction_id: int, data: SplitsRequest, db: Session = 
             category=s.category,
             action=s.action,
             is_gcb=s.is_gcb,
-            is_for_others=s.is_for_others,
             notes=s.notes,
         ))
 
@@ -883,7 +882,6 @@ async def get_splits(transaction_id: int, db: Session = Depends(get_db)):
             "category": s.category,
             "action": s.action,
             "is_gcb": bool(s.is_gcb),
-            "is_for_others": bool(s.is_for_others),
             "notes": s.notes,
         }
         for s in splits

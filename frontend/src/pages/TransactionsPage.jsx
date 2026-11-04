@@ -9,7 +9,8 @@ import {SkeletonTable} from '../components/SkeletonTable';
 import {SplitEditorModal} from '../components/SplitEditorModal';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
-import {fmt,fmtDate,sortedCats,todayStr} from '../lib/format';
+import {fmt,fmtDate,todayStr} from '../lib/format';
+import {catLabel,groupCats,topLevelOf} from '../lib/categories';
 
 export function TransactionsPage({categories,toast,refreshKey}){
   const[txns,setTxns]=useState([]);
@@ -23,12 +24,14 @@ export function TransactionsPage({categories,toast,refreshKey}){
   const[catFilter,setCatFilter]=useState(null);       // null=all, Set=specific
   const[actionFilter,setActionFilter]=useState(null);  // null=all, Set=specific
   const[networkFilter,setNetworkFilter]=useState(null);   // null=all, Set=specific — e.g. "show me every Visa txn"
+  const[brandFilter,setBrandFilter]=useState(null);       // null=all, Set=specific — e.g. every Hilton charge
   /* Draft copies for the type/category/account dropdowns — only take effect (copied into
      the applied state above) when the user clicks Apply, so toggling checkboxes doesn't
      re-filter/re-fetch on every click. */
   const[draftCatFilter,setDraftCatFilter]=useState(null);
   const[draftActionFilter,setDraftActionFilter]=useState(null);
   const[draftNetworkFilter,setDraftNetworkFilter]=useState(null);
+  const[draftBrandFilter,setDraftBrandFilter]=useState(null);
   const[reviewTxn,setReviewTxn]=useState(null);
   const[showManual,setShowManual]=useState(false);
   const[splitTxn,setSplitTxn]=useState(null);
@@ -119,6 +122,14 @@ export function TransactionsPage({categories,toast,refreshKey}){
   useEffect(()=>{setSelectedIds(new Set());},[search,_catKey,_actionKey,needsReview,_acctKey,startDate,endDate,minAmount,maxAmount,showDupes,showExcluded,networkFilter]);
   /* Distinct card networks seen in the loaded transactions — e.g. "show me every Visa txn" */
   const networkOptions=useMemo(()=>[...new Set(txns.map(t=>t.network).filter(Boolean))].sort(),[txns]);
+  /* Brand is the one field shared with the card network's view (set by the
+     merchant rules on rows from 2027-01-01); read-only here. */
+  const brandOptions=useMemo(()=>[...new Set(txns.map(t=>t.brand).filter(Boolean))].sort(),[txns]);
+  /* A top level selects its sub-categories too */
+  const categoryOptions=useMemo(()=>groupCats(categories).flatMap(({top,children})=>[
+    {value:top.name,label:top.name},
+    ...children.map(c=>({value:c.name,label:`${top.name} › ${c.name}`})),
+  ]),[categories]);
 
   /* Section 4A: Filter CC payment credits on the credit-card side (structural, not keyword-based).
      A CC payment shows up twice: once as a debit on the checking account (keep) and once as a
@@ -143,28 +154,29 @@ export function TransactionsPage({categories,toast,refreshKey}){
   if(!showDupes)visible=visible.filter(t=>!isCCPaymentDuplicate(t));
   if(!showExcluded)visible=visible.filter(t=>!t.is_excluded);
   if(search)visible=visible.filter(t=>(t.description_display||t.description_raw||'').toLowerCase().includes(search.toLowerCase())||t.description_raw?.toLowerCase().includes(search.toLowerCase()));
-  if(catFilter!==null)visible=visible.filter(t=>catFilter.has(t.category_final));
+  if(catFilter!==null)visible=visible.filter(t=>catFilter.has(t.category_final)||catFilter.has(topLevelOf(t.category_final)));
   if(actionFilter!==null)visible=visible.filter(t=>actionFilter.has(t.action));
   if(accountFilter!==null)visible=visible.filter(t=>accountFilter.has(String(t.account_id)));
   if(networkFilter!==null)visible=visible.filter(t=>networkFilter.has(t.network));
+  if(brandFilter!==null)visible=visible.filter(t=>brandFilter.has(t.brand));
   const _minAmt=minAmount!==''?Math.abs(parseFloat(minAmount)):null;
   const _maxAmt=maxAmount!==''?Math.abs(parseFloat(maxAmount)):null;
   if(_minAmt!==null&&!isNaN(_minAmt))visible=visible.filter(t=>Math.abs(t.amount)>=_minAmt);
   if(_maxAmt!==null&&!isNaN(_maxAmt))visible=visible.filter(t=>Math.abs(t.amount)<=_maxAmt);
   if(sortCol){
-    const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?(t.category_final||'').toLowerCase():(t.account_name||'').toLowerCase();
+    const key=t=>sortCol==='date'?t.date||'':sortCol==='description'?(t.description_display||t.description_raw||'').toLowerCase():sortCol==='amount'?t.amount||0:sortCol==='type'?(t.action||'').toLowerCase():sortCol==='category'?catLabel(t.category_final).toLowerCase():(t.account_name||'').toLowerCase();
     visible=[...visible].sort((a,b)=>{const ka=key(a),kb=key(b);const cmp=typeof ka==='number'?ka-kb:ka<kb?-1:ka>kb?1:0;return sortDir==='asc'?cmp:-cmp;});
   }
 
   const _expCatSet=new Set(categories.filter(c=>c.category_type==='expense'||c.category_type==='both').map(c=>c.name));
-  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&!t.is_for_others&&(t.action==='Expense'||t.action==='Income'));
+  const _budgetVisible=visible.filter(t=>!t.is_gcb&&!t.gcb_tagged&&(t.action==='Expense'||t.action==='Income'));
   const visibleExpenses=_budgetVisible.filter(t=>t.action==='Expense'||(t.action==='Income'&&_expCatSet.has(t.category_final))).reduce((s,t)=>s+(-t.amount),0);
   const visibleIncome=_budgetVisible.filter(t=>t.action==='Income'&&!_expCatSet.has(t.category_final)).reduce((s,t)=>s+t.amount,0);
   const visibleNet=visibleIncome-visibleExpenses;
 
   const exportCSV=()=>{
     const h=['Date','Description','Amount','Type','Category','Account'];
-    const rows=visible.map(t=>[fmtDate(t.date),t.description_display||t.description_raw,t.amount,t.action,t.category_final,t.account_name]);
+    const rows=visible.map(t=>[fmtDate(t.date),t.description_display||t.description_raw,t.amount,t.action,catLabel(t.category_final),t.account_name]);
     const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
     const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='transactions.csv';a.click();
   };
@@ -211,12 +223,14 @@ export function TransactionsPage({categories,toast,refreshKey}){
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <MultiSelectFilter label="All types" options={TXN_TYPES.map(a=>({value:a,label:a}))}
               selected={draftActionFilter} onChange={setDraftActionFilter} onApply={()=>setActionFilter(draftActionFilter)}/>
-            <MultiSelectFilter label="All categories" options={sortedCats(categories).map(c=>({value:c.name,label:c.name}))}
+            <MultiSelectFilter label="All categories" options={categoryOptions}
               selected={draftCatFilter} onChange={setDraftCatFilter} onApply={()=>setCatFilter(draftCatFilter)}/>
             <MultiSelectFilter label="All accounts" options={accounts.map(a=>({value:String(a.id),label:a.account_name}))}
               selected={draftAccountFilter} onChange={setDraftAccountFilter} onApply={()=>setAccountFilter(draftAccountFilter)}/>
             {networkOptions.length>0&&<MultiSelectFilter label="All networks" options={networkOptions.map(i=>({value:i,label:i}))}
               selected={draftNetworkFilter} onChange={setDraftNetworkFilter} onApply={()=>setNetworkFilter(draftNetworkFilter)}/>}
+            {brandOptions.length>0&&<MultiSelectFilter label="All brands" options={brandOptions.map(b=>({value:b,label:b}))}
+              selected={draftBrandFilter} onChange={setDraftBrandFilter} onApply={()=>setBrandFilter(draftBrandFilter)}/>}
             <button type="button" className="btn btn-primary" onClick={()=>setShowManual(true)}>+ Manual</button>
             <button type="button" className="btn btn-secondary" onClick={()=>setShowImport(true)}>↑ Import</button>
           </div>
@@ -257,8 +271,8 @@ export function TransactionsPage({categories,toast,refreshKey}){
           </div>
           
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||networkFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null||draftNetworkFilter!==null)&&
-              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setNetworkFilter(null);setDraftNetworkFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
+            {(startDate||endDate||minAmount||maxAmount||search||catFilter!==null||actionFilter!==null||needsReview||accountFilter!==null||networkFilter!==null||brandFilter!==null||quickYear||draftCatFilter!==null||draftActionFilter!==null||draftAccountFilter!==null||draftNetworkFilter!==null||draftBrandFilter!==null)&&
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>{setSearch('');setCatFilter(null);setActionFilter(null);setDraftCatFilter(null);setDraftActionFilter(null);setStartDate('');setEndDate('');setMinAmount('');setMaxAmount('');setNeedsReview(false);setAccountFilter(null);setDraftAccountFilter(null);setNetworkFilter(null);setDraftNetworkFilter(null);setBrandFilter(null);setDraftBrandFilter(null);setQuickYear('');setQuickMonth('');}}>Clear Filters</button>}
             <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setShowMoreMenu(p=>!p)}>⋯</button>
             {showMoreMenu&&<div style={{position:'absolute',right:24,top:'100%',marginTop:4,background:'var(--surface)',backdropFilter:'var(--glass-blur)',border:'1px solid var(--border)',borderRadius:16,padding:8,zIndex:20,boxShadow:'var(--card-shadow)',minWidth:180}}
               onMouseLeave={()=>setShowMoreMenu(false)}>

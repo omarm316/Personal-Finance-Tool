@@ -36,6 +36,7 @@ from core.challenges_helpers import (
 )
 from core.plaid_sync import _sync_item_background
 from core.points_engine import calc_earn_rate
+from core.categories import parent_map, with_children
 from core.serializers import serialize_account, _serialize_benefit
 
 logger = logging.getLogger('moresheth')
@@ -631,7 +632,8 @@ async def account_transactions(
 
     # Apply general-category filter (independent of csc — e.g. 'Fees & Interest')
     if category:
-        filtered = [t for t in filtered if (t.category_manual or t.category_auto) == category]
+        wanted = with_children(category, parent_map(db))  # a top level includes its sub-categories
+        filtered = [t for t in filtered if (t.category_manual or t.category_auto) in wanted]
 
     # Build summary across filtered set — signed points-earn read straight
     # off the locked columns (see _lock_points_for_transaction()).

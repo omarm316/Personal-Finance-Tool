@@ -5,7 +5,8 @@ import {ResetResyncButton} from '../components/ResetResyncButton';
 import {SyncLiabilitiesButton} from '../components/SyncLiabilitiesButton';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
-import {sortedCats,todayStr} from '../lib/format';
+import {todayStr} from '../lib/format';
+import {CategoryOptions} from '../components/CategoryOptions';
 
 export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoScan,onAutoScanDone}){
   const[tab,setTab]=useState('data');
@@ -423,7 +424,7 @@ export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categorie
               </select>
               <select value={ruleEditVals.set_category||''} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{border:'1px solid var(--border)',borderRadius:4,padding:'4px 6px',fontSize:12}}>
                 <option value="">— Category —</option>
-                {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                <CategoryOptions categories={categories||[]}/>
               </select>
             </div>
             <div style={{display:'flex',gap:8}}>
@@ -449,7 +450,7 @@ export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categorie
                   </select></td>
                   <td><select value={ruleEditVals.set_category} onChange={e=>setRuleEditVals(v=>({...v,set_category:e.target.value}))} style={{width:110,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}>
                     <option value="">—</option>
-                    {sortedCats(categories||[]).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                    <CategoryOptions categories={categories||[]}/>
                   </select></td>
                   <td><input value={ruleEditVals.set_description} onChange={e=>setRuleEditVals(v=>({...v,set_description:e.target.value}))} style={{width:100,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>
                   <td><input value={ruleEditVals.notes} onChange={e=>setRuleEditVals(v=>({...v,notes:e.target.value}))} style={{width:80,fontSize:11,border:'1px solid var(--border)',borderRadius:4,padding:'2px 4px'}}/></td>

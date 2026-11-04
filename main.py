@@ -62,7 +62,7 @@ from core.import_helpers import (
 from core.app_helpers import _frontend_index
 from core.constants import TRANSACTION_TYPES, BUDGET_TYPES, BALANCE_TYPES
 from core.rules_helpers import _reapply_rules
-from llm_service import enrich_transaction, _call_groq, VALID_CATEGORIES
+from llm_service import enrich_transaction, _call_groq
 from categorization import CategorizationEngine, load_rules_from_excel, compute_needs_review, find_overlapping_rules
 from plaid_integration import setup_plaid_from_env
 import logging
@@ -3801,6 +3801,7 @@ from routers.rules import router as rules_router
 from routers.admin import router as admin_router
 from routers.accounts import router as accounts_router
 from routers.earning import router as earning_router
+from routers.categories import router as categories_router
 
 app.include_router(misc_router)
 app.include_router(loans_router)
@@ -3814,6 +3815,7 @@ app.include_router(rules_router)
 app.include_router(admin_router)
 app.include_router(accounts_router)
 app.include_router(earning_router)
+app.include_router(categories_router)
 
 
 
