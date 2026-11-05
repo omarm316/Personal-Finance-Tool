@@ -12,7 +12,7 @@ const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 const MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const SKIP=new Set(['Transfer','Work']);
-const TODAY={y:2026,m:11,d:3};
+const TODAY={y:2026,m:11,d:4};
 // Preview state that survives re-renders (period, open category, sort, expanded list).
 const S={ym:'2026-10',view:'month',detail:null,sort:'pct',dir:'desc',showAll:false};
 let LAST=null,AGG=null;
@@ -125,7 +125,7 @@ function trend(picks,c){
   const ch=picks.chart,leg=ch==='pace'?`<div class="leg"><span><i class="lg-cur"></i>${S.view==='month'?MON[c.M-1]:c.Y}</span><span><i class="lg-prev"></i>${S.view==='month'?MON[shiftYm(c.Y,c.M,-1)[1]-1]:'Budget'}</span>${S.view==='month'?'<span><i class="lg-bud"></i>Budget</span>':''}</div>`
     :ch==='inout'?`<div class="leg"><span><i class="lg-in"></i>Income</span><span><i class="lg-out"></i>Spending</span></div>`:ch==='bars'?`<div class="leg"><span><i class="lg-bud"></i>Budget</span></div>`:'';
   const title={line:'Spending trend',bars:'Spending vs budget',pace:S.view==='month'?'Spending pace':'Spending vs budget, cumulative',inout:'Income vs spending'}[ch];
-  return `<section class="sf panel p-trend" data-region="spendchart"><div class="ph"><h2>${title}</h2><span class="mut">${chartRange(picks,c).label}</span></div>${leg}<div class="chart" data-chart="trend"></div>${ch!=='pace'?'<p class="hint">Click a month to open it.</p>':''}</section>`;
+  return `<section class="sf panel p-trend" data-region="round3"><div class="ph"><h2>${title}</h2><span class="mut">${chartRange(picks,c).label}</span></div>${leg}<div class="chart" data-chart="trend"></div>${ch!=='pace'?'<p class="hint">Click a month to open it.</p>':''}</section>`;
 }
 function chartRange(picks,c){
   const n=picks.range==='ytd'?c.M:6,ms=[];
@@ -216,12 +216,25 @@ function brow(r,total){return `<div class="br ${total?'tot':''} ${S.detail===r.c
 function sortHead(){const b=(k,l,al)=>`<button type="button" data-sort="${k}" class="${S.sort===k?'on':''} ${al||''}">${l}<i>${S.sort===k?(S.dir==='desc'?'↓':'↑'):'↕'}</i></button>`;
   return `<div class="br head"><span class="bc">Category</span>${b('pct','Progress','l')}${b('actual','Actual')}${b('budget','Budget')}</div>`}
 const legend=`<div class="bleg"><span><i class="k-ok"></i>Under budget</span><span><i class="k-near"></i>Near limit</span><span><i class="k-over"></i>Over budget</span><span><i class="k-none"></i>No budget set</span><span><i class="k-q"></i>25 / 50 / 75% of budget</span></div>`;
+/* ── Round 4: top-level categories (rows store the most specific name) ── */
+const topOf=c=>((LAST&&LAST.d.parents)||{})[c]||c;
+function groupRows(c){
+  const m=new Map();
+  c.rows.forEach(r=>{const t=topOf(r.cat),g=m.get(t)||{cat:t,budget:0,actual:0,kids:[]};g.budget+=r.budget;g.actual+=r.actual;g.kids.push(r);m.set(t,g)});
+  return[...m.values()].map(g=>{g.actual=Math.round(g.actual*100)/100;g.hasB=g.budget>0;g.credit=g.actual<0;g.pct=g.hasB?g.actual/g.budget:0;
+    g.over=g.hasB&&!g.credit&&g.pct>=1;g.near=g.hasB&&!g.over&&!g.credit&&g.pct>=.8;g.noB=!g.hasB&&g.actual>0;
+    g.kids=sorted(g.kids,'pct','desc');g.solo=g.kids.length===1&&g.kids[0].cat===g.cat;return g});
+}
+const grouped=p=>!!p.budGroup&&p.budGroup!=='flat';
 function detail(picks,c,d){
   if(!S.detail)return '';
-  const rows=d.lines.filter(l=>!SKIP.has(l.c)&&ncat(l.c)===S.detail&&l.d>=c.start&&l.d<=c.end).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:b.v-a.v);
+  const grp=S.detail.startsWith('g:'),name=grp?S.detail.slice(2):S.detail,inCat=l=>grp?topOf(ncat(l.c))===name:ncat(l.c)===name,e=LAST.h.esc;
+  const g=grp?groupRows(c).find(x=>x.cat===name):null;
+  const kids=g&&!g.solo?`<div class="det-k">${g.kids.map(k=>`<span><b>${e(k.cat)}</b> <em class="${k.over?'bad':k.credit?'good':''}">${k.credit?'+'+m2(-k.actual):m2(k.actual)}</em>${k.hasB?` of ${m2(k.budget)}`:' · no budget'}</span>`).join('')}</div>`:'';
+  const rows=d.lines.filter(l=>!SKIP.has(l.c)&&inCat(l)&&l.d>=c.start&&l.d<=c.end).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:b.v-a.v);
   const tot=rows.reduce((s,l)=>s+l.v,0),show=rows.slice(0,14);
-  return `<div class="det"><div class="det-h"><div><b>${LAST.h.esc(S.detail)}</b><span class="${tot>=0?'bad':'good'}">${tot>=0?'-':'+'}${m2(Math.abs(tot))}</span><span class="mut">${rows.length} transactions · ${c.label}</span></div><button type="button" class="x" data-close aria-label="Close category detail">✕</button></div>
-    <div class="det-l">${show.length?show.map(l=>{const x=new Date(l.d+'T12:00:00');return `<div class="dr"><span class="rd">${MON[x.getMonth()]} ${x.getDate()}</span><div class="rn"><b>${LAST.h.esc(l.n)}</b><span>${LAST.h.esc(l.a)}</span></div><b class="amt ${l.v>=0?'':'good'}">${l.v>=0?'-':'+'}${m2(Math.abs(l.v))}</b></div>`}).join(''):'<p class="mut pad">No transactions in this period.</p>'}
+  return `<div class="det"><div class="det-h"><div><b>${LAST.h.esc(name)}</b><span class="${tot>=0?'bad':'good'}">${tot>=0?'-':'+'}${m2(Math.abs(tot))}</span><span class="mut">${rows.length} transactions · ${c.label}</span></div><button type="button" class="x" data-close aria-label="Close category detail">✕</button></div>${kids}
+    <div class="det-l">${show.length?show.map(l=>{const x=new Date(l.d+'T12:00:00');return `<div class="dr"><span class="rd">${MON[x.getMonth()]} ${x.getDate()}</span><div class="rn"><b>${LAST.h.esc(l.n)}</b><span>${LAST.h.esc(grp?ncat(l.c)+' · '+l.a:l.a)}</span></div><b class="amt ${l.v>=0?'':'good'}">${l.v>=0?'-':'+'}${m2(Math.abs(l.v))}</b></div>`}).join(''):'<p class="mut pad">No transactions in this period.</p>'}
     ${rows.length>show.length?`<button type="button" class="link more">${rows.length-show.length} more in Transactions →</button>`:''}</div></div>`;
 }
 const tileFig=(r,p)=>p.tileFig!=='left'||!r.hasB||r.credit?amtCell(r):r.actual>r.budget?`<span class="ba bad">${m2(r.actual-r.budget)} over</span>`:`<span class="ba good">${m2(r.budget-r.actual)} left</span>`;
@@ -236,11 +249,19 @@ function budget(picks,c,d){
   else if(lay==='status'){const G=[['Over budget',r=>r.over],['Near limit',r=>r.near],['On track',r=>r.hasB&&!r.over&&!r.near&&!r.credit],['No budget set',r=>r.noB],['Credits and refunds',r=>r.credit]];
     body=brow(c.tot,true)+G.map(([l,f])=>{const g=all.filter(f);return g.length?`<div class="bg-h">${l}<span>${g.length}</span></div>`+rowsHtml(g):''}).join('')}
   else if(lay==='tiles'){
-    body=`<div class="btot"><span>Total spent</span><b class="val">${m2(c.tot.actual)}</b><span class="mut">of ${m2(c.tot.budget)} budgeted</span></div><div class="btiles">${all.map(r=>`<div class="bti ${S.detail===r.cat?'on':''}" data-cat="${LAST.h.esc(r.cat)}" role="button" tabindex="0"><div class="bti-h"><b>${LAST.h.esc(r.cat)}</b>${tileFig(r,picks)}</div>${bar(r)}<span class="mut">${tileSub(r,picks)}</span></div>${inl(r)}`).join('')}</div>`}
+    const e=LAST.h.esc,bg=picks.budGroup||'flat',G=bg==='flat'?null:sorted(groupRows(c),'pct','desc');
+    const tile=(r,key,extra='')=>`<div class="bti ${S.detail===key?'on':''}" data-cat="${e(key)}" role="button" tabindex="0"><div class="bti-h"><b>${e(r.cat)}</b>${tileFig(r,picks)}</div>${bar(r)}<span class="mut">${tileSub(r,picks)}</span>${extra}</div>`;
+    const kidAmt=k=>`<b class="${k.over?'bad':k.credit?'good':''}">${k.credit?'+'+m2(-k.actual):m2(k.actual)}</b>`;
+    let inner;
+    if(bg==='groups')inner=`<div class="btiles">${G.map(g=>tile(g,'g:'+g.cat,g.solo?'':`<span class="bti-k">${g.kids.filter(k=>Math.abs(k.actual)>.004).map(k=>e(k.cat)).join(' · ')||'Nothing spent yet'}</span>`)).join('')}</div>`;
+    else if(bg==='inside')inner=`<div class="btiles in">${G.map(g=>tile(g,'g:'+g.cat,g.solo?'':`<div class="bk2s">${g.kids.map(k=>`<div class="bk2 ${S.detail===k.cat?'on':''}" data-cat="${e(k.cat)}" role="button" tabindex="0"><span>${e(k.cat)}</span>${kidAmt(k)}<small>${k.hasB?'of '+m2(k.budget):k.credit?'net credit':'no budget'}</small><i class="bk2-t ${k.over?'over':k.near?'near':''}"><em style="width:${k.hasB&&!k.credit?Math.min(k.pct*100,100):0}%"></em></i></div>`).join('')}</div>`)).join('')}</div>`;
+    else if(bg==='sections')inner=`<div class="bsecs">${G.map(g=>`<div class="bsec"><div class="bsec-h ${S.detail==='g:'+g.cat?'on':''}" data-cat="${e('g:'+g.cat)}" role="button" tabindex="0"><b>${e(g.cat)}</b>${bar(g)}${tileFig(g,picks)}<span class="mut">${tileSub(g,picks)}</span></div>${g.solo?'':`<div class="btiles sub">${g.kids.map(k=>tile(k,k.cat)).join('')}</div>`}</div>`).join('')}</div>`;
+    else inner=`<div class="btiles">${all.map(r=>tile(r,r.cat)+inl(r)).join('')}</div>`;
+    body=`<div class="btot"><span>Total spent</span><b class="val">${m2(c.tot.actual)}</b><span class="mut">of ${m2(c.tot.budget)} budgeted</span></div>${inner}`}
   else body=sortHead()+brow(c.tot,true)+rowsHtml(all);
   const ctl=picks.header==='current'?`<div class="hdr-r">${viewToggle()}${picker(picks,c)}</div>`:`<span class="mut">${c.label}</span>`;
   const side=det==='side'&&S.detail,below=det==='below'||(det==='inline'&&lay==='never');
-  return `<section class="sf panel bud wide p-bud ${side?'has-side':''}" data-region="round2"><div class="ph"><h2>Budget performance</h2>${ctl}</div>
+  return `<section class="sf panel bud wide p-bud ${side?'has-side':''}" data-region="round4"><div class="ph"><h2>Budget performance</h2>${ctl}</div>
     <div class="bud-in"><div class="btab lay-${lay}">${body}${lay!=='tiles'?legend:''}</div>${side?`<aside class="det-side">${detail(picks,c,d)}</aside>`:''}</div></section>${below&&S.detail?`<section class="sf det-below wide">${detail(picks,c,d)}</section>`:''}`;
 }
 
@@ -276,7 +297,7 @@ function rewards(picks,d){
 /* ── Round 2: insight panels ──────────────────────────────── */
 // Every figure here is plain arithmetic on the period's rows: no guessing, nothing to maintain.
 const CATC=['#2563EB','#0D9488','#F59E0B','#DB2777','#7C3AED','#0EA5E9','#65A30D','#EA580C'];
-function catSpend(d,a,b){const o={};d.lines.forEach(l=>{if(SKIP.has(l.c)||l.d<a||l.d>b)return;const k=ncat(l.c);o[k]=(o[k]||0)+l.v});return o}
+function catSpend(d,a,b,lv){const o={};d.lines.forEach(l=>{if(SKIP.has(l.c)||l.d<a||l.d>b)return;const k=lv?topOf(ncat(l.c)):ncat(l.c);o[k]=(o[k]||0)+l.v});return o}
 function monthCtx(c){
   const{Y,M,endDay}=c,[pY,pM]=shiftYm(Y,M,-1);
   return{start:`${Y}-${pad(M)}-01`,end:`${Y}-${pad(M)}-${pad(endDay)}`,pStart:`${pY}-${pad(pM)}-01`,pEnd:`${pY}-${pad(pM)}-${pad(Math.min(endDay,lastDay(pY,pM)))}`,name:MONL[M-1],pName:MONL[pM-1],partial:c.isCM};
@@ -296,12 +317,12 @@ function insightList(c,d){
   if(S.view==='month'&&c.pExp>0){const p=Math.round((c.exp-c.pExp)/c.pExp*100);
     o.spend={fig:`${p>0?'▲':'▼'} ${Math.abs(p)}%`,tone:p>0?'bad':'good',text:`Spending ${p>0?'up':'down'} from ${mc.pName}${mc.partial?' (same days)':''}: ${m2(c.exp)} against ${m2(c.pExp)}.`}}
   else o.spend={fig:k1(c.exp/c.M),tone:'',text:`Average a month this year; ${m2(c.exp)} spent so far.`};
-  const over=c.rows.filter(r=>r.over).sort((a,b)=>(b.actual-b.budget)-(a.actual-a.budget));
+  const BR=grouped(LAST.picks)?groupRows(c):c.rows,over=BR.filter(r=>r.over).sort((a,b)=>(b.actual-b.budget)-(a.actual-a.budget));
   if(over.length){const r=over[0];o.over={fig:'+'+k1(r.actual-r.budget),tone:'bad',text:`${r.cat} ran ${m2(r.actual-r.budget)} over its ${m2(r.budget)} budget${over.length>1?`. ${over.length-1} more ${over.length===2?'category is':'categories are'} over too`:''}.`}}
   else o.over={fig:'✓',tone:'good',text:'Every budgeted category is within budget.'};
   if(c.inc>0){const r=Math.round(c.net/c.inc*100);o.kept={fig:`${r}%`,tone:r>=0?'good':'bad',text:r>=0?`Kept ${r}% of what came in: ${m2(c.net)} of ${m2(c.inc)}.`:`Spent ${m2(-c.net)} more than came in.`}}
   else o.kept={fig:'$0',tone:'',text:'No income recorded in this period yet.'};
-  const nb=c.rows.filter(r=>r.noB).sort((a,b)=>b.actual-a.actual);
+  const nb=BR.filter(r=>r.noB).sort((a,b)=>b.actual-a.actual);
   if(nb.length){const t=nb.reduce((s,r)=>s+r.actual,0);o.nobud={fig:k1(t),tone:'warn',text:`Went to categories with no budget: ${nb.slice(0,3).map(r=>r.cat).join(', ')}${nb.length>3?` and ${nb.length-3} more`:''}.`}}
   if(S.view==='month'){const cur=catSpend(d,mc.start,mc.end),cmp=catSpend(d,mc.pStart,mc.pEnd);
     const x=[...new Set([...Object.keys(cur),...Object.keys(cmp)])].map(k=>({k,a:cur[k]||0,b:cmp[k]||0})).filter(x=>x.a>=0&&x.b>=0).map(x=>({...x,d:x.a-x.b})).sort((p,q)=>Math.abs(q.d)-Math.abs(p.d))[0];
@@ -321,7 +342,7 @@ function insights(picks,c,d){
   if(!L.length)body='<p class="mut">Nothing to show: switch on at least one insight.</p>';
   else if(lk==='lead'){const[a,...r]=L;body=`<p class="ins-lead"><b class="${a.tone}">${a.fig}</b><span>${e(a.text)}</span></p>${r.length?`<ul class="ins-l lk-plain sm">${r.map(li).join('')}</ul>`:''}`}
   else body=`<ul class="ins-l lk-${lk}">${L.map(li).join('')}</ul>`;
-  return `<section class="wide sf panel ins p-ins" data-region="insights"><div class="ph"><h2>Insights</h2><span class="mut">${c.label}</span></div>${body}</section>`;
+  return `<section class="wide sf panel ins p-ins" data-region="round3"><div class="ph"><h2>Insights</h2><span class="mut">${c.label}</span></div>${body}</section>`;
 }
 function pace(picks,c){
   const B=c.tot.budget,X=c.tot.actual,doy=(y,m,dd)=>Math.round((new Date(y,m-1,dd)-new Date(y,0,1))/864e5)+1;
@@ -346,10 +367,11 @@ function pace(picks,c){
   const fy=zn?148:98;
   const svg=`<svg class="gauge" viewBox="-40 -14 300 ${zn?186:136}" role="img" aria-label="${Math.round(pct*100)}% of budget used">${arcs}<text class="g-v ${over?'bad':''}" x="110" y="${fy}" text-anchor="middle">${fig}</text><text class="tx" x="110" y="${fy+16}" text-anchor="middle">${figSub}</text></svg>`;
   const note=showProj?`<p class="mut g-note">Light arc: where today's pace lands, ${Math.round(proj/B*100)}% of budget.</p>`:gs==='proj'&&done?'<p class="mut g-note">The light arc appears while a month is in progress: pick November.</p>':'';
-  return `<section class="sf panel p-pace" data-region="pace"><div class="ph"><h2>${S.view==='month'?'Month pace':'Year pace'}</h2><span class="mut">${c.label}</span></div><p class="pace-h">${head}</p><p class="pace-s">${sub}</p>${svg}${note}</section>`;
+  return `<section class="sf panel p-pace" data-region="round3"><div class="ph"><h2>${S.view==='month'?'Month pace':'Year pace'}</h2><span class="mut">${c.label}</span></div><p class="pace-h">${head}</p><p class="pace-s">${sub}</p>${svg}${note}</section>`;
 }
 function where(picks,c,d){
-  const all=Object.entries(catSpend(d,c.start,c.end)),E=all.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),tot=E.reduce((s,x)=>s+x[1],0),N=picks.whereN;
+  const lv=picks.whereGroup==='top';
+  const all=Object.entries(catSpend(d,c.start,c.end,lv)),E=all.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),tot=E.reduce((s,x)=>s+x[1],0),N=picks.whereN;
   // Categories that net to a credit (refunds, business reimbursements) can't be a slice; say so, since the total then differs from the budget card's.
   const cr=all.filter(([,v])=>v<0).sort((a,b)=>a[1]-b[1]),crT=-cr.reduce((s,x)=>s+x[1],0);
   const crNote=crT>=1?`<p class="mut wnote">Gross spending. ${m2(crT)} of net credits (${cr.slice(0,2).map(x=>LAST.h.esc(x[0])).join(', ')}${cr.length>2?'…':''}) are left out, so this is more than the budget card's total.</p>`:'';
@@ -361,7 +383,7 @@ function where(picks,c,d){
   if(picks.wherePrev&&S.view==='month'){
     const mc=monthCtx(c),pm=shiftYm(c.Y,c.M,-1)[1],rank={},colOf={};it.forEach((x,i)=>{if(!x.rest){rank[x.k]=i;colOf[x.k]=x.col}});
     // Last month uses the same colour for the same category, in this month's order; anything else is grey.
-    const pE=Object.entries(catSpend(d,mc.pStart,mc.pEnd)).filter(([,v])=>v>0),ptot=pE.reduce((s,x)=>s+x[1],0);
+    const pE=Object.entries(catSpend(d,mc.pStart,mc.pEnd,lv)).filter(([,v])=>v>0),ptot=pE.reduce((s,x)=>s+x[1],0);
     const pit=pE.filter(([k])=>k in rank).map(([k,v])=>({k,v,col:colOf[k]})).sort((a,b)=>rank[a.k]-rank[b.k]),pr=pE.filter(([k])=>!(k in rank)).reduce((s,x)=>s+x[1],0);
     if(pr>0)pit.push({k:'Other categories',v:pr,col:'#94A3B8'});
     const mx=Math.max(tot,ptot)||1;
@@ -374,7 +396,7 @@ function where(picks,c,d){
   else if(picks.whereLegend==='top3'){const t3=it.filter(x=>!x.rest).slice(0,3),more=it.slice(t3.length);
     legend=`<div class="wtop">${t3.map(x=>`<div><span><i style="background:${x.col}"></i>${e(x.k)}</span><b class="val">${k1(x.v)}</b><em>${pc(x.v)}</em></div>`).join('')}</div>${more.length?`<p class="wrest">Then ${more.map(x=>`<span><i style="background:${x.col}"></i>${e(x.k)} ${pc(x.v)}</span>`).join(', ')}.</p>`:''}`}
   else legend=`<div class="wl">${it.map(x=>`<div class="wl-r"><i style="background:${x.col}"></i><span>${e(x.k)}</span><em>${pc(x.v)}</em><b>${m2(x.v)}</b></div>`).join('')}</div>`;
-  return `<section class="sf panel p-where" data-region="where"><div class="ph"><h2>Where the money went</h2><span class="mut">${c.label}</span></div>${bars}${legend}${crNote}</section>`;
+  return `<section class="sf panel p-where" data-region="round4"><div class="ph"><h2>Where the money went</h2><span class="mut">${c.label}</span></div>${bars}${legend}${crNote}</section>`;
 }
 function movers(picks,c,d){
   const mc=monthCtx(c),cur=catSpend(d,mc.start,mc.end);let cmp={},cl;
@@ -437,50 +459,25 @@ function page(picks,d){
 }
 
 Gallery.define({
-  id:'dashboard-r3',
-  name:'Dashboard, round 3',
+  id:'dashboard-final-r4',
+  name:'Dashboard, final design',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'arrange',label:'Arrangement',open:true,controls:[
-    {id:'arr',label:'Where the panels sit',type:'choice',options:[
-      {id:'r2',label:'Insights across, then three panels',current:true,hint:'Round 2: pace, chart and where side by side, budget at the bottom.'},
-      {id:'twoone',label:'Two and one',hint:'Insights and the chart take two thirds; pace and where sit beside them.'},
-      {id:'side',label:'Side column',hint:'Chart and budget on the left; insights, pace and where stacked on the right.'},
-      {id:'budhigh',label:'Budget card above the charts',hint:'Insights, then the budget, then pace, chart and where.'},
-    ]},
+   {id:'round4',label:'Decided in round 4',open:true,controls:[
+    {id:'budGroup',label:'Budget card',type:'choice',locked:true,options:[{id:'inside',label:'Top-level tiles with their categories inside'}]},
+    {id:'whereGroup',label:'Where the money went',type:'choice',locked:true,options:[{id:'top',label:'By top level'}]},
    ]},
-   {id:'insights',label:'Insights',open:true,controls:[
-    {id:'insLook',label:'Look',type:'choice',options:[
-      {id:'plain',label:'Figure and sentence',current:true,hint:'Round 2.'},
-      {id:'two',label:'Two columns',hint:'Same rows, half the height.'},
-      {id:'tone',label:'Tinted by tone',hint:'Red, amber or green edge and wash, so bad news stands out.'},
-      {id:'lead',label:'Headline, then the rest',hint:'The first insight switched on below is the big sentence.'},
-    ]},
-    ...INS.map(([k,l,on])=>({id:'ins_'+k,label:l,type:'toggle',default:on})),
-   ]},
-   {id:'pace',label:'Month pace',open:true,controls:[
-    {id:'gaugeStyle',label:'Gauge',type:'choice',options:[
-      {id:'arc',label:'Filled arc',current:true,hint:'Round 2.'},
-      {id:'proj',label:'Arc with the pace projection',hint:'A light arc shows where today\'s pace lands. Pick November to see it.'},
-      {id:'zones',label:'Colored zones and a needle',hint:'Under 80%, 80 to 100%, and over budget, in the bar colors.'},
-    ]},
-    {id:'gaugeFig',label:'Figure in the middle',type:'choice',options:[
-      {id:'pct',label:'Percent of budget used',current:true},
-      {id:'dollars',label:'Dollars left, or how far over'},
-    ]},
-   ]},
-   {id:'where',label:'Where the money went',open:true,controls:[
-    {id:'whereLegend',label:'Legend',type:'choice',options:[
-      {id:'list',label:'List with percent and amount',current:true,hint:'Round 2.'},
-      {id:'chips',label:'Compact chips',hint:'Name and percent; hover for the amount.'},
-      {id:'top3',label:'Top three called out',hint:'Three biggest as figures, the rest in one line.'},
-    ]},
-    {id:'whereH',label:'Bar height',type:'slider',min:12,max:40,step:2,default:22,unit:'px'},
-    {id:'wherePrev',label:'Last month\'s bar underneath',type:'toggle',default:false},
-   ]},
-   {id:'spendchart',label:'Spending chart',controls:[
-    {id:'chartBud',label:'Monthly budget, dashed',type:'toggle',default:false},
-    {id:'chartAvg',label:'Average of complete months, dotted',type:'toggle',default:false},
+   {id:'round3',label:'Decided in round 3',open:false,controls:[
+    {id:'arr',label:'Where the panels sit',type:'choice',locked:true,options:[{id:'budhigh',label:'Budget card above the charts'}]},
+    {id:'insLook',label:'Insights look',type:'choice',locked:true,options:[{id:'two',label:'Two columns'}]},
+    ...INS.map(([k,l,on])=>({id:'ins_'+k,label:'Insight: '+l,type:'toggle',locked:true,default:on})),
+    {id:'gaugeStyle',label:'Gauge',type:'choice',locked:true,options:[{id:'arc',label:'Filled arc'}]},
+    {id:'gaugeFig',label:'Figure in the middle',type:'choice',locked:true,options:[{id:'dollars',label:'Dollars left, or how far over'}]},
+    {id:'whereLegend',label:'Where the money went legend',type:'choice',locked:true,options:[{id:'list',label:'List with percent and amount'}]},
+    {id:'whereH',label:'Bar height',type:'slider',locked:true,min:12,max:40,step:2,default:28,unit:'px'},
+    {id:'wherePrev',label:'Last month\'s bar underneath',type:'toggle',locked:true,default:true},
+    {id:'chartBud',label:'Monthly budget line on the chart',type:'toggle',locked:true,default:false},
+    {id:'chartAvg',label:'Average line on the chart',type:'toggle',locked:true,default:false},
    ]},
    {id:'round2',label:'Decided in round 2',open:false,controls:[
     {id:'panels',label:'Panels shown',type:'choice',locked:true,options:[{id:'six',label:'Summary figures, insights, month pace, spending chart, where the money went, budget'}]},
@@ -536,7 +533,7 @@ Gallery.define({
     root.querySelectorAll('#pv_month').forEach(s=>s.onchange=()=>setYm(Y,Number(s.value)));
     root.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>{const k=b.dataset.sort;if(S.sort===k)S.dir=S.dir==='desc'?'asc':'desc';else{S.sort=k;S.dir='desc'}rr()});
     root.querySelectorAll('[data-showall]').forEach(b=>b.onclick=()=>{S.showAll=!S.showAll;rr()});
-    root.querySelectorAll('[data-cat]').forEach(el=>{const go=()=>{S.detail=S.detail===el.dataset.cat?null:el.dataset.cat;rr()};el.onclick=go;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}});
+    root.querySelectorAll('[data-cat]').forEach(el=>{const go=()=>{S.detail=S.detail===el.dataset.cat?null:el.dataset.cat;rr()};el.onclick=e=>{e.stopPropagation();go()};el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();go()}}});
     root.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{S.detail=null;rr()});
     // Charts are drawn at their real width so text stays at its true size.
     const draw=()=>{root.querySelectorAll('[data-chart]').forEach(el=>{const W=Math.max(Math.round(el.clientWidth),240);if(el.dataset.w==String(W))return;el.dataset.w=W;
@@ -992,6 +989,32 @@ Gallery.define({
 #pv .ln-avg{stroke:var(--tx3);stroke-width:1.4;stroke-dasharray:1 4;stroke-linecap:round}
 #pv .tl.avg{fill:var(--tx3);font-weight:500}
 #pv path.ln-bud{fill:none}
+/* Round 4: top-level categories */
+#pv .bti-k{font-size:11px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pv .btiles.in{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));align-items:start}
+#pv .bk2s{display:grid;gap:2px;margin-top:4px;padding-top:8px;border-top:1px solid var(--line)}
+#pv .bk2{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:2px 8px;align-items:baseline;padding:5px 6px;margin:0 -6px;border-radius:7px;font-size:12px}
+#pv .bk2:hover{background:var(--raised)}
+#pv .bk2.on{background:var(--ac-soft)}
+#pv .bk2 span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--tx2)}
+#pv .bk2 b{font-weight:600;font-variant-numeric:tabular-nums}
+#pv .bk2 small{font-size:10.5px;color:var(--tx3);white-space:nowrap}
+#pv .bk2-t{grid-column:1/-1;height:4px;border-radius:2px;background:var(--line);overflow:hidden;display:block}
+#pv .bk2-t em{display:block;height:100%;background:var(--b-ok);opacity:calc(var(--c-fill,.35) + .25)}
+#pv .bk2-t.near em{background:var(--b-near)}
+#pv .bk2-t.over em{background:var(--b-over)}
+#pv .bsecs{display:grid;gap:calc(var(--gap)*1.4);padding:var(--gap) calc(var(--p)*1.25) calc(var(--p)*1.25)}
+#pv .bsec-h{display:grid;grid-template-columns:minmax(120px,190px) minmax(0,1fr) minmax(130px,auto);gap:4px 14px;align-items:center;padding:8px 10px;margin:0 -10px;border-radius:calc(var(--c-radius)*.6);cursor:pointer}
+#pv .bsec-h:hover{background:var(--raised)}
+#pv .bsec-h.on{background:var(--ac-soft)}
+#pv .bsec-h>b{font-family:var(--f-h);font-size:15px;font-weight:600}
+#pv .bsec-h>.ba{text-align:right}
+#pv .bsec-h>.mut{grid-column:2}
+#pv .btiles.sub{padding:8px 0 0 14px;margin-left:4px;border-left:2px solid var(--line);grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+#pv .det-k{display:flex;flex-wrap:wrap;gap:6px 18px;padding:10px calc(var(--p)*1.25);border-bottom:1px solid var(--line);font-size:12px;color:var(--tx3);background:var(--raised)}
+#pv .det-k b{color:var(--tx);font-weight:600}
+#pv .det-k em{font-style:normal;font-weight:600;color:var(--tx2);font-variant-numeric:tabular-nums}
+#pv .det-k em.bad{color:var(--bad)}#pv .det-k em.good{color:var(--good)}
 `
 });
 })();
