@@ -1003,7 +1003,7 @@ Next is functionality (proposed order, 2026-11-03):
 2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history. **Stage 1 built 2026-11-03** (the 2027 engine; see the session writeup at the top). Still open: terms research for the held cards, the data fixes, the Q1 2027 selections.
 3. Program balances: not before 2027-01-01 (Omer, 2026-11-03). Balance syncing starts from that date, anchored to the balances on it; until then, wrong balances like Hilton's are left as they are.
 4. Benefits data model (per-period amounts, uses, purchase links) and Expiring credits.
-5. Build the Portfolio, Ecosystem and Card pages to their design docs.
+5. Build the Portfolio, Ecosystem and Card pages to their design docs. Includes the Actions strip on Portfolio and Ecosystem (`docs/cards-actions-design.md`, proposed 2026-11-05), once its gallery round is done.
 Editing a transaction's spender and category waits for step 2. See "Cards module findings" in `BACKLOG.md`.
 
 ## Main page (Dashboard) layout work (2026-11-03)
