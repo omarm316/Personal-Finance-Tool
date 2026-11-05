@@ -26,9 +26,10 @@ Cards module, in this order (see `PLAN.md` "Cards module layout work" and `BACKL
 3. **Benefits data model:** amount per period, reset frequency, calendar or card year, uses logged per period with source, optional statement-credit match text, mark used with undo, optional link from a use to its purchase. Platinum's stored credits are out of date against the 2026 statements.
 4. **Build the Portfolio, Ecosystem and Card pages** to `docs/cards-portfolio-design.md`, `docs/cards-ecosystem-design.md` and `docs/cards-card-design.md`. Pages go last so the new layout never shows wrong figures. The small flows behind the card ⋯ menu are designed while building.
 - **Deferred to 2027-01-01:** points balance syncing, anchored to balances on that date (the Hilton balance is known wrong until then).
-- **Parked:** duplicate-import cleanup (94 rows flagged); editing a transaction's spender and category (waits on item 2); collapsing the Category field to Level 1 plus sub-categories.
+- **Parked:** duplicate-import cleanup (94 rows flagged); editing a transaction's spender and category (waits on item 2).
 
 ## Recently Completed
+- 2026-11-04 — Two-level personal categories (top level › sub-category) with a Settings › Categories editor (`routers/categories.py`, `CategoryEditor.jsx`, design in `docs/settings-categories-design.md`). History moved by `docs/category_tree_migration.py`. The For Others tag is now the Other › For Others category. Tests 111 passed.
 - 2026-11-03 — Cards step 2 stage 1: the 2027 earning engine (merchant path, brand, kinds, earn rules with caps, top categories, selections and country limits; review list and before-and-after recalculation). Engine check 195/195; tests 85 passed (B27 fixed).
 - 2026-11-03 — Sync fix: real same-day repeat charges no longer dropped (`cb4e4cd`).
 - 2026-11-03 — Cards desktop designs approved (Portfolio, Ecosystem, Card page through 8 gallery rounds), categorization rules and engine check written, build order and the 2027-01-01 fresh start recorded (`ec80d9b`).

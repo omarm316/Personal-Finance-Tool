@@ -141,7 +141,7 @@ export function App(){
           {page==='accounts'&&<AccountsPage banks={banks} onConnectBank={openPlaid} onSync={sync} toast={toast} refreshKey={refreshKey}/>}
           {page==='cards'&&<CardsPage toast={toast} refreshKey={refreshKey}/>}
           {page==='gcb'&&<GCBPage toast={toast} refreshKey={refreshKey}/>}
-          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta} categories={categories} autoScan={pendingDupScan} onAutoScanDone={()=>setPendingDupScan(false)}/>}
+          {page==='settings'&&<SettingsPage banks={banks} onConnectBank={openPlaid} toast={toast} onBanksChanged={loadMeta} onCategoriesChanged={loadMeta} categories={categories} autoScan={pendingDupScan} onAutoScanDone={()=>setPendingDupScan(false)}/>}
         </main>
       </div>
 

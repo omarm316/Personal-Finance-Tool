@@ -1,7 +1,7 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-11-03
+> Last updated: 2026-11-04
 
 ---
 
@@ -9,6 +9,33 @@
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
 
 ---
+
+## Session 2026-11-03/04 — Two-level personal categories and Settings › Categories
+
+Built to the plan Omer approved on 2026-11-03 ("Yes, build it"). The data move ran on 2026-11-04 with his go-ahead ("Yes, apply it").
+
+**Model**
+- Personal categories are a two-level tree, top level › sub-category, using the existing `categories.parent_category` column (NULL = top level). Names are unique across the tree. Transactions, splits, rules and budget targets keep storing one name, the most specific one picked; the top level is looked up (`core/categories.py`: `parent_map`, `top_level`, `with_children`, `rollup`).
+- The list lives in the database and is edited in Settings › Categories. `STARTING_CATEGORY_TREE` in `database.py` only seeds an empty table. The every-startup `_CAT_REMAP` and deactivation are retired, since they would undo edits.
+- Locked names (`LOCKED_CATEGORIES`): Work, Transfer, Unclassified, Fees & Interest. The code relies on them; Fees & Interest because the card page's annual-fee tile nets it (`routers/accounts.py`), until that tile moves to fee and credit kinds.
+- Points never read personal categories, so editing a category no longer re-locks points.
+- The For Others tag (`is_for_others`, 2026-09-05) is retired (column kept, additive-only). The category Other › For Others replaces it; reimbursements categorized the same way net out.
+
+**API** (`routers/categories.py`): `GET /api/categories` (active, in order, with `parent_category` and `is_locked`); `GET /api/categories/manage` (all, with usage counts); create; `PATCH` to rename (cascades through `rename_category` to transactions, splits, rules and budget targets; budget months both have are added together), move, retype, hide or show; reorder; merge; delete when unused. Writers check names (`check_category`); automatic writers fall back to Unclassified. The AI categorizer reads the list from the database. Top-level filters include sub-categories; `/api/stats` returns `by_top_level` and `/api/budget/actuals` returns `top_levels`.
+
+**Frontend:** pickers grouped by top level (`CategoryOptions`), names shown as "Top › Sub" (`lib/categories.js`), the Transactions category filter selects a top level's sub-categories with it, and a read-only Brand tile and filter. For Others toggles removed.
+
+**Data move** (`docs/category_tree_migration.py`, dry run first; applied 2026-11-04 once Railway was running `e369b30`): renames (Home → Home Maintenance, Expense → Fees & Interest, Unrealized Gain/Loss → Investment Gain (Loss)); moves into sub-categories (gas stations, Uber Eats and DoorDash, NJ MVC, airlines, hotels, car rental, Amex Travel bookings, GEICO, condo insurance, National Insurance → For Others); rules re-pointed the same way; Insurance hidden with its budget on Auto Insurance; the 6 For Others marker rules now set the category; Expedia added as a brand with a merchant rule. Verified: a second run moves nothing, no stray names, 2026 budget targets still $289,319.
+
+**Settings › Categories** (2026-11-04): chosen in the design gallery (round 1, https://claude.ai/artifact/2iLd2vFKFFdwVFAbsGxUPB), recorded in `docs/settings-categories-design.md`, built in `frontend/src/components/CategoryEditor.jsx`: two panes, number columns, side panel, drag handles (arrow keys too), merge window, hidden list at the bottom. Locked top levels take no sub-categories in the editor, since the app checks those names exactly. Checked in the browser against a SQLite copy: rename, move, add, hide, show, merge, delete, reorder (keyboard and drag), find, the locked panel, and that Escape and outside clicks don't close the panel.
+
+**Open**
+- The $225 "AplPay DD *DOORDASH" charge moved to Food Delivery may be a gift card; Omer to check.
+- The IRS and NJ tax refunds ($8,222) stay in Work; move them to Other › Taxes if Omer wants.
+- Budgets page and Dashboard grouped by top level: needs a design-gallery pass first (the Dashboard gallery session has the API notes).
+- Editing brands belongs to the Transactions-page merchant-path session.
+
+Tests: `tests/test_categories.py` (26). Suite: 111 passed.
 
 ## Session 2026-11-03 — Cards step 2, stage 1: the 2027 earning engine
 
@@ -939,6 +966,10 @@ Omer: "let's look closely at the Dashboard page." Read it live at desktop and mo
   "current balance" means. Don't inline a second copy.
 - `MultiSelectFilter` for checkbox multi-select dropdowns.
 - Modals never close on backdrop click or Escape — explicit buttons only.
+- Personal categories are a two-level tree in the `categories` table (`parent_category`),
+  edited in Settings › Categories. Rows store the most specific name; look up the top
+  level with `core/categories.py` / `frontend/src/lib/categories.js`. Work, Transfer,
+  Unclassified and Fees & Interest are locked because code checks those names.
 
 ### Traps that have bitten more than once
 - **`pytest` without a `DATABASE_URL` override touches production.** Importing

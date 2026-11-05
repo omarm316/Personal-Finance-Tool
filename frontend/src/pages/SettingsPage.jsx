@@ -7,8 +7,9 @@ import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
 import {todayStr} from '../lib/format';
 import {CategoryOptions} from '../components/CategoryOptions';
+import {CategoryEditor} from '../components/CategoryEditor';
 
-export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categories,autoScan,onAutoScanDone}){
+export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,onCategoriesChanged,categories,autoScan,onAutoScanDone}){
   const[tab,setTab]=useState('data');
   const[busy,setBusy]=useState(false);
   const[cm,setCm]=useState(null);
@@ -188,6 +189,7 @@ export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categorie
     {id:'prefs',label:'Preferences'},
     {id:'data',label:'Data Management'},
     {id:'rules',label:'Rules'},
+    {id:'categories',label:'Categories'},
     {id:'bank',label:'Bank Links'},
     {id:'about',label:'About'},
   ];
@@ -479,6 +481,8 @@ export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,categorie
           }
         </div>
       </div>}
+
+      {tab==='categories'&&<CategoryEditor toast={toast} onChanged={onCategoriesChanged}/>}
 
       {tab==='bank'&&<div>
         <div className="card" style={{marginBottom:20}}>
