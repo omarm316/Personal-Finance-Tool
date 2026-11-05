@@ -90,9 +90,9 @@ function period(p){
   if(st==='strip')body=`<div class="und strip" role="group" aria-label="Month">${MON.slice(0,11).map((m,i)=>{const k=`2026-${pad(i+1)}`;return `<button type="button" data-ym="${k}" class="${ym===k?'on':''}" ${ymOk(k)?'':'disabled title="Not in the preview data"'}>${m}</button>`}).join('')}<span class="yr-t">2026</span><button type="button" data-per="all" class="${S.per==='all'?'on':''}">All</button></div>`;
   else if(st==='presets'){const P=[['m:'+TODAY.slice(0,7),'This month'],['m:'+stepYm(TODAY.slice(0,7),-1),'Last month'],['q3','Last 3 months'],['y:2026','This year'],['all','All'],['custom','Custom']];
     body=`<div class="und" role="group" aria-label="Dates">${P.map(([k,l])=>`<button type="button" data-per="${k}" class="${S.per===k?'on':''}">${l}</button>`).join('')}</div>${S.per==='custom'?dateInputs():''}`}
-  else{const yr=S.per.startsWith('m:')?S.per.slice(2,6):S.per.startsWith('y:')?S.per.slice(2):'';
-    body=`<div class="dd"><select data-ysel aria-label="Year"><option value="">All years</option>${['2026','2025','2024'].map(y=>`<option ${yr===y?'selected':''} ${y!=='2026'?'disabled':''}>${y}</option>`).join('')}</select>
-      ${yr?`<select data-msel aria-label="Month"><option value="">All months</option>${MON.map((m,i)=>`<option value="${i+1}" ${S.per===`m:${yr}-${pad(i+1)}`?'selected':''}>${m}</option>`).join('')}</select>`:''}${dateInputs()}</div>`}
+  else{const yr=S.per.startsWith('m:')?S.per.slice(2,6):S.per.startsWith('y:')?S.per.slice(2):'',cust=S.per==='custom',onlyCust=p.dateFields==='custom';
+    body=`<div class="dd"><select data-ysel aria-label="Year"><option value="">All years</option>${['2026','2025','2024'].map(y=>`<option ${yr===y?'selected':''} ${y!=='2026'?'disabled':''}>${y}</option>`).join('')}${onlyCust?`<option value="custom" ${cust?'selected':''}>Custom dates…</option>`:''}</select>
+      ${yr?`<select data-msel aria-label="Month"><option value="">All months</option>${MON.map((m,i)=>`<option value="${i+1}" ${S.per===`m:${yr}-${pad(i+1)}`?'selected':''}>${m}</option>`).join('')}</select>`:''}${onlyCust&&!cust?'':dateInputs()}</div>`}
   return `<div class="per" data-region="period">${body}</div>`;
 }
 function dateInputs(){const[a,b]=S.per==='all'?['','']:perRange();
@@ -151,9 +151,9 @@ function header(p,v){
   if(p.header==='none')return '';
   const tt=totals(v),acts=actsInHeader(p)?`<div class="acts">${actionBtns(p)}</div>`:'';
   const big=p.searchStyle==='header'?search(p,'hs'):'';
-  if(p.header==='bar')return `<header class="hdr sf" data-region="header"><div class="ht"><h1>Transactions</h1><span class="mut">${tt.n} shown</span></div>${big}<div class="hdr-r">${period(p)}${acts}</div></header>`;
+  if(p.header==='bar')return `<header class="hdr sf" data-region="period"><div class="ht"><h1>Transactions</h1><span class="mut">${tt.n} shown</span></div>${big}<div class="hdr-r">${p.perPlace!=='toolbar'?period(p):''}${acts}</div></header>`;
   const ar=p.period==='arrows';
-  return `<header class="hdr open" data-region="header"><div><p class="eyebrow">Transactions</p>${ar?arrows(true):`<h1 class="mo">${perLabel()}</h1>`}<p class="sub">${tt.n} transactions · <b>${money(tt.exp)}</b> out · <b class="good">${money(tt.inc)}</b> in</p></div>${big}<div class="hdr-r">${ar?'':period(p)}${acts}</div></header>`;
+  return `<header class="hdr open" data-region="period"><div><p class="eyebrow">Transactions</p>${ar?arrows(true):`<h1 class="mo">${perLabel()}</h1>`}<p class="sub">${tt.n} transactions · <b>${money(tt.exp)}</b> out · <b class="good">${money(tt.inc)}</b> in</p></div>${big}<div class="hdr-r">${ar?'':period(p)}${acts}</div></header>`;
 }
 
 /* ── Search and filters ───────────────────────────────────── */
@@ -174,14 +174,27 @@ function fPop(k){
 }
 const amtInputs=()=>`<span class="dr" title="Filters by dollar size, either direction"><input id="pv_min" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Min $" data-amt="min" value="${esc(S.min)}"><span class="mut">→</span><input id="pv_max" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Max $" data-amt="max" value="${esc(S.max)}"></span>`;
 const revBox=p=>p.reviewStyle==='checkbox'?`<label class="cb"><input type="checkbox" data-rev ${S.rev?'checked':''}> Needs review</label>`:'';
+function amtCtl(p){
+  if(p.amtStyle!=='chip')return amtInputs();
+  const on=S.min||S.max,lab=on?`Amount: ${S.min?'$'+esc(S.min):'any'} – ${S.max?'$'+esc(S.max):'any'}`:'Amount';
+  return `<button type="button" class="fb fb-${p.filterCtl} ${on?'on':''}" data-pop="amt">${lab}${ic('down',12)}</button>`;
+}
+function revCtlH(p){
+  if(p.reviewStyle!=='checkbox')return '';
+  if(p.revCtl!=='chip')return revBox(p);
+  const n=facet(inPeriod().filter(t=>!t.exc&&!isDup(t))).filter(t=>t.rev).length;
+  return `<button type="button" class="fb fb-${p.filterCtl} ${S.rev?'on':''}" data-revchip aria-pressed="${S.rev}">${ic('alert',13)}Needs review<em>${n}</em></button>`;
+}
 const anyFilter=()=>S.q||S.min||S.max||S.rev||FKEYS.some(([k])=>S.f[k]);
 const clearBtn=()=>anyFilter()?`<button type="button" class="lnk" data-clear>Clear filters</button>`:'';
 function filters(p){
-  const st=p.filterPlace,perHere=p.header==='none',acts=actsInHeader(p)?'':actionBtns(p);
+  const st=p.filterPlace,perHere=p.header==='none'||p.perPlace==='toolbar',acts=actsInHeader(p)?'':actionBtns(p);
   const srch=p.searchStyle==='large'||(p.searchStyle==='header'&&p.header!=='none')?'':search(p);
-  if(S.sel.size&&p.batchBar==='toolbar')return `<div class="fz sel-tb" data-region="batch">${batchInner(p)}</div>`;
-  if(st==='toolbar')return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${FKEYS.map(([k,l,a])=>fBtn(p,k,l,a)).join('')}${acts}</div></div>
-    <div class="tb2"><div class="fbs">${perHere?period(p):''}${amtInputs()}${revBox(p)}</div><div class="fbs end">${clearBtn()}${moreHere(p)}</div></div></div>`;
+  if(S.sel.size&&p.batchBar==='toolbar')return `<div class="fz sel-tb" data-region="r1">${batchInner(p)}</div>`;
+  if(st==='toolbar'){const amt=amtCtl(p),rev=revCtlH(p),per=perHere?period(p):'',fb=FKEYS.map(([k,l,a])=>fBtn(p,k,l,a)).join('');
+    if(p.row2==='one')return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${fb}${amt}${rev}${per}</div><div class="fbs end">${clearBtn()}${acts}${moreHere(p)}</div></div></div>`;
+    return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${fb}${acts}</div></div>
+    <div class="tb2"><div class="fbs">${per}${amt}${rev}</div><div class="fbs end">${clearBtn()}${moreHere(p)}</div></div></div>`}
   if(st==='panel'){const n=FKEYS.filter(([k])=>S.f[k]).length+(S.min||S.max?1:0)+(S.rev?1:0);
     return `<div class="fz row1" data-region="filters"><div class="fbs grow">${srch}<button type="button" class="fb fb-${p.filterCtl} ${S.fpanel||n?'on':''}" data-fpanel aria-expanded="${S.fpanel}">${ic('filter',14)}Filters${n?` · ${n}`:''}${ic(S.fpanel?'upc':'down',12)}</button>${perHere?period(p):''}</div><div class="fbs end">${clearBtn()}${acts}${moreHere(p)}</div></div>
       ${S.fpanel?`<div class="fpanel sf" data-region="filters">${FKEYS.map(([k,l])=>{const o=options(p,k).filter(x=>k!=='cat'||x.top||S.f.cat&&S.f.cat.has(x.v));
@@ -209,15 +222,17 @@ function rail(p){
 
 /* ── Popovers (one layer, placed under their button) ──────── */
 function popLayer(p){
-  const P=S.pop;if(!P)return '';
+  const P=S.pop;if(!P||P.k==='ci')return '';
   let html='',right=false;
   if(P.k==='f')html=fPop(P.key);
   else if(P.k==='addf')html=`<div class="pop menu">${FKEYS.map(([k,l])=>`<button type="button" class="mi" data-pop="f:${k}">${l}</button>`).join('')}<div class="mi-in"><span>Amount</span>${amtInputs()}</div>${p.reviewStyle==='checkbox'?`<div class="mi-in">${revBox(p)}</div>`:''}</div>`;
   else if(P.k==='add'){right=true;html=`<div class="pop menu"><button type="button" class="mi">${ic('edit',14)}Manual transaction</button><button type="button" class="mi">${ic('up',14)}Import a file (CSV, OFX)</button></div>`}
   else if(P.k==='more'){right=true;html=`<div class="pop menu"><button type="button" class="mi">↓ Export CSV</button><button type="button" class="mi">✨ AI Enrich</button></div>`}
-  else if(P.k==='rm'){right=true;const t=byId(P.id),ce=p.editMode==='row';if(!t)return '';
-    html=`<div class="pop menu">${t.rev?`<button type="button" class="mi" data-reviewed="${t.id}">${ic('check',14)}Mark reviewed</button>`:''}<button type="button" class="mi" data-open="${t.id}">${ic('info',14)}Details</button><button type="button" class="mi" data-${ce?'edit':'open'}="${t.id}">${ic('edit',14)}Edit</button><button type="button" class="mi" data-open="${t.id}">${ic('split',14)}${t.spl?'Edit splits':'Split'}</button><button type="button" class="mi" data-tag="gcb:${t.id}">${ic('star',14)}${t.gcb?'Remove GCB tag':'Tag as GCB'}</button><button type="button" class="mi" data-tag="fo:${t.id}">${ic('users',14)}${t.fo?'Not for others':'For others'}</button><button type="button" class="mi" data-tag="exc:${t.id}">${ic('ban',14)}${t.exc?'Include again':'Exclude'}</button></div>`}
-  else if(P.k==='cc'){const t=byId(P.id);if(!t)return '';html=`<div class="pop cpop"><span class="lbl">Category for ${nm(t,p)}</span>${catCtl(p,t.cat,'cell')}</div>`}
+  else if(P.k==='rm'){right=true;const t=byId(P.id),ce=editAttr(p);if(!t)return '';
+    html=`<div class="pop menu">${t.rev?`<button type="button" class="mi" data-reviewed="${t.id}">${ic('check',14)}Mark reviewed</button>`:''}<button type="button" class="mi" data-open="${t.id}">${ic('info',14)}Details</button><button type="button" class="mi" data-${ce}="${t.id}">${ic('edit',14)}Edit</button><button type="button" class="mi" data-open="${t.id}">${ic('split',14)}${t.spl?'Edit splits':'Split'}</button><button type="button" class="mi" data-tag="gcb:${t.id}">${ic('star',14)}${t.gcb?'Remove GCB tag':'Tag as GCB'}</button><button type="button" class="mi" data-tag="fo:${t.id}">${ic('users',14)}${t.fo?'Not for others':'For others'}</button><button type="button" class="mi" data-tag="exc:${t.id}">${ic('ban',14)}${t.exc?'Include again':'Exclude'}</button></div>`}
+  else if(P.k==='cc'){const t=byId(P.id);if(!t)return '';html=`<div class="pop cpop"><span class="lbl">Category for ${nm(t,p)}</span>${catCtl(p.cellPicker==='list'?{...p,catCtl:'search'}:p,t.cat,'cell')}</div>`}
+  else if(P.k==='ct'){const t=byId(P.id);if(!t)return '';html=`<div class="pop menu">${TYPES.map(a=>`<button type="button" class="mi ${t.act===a?'on':''}" data-tpick="${a}">${a}</button>`).join('')}</div>`}
+  else if(P.k==='amt')html=`<div class="pop menu"><div class="mi-in"><span>Amount, in either direction</span>${amtInputs()}</div><div class="pf"><button type="button" class="lnk" data-unamt>Clear</button><button type="button" class="btn sm" data-amtdone>Done</button></div></div>`;
   return `<div class="popl ${right?'r':''}">${html}</div>`;
 }
 function placePop(root){
@@ -238,15 +253,15 @@ function summary(p,v,where){
   const s=p.summary;if(s==='none')return '';
   if((s==='bar'||s==='sentence')!==(where==='card'))return '';
   const tt=totals(v);
-  if(s==='bar')return `<div class="ib" data-region="summary"><span><b>${tt.n}</b> TRANSACTIONS</span>${tt.exp?`<span>EXPENSES: <b class="${tt.exp>0?'bad':'good'}">${money(tt.exp)}</b></span>`:''}${tt.inc>0?`<span>INCOME: <b class="good">${money(tt.inc)}</b></span>`:''}</div>`;
-  if(s==='sentence')return `<p class="sent" data-region="summary"><b>${tt.n}</b> transactions · <b>${money(tt.exp)}</b> out · <b class="good">${money(tt.inc)}</b> in · net <b class="${tt.net<0?'bad':'good'}">${tt.net<0?'−':'+'}${money(tt.net)}</b></p>`;
+  if(s==='bar')return `<div class="ib" data-region="r1"><span><b>${tt.n}</b> TRANSACTIONS</span>${tt.exp?`<span>EXPENSES: <b class="${tt.exp>0?'bad':'good'}">${money(tt.exp)}</b></span>`:''}${tt.inc>0?`<span>INCOME: <b class="good">${money(tt.inc)}</b></span>`:''}</div>`;
+  if(s==='sentence')return `<p class="sent" data-region="r1"><b>${tt.n}</b> transactions · <b>${money(tt.exp)}</b> out · <b class="good">${money(tt.inc)}</b> in · net <b class="${tt.net<0?'bad':'good'}">${tt.net<0?'−':'+'}${money(tt.net)}</b></p>`;
   const fig=(l,val,cls='')=>`<div class="kv"><b class="kn val ${cls}">${val}</b><span class="kl">${l}</span></div>`;
   const figs=`<div class="kvs">${fig('Spent',money(tt.exp))}${fig('Came in',money(tt.inc),'good')}${fig('Net',(tt.net<0?'−':'+')+money(tt.net),tt.net<0?'bad':'good')}${fig('Transactions',tt.n.toLocaleString('en-US'))}</div>`;
-  if(s==='figures')return `<section class="sum sf" data-region="summary">${figs}</section>`;
+  if(s==='figures')return `<section class="sum sf" data-region="r1">${figs}</section>`;
   const by={};v.forEach(t=>{if(t.act!=='Expense'||t.gcb||t.fo)return;const k=topOf(t.cat);by[k]=(by[k]||0)-t.amt});
   const E=Object.entries(by).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]),tot=E.reduce((s,e)=>s+e[1],0)||1,top=E.slice(0,7),rest=E.slice(7).reduce((s,e)=>s+e[1],0);
   const segs=top.map(([k,x])=>({k,x,c:hue(k)})).concat(rest>0?[{k:'',x:rest,c:'#E2E8F0'}]:[]);
-  return `<section class="sum sf" data-region="summary">${figs}<div class="brk">${segs.map(g=>`<button type="button" style="flex:${g.x};background:${g.c}" ${g.k?`data-seg="${esc(g.k)}"`:''} title="${esc(g.k||'Everything else')}: ${money(g.x)}" aria-label="${esc(g.k||'Everything else')}: ${money(g.x)}"></button>`).join('')}</div>
+  return `<section class="sum sf" data-region="r1">${figs}<div class="brk">${segs.map(g=>`<button type="button" style="flex:${g.x};background:${g.c}" ${g.k?`data-seg="${esc(g.k)}"`:''} title="${esc(g.k||'Everything else')}: ${money(g.x)}" aria-label="${esc(g.k||'Everything else')}: ${money(g.x)}"></button>`).join('')}</div>
     <div class="brl">${segs.map(g=>`<span><i style="background:${g.c}"></i>${esc(g.k||'Everything else')} <b>${Math.round(g.x/tot*100)}%</b></span>`).join('')}</div></section>`;
 }
 
@@ -272,17 +287,27 @@ function catLabel(t,p){
   if(st==='stack')return `<span class="cst"><b>${esc(c)}</b>${par?`<small>${esc(par)}</small>`:''}</span>`;
   return `<span class="ctx">${par?`<span class="pp">${esc(par)} › </span>`:''}${esc(c)}</span>`;
 }
-const inPlace=(t,p)=>S.edit===t.id&&p.editMode==='row'&&(p.rowStyle==='current'||p.rowStyle==='ledger')&&p.typeCtl==='dropdown'&&p.catCtl==='dropdown';
+// How the row's Edit button edits: 'cells' (today), 'strip', or null (in the details window).
+function rowEdit(p){
+  const mode=p.editMode==='row'?'cells':p.editMode==='cell'&&p.editOpens!=='details'?p.editOpens:null;
+  if(!mode)return null;
+  return mode==='cells'&&(p.rowStyle==='current'||p.rowStyle==='ledger')&&p.typeCtl==='dropdown'&&p.catCtl==='dropdown'?'cells':'strip';
+}
+const editAttr=p=>rowEdit(p)?'edit':'oedit';
+const inPlace=(t,p)=>S.edit===t.id&&rowEdit(p)==='cells';
 function catCell(t,p){
   if(inPlace(t,p))return isBudget(S.cd.act)?`<select data-cs="cd" aria-label="Category">${catOptions(S.cd.cat)}</select>`:'<span class="mut">—</span>';
-  if(p.editMode==='cell'&&isBudget(t.act))return `<button type="button" class="cbtn" data-pop="cc:${t.id}" title="Change category">${catLabel(t,p)}${ic('down',11)}</button>`;
+  if(p.editMode==='cell'&&isBudget(t.act)){
+    if(p.cellPicker==='inline'&&S.pop&&S.pop.k==='ci'&&S.pop.id===t.id)return `<select id="pv_ci" data-cs="cell" aria-label="Category for ${esc(t.n)}">${catOptions(t.cat)}</select>`;
+    return `<button type="button" class="cbtn" data-pop="${p.cellPicker==='inline'?'ci':'cc'}:${t.id}" title="Change category">${catLabel(t,p)}${ic('down',11)}</button>`}
   return catLabel(t,p);
 }
 const typeBadge=a=>{const l=(a||'').toLowerCase();return l==='income'?'income':l==='transfer'?'transfer':'expense'};
 function typeCell(t,p){
   if(inPlace(t,p))return `<select data-ts="cd" aria-label="Type">${TYPES.map(a=>`<option ${S.cd.act===a?'selected':''}>${a}</option>`).join('')}</select>`;
   const lab=t.spl&&new Set(t.spl.map(s=>s.act)).size>1?'Multiple':t.act;
-  return p.rowStyle==='ledger'?`<span class="tt">${esc(lab)}</span>`:`<span class="badge b-${typeBadge(t.act)}">${esc(lab)}</span>`;
+  const b=p.rowStyle==='ledger'?`<span class="tt">${esc(lab)}</span>`:`<span class="badge b-${typeBadge(t.act)}">${esc(lab)}</span>`;
+  return p.typeClick&&!t.spl?`<button type="button" class="cbtn" data-pop="ct:${t.id}" title="Change type">${b}${ic('down',11)}</button>`:b;
 }
 function amtCell(t,p){
   const c=p.amtColor,cls=t.act==='Transfer'?'':t.amt<0?(c==='both'?'bad':''):(c==='none'?'':'good');
@@ -299,7 +324,9 @@ function ptsCell(t){
   return `<span class="pts ${t.pts<0?'bad':''}">${t.pts>0?'+':''}${t.pts.toLocaleString('en-US')} ${esc(ECO[t.eco]||t.eco||'pts')}</span><small>${t.rate!=null?t.rate+'x':''}</small>`;
 }
 const caret=(t,p)=>t.spl&&p.splitShow==='caret'?`<button type="button" class="car ${S.exp.has(t.id)?'on':''}" data-exp="${t.id}" aria-expanded="${S.exp.has(t.id)}" aria-label="Show the ${t.spl.length} parts">▸</button>`:'';
-const dateCell=(t,p)=>`<span class="dte">${caret(t,p)}${p.rowStyle==='ledger'?shortD(t.d):fullD(t.d)}</span>`;
+const DOW3=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function ledD(s,p){const x=dt(s);return p.dateFmt==='num'?`${x.getMonth()+1}/${x.getDate()}`:p.dateFmt==='dow'?`${DOW3[x.getDay()]} ${x.getDate()}`:shortD(s)}
+const dateCell=(t,p)=>`<span class="dte">${caret(t,p)}${p.rowStyle==='ledger'?ledD(t.d,p):fullD(t.d)}</span>`;
 function tagList(t,p){
   const g=[];
   if(t.rev)g.push(['Review','warn']);if(t.gcb)g.push(['GCB','gold']);if(t.fo)g.push(['For others','']);
@@ -307,7 +334,7 @@ function tagList(t,p){
   return g;
 }
 function flagsUnder(t,p){
-  if(p.flags==='chips'){const b=[];
+  if(p.flags==='chips'){if(p.aiLabels==='detail')return '';const b=[];
     if(t.conf!=null&&!t.lk)b.push(`<span class="conf">${Math.round(t.conf*100)}% AI CONFIDENCE</span>`);
     if(t.src&&t.src!=='rule'){const lab={llm:'AI ENRICHED',override:'AUTO-OVERRIDE'}[t.src]||t.src.toUpperCase();b.push(`<span class="src s-${t.src}">${lab}</span>`)}
     return b.length?`<div class="fl-u">${b.join('')}</div>`:''}
@@ -327,7 +354,7 @@ function nameCell(t,p){
   const sub=p.rowStyle==='airy'&&subs.length?`<small>${subs.join(' · ')}</small>`:'';
   const nmH=inPlace(t,p)?`<input data-nm="cd" value="${esc(S.cd.n)}" aria-label="Display name">`:`<b class="nm" title="${esc(t.raw)}">${nm(t,p)}</b>`;
   const car=p.grouping==='day'||p.rowStyle==='airy'?caret(t,p):'';
-  const inline=p.flags==='tags'||p.flags==='edge';
+  const inline=p.flags==='tags'||p.flags==='edge'||(p.flags==='chips'&&p.aiLabels==='inline');
   return `<div class="nc">${inline?`<div class="nl">${car}${nmH}${flagsUnder(t,p)}</div>`:`<div class="nl">${car}${nmH}</div>${flagsUnder(t,p)}`}${sub}</div>`;
 }
 function avatar(t){const c=isBudget(t.act)?hue(t.cat):'#94A3B8',ch=(t.n||'?').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase()||'?';
@@ -337,7 +364,9 @@ function actionsCell(t,p){
   const ra=p.rowActions;
   if(inPlace(t,p))return `<div class="ra"><button type="button" class="btn pri sm" data-save="${t.id}" data-scope="cd">Save</button><button type="button" class="btn sm ghost" data-cancel aria-label="Cancel">✕</button></div>`;
   const chips=p.flags==='chips'?(t.gcb?'<span class="ch gold" title="GCB">⭐</span>':'')+(t.exc?'<span class="ch bad" title="Excluded">⊘</span>':'')+(t.lk?'<span class="ch" title="Locked">🔒</span>':''):'';
-  const ce=p.editMode==='row'?'edit':'open';
+  const ce=editAttr(p);
+  if(ra==='buttons'&&p.btnStyle==='links')return `<div class="ra lk"><span class="rv sm">${t.rev?`<button type="button" class="lk2 warn" data-review="${t.id}">Review</button>`:''}</span>${chips}<button type="button" class="lk2" data-open="${t.id}">Details</button><button type="button" class="lk2" data-${ce}="${t.id}">Edit</button><button type="button" class="lk2" data-open="${t.id}">${t.spl?'Splits':'Split'}</button></div>`;
+  if(ra==='buttons'&&p.btnStyle==='icons')return `<div class="ra"><span class="rv">${t.rev?`<button type="button" class="btn pri sm" data-review="${t.id}">Review</button>`:''}</span>${chips}<button type="button" class="ib2" data-open="${t.id}" title="Details" aria-label="Details">${ic('info',15)}</button><button type="button" class="ib2" data-${ce}="${t.id}" title="Edit" aria-label="Edit">${ic('edit',15)}</button><button type="button" class="ib2" data-open="${t.id}" title="${t.spl?'Splits':'Split'}" aria-label="${t.spl?'Splits':'Split'}">${ic('split',15)}</button></div>`;
   if(ra==='buttons')return `<div class="ra"><span class="rv">${t.rev?`<button type="button" class="btn pri sm" data-review="${t.id}">Review</button>`:''}</span>${chips}<button type="button" class="btn sm ghost ico" data-open="${t.id}" title="Details" aria-label="Details">${ic('info',14)}</button><button type="button" class="btn sm" data-${ce}="${t.id}">Edit</button><button type="button" class="btn sm" data-open="${t.id}">${t.spl?'Splits':'Split'}</button></div>`;
   if(ra==='hover')return `<div class="ra">${chips}<div class="hov">${t.rev?`<button type="button" class="ib2" data-reviewed="${t.id}" title="Mark reviewed" aria-label="Mark reviewed">${ic('check',15)}</button>`:''}<button type="button" class="ib2" data-${ce}="${t.id}" title="Edit" aria-label="Edit">${ic('edit',15)}</button><button type="button" class="ib2" data-open="${t.id}" title="Split" aria-label="Split">${ic('split',15)}</button></div></div>`;
   if(ra==='menu')return `<div class="ra">${chips}<button type="button" class="ib2" data-pop="rm:${t.id}" aria-label="Actions for ${esc(t.n)}">${ic('dots',16)}</button></div>`;
@@ -350,11 +379,12 @@ function defs(p){
   D.push({k:'chk',w:'max-content',h:'chk',c:chk});
   if(st==='airy')D.push({k:'av',w:'34px',h:'',c:avatar});
   if(!day&&st!=='airy')D.push({k:'date',w:st==='ledger'?'58px':'max-content',h:'Date',s:'date',c:dateCell});
-  D.push({k:'name',w:'minmax(120px,1fr)',h:'Description',s:'name',c:nameCell});
+  const led=st==='ledger';
+  D.push({k:'name',w:led?'minmax(120px,1.6fr)':'minmax(120px,1fr)',h:'Description',s:'name',c:nameCell});
   if(st==='current')D.push({k:'amt',w:'max-content',h:'Amount',s:'amount',c:amtCell});
   if(p.typeShow==='badge')D.push({k:'type',w:'max-content',h:'Type',s:'type',c:typeCell});
-  D.push({k:'cat',w:'minmax(56px,max-content)',h:'Category',s:'category',c:catCell});
-  if(p.showAccount&&st!=='airy')D.push({k:'acct',w:'minmax(56px,170px)',h:'Account',s:'account',c:acctCell});
+  D.push({k:'cat',w:led?'minmax(60px,1.2fr)':'minmax(56px,max-content)',h:'Category',s:'category',c:catCell});
+  if(p.showAccount&&st!=='airy')D.push({k:'acct',w:led?'minmax(60px,1fr)':'minmax(56px,170px)',h:'Account',s:'account',c:acctCell});
   if(p.showNetwork)D.push({k:'net',w:'max-content',h:'Network',c:netCell});
   if(p.showSpender&&st!=='airy')D.push({k:'sp',w:'max-content',h:'Spender',c:spCell});
   if(p.showPoints&&st!=='airy')D.push({k:'pts',w:'max-content',h:'Points',c:ptsCell,r:1});
@@ -365,7 +395,7 @@ function defs(p){
 }
 function headRow(p,D,v){
   const all=v.length&&v.every(t=>S.sel.has(t.id));
-  return `<div class="tr th" data-region="cells">${D.map(c=>c.h==='chk'?`<div class="td c-chk"><input type="checkbox" class="rchk" data-selall ${all?'checked':''} aria-label="Select all shown"></div>`
+  return `<div class="tr th" data-region="rows">${D.map(c=>c.h==='chk'?`<div class="td c-chk"><input type="checkbox" class="rchk" data-selall ${all?'checked':''} aria-label="Select all shown"></div>`
     :c.s?`<div class="td ${c.r?'r':''}"><button type="button" data-sort="${c.s}" class="${S.sort===c.s?'on':''}">${c.h}<i>${S.sort===c.s?(S.dir==='asc'?'▲':'▼'):'⇅'}</i></button></div>`:`<div class="td ${c.r?'r':''}">${c.h}</div>`).join('')}</div>`;
 }
 const rowCls=(t,p)=>['tr',S.sel.has(t.id)?'sel':'',S.open===t.id&&p.detailOpen!=='modal'?'opn':'',p.flags==='edge'&&t.rev?'e-rev':'',p.flags==='edge'&&t.exc?'e-exc':'',t.exc?'exc':''].join(' ');
@@ -382,14 +412,14 @@ function splitRows(t,p){
   return t.spl.map(s=>`<div class="spr"><span class="mut">↳</span><span>${esc(s.n)||'<i class="mut">No note</i>'}</span>${isBudget(s.act)?catLabel({act:s.act,cat:s.cat},p):''}<span class="amt">${sgn(s.amt)}</span></div>`).join('');
 }
 function editStrip(t,p){
-  if(S.edit!==t.id||p.editMode!=='row'||inPlace(t,p))return '';
+  if(S.edit!==t.id||rowEdit(p)!=='strip')return '';
   return `<div class="estrip" data-region="editctl"><label class="fld"><span>Display name</span><input data-nm="cd" value="${esc(S.cd.n)}"></label><div class="fld"><span>Type</span>${typeCtl(p,S.cd.act,'cd')}</div>${isBudget(S.cd.act)?`<div class="fld"><span>Category</span>${catCtl(p,S.cd.cat,'cd')}</div>`:'<div></div>'}
     <div class="eacts"><button type="button" class="btn pri sm" data-save="${t.id}" data-scope="cd">Save</button><button type="button" class="btn sm ghost" data-cancel>Cancel</button></div></div>`;
 }
 function list(p,v){
   if(!v.length)return `<div class="empty"><div class="ei">◎</div><span>No transactions found</span>${anyFilter()?'<button type="button" class="lnk" data-clear>Clear filters</button>':''}</div>`;
   const D=p.rowStyle==='twoline'?null:defs(p),gt=D?D.map(c=>c.w).join(' '):'';
-  const one=t=>(D?gridRow(t,p,D):twoRow(t,p))+splitRows(t,p)+editStrip(t,p)+(p.detailOpen==='expand'&&S.open===t.id?`<div class="dexp" data-region="detail">${detail(t,p)}</div>`:'');
+  const one=t=>(D?gridRow(t,p,D):twoRow(t,p))+splitRows(t,p)+editStrip(t,p)+(p.detailOpen==='expand'&&S.open===t.id?`<div class="dexp" data-region="editctl">${detail(t,p)}</div>`:'');
   let body;
   if(p.grouping==='flat')body=v.map(one).join('');
   else{const key=t=>p.grouping==='day'?t.d:t.d.slice(0,7),G=new Map();
@@ -406,7 +436,7 @@ function batchInner(p){
 }
 function batch(p,where){
   if(!S.sel.size||p.batchBar!==where)return '';
-  return where==='top'?`<div class="bb" data-region="batch">${batchInner(p)}</div>`:`<div class="bfloat" data-region="batch"><div class="bfi">${batchInner(p)}</div></div>`;
+  return where==='top'?`<div class="bb" data-region="r1">${batchInner(p)}</div>`:`<div class="bfloat" data-region="r1"><div class="bfi">${batchInner(p)}</div></div>`;
 }
 
 /* ── Edit controls (sc: cd = row edit, dd = details, bd = several, cell = category cell) ── */
@@ -449,7 +479,7 @@ function queueFoot(){
 }
 function detail(t,p){
   if(!S.dd||S.dd.id!==t.id)S.dd={id:t.id,n:t.n,act:t.act,cat:t.cat};
-  const st=p.detailStyle,ed=p.editMode==='detail'||st==='form'||!!S.queue;
+  const st=p.detailStyle,ed=p.editMode==='detail'||st==='form'||!!S.queue||S.dedit;
   const close=`<button type="button" class="x" data-close aria-label="Close details">${ic('x',16)}</button>`;
   const foot=`${queueFoot()}<div class="df"><div class="fbs">${ed&&!S.queue?`<button type="button" class="btn pri sm" data-save="${t.id}" data-scope="dd">Save</button>`:''}<button type="button" class="btn sm">${t.spl?'✎ Edit splits':'⊕ Split'}</button><button type="button" class="btn sm">Create rule</button><button type="button" class="btn sm danger">Delete</button></div><button type="button" class="btn sm ghost" data-close>Close</button></div>`;
   const splits=t.spl&&p.splitShow!=='never'?`<div class="dsp"><span class="lbl">Splits (${t.spl.length})</span>${t.spl.map(s=>`<div class="dspr"><span>${esc(s.n)||'<i class="mut">No note</i>'}<small>${esc(s.cat)}</small></span><span class="badge b-${typeBadge(s.act)}">${esc(s.act)}</span><b>${sgn(s.amt)}</b></div>`).join('')}</div>`:'';
@@ -474,10 +504,10 @@ function detail(t,p){
 }
 function detailWrap(p){
   const t=S.open!=null?byId(S.open):null,m=p.detailOpen;
-  if(m==='pane')return `<aside class="pane sf" data-region="detail">${t?detail(t,p):`<div class="pe">${ic('info',22)}<p>Pick a transaction to see its details here.</p></div>`}</aside>`;
+  if(m==='pane')return `<aside class="pane sf" data-region="editctl">${t?detail(t,p):`<div class="pe">${ic('info',22)}<p>Pick a transaction to see its details here.</p></div>`}</aside>`;
   if(!t||m==='expand')return '';
-  if(m==='drawer')return `<div class="ovl drw" data-region="detail"><div class="drw-p" role="dialog" aria-label="Transaction details">${detail(t,p)}</div></div>`;
-  return `<div class="ovl mdl" data-region="detail"><div class="mdl-p" role="dialog" aria-modal="true" aria-label="Transaction details">${detail(t,p)}</div></div>`;
+  if(m==='drawer')return `<div class="ovl drw" data-region="editctl"><div class="drw-p" role="dialog" aria-label="Transaction details">${detail(t,p)}</div></div>`;
+  return `<div class="ovl mdl" data-region="editctl"><div class="mdl-p" role="dialog" aria-modal="true" aria-label="Transaction details">${detail(t,p)}</div></div>`;
 }
 function batchModal(p){
   if(!S.batch)return '';
@@ -526,11 +556,11 @@ function setEd(id,o){S.ed[id]=Object.assign({},S.ed[id]||{},o)}
 function save(id,sc){
   const d=S[sc],t=byId(id),o={n:d.n,act:d.act,rev:0,lk:1};
   if(isBudget(d.act)){o.cat=d.cat||'Unclassified';if(o.cat!==t.cat)o.man=1}
-  setEd(id,o);if(sc==='cd'){S.edit=null;S.cd=null}else S.dd=null;
+  setEd(id,o);if(sc==='cd'){S.edit=null;S.cd=null}else{S.dd=null;S.dedit=false}
 }
 function openRow(id,p){
   const toggle=p.detailOpen==='pane'||p.detailOpen==='expand';
-  S.open=toggle&&S.open===id?null:id;S.dd=null;S.pop=null;S.queue=null;
+  S.open=toggle&&S.open===id?null:id;S.dd=null;S.pop=null;S.queue=null;S.dedit=false;
 }
 function qNext(done){
   const q=S.queue,i=q.ids.indexOf(S.open);
@@ -541,11 +571,12 @@ function qNext(done){
 function wire(root,p){
   const app=root.querySelector('.app');if(!app)return;
   placeOverlays();placePop(root);
+  const ci=root.querySelector('#pv_ci');if(ci){ci.focus({preventScroll:true});try{ci.showPicker()}catch(e){}}
   const stage=document.getElementById('stage');
   if(stage&&!window.__txSc){window.__txSc=1;stage.addEventListener('scroll',()=>{if(L&&L.root)placeOverlays()},{passive:true})}
   app.addEventListener('click',e=>{
     const el=e.target.closest('button,[data-row],input,label,select,summary');
-    if(S.pop&&!e.target.closest('.popl')&&!(el&&'pop' in el.dataset)){S.pop=null;root.querySelectorAll('.popl').forEach(x=>x.remove())}
+    if(S.pop&&!e.target.closest('.popl,#pv_ci')&&!(el&&'pop' in el.dataset)){const ci=S.pop.k==='ci';S.pop=null;root.querySelectorAll('.popl').forEach(x=>x.remove());if(ci)setTimeout(rr,0)}
     if(!el)return;
     const D=el.dataset,stop=()=>e.stopPropagation(),has=k=>k in D;
     if(el.matches('input,select,label,summary')&&!['sel','selall','tag','tv','dv','live'].some(has))return;
@@ -566,6 +597,10 @@ function wire(root,p){
     if(has('unrev')){stop();S.rev=false;rr();return}
     if(has('clear')){stop();S.q='';S.min=S.max='';S.rev=false;FKEYS.forEach(([k])=>S.f[k]=null);rr();return}
     if(has('fpanel')){stop();S.fpanel=!S.fpanel;rr();return}
+    if(has('revchip')){stop();S.rev=!S.rev;rr();return}
+    if(has('amtdone')){stop();S.pop=null;rr();return}
+    if(has('tpick')){stop();setEd(S.pop.id,{act:D.tpick,rev:0});S.pop=null;rr();toast('Type saved');return}
+    if(has('oedit')){stop();openRow(Number(D.oedit),p);S.dedit=true;rr();return}
     if(has('seg')){stop();S.f.cat=S.f.cat&&S.f.cat.size===1&&S.f.cat.has(D.seg)?null:new Set([D.seg]);rr();return}
     if(has('ym')){stop();if(ymOk(D.ym)){S.per='m:'+D.ym;rr()}return}
     if(has('per')){stop();S.per=D.per;if(D.per==='custom'&&!S.from&&!S.to){S.from='2026-10-01';S.to='2026-10-31'}rr();return}
@@ -594,7 +629,7 @@ function wire(root,p){
     if(has('queue')){stop();const ids=visible({...p,reviewStyle:'checkbox'}).filter(t=>t.rev).map(t=>t.id);openRow(ids[0],p);S.queue={ids};rr();return}
     if(has('qok')){stop();save(S.open,'dd');const m=qNext(true);rr();toast(m||'Saved');return}
     if(has('qskip')){stop();const m=qNext(false);rr();if(m)toast(m);return}
-    if(has('close')){stop();S.open=null;S.dd=null;S.queue=null;rr();return}
+    if(has('close')){stop();S.open=null;S.dd=null;S.queue=null;S.dedit=false;rr();return}
     if(has('open')){stop();openRow(Number(D.open),p);rr();return}
     if(has('row')){stop();if(e.target.closest('.c-chk'))return;openRow(Number(D.row),p);rr();return}
   });
@@ -608,7 +643,7 @@ function wire(root,p){
       g.style.display=g.dataset.lab.includes(q)?'':'none';g.querySelectorAll('button[data-lab]').forEach(b=>b.style.display=!q||topHit||b.dataset.lab.includes(q)?'':'none')});return}
   });
   app.addEventListener('change',e=>{const el=e.target,D=el.dataset;
-    if('ysel' in D){S.per=el.value?'y:'+el.value:'all';rr();return}
+    if('ysel' in D){if(el.value==='custom'){const[a,b]=S.per==='all'?['','']:perRange();S.from=a.startsWith('0000')?'':a;S.to=b.startsWith('9999')?'':b;S.per='custom'}else S.per=el.value?'y:'+el.value:'all';rr();return}
     if('msel' in D){const y=S.per.startsWith('m:')?S.per.slice(2,6):S.per.slice(2);S.per=el.value?`m:${y}-${pad(el.value)}`:'y:'+y;rr();return}
     if(D.date){if(S.per!=='custom'){const[a,b]=S.per==='all'?['','']:perRange();S.from=a.startsWith('0000')?'':a;S.to=b.startsWith('9999')?'':b}S[D.date]=el.value;S.per='custom';rr();return}
     if('rev' in D){S.rev=el.checked;rr();return}
@@ -618,162 +653,106 @@ function wire(root,p){
 }
 
 Gallery.define({
-  id:'transactions-r1',
-  name:'Transactions, round 1',
+  id:'transactions-r2',
+  name:'Transactions, round 2',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'header',label:'Page header and actions',open:true,controls:[
-    {id:'header',label:'Header',type:'choice',options:[
-      {id:'none',label:'No header',current:true,hint:'Today: the page opens straight into the search box.'},
-      {id:'bar',label:'Slim bar, like Cards and the Dashboard',hint:'Title and count left; dates and buttons right.'},
-      {id:'headline',label:'Big period headline',hint:'The period as the title, with a one-line total under it.'},
+   {id:'period',label:'Dates in the header bar',open:true,controls:[
+    {id:'perPlace',label:'Where the date dropdowns sit',type:'choice',options:[
+      {id:'header',label:'In the header bar',current:true,hint:'As in round 1.'},
+      {id:'toolbar',label:'In the toolbar, as today',hint:'The header bar keeps the title, count and buttons.'},
     ]},
-    {id:'actionsPlace',label:'Manual, Import, Export, AI Enrich',type:'choice',options:[
-      {id:'toolbar',label:'Buttons in the filter row',current:true,hint:'Today: + Manual and ↑ Import beside the filters; Export and AI Enrich under ⋯.'},
-      {id:'header',label:'Buttons in the header',hint:'Needs a header; with "No header" they stay with the filters.'},
-      {id:'menu',label:'One "Add" menu and ⋯',hint:'Manual and Import fold into one button.'},
+    {id:'selStyle',label:'Dropdowns and date fields',type:'choice',options:[
+      {id:'boxed',label:'Outlined boxes',current:true,hint:'As in round 1.'},
+      {id:'soft',label:'Soft grey, like the filter chips'},
+      {id:'text',label:'Plain text with an arrow'},
     ]},
-   ]},
-   {id:'period',label:'Dates',open:true,controls:[
-    {id:'period',label:'Picking the period',type:'choice',options:[
-      {id:'dropdowns',label:'Year and month dropdowns, date fields',current:true,hint:'Today.'},
-      {id:'arrows',label:'Arrows around the month',hint:'As picked for the Dashboard. With the big headline, the arrows wrap the title.'},
-      {id:'strip',label:'Row of months',hint:'Underlined, like the Cards controls. Months before August aren\'t in the preview data.'},
-      {id:'presets',label:'Ranges: this month, last month, 3 months, year, all, custom'},
+    {id:'dateFields',label:'From and to date fields',type:'choice',options:[
+      {id:'always',label:'Always shown',current:true,hint:'As in round 1.'},
+      {id:'custom',label:'Only after picking "Custom dates…"',hint:'The last choice in the year dropdown.'},
     ]},
    ]},
-   {id:'filters',label:'Search and filters',open:true,controls:[
-    {id:'filterPlace',label:'Where the filters sit',type:'choice',options:[
-      {id:'toolbar',label:'Two toolbar rows',current:true,hint:'Today: search and dropdowns, then dates, amounts and Needs review.'},
-      {id:'panel',label:'One row and a Filters panel',hint:'All filters open together under one button.'},
-      {id:'chips',label:'Chips you add one at a time',hint:'Only the filters in use take up space.'},
-      {id:'rail',label:'Column on the left with counts',hint:'Click to filter at once; categories fold open to their sub-categories.'},
+   {id:'filters',label:'Toolbar',open:true,controls:[
+    {id:'row2',label:'Rows',type:'choice',options:[
+      {id:'two',label:'Two rows',current:true,hint:'As in round 1. With the dates in the header, the second row holds only amount and Needs review.'},
+      {id:'one',label:'One row that wraps when full'},
     ]},
-    {id:'filterCtl',label:'Filter buttons',type:'choice',options:[
-      {id:'outline',label:'Outlined, blue when in use',current:true},
-      {id:'under',label:'Plain text, underlined when in use'},
-      {id:'soft',label:'Soft grey chips'},
+    {id:'amtStyle',label:'Amount filter',type:'choice',options:[
+      {id:'fields',label:'Min and Max fields',current:true,hint:'As in round 1.'},
+      {id:'chip',label:'An Amount chip that opens Min and Max',hint:'Matches the other filter chips.'},
     ]},
-    {id:'searchStyle',label:'Search box',type:'choice',options:[
-      {id:'boxed',label:'Boxed',current:true},
-      {id:'underline',label:'Underline only'},
-      {id:'large',label:'Wide, on its own row'},
-      {id:'header',label:'In the header',hint:'Needs a header; otherwise it stays with the filters.'},
-    ]},
-    {id:'reviewStyle',label:'Needs review',type:'choice',options:[
-      {id:'checkbox',label:'Checkbox filter and a Review button per row',current:true,hint:'Today.'},
-      {id:'tabs',label:'Tabs: All, Needs review, Excluded, GCB, Split',hint:'Also the only way to see excluded rows, which today are always hidden.'},
-      {id:'queue',label:'Banner that walks you through them',hint:'Start review opens each in turn with "Looks right, next".'},
+    {id:'revCtl',label:'Needs review filter',type:'choice',options:[
+      {id:'checkbox',label:'Checkbox',current:true,hint:'As in round 1.'},
+      {id:'chip',label:'A chip with the count',hint:'Matches the other filter chips.'},
     ]},
    ]},
-   {id:'summary',label:'Totals',controls:[
-    {id:'summary',label:'Totals for what\'s shown',type:'choice',options:[
-      {id:'bar',label:'Uppercase strip',current:true,hint:'Today: count, expenses, income.'},
-      {id:'sentence',label:'One quiet sentence'},
-      {id:'figures',label:'Four figures, value first'},
-      {id:'breakdown',label:'Figures and a spending-by-category bar',hint:'Click a color to filter to that category.'},
+   {id:'rows',label:'Ledger rows',open:true,controls:[
+    {id:'zebra',label:'Striped rows',type:'toggle',default:true},
+    {id:'lines',label:'Lines',type:'choice',options:[
+      {id:'rows',label:'Under each row',current:true,hint:'As in round 1.'},
       {id:'none',label:'None'},
+      {id:'grid',label:'Between columns too, like a spreadsheet'},
+    ]},
+    {id:'dateFmt',label:'Date',type:'choice',options:[
+      {id:'mon',label:'Oct 31',current:true,hint:'As in round 1.'},
+      {id:'num',label:'10/31'},
+      {id:'dow',label:'Fri 31',hint:'The weekday helps spot weekend spending.'},
+    ]},
+    {id:'aiLabels',label:'AI confidence and source labels',type:'choice',options:[
+      {id:'under',label:'Under the name',current:true,hint:'As in round 1; those rows are taller.'},
+      {id:'inline',label:'After the name, same row height'},
+      {id:'detail',label:'Only in the details window'},
+    ]},
+    {id:'btnStyle',label:'Review, ⓘ, Edit, Split',type:'choice',options:[
+      {id:'buttons',label:'Small outlined buttons',current:true,hint:'As in round 1.'},
+      {id:'links',label:'Text links'},
+      {id:'icons',label:'Icons, always shown'},
     ]},
    ]},
-   {id:'rows',label:'Rows',open:true,controls:[
-    {id:'rowStyle',label:'Row layout',type:'choice',options:[
-      {id:'current',label:'Table with badges and buttons',current:true,hint:'Today.'},
-      {id:'airy',label:'Airy rows: initial, merchant, category, amount',hint:'Account under the name, date under the amount, no column headings.'},
-      {id:'ledger',label:'Dense ledger',hint:'Short plain-text columns, amount last.'},
-      {id:'twoline',label:'Two lines per transaction',hint:'Merchant and amount, then date, category and account.'},
+   {id:'editctl',label:'Changing a transaction',open:true,controls:[
+    {id:'cellPicker',label:'Clicking a category opens',type:'choice',options:[
+      {id:'select',label:'A box with the grouped dropdown',current:true,hint:'As in round 1: two clicks to choose.'},
+      {id:'list',label:'A grouped list with a search box',hint:'One click picks.'},
+      {id:'inline',label:'The dropdown, right in the row'},
     ]},
-    {id:'grouping',label:'Grouping',type:'choice',options:[
-      {id:'flat',label:'None, date column',current:true},
-      {id:'day',label:'By day, with day totals'},
-      {id:'month',label:'By month, with month totals',hint:'Most useful with a longer range picked.'},
-    ]},
-    {id:'rowH',label:'Row height',type:'slider',min:36,max:68,step:2,default:54,unit:'px'},
-    {id:'splitShow',label:'Split transactions',type:'choice',options:[
-      {id:'caret',label:'Arrow to show the parts',current:true},
-      {id:'always',label:'Parts always shown under the row'},
-      {id:'detail',label:'Only in the details'},
-    ]},
-    {id:'hoverChecks',label:'Checkboxes only on hover',type:'toggle',default:false},
-   ]},
-   {id:'cells',label:'What each row shows',open:true,controls:[
-    {id:'nameCase',label:'Merchant names',type:'choice',options:[
-      {id:'stored',label:'As the bank sends them',current:true,hint:'Mostly capitals.'},
-      {id:'title',label:'Title case',hint:'Short letter-only codes like CVS and TD stay in capitals.'},
-    ]},
-    {id:'catStyle',label:'Category',type:'choice',options:[
-      {id:'pill',label:'Blue pill with the full path',current:true},
-      {id:'dot',label:'Colored dot and name'},
-      {id:'text',label:'Plain text with the path'},
-      {id:'stack',label:'Name, with Level 1 under it'},
-    ]},
-    {id:'typeShow',label:'Type',type:'choice',options:[
-      {id:'badge',label:'Badge column',current:true},
-      {id:'glyph',label:'Small arrow beside the amount'},
-      {id:'none',label:'Not shown',hint:'The amount color and the category carry it.'},
-    ]},
-    {id:'amtColor',label:'Amount colors',type:'choice',options:[
-      {id:'both',label:'Red out, green in',current:true},
-      {id:'in',label:'Green in only'},
-      {id:'none',label:'No color'},
-    ]},
-    {id:'flags',label:'Review, GCB, excluded, locked, split',type:'choice',options:[
-      {id:'chips',label:'Emoji chips and AI labels',current:true,hint:'Today: ⭐ ⊘ 🔒 by the buttons; AI confidence and source under the name.'},
-      {id:'tags',label:'Small word tags after the name'},
-      {id:'icons',label:'Icon column with tooltips'},
-      {id:'edge',label:'Amber edge for review, faded row when excluded'},
-    ]},
-    {id:'rowActions',label:'Row buttons',type:'choice',options:[
-      {id:'buttons',label:'Review, ⓘ, Edit, Split always shown',current:true},
-      {id:'hover',label:'Icons on hover'},
-      {id:'menu',label:'One ⋯ menu per row'},
-      {id:'none',label:'None: click the row'},
-    ]},
-    {id:'showAccount',label:'Account',type:'toggle',default:true},
-    {id:'showPoints',label:'Points earned',type:'toggle',default:false},
-    {id:'showNetwork',label:'Card network',type:'toggle',default:false},
-    {id:'showSpender',label:'Spender',type:'toggle',default:false},
-   ]},
-   {id:'detail',label:'Transaction details',open:true,controls:[
-    {id:'detailOpen',label:'Where details open',type:'choice',options:[
-      {id:'modal',label:'Window in the middle',current:true,hint:'Closes only with its buttons.'},
-      {id:'drawer',label:'Drawer from the right',hint:'The list stays usable beside it.'},
-      {id:'pane',label:'Pane beside the list',hint:'Always there; click rows to switch. Today\'s wide table scrolls sideways beside it here, since this options panel takes part of the screen.'},
-      {id:'expand',label:'Opens under the row'},
-    ]},
-    {id:'detailStyle',label:'Details layout',type:'choice',options:[
-      {id:'tiles',label:'Grid of fact tiles',current:true,hint:'Today, minus the estimated dollar value of points.'},
-      {id:'form',label:'Edit fields first, facts folded away'},
-      {id:'sections',label:'Labeled sections: overview, card earning, tags, source'},
-    ]},
-    {id:'editMode',label:'Editing name, type and category',type:'choice',options:[
-      {id:'row',label:'In the row',current:true,hint:'Today the cells turn into fields; with other row layouts or pickers, a strip opens under the row.'},
-      {id:'detail',label:'In the details'},
-      {id:'cell',label:'Click the category to change it',hint:'Saves at once. Quickest for the many Unclassified rows.'},
+    {id:'typeClick',label:'Click the type badge to change it too',type:'toggle',default:false},
+    {id:'editOpens',label:'The row\'s Edit button',type:'choice',options:[
+      {id:'details',label:'Opens the details window with name, type and category fields',current:true,hint:'Round 1 opened the details window, which had no fields for these; now it does.'},
+      {id:'strip',label:'Opens a strip under the row'},
+      {id:'cells',label:'Turns the row\'s cells into fields, as today'},
     ]},
    ]},
-   {id:'editctl',label:'Edit controls',controls:[
-    {id:'typeCtl',label:'Type picker',type:'choice',options:[
-      {id:'dropdown',label:'Dropdown',current:true},
-      {id:'segmented',label:'Segmented: Expense, Income, Transfer, More'},
-      {id:'radio',label:'Radio buttons'},
-    ]},
-    {id:'catCtl',label:'Category picker',type:'choice',options:[
-      {id:'dropdown',label:'Grouped dropdown',current:true},
-      {id:'search',label:'Search box over a grouped list'},
-      {id:'steps',label:'Level 1, then a sub-category',hint:'Two rows of chips.'},
-    ]},
-    {id:'tagCtl',label:'Tags: GCB, for others, exclude, locked',type:'choice',options:[
-      {id:'pills',label:'Pill buttons',current:true},
-      {id:'switch',label:'Switches'},
-      {id:'check',label:'Checkboxes'},
-    ]},
-   ]},
-   {id:'batch',label:'Selecting several',controls:[
-    {id:'batchBar',label:'Selection bar',type:'choice',options:[
-      {id:'top',label:'Bar above the list',current:true,hint:'Today: Edit selected and Deselect all.'},
-      {id:'float',label:'Floating at the bottom',hint:'Adds Tag GCB, Exclude and Mark reviewed.'},
-      {id:'toolbar',label:'Takes over the filter row',hint:'Same buttons as floating; the filters come back when nothing is selected.'},
-    ]},
+   {id:'r1',label:'Decided in round 1',open:false,controls:[
+    {id:'header',label:'Header',type:'choice',locked:true,options:[{id:'bar',label:'Slim bar, like Cards and the Dashboard'}]},
+    {id:'actionsPlace',label:'Manual, Import, Export, AI Enrich',type:'choice',locked:true,options:[{id:'menu',label:'One "Add" menu and ⋯'}]},
+    {id:'period',label:'Picking the period',type:'choice',locked:true,options:[{id:'dropdowns',label:'Year and month dropdowns, date fields'}]},
+    {id:'filterPlace',label:'Where the filters sit',type:'choice',locked:true,options:[{id:'toolbar',label:'Toolbar above the list'}]},
+    {id:'filterCtl',label:'Filter buttons',type:'choice',locked:true,options:[{id:'soft',label:'Soft grey chips'}]},
+    {id:'searchStyle',label:'Search box',type:'choice',locked:true,options:[{id:'underline',label:'Underline only'}]},
+    {id:'reviewStyle',label:'Needs review',type:'choice',locked:true,options:[{id:'checkbox',label:'Filter and a Review button per row'}]},
+    {id:'summary',label:"Totals for what's shown",type:'choice',locked:true,options:[{id:'bar',label:'Uppercase strip'}]},
+    {id:'rowStyle',label:'Row layout',type:'choice',locked:true,options:[{id:'ledger',label:'Dense ledger'}]},
+    {id:'grouping',label:'Grouping',type:'choice',locked:true,options:[{id:'flat',label:'None, date column'}]},
+    {id:'splitShow',label:'Split transactions',type:'choice',locked:true,options:[{id:'caret',label:'Arrow to show the parts'}]},
+    {id:'nameCase',label:'Merchant names',type:'choice',locked:true,options:[{id:'stored',label:'As the bank sends them'}]},
+    {id:'catStyle',label:'Category',type:'choice',locked:true,options:[{id:'pill',label:'Blue pill with the full path'}]},
+    {id:'typeShow',label:'Type',type:'choice',locked:true,options:[{id:'badge',label:'Badge column'}]},
+    {id:'amtColor',label:'Amount colors',type:'choice',locked:true,options:[{id:'both',label:'Red out, green in'}]},
+    {id:'flags',label:'Review, GCB, excluded, locked',type:'choice',locked:true,options:[{id:'chips',label:'Emoji chips'}]},
+    {id:'rowActions',label:'Row buttons',type:'choice',locked:true,options:[{id:'buttons',label:'Review, ⓘ, Edit, Split always shown'}]},
+    {id:'detailOpen',label:'Where details open',type:'choice',locked:true,options:[{id:'modal',label:'Window in the middle'}]},
+    {id:'detailStyle',label:'Details layout',type:'choice',locked:true,options:[{id:'tiles',label:'Grid of fact tiles'}]},
+    {id:'editMode',label:'Changing a category',type:'choice',locked:true,options:[{id:'cell',label:'Click the category'}]},
+    {id:'typeCtl',label:'Type picker',type:'choice',locked:true,options:[{id:'dropdown',label:'Dropdown'}]},
+    {id:'catCtl',label:'Category picker',type:'choice',locked:true,options:[{id:'dropdown',label:'Grouped dropdown'}]},
+    {id:'tagCtl',label:'Tags',type:'choice',locked:true,options:[{id:'pills',label:'Pill buttons'}]},
+    {id:'batchBar',label:'Selection bar',type:'choice',locked:true,options:[{id:'top',label:'Bar above the list'}]},
+    {id:'rowH',label:'Row height',type:'slider',locked:true,min:36,max:68,step:2,default:58,unit:'px'},
+    {id:'hoverChecks',label:'Checkboxes only on hover',type:'toggle',locked:true,default:false},
+    {id:'showAccount',label:'Account column',type:'toggle',locked:true,default:true},
+    {id:'showPoints',label:'Points earned column',type:'toggle',locked:true,default:false},
+    {id:'showNetwork',label:'Card network column',type:'toggle',locked:true,default:false},
+    {id:'showSpender',label:'Spender column',type:'toggle',locked:true,default:false},
    ]},
    {id:'decided',label:'Decided on the Cards pages',open:false,controls:[
     {id:'scheme',label:'Color scheme',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud',swatches:['#EEF2F7','#FFFFFF','#2563EB'],tokens:light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F')}]},
@@ -790,7 +769,7 @@ Gallery.define({
     if(!L||L.d!==d){PAR={};Object.entries(d.tree).forEach(([top,kids])=>kids.forEach(c=>PAR[c]=top));TODAY=d.today||TODAY}
     if(L&&L.lastDO&&L.lastDO!==picks.detailOpen){S.open=null;S.queue=null}
     L=Object.assign(L||{},{d,h,picks,lastDO:picks.detailOpen});
-    if(picks.editMode!=='row'){S.edit=null;S.cd=null}
+    if(!rowEdit(picks)){S.edit=null;S.cd=null}
     if(picks.reviewStyle!=='tabs')S.tab='all';
     if(picks.reviewStyle!=='checkbox')S.rev=false;
     if(picks.reviewStyle!=='queue')S.queue=null;
@@ -1033,6 +1012,26 @@ Gallery.define({
 #pv .cbtn>svg{opacity:.4;flex:none}
 #pv .ra{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
 #pv .rv{width:62px;display:inline-flex}
+#pv .rv.sm{width:46px}
+#pv .ra.lk{gap:12px}
+#pv .lk2{font-size:12px;font-weight:500;color:var(--ac);padding:3px 0}
+#pv .lk2:hover{text-decoration:underline}
+#pv .lk2.warn{color:var(--warn);font-weight:600}
+#pv .nl .fl-u{flex:none;flex-wrap:nowrap}
+#pv .mi.on{color:var(--ac);font-weight:600;background:var(--ac-soft)}
+#pv .fb em{font-style:normal;font-size:11px;color:var(--tx3);font-variant-numeric:tabular-nums}
+#pv .fb.on em{color:inherit}
+#pv #pv_ci{max-width:240px;border-color:var(--ac)}
+#pv[data-zebra=off] .rs-ledger .tr:nth-child(even):not(.th):not(.sel){background:none}
+#pv[data-zebra=off] .rs-ledger .tr:not(.th):not(.sel):hover{background:var(--raised)}
+#pv[data-lines=none] .rs-ledger .tr:not(.th){border-bottom-color:transparent}
+#pv[data-lines=grid] .rs-ledger .tr>.td{align-self:stretch;display:flex;align-items:center;padding-right:10px;border-right:1px solid var(--line)}
+#pv[data-lines=grid] .rs-ledger .tr>.td.r{justify-self:stretch;justify-content:flex-end}
+#pv[data-lines=grid] .rs-ledger .tr>.td>*{min-width:0}
+#pv[data-lines=grid] .rs-ledger .tr>.td:last-child{border-right:0;padding-right:calc(14px*var(--c-density))}
+#pv[data-selStyle=soft] .per select,#pv[data-selStyle=soft] .per input{border-color:transparent;background:var(--raised);border-radius:99px;padding:6px 12px}
+#pv[data-selStyle=text] .per select,#pv[data-selStyle=text] .per input{border:0;border-bottom:1.5px solid transparent;border-radius:0;background:none;padding:6px 2px;font-weight:500}
+#pv[data-selStyle=text] .per select:hover,#pv[data-selStyle=text] .per input:hover{border-bottom-color:var(--line)}
 #pv .hov{position:absolute;right:calc(10px*var(--c-density));top:50%;transform:translateY(-50%);display:flex;gap:2px;padding:3px 3px 3px 28px;background:linear-gradient(to right,transparent,var(--raised) 26px);opacity:0;pointer-events:none;transition:opacity .12s;border-radius:0 8px 8px 0}
 #pv .tr.sel .hov,#pv .tr.opn .hov{background:linear-gradient(to right,transparent,color-mix(in srgb,var(--ac) 10%,var(--surface)) 26px)}
 #pv .tr:hover .hov,#pv .tr:focus-within .hov{opacity:1;pointer-events:auto}
