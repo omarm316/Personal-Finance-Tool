@@ -25,7 +25,7 @@ const FKEYS=[['act','Type','All types'],['cat','Category','All categories'],['ac
 // Preview state that survives re-renders. Edits live in S.ed and never leave the page.
 const S={per:'m:2026-10',from:'',to:'',q:'',f:{act:null,cat:null,acct:null,net:null},min:'',max:'',rev:false,tab:'all',
   sel:new Set(),open:null,sort:null,dir:'asc',exp:new Set(),pop:null,draft:null,edit:null,ed:{},queue:null,fpanel:false,
-  ropen:new Set(),batch:false,bd:{act:'',cat:''},cd:null,dd:null};
+  ropen:new Set(),batch:false,bd:{act:'',cat:''},cd:null,dd:null,rv:null};
 let L=null,PAR={},TODAY='2026-11-03';
 
 /* ── Small helpers ────────────────────────────────────────── */
@@ -515,6 +515,16 @@ function batchModal(p){
     <div class="fld"><span>Type</span>${typeCtl(p,S.bd.act,'bd')}</div><div class="fld"><span>Category</span>${catCtl(p,S.bd.cat,'bd')}</div>
     <div class="df"><span></span><div class="fbs"><button type="button" class="btn sm ghost" data-bclose>Cancel</button><button type="button" class="btn pri sm" data-bapply>Apply to ${S.sel.size}</button></div></div></div></div></div>`;
 }
+// Today's Review window, in the new look: type, category, an optional rule, then Ignore, Discard or Save.
+function reviewModal(p){
+  const t=S.rv?byId(S.rv.id):null;if(!t)return '';
+  const r=S.rv,ai=t.src==='llm'||t.src==='fallback';
+  return `<div class="ovl mdl" data-region="editctl"><div class="mdl-p sm" role="dialog" aria-modal="true" aria-label="Review transaction"><div class="dt"><div class="dh"><div><h3>Review transaction</h3><span class="mut">${fullD(t.d)} · <b class="${t.amt<0?'bad':'good'}">${sgn(t.amt)}</b> · ${esc(t.acct)}</span></div><button type="button" class="x" data-rvx aria-label="Close">${ic('x',16)}</button></div>
+    <div class="dbox"><span class="lbl">Description</span><b>${nm(t,p)}</b>${t.raw!==t.n?`<span class="mut">Raw: <code>${esc(t.raw)}</code></span>`:''}${t.conf!=null?`<span class="mut">AI confidence ${Math.round(t.conf*100)}%</span>`:''}</div>
+    <div class="rvf"><div class="fld"><span>Type</span>${typeCtl(p,r.act,'rv')}</div>${isBudget(r.act)?`<div class="fld"><span>Category</span>${catCtl(p,r.cat,'rv')}</div>`:''}</div>
+    ${ai&&isBudget(r.act)?`<label class="cb rvr"><input type="checkbox" data-rvrule ${r.rule?'checked':''}> Save as a rule for this merchant</label>`:''}
+    <div class="df"><button type="button" class="btn sm ghost" data-rvign title="Takes it off the review list without changing anything">Ignore</button><div class="fbs"><button type="button" class="btn sm" data-rvx>Discard</button><button type="button" class="btn pri sm" data-rvok>Save</button></div></div></div></div></div>`;
+}
 
 /* ── Page ─────────────────────────────────────────────────── */
 function nav(){
@@ -525,7 +535,7 @@ function page(p){
   const big=p.searchStyle==='large'?`<div class="bigs" data-region="filters">${search(p)}</div>`:'';
   const card=`<section class="lst sf" data-region="rows">${tbIn?filters(p):''}${summary(p,v,'card')}${reviewBar(p)}${batch(p,'top')}${list(p,v)}</section>`;
   const main=`<div class="colm">${tbIn?'':filters(p)}${summary(p,v,'above')}${card}${batch(p,'float')}</div>`;
-  return `<div class="app">${nav()}<div class="main">${header(p,v)}${big}<div class="body ${hasRail?'w-rail':''} ${pane?'w-pane':''}">${hasRail?rail(p):''}${main}${pane?detailWrap(p):''}</div></div>${pane?'':detailWrap(p)}${batchModal(p)}${popLayer(p)}<div class="toast" role="status" aria-live="polite"></div></div>`;
+  return `<div class="app">${nav()}<div class="main">${header(p,v)}${big}<div class="body ${hasRail?'w-rail':''} ${pane?'w-pane':''}">${hasRail?rail(p):''}${main}${pane?detailWrap(p):''}</div></div>${pane?'':detailWrap(p)}${batchModal(p)}${reviewModal(p)}${popLayer(p)}<div class="toast" role="status" aria-live="polite"></div></div>`;
 }
 
 /* ── Interactions ─────────────────────────────────────────── */
@@ -624,7 +634,11 @@ function wire(root,p){
       S[sc].cat=D.v;rr();return}
     if(has('cv')){stop();if(D.cv==='cell'){setEd(S.pop.id,{cat:D.v,man:1,rev:0});S.pop=null;rr();toast('Category saved')}else{S[D.cv].cat=D.v;rr()}return}
     if(has('tag')){stop();const[k,id]=D.tag.split(':'),t=byId(Number(id));setEd(t.id,{[k]:t[k]?0:1});S.pop=null;rr();return}
-    if(has('review')){stop();openRow(Number(D.review),p);rr();return}
+    if(has('review')){stop();const t=byId(Number(D.review));if(p.reviewOpens==='window'){S.pop=null;S.rv={id:t.id,act:t.act,cat:t.cat,rule:t.src==='llm'||t.src==='fallback'}}else openRow(t.id,p);rr();return}
+    if(has('rvx')){stop();S.rv=null;rr();return}
+    if(has('rvign')){stop();setEd(S.rv.id,{rev:0});S.rv=null;rr();toast('Taken off the review list');return}
+    if(has('rvok')){stop();const r=S.rv,t=byId(r.id),o={act:r.act,rev:0};if(isBudget(r.act)){o.cat=r.cat||'Unclassified';if(o.cat!==t.cat)o.man=1}
+      setEd(r.id,o);const rule=r.rule&&isBudget(r.act);S.rv=null;rr();toast(rule?'Saved, with a rule for this merchant':'Saved');return}
     if(has('reviewed')){stop();setEd(Number(D.reviewed),{rev:0});S.pop=null;rr();toast('Marked reviewed');return}
     if(has('queue')){stop();const ids=visible({...p,reviewStyle:'checkbox'}).filter(t=>t.rev).map(t=>t.id);openRow(ids[0],p);S.queue={ids};rr();return}
     if(has('qok')){stop();save(S.open,'dd');const m=qNext(true);rr();toast(m||'Saved');return}
@@ -647,80 +661,39 @@ function wire(root,p){
     if('msel' in D){const y=S.per.startsWith('m:')?S.per.slice(2,6):S.per.slice(2);S.per=el.value?`m:${y}-${pad(el.value)}`:'y:'+y;rr();return}
     if(D.date){if(S.per!=='custom'){const[a,b]=S.per==='all'?['','']:perRange();S.from=a.startsWith('0000')?'':a;S.to=b.startsWith('9999')?'':b}S[D.date]=el.value;S.per='custom';rr();return}
     if('rev' in D){S.rev=el.checked;rr();return}
+    if('rvrule' in D){S.rv.rule=el.checked;return}
     if(D.ts){if(el.value)S[D.ts].act=el.value;else if(D.ts==='bd')S.bd.act='';rr();return}
     if(D.cs){if(D.cs==='cell'){setEd(S.pop.id,{cat:el.value,man:1,rev:0});S.pop=null;rr();toast('Category saved')}else S[D.cs].cat=el.value;return}
   });
 }
 
 Gallery.define({
-  id:'transactions-r2',
-  name:'Transactions, round 2',
+  id:'transactions-final',
+  name:'Transactions, final design',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'period',label:'Dates in the header bar',open:true,controls:[
-    {id:'perPlace',label:'Where the date dropdowns sit',type:'choice',options:[
-      {id:'header',label:'In the header bar',current:true,hint:'As in round 1.'},
-      {id:'toolbar',label:'In the toolbar, as today',hint:'The header bar keeps the title, count and buttons.'},
-    ]},
-    {id:'selStyle',label:'Dropdowns and date fields',type:'choice',options:[
-      {id:'boxed',label:'Outlined boxes',current:true,hint:'As in round 1.'},
-      {id:'soft',label:'Soft grey, like the filter chips'},
-      {id:'text',label:'Plain text with an arrow'},
-    ]},
-    {id:'dateFields',label:'From and to date fields',type:'choice',options:[
-      {id:'always',label:'Always shown',current:true,hint:'As in round 1.'},
-      {id:'custom',label:'Only after picking "Custom dates…"',hint:'The last choice in the year dropdown.'},
-    ]},
+   {id:'period',label:'Dates (round 2)',open:true,controls:[
+    {id:'perPlace',label:'Where the date dropdowns sit',type:'choice',locked:true,options:[{id:'toolbar',label:'In the toolbar, as today'}]},
+    {id:'selStyle',label:'Dropdowns and date fields',type:'choice',locked:true,options:[{id:'boxed',label:'Outlined boxes'}]},
+    {id:'dateFields',label:'From and to date fields',type:'choice',locked:true,options:[{id:'always',label:'Always shown'}]},
    ]},
-   {id:'filters',label:'Toolbar',open:true,controls:[
-    {id:'row2',label:'Rows',type:'choice',options:[
-      {id:'two',label:'Two rows',current:true,hint:'As in round 1. With the dates in the header, the second row holds only amount and Needs review.'},
-      {id:'one',label:'One row that wraps when full'},
-    ]},
-    {id:'amtStyle',label:'Amount filter',type:'choice',options:[
-      {id:'fields',label:'Min and Max fields',current:true,hint:'As in round 1.'},
-      {id:'chip',label:'An Amount chip that opens Min and Max',hint:'Matches the other filter chips.'},
-    ]},
-    {id:'revCtl',label:'Needs review filter',type:'choice',options:[
-      {id:'checkbox',label:'Checkbox',current:true,hint:'As in round 1.'},
-      {id:'chip',label:'A chip with the count',hint:'Matches the other filter chips.'},
-    ]},
+   {id:'filters',label:'Toolbar (round 2)',open:true,controls:[
+    {id:'row2',label:'Rows',type:'choice',locked:true,options:[{id:'one',label:'One row that wraps when full'}]},
+    {id:'amtStyle',label:'Amount filter',type:'choice',locked:true,options:[{id:'chip',label:'An Amount chip that opens Min and Max'}]},
+    {id:'revCtl',label:'Needs review filter',type:'choice',locked:true,options:[{id:'chip',label:'A chip with the count'}]},
    ]},
-   {id:'rows',label:'Ledger rows',open:true,controls:[
-    {id:'zebra',label:'Striped rows',type:'toggle',default:true},
-    {id:'lines',label:'Lines',type:'choice',options:[
-      {id:'rows',label:'Under each row',current:true,hint:'As in round 1.'},
-      {id:'none',label:'None'},
-      {id:'grid',label:'Between columns too, like a spreadsheet'},
-    ]},
-    {id:'dateFmt',label:'Date',type:'choice',options:[
-      {id:'mon',label:'Oct 31',current:true,hint:'As in round 1.'},
-      {id:'num',label:'10/31'},
-      {id:'dow',label:'Fri 31',hint:'The weekday helps spot weekend spending.'},
-    ]},
-    {id:'aiLabels',label:'AI confidence and source labels',type:'choice',options:[
-      {id:'under',label:'Under the name',current:true,hint:'As in round 1; those rows are taller.'},
-      {id:'inline',label:'After the name, same row height'},
-      {id:'detail',label:'Only in the details window'},
-    ]},
-    {id:'btnStyle',label:'Review, ⓘ, Edit, Split',type:'choice',options:[
-      {id:'buttons',label:'Small outlined buttons',current:true,hint:'As in round 1.'},
-      {id:'links',label:'Text links'},
-      {id:'icons',label:'Icons, always shown'},
-    ]},
+   {id:'rows',label:'Ledger rows (round 2)',open:true,controls:[
+    {id:'zebra',label:'Striped rows',type:'toggle',locked:true,default:true},
+    {id:'lines',label:'Lines',type:'choice',locked:true,options:[{id:'rows',label:'Under each row'}]},
+    {id:'dateFmt',label:'Date',type:'choice',locked:true,options:[{id:'num',label:'10/31'}]},
+    {id:'aiLabels',label:'AI confidence and source labels',type:'choice',locked:true,options:[{id:'inline',label:'After the name, same row height'}]},
+    {id:'btnStyle',label:'Review, ⓘ, Edit, Split',type:'choice',locked:true,options:[{id:'icons',label:'Icons, always shown'}]},
    ]},
-   {id:'editctl',label:'Changing a transaction',open:true,controls:[
-    {id:'cellPicker',label:'Clicking a category opens',type:'choice',options:[
-      {id:'select',label:'A box with the grouped dropdown',current:true,hint:'As in round 1: two clicks to choose.'},
-      {id:'list',label:'A grouped list with a search box',hint:'One click picks.'},
-      {id:'inline',label:'The dropdown, right in the row'},
-    ]},
-    {id:'typeClick',label:'Click the type badge to change it too',type:'toggle',default:false},
-    {id:'editOpens',label:'The row\'s Edit button',type:'choice',options:[
-      {id:'details',label:'Opens the details window with name, type and category fields',current:true,hint:'Round 1 opened the details window, which had no fields for these; now it does.'},
-      {id:'strip',label:'Opens a strip under the row'},
-      {id:'cells',label:'Turns the row\'s cells into fields, as today'},
-    ]},
+   {id:'editctl',label:'Changing a transaction (round 2)',open:true,controls:[
+    {id:'cellPicker',label:'Clicking a category opens',type:'choice',locked:true,options:[{id:'list',label:'A grouped list with a search box'}]},
+    {id:'typeClick',label:'Click the type badge to change it too',type:'toggle',locked:true,default:true},
+    {id:'editOpens',label:'The row\'s Edit button',type:'choice',locked:true,options:[{id:'cells',label:'Turns the row\'s cells into fields, as today'}]},
+    {id:'reviewOpens',label:'The row\'s Review button',type:'choice',locked:true,options:[{id:'window',label:'Opens the Review window, as today'}]},
    ]},
    {id:'r1',label:'Decided in round 1',open:false,controls:[
     {id:'header',label:'Header',type:'choice',locked:true,options:[{id:'bar',label:'Slim bar, like Cards and the Dashboard'}]},
@@ -985,6 +958,7 @@ Gallery.define({
 #pv .nc small{font-size:11.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #pv .nc input{width:100%;padding:5px 9px;border:1px solid var(--ac);border-radius:7px;font-size:12.5px}
 #pv .td select{width:100%;padding:4px 6px;max-width:220px}
+#pv .c-type select{width:112px}
 #pv .amt{font-weight:600;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
 #pv .amt.strike{text-decoration:line-through;color:var(--tx3)}
 #pv .c-amt small{display:block;font-size:11px;color:var(--tx3);margin-top:2px}
@@ -1170,6 +1144,9 @@ Gallery.define({
 #pv .er .val{font-size:18px;color:var(--good)}#pv .er small{font-size:11.5px;font-weight:400}
 #pv .later{margin:2px 0 0;font-size:11.5px}
 #pv .dedit{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:14px;border-radius:10px;border:1px solid var(--line);background:var(--raised)}
+#pv .rvf{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:12px}
+#pv .rvf select{width:100%}
+#pv .rvr{font-size:13px}
 #pv .dt-form .dedit,#pv .dt-sec .dedit{background:none;border:0;padding:0}
 #pv .eline{display:flex;gap:6px 16px;flex-wrap:wrap;align-items:baseline;font-size:13px;color:var(--tx2);padding:10px 12px;border-radius:9px;background:var(--raised)}
 #pv .eline b{color:var(--tx);font-weight:600}
