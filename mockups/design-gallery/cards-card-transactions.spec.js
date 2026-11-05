@@ -16,9 +16,12 @@ const light=(bg,s,r,l,t,t2,t3)=>({'--bg':bg,'--surface':s,'--raised':r,'--line':
 // Preview state that survives re-renders. Edits stay on this page.
 const S={};
 function resetS(){Object.assign(S,{q:'',pq:'',f:{ycat:null,mcat:null,brand:null,sp:null,kind:null},fd:null,chip:'',top:'',sub:'',unk:false,
-  r:null,sort:null,dir:'desc',sel:new Set(),pop:null,ed:{},exp:new Set(),spx:new Set(),coll:null,all:false,modal:null,bd:null})}
+  r:null,sort:null,dir:'desc',sel:new Set(),pop:null,ed:{},exp:new Set(),spx:new Set(),coll:null,all:false,modal:null,bd:null,fx:null,ask:null})}
 resetS();
-let L=null,PAR={},TODAY='2026-11-05';
+let L=null,PAR={},TODAY='2026-11-05',RC={},ALL=[];
+// Round 1 choices that are settled and no longer shown as controls.
+const FIXED={yourCol:'off',catEdit:'none',merchEdit:'none',extras:'none',rowClick:'none',groupCat:'yours',groupSub:true,groupFold:false};
+const fill=p=>Object.assign({},FIXED,p);
 
 /* ── Helpers ─────────────────────────────────────────────── */
 const pad=n=>String(n).padStart(2,'0');
@@ -36,6 +39,28 @@ const rateTxt=r=>r?`${Math.round(r*100)/100}x`:'';
 const ptsSpan=v=>v<0?`<span class="neg">−${f0(-v)}</span>`:v>0?`<span class="up">+${f0(v)}</span>`:'<span class="dim">0</span>';
 function groupCats(){const G=[],by={};L.d.cats.forEach(c=>{if(!c.p){const g={top:c.n,kids:[]};G.push(g);by[c.n]=g}});L.d.cats.forEach(c=>{if(c.p&&by[c.p])by[c.p].kids.push(c.n)});return G}
 function mcatTree(){const M=L.d.mparent,G=[],by={};Object.keys(M).forEach(n=>{if(!M[n]){const g={top:n,kids:[]};G.push(g);by[n]=g}});Object.keys(M).forEach(n=>{if(M[n]&&by[M[n]])by[M[n]].kids.push(n)});G.sort((a,b)=>a.top.localeCompare(b.top));G.forEach(g=>g.kids.sort());return G}
+
+/* ── Fixing a charge: rates, points and merchant rules ───── */
+// 2027 rows: a brand rule wins, then the merchant category (its parent's rate when it has none), then the base rate.
+// 2026 history: the rate each old bonus category earned on this card's own rows.
+function rateFor(cn,mc,brand,nw){const c=L.d.cards[cn]||L.d.cards[L.picks.card];
+  if(nw){if(brand&&c.brates[brand]!=null)return c.brates[brand];return mc&&c.rates[mc]!=null?c.rates[mc]:c.base}
+  return mc&&c.orates[mc]!=null?c.orates[mc]:c.base}
+const ptsOf=(amt,rate,kind)=>kind==='purchase'&&amt<0?Math.round(-amt*rate):kind==='refund'&&amt>0?-Math.round(amt*rate):0;
+const nrm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const defPat=t=>String(t.n||'').replace(/[^A-Za-z0-9]+$/,'').trim();
+const shortCard=n=>String(n||'').split(' ').slice(1).join(' ');
+const canFix=(t,p)=>t.kind!=='payment'&&!(p.data==='old'&&p.history==='lock')&&(t.earn||p.fixKind);
+// Every purchase or refund, on any card, whose bank text or name holds the match text.
+function ruleRows(p,pat,mt){const n=nrm(pat);if(!n)return [];
+  return ALL.filter(r=>{const a=nrm(r.raw),b=nrm(r.n);return mt==='contains'?a.includes(n)||b.includes(n):` ${a} `.includes(` ${n} `)||` ${b} `.includes(` ${n} `)}).map(r=>view(r,p)).filter(t=>t.earn&&t.id!==S.pendId)}
+function changesOf(p,t,cat,rows){const nw=p.data==='new';
+  return rows.filter(x=>x.id!==t.id&&(x.mc||null)!==(cat||null)).map(x=>({x,after:x.exc?0:ptsOf(x.amt,rateFor(RC[x.id],cat,x.brand,nw),x.kind)}))}
+const ptsDelta=d=>d?`${d<0?'−':'+'}${f0(Math.abs(d))} points`:'same points';
+function countTxt(p,t,cat,pat,mt){const rows=ruleRows(p,pat,mt),ch=cat?changesOf(p,t,cat,rows):[],d=ch.reduce((s,c)=>s+c.after-c.x.pts,0);
+  let s=`Matches ${rows.length} charge${rows.length===1?'':'s'} on your cards`;
+  if(cat)s+=ch.length?`; ${ch.length} other${ch.length===1?'':'s'} change, ${ptsDelta(d)}`:'; no others change';
+  return s}
 
 /* ── Statement periods ───────────────────────────────────── */
 const closeOn=(y,m,day)=>new Date(y,m,Math.min(day,new Date(y,m+1,0).getDate()),12);
@@ -59,14 +84,17 @@ function rangeOf(c){const r=S.r,t=dt(TODAY);
 function view(r,p){const nw=p.data==='new',w=r.w,o=r.o,ed=S.ed[r.id]||{};let kind,mc,mtop,brand,pts,rate;
   if(nw){kind=w.k;mc=w.c;mtop=w.t;brand=w.b;pts=w.p;rate=w.r}
   else{kind=r.act==='Transfer'?'payment':r.amt>0?(o.k==='clawback'?'refund':'credit'):(r.cat==='Fees & Interest'?'fee':'purchase');mc=o.c;mtop=null;brand=null;pts=o.p;rate=o.r}
-  if(ed.mc){mc=ed.mc;mtop=L.d.mparent[ed.mc]||null}
+  const fixed='mc' in ed||'kind' in ed;
+  if(fixed){if('kind' in ed)kind=ed.kind;if('mc' in ed){mc=ed.mc||null;mtop=nw&&mc?(L.d.mparent[mc]||null):null}
+    rate=kind==='purchase'||kind==='refund'?rateFor(RC[r.id]||p.card,mc,brand,nw):0;pts=ptsOf(r.amt,rate,kind)}
   const exc='exc' in ed?ed.exc:!!r.exc;
   const t={id:r.id,d:r.d,n:r.n,raw:r.raw,amt:r.amt,act:r.act,cat:ed.cat||r.cat,man:ed.cat?1:r.man,sp:'sp' in ed?ed.sp:(r.sp||''),note:ed.note!=null?ed.note:'',
-    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:pts,rate:exc?0:rate,demo:r.id===8720};
+    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:pts,rate:exc?0:rate,demo:r.id===8720,fixed};
   t.earn=kind==='purchase'||kind==='refund';t.unk=t.earn&&!mc;return t}
 function cardRows(c,p){let R=c.rows;if(p.splitDemo)R=R.concat([L.d.splitDemo]).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:b.id-a.id);return R.map(r=>view(r,p))}
 function scoped(c,p){const[a,b]=rangeOf(c);let R=cardRows(c,p).filter(t=>t.d>=a&&t.d<=b);if(p.payments==='hide')R=R.filter(t=>t.kind!=='payment');if(p.emptyDemo)R=[];
-  let pend=[];if(p.pending==='top'&&R[0]&&R[0].d>=TODAY.slice(0,8)+'01'){const i=R.findIndex(t=>t.kind==='purchase');if(i>=0){pend=[R[i]];R=R.slice(0,i).concat(R.slice(i+1))}}return {R,pend}}
+  let pend=[];if(p.pending==='top'&&R[0]&&R[0].d>=TODAY.slice(0,8)+'01'){const i=R.findIndex(t=>t.kind==='purchase');if(i>=0){pend=[R[i]];R=R.slice(0,i).concat(R.slice(i+1))}}
+  S.pendId=pend.length?pend[0].id:null;return {R,pend}}
 function matches(t){if(S.q){const n=S.q.toLowerCase();if(![t.n,t.raw,t.brand,t.mc,t.cat,t.note].some(x=>x&&String(x).toLowerCase().includes(n)))return false}
   const F=S.f;if(F.ycat&&!(F.ycat.has(t.cat)||F.ycat.has(PAR[t.cat])))return false;
   if(F.mcat&&!F.mcat.has(t.earn?(t.mc||'__none__'):'__k:'+t.kind))return false;
@@ -139,7 +167,11 @@ function totals(R,p){if(!R.length)return '';const T=totalsOf(R),unk=T.unk?`${T.u
 function selBar(p,R){if(!S.sel.size)return '';const n=S.sel.size;
   if(p.selBar==='full')return `<div class="selbar"><b>${n} selected</b>${p.yourCol!=='off'||p.catEdit!=='none'?'<button type="button" class="btn" data-pop="bcat">Set category ▾</button>':''}<button type="button" class="btn" data-pop="bsp">Set spender ▾</button><button type="button" class="btn" data-bexc>Exclude from points</button><button type="button" class="btn ghost" data-desel>✕ Deselect all</button></div>`;
   if(p.selBar==='tx')return `<div class="selbar"><b>${n} selected</b><button type="button" class="btn" data-bedit>✎ Edit selected</button><button type="button" class="btn ghost" data-desel>✕ Deselect all</button></div>`;
-  return `<div class="selbar"><b>${n} selected</b><span class="mut">Tag as:</span><button type="button" class="btn" data-pop="bsp">Who spent this? ▾</button><button type="button" class="btn ghost" data-desel>Clear selection</button></div>`}
+  const bf=p.bulkFix&&!(p.data==='old'&&p.history==='lock')?'<button type="button" class="btn" data-pop="bfix">Set bonus category ▾</button>':'';
+  return `<div class="selbar"><b>${n} selected</b><span class="mut">Tag as:</span><button type="button" class="btn" data-pop="bsp">Who spent this? ▾</button>${bf}<button type="button" class="btn ghost" data-desel>Clear selection</button></div>`}
+// Asked after a one-row fix, when rules are offered after saving (today's teach-merchant bar).
+function askBar(c,p){const A=S.ask;if(!A||p.ruleAsk!=='after')return '';const t=cardRows(c,p).find(x=>x.id===A.id);if(!t)return '';
+  return `<div class="askbar" role="status"><span>Use <b>${esc(A.cat)}</b> for every charge from <b>${esc(A.pat)}</b>?${p.ruleDetail==='count'?` <span class="mut">${countTxt(p,t,A.cat,A.pat,'word')}.</span>`:''}</span><span><button type="button" class="btn pri" data-ask="make">${p.ruleDetail==='count'?'Make a rule':'Make a rule…'}</button><button type="button" class="btn ghost" data-ask="no">Not now</button></span></div>`}
 
 /* ── Table ───────────────────────────────────────────────── */
 function yourCell(t,p){if(t.kind==='payment'||t.act==='Transfer')return '<span class="dim">—</span>';const c=t.cat,par=PAR[c],st=p.yourCol;let inner;
@@ -148,12 +180,16 @@ function yourCell(t,p){if(t.kind==='payment'||t.act==='Transfer')return '<span c
   else if(st==='sub')inner=`<span class="cdot" title="${esc(catPath(c))}"><i style="background:${hue(c)}"></i>${esc(c)}${t.man?'<span class="pen">✎</span>':''}</span>`;
   else inner=`<span class="cst"><b>${esc(c)}${t.man?'<span class="pen">✎</span>':''}</b>${par?`<small>${esc(par)}</small>`:''}</span>`;
   return p.catEdit==='pill'&&c!=='Multiple'?`<button type="button" class="cbtn" data-pop="cat:${t.id}" title="Change category">${inner}</button>`:inner}
-function cardCell(t,p){const st=p.cardCol,br=p.brandCol==='card'&&t.brand?` · <b>${esc(t.brand)}</b>`:'';
+function cardInner(t,p){const st=p.cardCol,br=p.brandCol==='card'&&t.brand?`<span class="bnd"> · ${esc(t.brand)}</span>`:'';
   if(!t.earn)return st==='kind'?`<span class="kb">${KIND[t.kind]}</span>`:(t.mc&&st!=='bonus'?`<span class="dim">${esc(t.mc)}</span>`:'<span class="dim">—</span>');
-  if(!t.mc){const u=`<span class="warn-t">${st==='bonus'?'None':'Unknown'}</span>${br}`;return p.merchEdit==='unknown'?`<button type="button" class="cbtn unk" data-pop="mc:${t.id}" title="Set the merchant category">${u}<span class="cv">▾</span></button>`:u}
+  if(!t.mc)return `<span class="ctx"><span class="warn-t">${st==='bonus'?'None':'Unknown'}</span>${br}</span>`;
   const rf=st==='kind'&&t.kind==='refund'?' <span class="kb">Refund</span>':'';
-  if(st==='bonus')return esc(t.mc)+br+rf;
-  return `<span class="ctx">${t.mtop?`<span class="pp">${esc(t.mtop)} › </span>`:''}${esc(t.mc)}</span>${br}${rf}`}
+  if(st==='bonus')return `<span class="ctx">${esc(t.mc)}${br}</span>${rf}`;
+  return `<span class="ctx">${t.mtop?`<span class="pp">${esc(t.mtop)} › </span>`:''}${esc(t.mc)}${br}</span>${rf}`}
+function cardCell(t,p){const inner=cardInner(t,p)+(p.fixMark&&t.fixed?'<span class="pen" title="Fixed by hand">✎</span>':'');
+  if(p.fixStart==='cell'&&canFix(t,p))return `<button type="button" class="cbtn fixb${t.unk?' unk':''}" data-fix="${t.id}" title="Fix the bonus category">${inner}<span class="cv">▾</span></button>`;
+  if(p.data==='old'&&p.history==='lock'&&t.earn)return `<span title="History keeps its stored points. Fixes start with charges from January 1, 2027.">${inner}</span>`;
+  return inner}
 function nameCell(t,p,pd){const car=t.spl?`<button type="button" class="car ${S.spx.has(t.id)?'on':''}" data-spx="${t.id}" aria-expanded="${S.spx.has(t.id)}" aria-label="Show the ${t.spl.length} parts">▸</button>`:'';
   const tags=(pd?'<span class="tag pd">Pending</span>':'')+(t.exc?'<span class="tag" title="Excluded from points">⊘ Excluded</span>':'')+(t.link?`<span class="lk1" title="${esc(t.link)}" role="img" aria-label="${esc(t.link)}">$</span>`:'')+(p.brandCol==='inline'&&t.brand?`<span class="btag">${esc(t.brand)}</span>`:'');
   const nt=t.note&&p.extras!=='none'?`<small class="note">${esc(t.note)}</small>`:'';
@@ -167,7 +203,7 @@ function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   D.push({k:'date',h:'Date',s:'d',cls:'nw dte',cell:t=>dateTxt(t.d,p)});
   D.push({k:'n',h:'Merchant',s:'n',cls:'mc',cell:(t,pd)=>nameCell(t,p,pd)});
   if(p.yourCol!=='off')D.push({k:'cat',h:'Your category',s:'cat',cls:'yc',cell:t=>yourCell(t,p)});
-  D.push({k:'mc',h:p.cardCol==='bonus'?'Bonus category':'Merchant category',s:'mc',cls:'cc',cell:t=>cardCell(t,p)});
+  D.push({k:'mc',h:p.cardCol==='bonus'?'Bonus category':'Merchant category',s:'mc',cls:'cc',cell:(t,pd)=>pd?cardInner(t,p):cardCell(t,p)});
   if(p.brandCol==='col')D.push({k:'brand',h:'Brand',s:'brand',cls:'nw',cell:t=>t.brand?esc(t.brand):'<span class="dim">–</span>'});
   if(p.spCol==='always'||(p.spCol==='auto'&&hasSp))D.push({k:'sp',h:'Spender',s:'sp',cls:'nw',cell:t=>spCell(t,p)});
   if(p.typeCol!=='off')D.push({k:'kind',h:p.typeCol==='kind'?'Kind':'Type',s:'kind',cls:'nw',cell:t=>typeCell(t,p)});
@@ -188,12 +224,13 @@ function splitRows(t,n,p,D){if(!t.spl||!S.spx.has(t.id))return '';const pre=D.fi
 function table(c,p,R,pend){const D=cols(c,p),n=D.length,G=groupsOf(sorted(R),c,p);
   if(S.coll===null){S.coll=new Set(p.groupFold&&p.group!=='none'?G.slice(1).map(g=>g.key):[])}
   let body='',shown=0;const limit=p.length==='more'&&!S.all?12:1e9;
-  const row=(t,pd)=>`<tr class="tr ${t.exc?'exc':''} ${pd?'pend':''} ${S.sel.has(t.id)?'sel':''} ${p.rowClick!=='none'?'clk':''} ${t.kind==='payment'?'pay':''}" data-row="${t.id}" ${p.rowClick!=='none'?'tabindex="0"':''}>${D.map(col=>`<td class="${col.cls||''}">${col.cell(t,pd)}</td>`).join('')}</tr>`;
+  const clk=(t,pd)=>!pd&&(p.rowClick!=='none'||p.fixStart==='row'&&canFix(t,p));
+  const row=(t,pd)=>`<tr class="tr ${t.exc?'exc':''} ${pd?'pend':''} ${S.sel.has(t.id)?'sel':''} ${clk(t,pd)?'clk':''} ${t.kind==='payment'?'pay':''} ${S.fx&&S.fx.id===t.id?'fxon':''}" data-row="${t.id}" ${clk(t,pd)?`tabindex="0" title="Fix this charge"`:''}>${D.map(col=>`<td class="${col.cls||''}">${col.cell(t,pd)}</td>`).join('')}</tr>`;
   if(pend.length)body+=`<tr class="gh pg"><td colspan="${n}"><div class="ghw"><span class="gt"><span class="tag pd">Pending</span> Not posted yet; points count once it posts</span></div></td></tr>`+pend.map(t=>row(t,true)).join('');
   for(const g of G){if(shown>=limit)break;if(p.group!=='none')body+=gHead(g,n,p);if(S.coll.has(g.key))continue;
     for(const t of g.rows){if(shown>=limit)break;body+=row(t,false);shown++;if(S.exp.has(t.id)&&p.rowClick==='expand')body+=stripRow(t,n,p);body+=splitRows(t,n,p,D)}}
   const more=p.length==='more'&&!S.all&&R.length>limit?`<div class="t-more"><button type="button" class="btn" data-all>Show all ${R.length}</button></div>`:'';
-  return `<div class="t-s ${p.length==='scroll'?'cap':''}"><table class="t tx ${p.rowStyle}"><thead data-region="cols"><tr>${D.map(col=>th(col,p)).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}`}
+  return `<div class="t-s ${p.length==='scroll'?'cap':''}"><table class="t tx ${p.rowStyle}"><thead data-region="cols"><tr>${D.map(col=>th(col,p)).join('')}</tr></thead><tbody data-region="fix">${body}</tbody></table></div>${more}`}
 function emptyBox(c,p,all){const[a,b]=rangeOf(c);
   if(anyFilter())return p.empty==='helpful'?`<div class="empty"><b>Nothing matches these filters</b><span>${all.length} transaction${all.length===1?'':'s'} in ${md(a)} – ${md(b)}, none of them match.</span><button type="button" class="btn" data-clear>Clear filters</button></div>`:'<p class="emp c">No matches.</p>';
   if(p.empty!=='helpful')return '<p class="emp c">No transactions for this period.</p>';
@@ -202,7 +239,7 @@ function emptyBox(c,p,all){const[a,b]=rangeOf(c);
 function txSection(c,p){const {R,pend}=scoped(c,p),V=R.filter(matches),[a,b,lab]=rangeOf(c);
   const ct=`${V.length}${anyFilter()?` of ${R.length}`:''} in ${lab}${pend.length?`, plus ${pend.length} pending`:''}`;
   const body=V.length||pend.length?table(c,p,V,pend):emptyBox(c,p,R);
-  return `<section data-region="tx"><h2>Transactions <span class="ct">${ct}</span></h2><div class="sf pn"><div class="tb" data-region="find"><div class="tb1">${periodCtl(c,p)}${searchBox(p)}</div>${filters(c,p,R)}</div>${totals(V,p)}${selBar(p,V)}${body}</div></section>`}
+  return `<section data-region="tx"><h2>Transactions <span class="ct">${ct}</span></h2><div class="sf pn"><div class="tb" data-region="find"><div class="tb1">${periodCtl(c,p)}${searchBox(p)}</div>${filters(c,p,R)}</div>${totals(V,p)}${selBar(p,V)}${askBar(c,p)}${body}</div></section>`}
 
 /* ── Popovers and windows ────────────────────────────────── */
 function catPicker(title,cur){const q=(S.pq||'').toLowerCase();let h=`<div class="ph">${esc(title)}</div><input class="inp pq" data-pq placeholder="Search categories" value="${esc(S.pq||'')}" aria-label="Search categories"><div class="pl">`;
@@ -213,7 +250,8 @@ function mcPicker(t){const q=(S.pq||'').toLowerCase();let h=`<div class="ph">Mer
   mcatTree().forEach(g=>{const tm=!q||g.top.toLowerCase().includes(q),kids=g.kids.filter(k=>tm||k.toLowerCase().includes(q));if(!tm&&!kids.length)return;h+=`<button type="button" class="po top" data-pick="${esc(g.top)}">${esc(g.top)}</button>`+kids.map(k=>`<button type="button" class="po sub" data-pick="${esc(k)}">${esc(k)}</button>`).join('')});return h+'</div>'}
 function spPicker(title,cur){const N=L.d.spenders;return `<div class="ph">${esc(title)}</div><div class="pl">${N.map(n=>`<button type="button" class="po ${cur===n?'on':''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="po dim2" data-pick="">Nobody</button></div><div class="padd"><input class="inp" data-newsp placeholder="Add a name" aria-label="Add a name"><button type="button" class="btn" data-addsp>Add</button></div>`}
 function menuPop(t,p){const it=(a,l,cls='')=>`<button type="button" class="mi ${cls}" data-ma="${a}">${l}</button>`;let h='';
-  if(t.kind==='purchase')h+=it('log','Log credit use…')+'<hr>';
+  if(p.fixStart==='menu'){if(canFix(t,p))h+=it('fix','Fix category…');else if(p.data==='old'&&p.history==='lock'&&t.earn)h+='<span class="mi off">Fix category… (from 2027)</span>'}
+  if(t.kind==='purchase')h+=it('log','Log credit use…');if(h)h+='<hr>';
   if(p.catEdit==='menu')h+=it('cat','Change category…');if(p.spEdit==='menu')h+=it('sp','Set spender…');
   if(p.merchEdit==='unknown'&&t.unk)h+=it('mc','Set merchant category…');
   if(p.extras==='menu')h+=it('split',t.spl?'Edit split…':'Split…')+it('note',t.note?'Edit note…':'Add note…');
@@ -221,32 +259,124 @@ function menuPop(t,p){const it=(a,l,cls='')=>`<button type="button" class="mi ${
   if(h&&!h.endsWith('<hr>'))h+='<hr>';
   return h+it('exc',t.exc?'Include in points':'Exclude from points')+it('pts','Set points by hand')}
 function fPop(k,R){const O=options(k,R),D=S.fd;return `<div class="ph">${esc(FL[k][0])}</div><div class="pl ck">${O.map(o=>`<label class="fo ${o.sub?'sub':''}"><input type="checkbox" data-fx="${esc(o.v)}" ${!D||D.has(o.v)?'checked':''}><span>${esc(o.l)}</span><em>${o.n}</em></label>`).join('')||'<p class="emp">Nothing in this period.</p>'}</div><div class="pf"><span><button type="button" class="lnk" data-fall="0">Clear all</button><button type="button" class="lnk" data-fall="1">Select all</button></span><button type="button" class="btn pri" data-fapply>Apply</button></div>`}
+/* The list a fix picks from. 2027 rows: merchant categories. 2026 history: the old bonus categories. */
+function fixOpts(p){const c=L.d.cards[p.card],nw=p.data==='new',q=(S.pq||'').toLowerCase();let I=[];
+  if(nw)mcatTree().forEach(g=>{I.push({v:g.top,l:g.top,top:1});g.kids.forEach(k=>I.push({v:k,l:k,sub:1,par:g.top}))});
+  else I=L.d.oldCats.map(v=>({v,l:v}));
+  I.forEach(i=>{i.rate=rateFor(p.card,i.v,null,nw);i.note=nw?(c.rnotes[i.v]||''):''});
+  if(q)I=I.filter(i=>i.l.toLowerCase().includes(q)||(i.par||'').toLowerCase().includes(q));
+  // History has no full rate table (the old engine's rates come from its own rows), so its list stays plain.
+  if(p.fixList!=='bonus'||!nw)return [{items:I}];
+  const hi=I.filter(i=>i.rate>c.base+1e-9).map(i=>Object.assign({},i,{flat:1})),lo=I.filter(i=>!(i.rate>c.base+1e-9)),inLo=new Set(lo.map(i=>i.v));
+  lo.forEach(i=>{if(i.sub&&!inLo.has(i.par))i.flat=1});
+  return [{h:'Earns more on this card',items:hi},{h:`Everything else, ${rateTxt(c.base)}`,items:lo}]}
+function fixList(p,sel){const c=L.d.cards[p.card],showR=p.fixList!=='mc'&&p.data==='new',secs=fixOpts(p);let h='',n=0;
+  secs.forEach(s=>{if(!s.items.length)return;if(s.h)h+=`<div class="psec">${esc(s.h)}</div>`;
+    s.items.forEach(i=>{n++;const lab=i.flat&&i.par?`<span class="pp">${esc(i.par)} › </span>${esc(i.l)}`:esc(i.l);
+      h+=`<button type="button" class="po ${i.sub&&!i.flat?'sub':''} ${i.top&&!i.flat?'top':''} ${sel===i.v?'on':''}" data-fpick="${esc(i.v)}"><span class="pol">${lab}</span>${showR?`<span class="prt ${i.rate>c.base+1e-9?'hi':''}">${i.note?esc(i.note)+' · ':''}${rateTxt(i.rate)}</span>`:''}${sel===i.v?'<span class="ok">✓</span>':''}</button>`})});
+  return `<input class="inp pq" data-pq placeholder="Search categories" value="${esc(S.pq||'')}" aria-label="Search categories"><div class="pl" data-keep="fl">${n?h:'<p class="emp">No match.</p>'}</div>`}
+const patRow=()=>`<div class="pat"><input class="inp" data-pat value="${esc(S.fx.pat)}" aria-label="Match text"><span class="seg" role="group" aria-label="How it matches"><button type="button" class="${S.fx.mt==='word'?'on':''}" data-mt="word">Whole words</button><button type="button" class="${S.fx.mt==='contains'?'on':''}" data-mt="contains">Contains</button></span></div>`;
+function changeList(p,t,cat){const ch=changesOf(p,t,cat,ruleRows(p,S.fx.pat,S.fx.mt));if(!ch.length)return '';const sh=ch.slice(0,6);
+  return `<div class="chl"><div class="chh"><span>Date</span><span>Card</span><span>Merchant</span><span class="n">Points</span></div>${sh.map(c=>`<div class="chr"><span>${dateTxt(c.x.d,p)}</span><span>${esc(shortCard(RC[c.x.id]))}</span><span class="cm"><b>${esc(c.x.n)}</b><small>${esc(c.x.mc||'None')} → ${esc(cat)}</small></span><span class="n">${ptsSpan(c.x.pts)} → ${ptsSpan(c.after)}</span></div>`).join('')}${ch.length>6?`<div class="chr more">and ${ch.length-6} more</div>`:''}</div>`}
+// What a rule shows before it saves: a count, editable match text, or every change.
+function ruleSec(p,t,cat){const F=S.fx;
+  return (p.ruleDetail==='count'?`<p class="rl">Every charge whose bank text has “${esc(F.pat)}”.</p>`:patRow())+`<p class="rl">${countTxt(p,t,cat,F.pat,F.mt)}.</p>`+(p.ruleDetail==='review'&&cat?changeList(p,t,cat):'')}
+function fixPop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';let h=`<div class="ph">${p.data==='new'?'Merchant category':'Bonus category'} for ${esc(t.n)}</div>`;
+  if(p.ruleAsk==='box')h+=`<label class="rck sm"><input type="checkbox" data-frule ${F.rule?'checked':''}> Use for every charge from <b>${esc(F.pat)}</b></label>${F.rule?`<div class="rin">${p.ruleDetail==='count'?'':patRow()}<p class="pn2">${countTxt(p,t,null,F.pat,F.mt)}${p.ruleDetail==='review'?'. You see each change before it saves.':'.'}</p></div>`:''}`;
+  h+=fixList(p,p.ruleAsk==='two'&&F.picked?F.cat:t.mc);
+  if(p.fixKind)h+=`<label class="fld in">Kind<select class="inp" data-fkind>${Object.keys(KIND).filter(k=>k!=='payment').map(k=>`<option value="${k}" ${F.kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`;
+  if(p.ruleAsk==='two'&&F.picked){const kind=F.kind,r2=kind==='purchase'||kind==='refund'?rateFor(p.card,F.cat,t.brand,p.data==='new'):0;
+    h+=`<div class="pf col"><span class="mut">${esc(F.cat)}: ${r2?rateTxt(r2):'no points'}, ${ptsSpan(ptsOf(t.amt,r2,kind))} points.</span>${p.ruleDetail==='count'?'':patRow()}<span class="mut">Every charge: ${countTxt(p,t,F.cat,F.pat,F.mt)}.</span><span class="bt2"><button type="button" class="btn" data-fsave="one">Just this charge</button><button type="button" class="btn pri trunc" data-fsave="all">Every ${esc(F.pat)} charge</button></span></div>`}
+  return h}
+function fixWin(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';const nw=p.data==='new',cat=F.cat,kind=F.kind;
+  const r2=kind==='purchase'||kind==='refund'?rateFor(p.card,cat,t.brand,nw):0,p2=ptsOf(t.amt,r2,kind),lab=nw?'Merchant category':'Bonus category';
+  const side=(m,r,pts)=>`${m?esc(m):'<span class="warn-t">None</span>'} · ${r?rateTxt(r):'no points'} · ${ptsSpan(pts)}`;
+  const changed=(cat||null)!==(t.mc||null)||kind!==t.kind,ruleOn=p.ruleAsk==='box'?F.rule:false;
+  let rule='';
+  if(p.ruleAsk==='box')rule=`<div class="rbox"><label class="rck"><input type="checkbox" data-frule ${F.rule?'checked':''}> Use for every charge from <b>${esc(F.pat)}</b></label>${F.rule?ruleSec(p,t,cat):''}</div>`;
+  else if(p.ruleAsk==='two')rule=`<div class="rbox"><div class="rh">“Every ${esc(F.pat)} charge” also saves a rule:</div>${ruleSec(p,t,cat)}</div>`;
+  const note=nw?`<small class="mut">Brand: ${esc(t.brand||'none')}. Brand is changed on the Transactions page.</small>`:`<small class="mut">2026 history uses the old bonus categories. Rows from 2027 pick a merchant category.</small>`;
+  const kindF=p.fixKind?`<label class="fld">Kind<select class="inp" data-fkind>${Object.keys(KIND).filter(k=>k!=='payment').map(k=>`<option value="${k}" ${kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`:'';
+  const foot=p.ruleAsk==='two'?`<button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn" data-fsave="one" ${changed?'':'disabled'}>Just this charge</button><button type="button" class="btn pri trunc" data-fsave="all" ${cat?'':'disabled'}>Every ${esc(F.pat)} charge</button>`
+    :`<button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn pri" data-fsave="${ruleOn?'all':'one'}" ${changed||ruleOn&&cat?'':'disabled'}>Save</button>`;
+  return `<div class="mh"><div><h3 id="mdl-t">Fix this charge</h3><small>${dateTxt(t.d,p)} · ${money(t.amt)} · ${esc(p.card)}</small></div><button type="button" class="ib x" data-fxx aria-label="Close">×</button></div>
+    <div class="mb"><div class="dbox"><b>${esc(t.n)}</b>${t.raw!==t.n?`<small>Bank text: ${esc(t.raw)}</small>`:''}</div>
+    <div class="ba"><div><span>Now</span><b>${side(t.mc,t.rate,t.pts)}</b></div><i aria-hidden="true">→</i><div><span>After</span><b>${changed?side(cat,r2,p2):'<span class="dim">Pick below</span>'}</b></div></div>
+    <div class="fld"><span>${lab}</span>${fixList(p,cat)}${note}</div>${kindF}${rule}</div>
+    <div class="mf"><span></span><span>${foot}</span></div>`}
+// The rule step on its own: from the ask bar, or the review before a one-click fix with a rule.
+function ruleWin(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';const fromAsk=S.modal.from==='ask';
+  return `<div class="mh"><div><h3 id="mdl-t">${fromAsk?'Rule for this merchant':'Check before it saves'}</h3><small>${esc(t.n)} → ${esc(F.cat)}</small></div><button type="button" class="ib x" data-fxx aria-label="Close">×</button></div>
+    <div class="mb"><p class="rl">Every charge from <b>${esc(F.pat)}</b> gets <b>${esc(F.cat)}</b>, on every card, from now on and for past charges.</p>${p.ruleDetail==='count'?`<p class="rl">${countTxt(p,t,F.cat,F.pat,F.mt)}.</p>`:patRow()+`<p class="rl">${countTxt(p,t,F.cat,F.pat,F.mt)}.</p>`}${p.ruleDetail==='review'?changeList(p,t,F.cat):''}</div>
+    <div class="mf"><span></span><span><button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn pri" data-rsave>Save rule</button></span></div>`}
 function popLayer(c,p){const P=S.pop;if(!P)return '';const all=cardRows(c,p),t=P.id!=null?all.find(x=>x.id===P.id):null;let inner='';
-  if(P.k==='menu'&&t)inner=menuPop(t,p);else if(P.k==='cat'&&t)inner=catPicker(`Category for ${t.n}`,t.cat);else if(P.k==='bcat')inner=catPicker(`Category for ${S.sel.size} selected`,'');
+  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
+  else if(P.k==='menu'&&t)inner=menuPop(t,p);else if(P.k==='cat'&&t)inner=catPicker(`Category for ${t.n}`,t.cat);else if(P.k==='bcat')inner=catPicker(`Category for ${S.sel.size} selected`,'');
   else if(P.k==='sp'&&t)inner=spPicker(`Spender for ${t.n}`,t.sp);else if(P.k==='bsp')inner=spPicker(`Spender for ${S.sel.size} selected`,'');
   else if(P.k==='mc'&&t)inner=mcPicker(t);else if(P.k==='note'&&t)inner=`<div class="ph">Note on ${esc(t.n)}</div><textarea class="inp nt" data-notev rows="3" aria-label="Note">${esc(t.note)}</textarea><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button><button type="button" class="btn pri" data-notesave>Save</button></div>`;
   else if(P.k.startsWith('f:'))inner=fPop(P.k.slice(2),scoped(c,p).R);
   return inner?`<div class="pop ${P.k==='menu'?'menu':''}" style="left:${P.x}px;top:${P.y}px;width:${P.w}px" role="dialog" aria-label="Options">${inner}</div>`:''}
 function modalLayer(c,p){const M=S.modal;if(!M)return '';let body;
-  if(M.k==='details'){const t=cardRows(c,p).find(x=>x.id===M.id);if(!t)return '';const tile=(k,v)=>`<div class="tl"><span>${k}</span><b>${v}</b></div>`;
+  if(M.k==='fix')body=fixWin(c,p);else if(M.k==='rule')body=ruleWin(c,p);
+  else if(M.k==='details'){const t=cardRows(c,p).find(x=>x.id===M.id);if(!t)return '';const tile=(k,v)=>`<div class="tl"><span>${k}</span><b>${v}</b></div>`;
     body=`<div class="mh"><div><h3 id="mdl-t">Transaction details</h3><small>ID #${t.id}</small></div><button type="button" class="ib x" data-mx aria-label="Close">×</button></div><div class="mb"><div class="dbox"><b>${esc(t.n)}</b>${t.raw!==t.n?`<small>Raw: ${esc(t.raw)}</small>`:''}</div><div class="tiles">${tile('Date',md(t.d)+', 2026')}${tile('Amount',amtCell(t,{amtStyle:'signed'}))}${tile('Account',esc(p.card))}${tile('Category',esc(catPath(t.cat)))}${t.sp?tile('Spender',esc(t.sp)):''}${tile('Kind',KIND[t.kind])}</div>
       <div class="dbox mcb"><div class="row"><span>Merchant category</span><button type="button" class="lnk">${t.mc?'Edit':'Set'}</button></div><b>${t.mc?esc((t.mtop?t.mtop+' › ':'')+t.mc):'Not classified'}</b><small>Brand: ${esc(t.brand||'none')} · Kind: ${KIND[t.kind]}</small></div>
       <div class="dbox"><div class="row"><span>${t.pts<0?'Points clawback':t.exc?'Not counted for points':'Points earned'}</span></div><b>${ptsSpan(t.pts)} ${esc(c.eco)}${t.rate?` · ${rateTxt(t.rate)}`:''}</b></div>
       <p class="mut">Same window as the Transactions page (docs/transactions-design.md); shortened here.</p></div><div class="mf"><span><button type="button" class="btn">⊕ Split</button></span><button type="button" class="btn pri" data-mx>Close</button></div>`}
   else{const opts=groupCats().map(g=>`<optgroup label="${esc(g.top)}"><option>${esc(g.top)}</option>${g.kids.map(k=>`<option>${esc(k)}</option>`).join('')}</optgroup>`).join('');
     body=`<div class="mh"><h3 id="mdl-t">Edit ${S.sel.size} selected</h3><button type="button" class="ib x" data-mx aria-label="Close">×</button></div><div class="mb"><label class="fld">Category<select class="inp" data-bcat><option value="">Keep as is</option>${opts}</select></label><label class="fld">Spender<select class="inp" data-bsp><option value="">Keep as is</option>${L.d.spenders.map(n=>`<option>${esc(n)}</option>`).join('')}<option value="__none__">Nobody</option></select></label></div><div class="mf"><span></span><span><button type="button" class="btn" data-mx>Cancel</button><button type="button" class="btn pri" data-bapply>Apply to ${S.sel.size}</button></span></div>`}
+  if(!body)return '';
   return `<div class="mdl-bk"></div><div class="mdl" role="dialog" aria-modal="true" aria-labelledby="mdl-t" style="top:${M.y}px">${body}</div>`}
 
 /* ── Wiring ──────────────────────────────────────────────── */
-function redraw(focus){const st=L.root.closest('#stage')||document.getElementById('stage'),top=st?st.scrollTop:0;L.root.innerHTML=page(L.picks);wire(L.root,L.picks);if(st)st.scrollTop=top;
+function redraw(focus){const st=L.root.closest('#stage')||document.getElementById('stage'),top=st?st.scrollTop:0,keep={};
+  L.root.querySelectorAll('[data-keep]').forEach(e=>keep[e.dataset.keep]=e.scrollTop);
+  L.root.innerHTML=page(L.picks);wire(L.root,L.picks);if(st)st.scrollTop=top;
+  L.root.querySelectorAll('[data-keep]').forEach(e=>{if(keep[e.dataset.keep])e.scrollTop=keep[e.dataset.keep]});
   if(focus){const el=L.root.querySelector(focus);if(el){el.focus();const v=el.value||'';try{el.setSelectionRange(v.length,v.length)}catch(e){}}}}
 // Shown after the redraw that follows every action, so it isn't wiped by it.
 function toast(msg){setTimeout(()=>{const el=L.root.querySelector('.toast');if(!el)return;el.textContent='✓ '+msg;el.style.top=(S.ty||200)+'px';el.hidden=false;clearTimeout(L.tt);L.tt=setTimeout(()=>{const e2=L.root.querySelector('.toast');if(e2)e2.hidden=true},2600)},0)}
 function rel(el,w,alignRight){const app=L.root.querySelector('.app').getBoundingClientRect(),r=el.getBoundingClientRect();let x=(alignRight?r.right-w:r.left)-app.left;x=Math.max(8,Math.min(x,app.width-w-8));return {x,y:r.bottom-app.top+4}}
 const setEd=(id,o)=>{S.ed[id]=Object.assign(S.ed[id]||{},o)};
+// Windows open at the top of what's visible, so their buttons are in view.
+function visTop(){const st=document.getElementById('stage'),a=L.root.querySelector('.app').getBoundingClientRect(),s=st?Math.max(0,st.getBoundingClientRect().top):0;return Math.max(8,s-a.top+16)}
+// Fix flow. A popover hangs under the row's category cell; a window opens over the row.
+function openFix(id,c,p){const t=cardRows(c,p).find(x=>x.id===id);if(!t)return;
+  S.fx={id,cat:t.mc||null,kind:t.kind,rule:p.ruleAsk==='box',pat:defPat(t),mt:'word',picked:false};S.pq='';S.ask=null;S.modal=null;
+  const tr=L.root.querySelector(`tr[data-row="${id}"]`),cell=tr&&(tr.querySelector('td.cc')||tr);if(!cell)return;
+  if(p.fixWhere==='pop'){const W=310,pos=rel(cell,W,false);S.pop={key:'fix:'+id,k:'fix',id,x:pos.x,y:pos.y,w:W};S.ty=pos.y}
+  else{S.pop=null;S.modal={k:'fix',id,y:visTop()};S.ty=rel(cell,10).y}
+  redraw(p.fixWhere==='pop'?'[data-pq]':null)}
+function closeFix(){S.pop=null;S.modal=null;S.fx=null;S.pq=''}
+function applyRule(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id),ch=changesOf(p,t,F.cat,ruleRows(p,F.pat,F.mt)),d=ch.reduce((s,x)=>s+x.after-x.x.pts,0);
+  const o=Object.assign({mc:F.cat},F.kind!==t.kind?{kind:F.kind}:{});setEd(t.id,o);ch.forEach(x=>setEd(x.x.id,{mc:F.cat}));
+  closeFix();S.ask=null;toast(`Rule saved: “${F.pat}” → ${F.cat}. ${ch.length?`${ch.length} other charge${ch.length===1?'':'s'} updated, ${ptsDelta(d)}`:'No other charges changed'}`);redraw()}
+function doSave(mode,c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return;
+  if(mode==='all'&&F.cat){const ch=changesOf(p,t,F.cat,ruleRows(p,F.pat,F.mt));
+    // A one-click fix can't show the changes first, so "every change listed" gets its own step.
+    if(p.ruleDetail==='review'&&S.pop&&ch.length){S.pop=null;S.modal={k:'rule',from:'pop',y:visTop()};redraw();return}
+    applyRule(c,p);return}
+  const o={};if((F.cat||null)!==(t.mc||null))o.mc=F.cat;if(F.kind!==t.kind)o.kind=F.kind;
+  if(Object.keys(o).length)setEd(t.id,o);
+  const ask=p.ruleAsk==='after'&&'mc' in o&&F.cat?{id:t.id,cat:F.cat,pat:F.pat}:null;
+  closeFix();S.ask=ask;toast(Object.keys(o).length?'Saved':'No change');redraw()}
 function wire(root,p){const c=L.d.cards[p.card];
   root.onclick=e=>{const g=e.target,q=s=>g.closest(s);let el;
-    if(S.pop&&!q('.pop')&&!q('[data-pop]')){S.pop=null;S.pq='';S.fd=null;redraw();return}
+    if(S.pop&&!q('.pop')&&!q('[data-pop]')){if(S.pop.k==='fix')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
+    if(el=q('[data-fix]')){openFix(Number(el.dataset.fix),c,p);return}
+    if(el=q('[data-fpick]')){const v=el.dataset.fpick;
+      if(S.pop&&S.pop.k==='bfix'){let n=0;cardRows(c,p).forEach(t=>{if(S.sel.has(t.id)&&t.earn){setEd(t.id,{mc:v});n++}});S.pop=null;S.pq='';toast(`${v} set on ${n} charge${n===1?'':'s'}`);redraw();return}
+      S.fx.cat=v;S.fx.picked=true;
+      if(S.pop&&p.ruleAsk!=='two'){doSave(p.ruleAsk==='box'&&S.fx.rule?'all':'one',c,p);return}
+      redraw();return}
+    if(el=q('[data-mt]')){S.fx.mt=el.dataset.mt;redraw();return}
+    if(el=q('[data-fsave]')){doSave(el.dataset.fsave,c,p);return}
+    if(q('[data-fxx]')){closeFix();redraw();return}
+    if(q('[data-rsave]')){applyRule(c,p);return}
+    if(el=q('[data-ask]')){const A=S.ask;if(el.dataset.ask==='no'||!A){S.ask=null;redraw();return}
+      const t=cardRows(c,p).find(x=>x.id===A.id);S.fx={id:A.id,cat:A.cat,kind:t.kind,rule:true,pat:A.pat,mt:'word',picked:true};
+      if(p.ruleDetail==='count'){applyRule(c,p);return}
+      S.modal={k:'rule',from:'ask',y:visTop()};redraw();return}
     if(el=q('[data-pop]')){const k=el.dataset.pop,[kind,id]=k.split(':'),W={menu:210,cat:290,bcat:290,sp:230,bsp:230,mc:290,note:280}[kind]||270;
       if(S.pop&&S.pop.key===k){S.pop=null;redraw();return}
       const pos=rel(el,W,kind==='menu');S.pop={key:k,k:kind==='f'?k:kind,id:id&&kind!=='f'?Number(id):null,x:pos.x,y:pos.y,w:W};S.pq='';S.ty=pos.y;
@@ -261,6 +391,7 @@ function wire(root,p){const c=L.d.cards[p.card];
     if(q('[data-notesave]')){setEd(S.pop.id,{note:root.querySelector('[data-notev]').value.trim()});S.pop=null;toast('Note saved');redraw();return}
     if(el=q('[data-ma]')){const a=el.dataset.ma,P=S.pop,t=cardRows(c,p).find(x=>x.id===P.id);
       if(a==='cat'||a==='sp'||a==='mc'||a==='note'){const w=a==='sp'?230:290;S.pop=Object.assign({},P,{key:a+':'+P.id,k:a,w,x:Math.max(8,P.x-(w-P.w))});redraw(a==='note'?'[data-notev]':a==='sp'?null:'[data-pq]');return}
+      if(a==='fix'){S.pop=null;openFix(t.id,c,p);return}
       S.pop=null;
       if(a==='exc'){setEd(t.id,{exc:!t.exc});toast(t.exc?'Counted for points again':'Excluded from points')}
       else if(a==='details'){S.modal={k:'details',id:t.id,y:Math.max(8,P.y-160)}}
@@ -291,13 +422,17 @@ function wire(root,p){const c=L.d.cards[p.card];
     if(q('[data-all]')){S.all=true;redraw();return}
     if(q('button,input,select,textarea,label,a'))return;
     if(el=q('tr[data-row]')){const id=Number(el.dataset.row);if(el.classList.contains('pend'))return;
+      if(p.fixStart==='row'&&el.classList.contains('clk')){openFix(id,c,p);return}
       if(p.rowClick==='expand'){S.exp.has(id)?S.exp.delete(id):S.exp.add(id);redraw()}
       else if(p.rowClick==='details'){S.modal={k:'details',id,y:Math.max(8,rel(el,10).y-200)};redraw()}}};
   root.onkeydown=e=>{const tr=e.target.closest&&e.target.closest('tr[data-row].clk');if(tr&&e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();tr.click()}};
   root.oninput=e=>{const g=e.target;
     if(g.matches('[data-q]')){S.q=g.value;S.all=false;redraw('[data-q]')}
-    else if(g.matches('[data-pq]')){S.pq=g.value;redraw('[data-pq]')}};
+    else if(g.matches('[data-pq]')){S.pq=g.value;redraw('[data-pq]')}
+    else if(g.matches('[data-pat]')){S.fx.pat=g.value;redraw('[data-pat]')}};
   root.onchange=e=>{const g=e.target;
+    if(g.matches('[data-frule]')){S.fx.rule=g.checked;redraw();return}
+    if(g.matches('[data-fkind]')){S.fx.kind=g.value;if(S.pop&&S.pop.k==='fix'&&p.ruleAsk!=='two')doSave('one',c,p);else redraw();return}
     if(g.matches('[data-fx]')){const k=S.pop.k.slice(2),O=options(k,scoped(c,p).R);if(!S.fd)S.fd=new Set(O.map(o=>o.v));g.checked?S.fd.add(g.dataset.fx):S.fd.delete(g.dataset.fx)}
     else if(g.matches('[data-sel]')){const id=Number(g.dataset.sel);g.checked?S.sel.add(id):S.sel.delete(id);redraw()}
     else if(g.matches('[data-allsel]')){const {R}=scoped(c,p),V=R.filter(matches);if(g.checked)V.forEach(t=>S.sel.add(t.id));else S.sel.clear();redraw()}
@@ -309,102 +444,75 @@ function page(p){const c=L.d.cards[p.card];
   return chrome(c,p,`<div class="rail"><div class="col">${txSection(c,p)}</div>${side}</div>`)}
 
 Gallery.define({
-  id:'cards-card-tx-r1',
-  name:'Cards: Card page transactions',
+  id:'cards-card-tx-r2',
+  name:'Cards: Card page transactions, round 2',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
-    {id:'card',label:'Card',type:'choice',options:[
+    {id:'card',label:'Card',type:'choice',default:'Chase SP 3698',options:[
       {id:'Amex Platinum 1008',label:'Amex Platinum 1008',hint:'Brands on airlines, hotels and Walmart; statement credits; a linked purchase (Martha’s, Oct 2).'},
       {id:'Hilton Aspire 2007',label:'Hilton Aspire 2007',hint:'Fees, interest, refunds, and 16 rows excluded from points.'},
-      {id:'Chase SP 3698',label:'Chase SP 3698',hint:'Short list, mostly restaurants.'},
-      {id:'Amex BBP 1008',label:'Amex BBP 1008',hint:'The only card with spender tags (Daniella, Omer). No rows after Oct 15, so the current month is empty.'}]},
-    {id:'data',label:'Rows shown as',type:'choice',options:[
-      {id:'new',label:'From 2027 on',hint:'Merchant category, brand and kind, scored read-only by the 2027 engine. Unknown is overcounted: Plaid’s category, which fills many from 2027, isn’t stored on these rows.'},
-      {id:'old',label:'2026 history, as stored',hint:'The old bonus category and points; no brand. Rows dated before 2027 stay like this.'}]},
+      {id:'Chase SP 3698',label:'Chase SP 3698',hint:'Try City Bistro or Pura Vida Nomad (None, should be Dining at 3x), or Paz Oil (gas).'},
+      {id:'Amex BBP 1008',label:'Amex BBP 1008',hint:'2x on everything, so a fix changes no points. No rows after Oct 15.'}]},
+    {id:'data',label:'Rows shown as',type:'choice',default:'new',options:[
+      {id:'new',label:'From 2027 on',hint:'A fix sets the merchant category, which decides the bonus category on every card. Unknown is overcounted here: Plaid’s category isn’t stored on these rows.'},
+      {id:'old',label:'2026 history, as stored',hint:'A fix picks one of the old bonus categories, as today.'}]},
     {id:'splitDemo',label:'Add a split row (real, from Bilt 8961, Aug 6)',type:'toggle',default:false},
     {id:'emptyDemo',label:'Show the empty list',type:'toggle',default:false},
    ]},
-   {id:'cols',label:'Columns',open:true,controls:[
-    {id:'yourCol',label:'Your category (top level › sub-category)',type:'choice',options:[
-      {id:'off',label:'Not on this page',current:true,hint:'Approved layout: your categories live on the Transactions page.'},
-      {id:'pill',label:'Top › Sub pill',hint:'Same pill as the Transactions page; ✎ when set by hand.'},
-      {id:'sub',label:'Sub-category with a color dot',hint:'The dot is the top level’s color; full path on hover. Narrower.'},
-      {id:'stack',label:'Two lines',hint:'Sub-category, with the top level under it in grey.'}]},
-    {id:'cardCol',label:'The card’s category',type:'choice',options:[
-      {id:'bonus',label:'Bonus category',current:true,hint:'Approved: the category the points came from, None in amber.'},
-      {id:'path',label:'Merchant category path',hint:'Travel › Hotels. Unknown in amber. Fees, credits and payments show —.'},
-      {id:'kind',label:'Merchant category, kind badges',hint:'Fees, credits, payments and refunds get a grey badge in the same cell, so the Type column can go.'}]},
-    {id:'brandCol',label:'Brand',type:'choice',options:[
-      {id:'off',label:'Not shown',current:true},{id:'col',label:'Its own column'},
-      {id:'inline',label:'Tag after the merchant name'},{id:'card',label:'In the card’s category cell',hint:'Hotels · Hilton'}]},
-    {id:'typeCol',label:'Type',type:'choice',options:[
-      {id:'type',label:'Expense or Credit',current:true,hint:'Approved.'},{id:'kind',label:'Kind',hint:'Purchase, Refund, Credit, Fee, Interest, Payment.'},
-      {id:'badge',label:'Only when it isn’t a purchase'},{id:'off',label:'Off'}]},
-    {id:'spCol',label:'Spender',type:'choice',options:[
-      {id:'always',label:'Always',current:true,hint:'Approved.'},{id:'auto',label:'Only on cards with spender tags',hint:'Shows on BBP, hidden on the other three.'},{id:'off',label:'Off'}]},
-    {id:'ptsCol',label:'Rate and points',type:'choice',options:[
-      {id:'two',label:'Rate and Points columns',current:true},{id:'one',label:'One column, rate under the points'},{id:'pts',label:'Points only, rate on hover'}]},
-    {id:'amtStyle',label:'Amount',type:'choice',options:[
-      {id:'card',label:'Card statement style',current:true,hint:'Approved: $107.00 for a charge, green −$100.00 for a credit.'},
-      {id:'signed',label:'Transactions page style',hint:'−$107.00 in red, +$100.00 in green, payments plain.'}]},
-    {id:'dateFmt',label:'Date',type:'choice',options:[{id:'mon',label:'Oct 25',current:true},{id:'num',label:'10/25, as on Transactions'}]},
-    {id:'rowStyle',label:'Rows',type:'choice',options:[{id:'plain',label:'Today’s table rows',current:true},{id:'ledger',label:'Dense ledger, striped (Transactions page)'}]},
-    {id:'payments',label:'Card payments',type:'choice',options:[
-      {id:'hide',label:'Hidden',current:true,hint:'Today the page lists expense rows only.'},{id:'show',label:'Shown, dimmed, no points'}]},
-    {id:'pending',label:'Pending charges',type:'choice',options:[
-      {id:'skip',label:'Not shown until they post',current:true,hint:'The sync skips pending charges today.'},
-      {id:'top',label:'At the top, marked Pending',hint:'Needs a sync change to store them. The preview marks the newest charge as pending to show the look.'}]},
+   {id:'fix',label:'Fixing a charge (your note)',open:true,controls:[
+    {id:'fixStart',label:'How a fix starts',type:'choice',options:[
+      {id:'cell',label:'Click the bonus category',current:true,hint:'Today the cell is a dropdown. A faint ▾ marks it on every row; None is outlined in amber.'},
+      {id:'menu',label:'⋯ → Fix category…',hint:'Keeps the table plain; one more click.'},
+      {id:'row',label:'Click anywhere on the row',hint:'The checkbox, spender and ⋯ keep their own clicks.'}]},
+    {id:'fixWhere',label:'Where you fix it',type:'choice',options:[
+      {id:'pop',label:'A list under the cell',current:true,hint:'One click saves.'},
+      {id:'win',label:'A window',hint:'Shows the points now and after, then Save. Closes only with its buttons.'}]},
+    {id:'fixList',label:'What the list shows',type:'choice',options:[
+      {id:'mc',label:'Every category, grouped',current:true,hint:'From 2027: the merchant categories (Travel › Hotels). 2026 history: the old bonus categories, always a plain list.'},
+      {id:'rate',label:'Grouped, with this card’s rate on each',hint:'Blue where the card pays more than its base rate.'},
+      {id:'bonus',label:'This card’s bonus categories first',hint:'Then everything else, at the base rate.'}]},
+    {id:'ruleAsk',label:'Making a rule for the merchant',type:'choice',options:[
+      {id:'after',label:'Ask after saving',current:true,hint:'Today: a bar over the table offers to apply the fix to every charge from that merchant.'},
+      {id:'box',label:'A tick box, on',hint:'“Use for every charge from …”, as in the Transactions page review window.'},
+      {id:'two',label:'Two buttons',hint:'Just this charge, or every charge from the merchant.'}]},
+    {id:'ruleDetail',label:'What a rule shows before it saves',type:'choice',options:[
+      {id:'count',label:'A count',hint:'How many charges match and how many points change.'},
+      {id:'match',label:'Match text you can edit',hint:'Whole words or Contains, for bank text like TST*CITY BISTRO - 2024. The count updates as you type.'},
+      {id:'review',label:'Match text and every change',hint:'Each charge that changes, with its points before and after.'}]},
+    {id:'fixKind',label:'Also fix the kind (purchase, refund, credit, fee)',type:'toggle',default:false},
+    {id:'history',label:'Rows before 2027',type:'choice',options:[
+      {id:'edit',label:'Fixable, as today',current:true,hint:'Picks an old bonus category; points recalculate the old way.'},
+      {id:'lock',label:'Read-only',hint:'History keeps its stored points; fixes start with 2027 rows. The API already refuses 2027 fields on older rows. Shows with “2026 history”.'}]},
+    {id:'fixMark',label:'✎ on rows you fixed',type:'toggle',default:true},
+    {id:'bulkFix',label:'Selection bar sets the bonus category too',type:'toggle',default:false},
    ]},
-   {id:'find',label:'Filters and search',controls:[
-    {id:'period',label:'Date selector',type:'choice',options:[
-      {id:'own',label:'Monthly, QTD, YTD, Custom',current:true,hint:'Approved.'},
-      {id:'stmt',label:'Statement periods',hint:'Step through statements by close day; Month, Year to date and Custom too.'},
-      {id:'ymd',label:'Year and month dropdowns with dates',hint:'Transactions page.'}]},
-    {id:'filterStyle',label:'Filters',type:'choice',options:[
-      {id:'chips',label:'Bonus category chips',current:true,hint:'Approved: one row of chips.'},
-      {id:'menus',label:'Filter menus (Transactions page)',hint:'Your category, merchant category, brand, spender and kind, each a checklist with counts. A top level includes its sub-categories.'},
-      {id:'tops',label:'Your top levels as chips',hint:'Click a top level to see its sub-categories as chips; merchant category, brand and spender as menus.'}]},
-    {id:'fBrand',label:'Brand filter',type:'toggle',default:false},
-    {id:'fUnknown',label:'Unknown merchant chip with its count',type:'toggle',default:false},
-    {id:'search',label:'Search box',type:'choice',options:[{id:'box',label:'Outlined box',current:true},{id:'line',label:'Underline (Transactions page)'}]},
-   ]},
-   {id:'order',label:'Order and grouping',controls:[
-    {id:'group',label:'Grouping',type:'choice',options:[
-      {id:'none',label:'None, latest first',current:true},{id:'stmt',label:'By statement',hint:'Each header says open or closed, and when it’s due.'},
-      {id:'month',label:'By month'},{id:'cat',label:'By category',hint:'Biggest spend first.'}]},
-    {id:'groupCat',label:'By category uses',type:'choice',options:[{id:'yours',label:'Your top level'},{id:'card',label:'The merchant category'}]},
-    {id:'groupSub',label:'Subtotals in group headers',type:'toggle',default:true},
-    {id:'groupFold',label:'Older groups start folded',type:'toggle',default:false},
-    {id:'sortable',label:'Click a header to sort',type:'toggle',default:true},
-    {id:'length',label:'Long lists',type:'choice',options:[
-      {id:'more',label:'Latest 12, then Show all',current:true,hint:'Approved.'},{id:'all',label:'The whole period'},{id:'scroll',label:'The panel scrolls, headers stay'}]},
-   ]},
-   {id:'edit',label:'Changing a row',controls:[
-    {id:'catEdit',label:'Your category',type:'choice',options:[
-      {id:'none',label:'Read-only here',current:true},{id:'pill',label:'Click it: grouped list with search',hint:'One click saves, as on the Transactions page. Needs the column on.'},
-      {id:'menu',label:'From the ⋯ menu'}]},
-    {id:'spEdit',label:'Spender',type:'choice',options:[
-      {id:'click',label:'Click the cell: pick or add a name',current:true,hint:'Today’s behavior.'},{id:'menu',label:'From the ⋯ menu'},{id:'bulk',label:'Only for selected rows'}]},
-    {id:'merchEdit',label:'Merchant category and brand',type:'choice',options:[
-      {id:'none',label:'Read-only here',current:true,hint:'Edited in the Transactions page’s details window.'},
-      {id:'unknown',label:'Set it when Unknown',hint:'Click the amber Unknown. Saves a merchant rule for every card, then the before-and-after recalculation.'},
-      {id:'details',label:'⋯ → Transaction details',hint:'Opens the Transactions page’s details window, merchant category box included.'}]},
-    {id:'extras',label:'Splits and notes',type:'choice',options:[
-      {id:'none',label:'Not here',current:true},{id:'menu',label:'⋯ → Split…, Add note…',hint:'A note shows under the merchant name. Notes need a new field on transactions.'},
-      {id:'details',label:'Through the details window'}]},
-    {id:'rowClick',label:'Clicking a row',type:'choice',options:[
-      {id:'none',label:'Nothing',current:true},{id:'expand',label:'Opens a strip under the row',hint:'The card’s view beside yours.'},{id:'details',label:'Opens the details window'}]},
-    {id:'selBar',label:'Selection bar',type:'choice',options:[
-      {id:'spender',label:'Tag a spender',current:true,hint:'Today’s bar.'},{id:'full',label:'Category, spender, exclude'},{id:'tx',label:'Edit selected (Transactions page)'}]},
-   ]},
-   {id:'tot',label:'Totals and empty states',controls:[
-    {id:'totals',label:'Totals',type:'choice',options:[
-      {id:'bar',label:'Totals bar',current:true,hint:'Approved: spend, points, rows missing a category.'},
-      {id:'strip',label:'Uppercase line (Transactions page)'},{id:'figs',label:'Figure tiles',hint:'Adds points per dollar of spend.'}]},
-    {id:'totCredits',label:'Show credits and refunds',type:'toggle',default:false},
-    {id:'empty',label:'Empty list',type:'choice',options:[
-      {id:'plain',label:'“No transactions for this period.”',current:true},{id:'helpful',label:'Say when the last charge was, offer to go there'}]},
+   {id:'r1',label:'Decided in round 1',open:false,controls:[
+    {id:'yourColD',label:'Your category',type:'choice',locked:true,options:[{id:'off',label:'Not on this page'}]},
+    {id:'cardCol',label:'The card’s category',type:'choice',locked:true,options:[{id:'bonus',label:'Bonus category'}]},
+    {id:'brandCol',label:'Brand',type:'choice',locked:true,options:[{id:'card',label:'In the card’s category cell'}]},
+    {id:'typeCol',label:'Type',type:'choice',locked:true,options:[{id:'type',label:'Expense or Credit'}]},
+    {id:'spCol',label:'Spender',type:'choice',locked:true,options:[{id:'always',label:'Always'}]},
+    {id:'ptsCol',label:'Rate and points',type:'choice',locked:true,options:[{id:'two',label:'Rate and Points columns'}]},
+    {id:'amtStyle',label:'Amount',type:'choice',locked:true,options:[{id:'card',label:'Card statement style'}]},
+    {id:'dateFmt',label:'Date',type:'choice',locked:true,options:[{id:'num',label:'10/25, as on Transactions'}]},
+    {id:'rowStyle',label:'Rows',type:'choice',locked:true,options:[{id:'ledger',label:'Dense ledger, striped'}]},
+    {id:'payments',label:'Card payments',type:'choice',locked:true,options:[{id:'hide',label:'Hidden'}]},
+    {id:'pending',label:'Pending charges',type:'choice',locked:true,options:[{id:'top',label:'At the top, marked Pending (needs a sync change)'}]},
+    {id:'period',label:'Date selector',type:'choice',locked:true,options:[{id:'own',label:'Monthly, QTD, YTD, Custom'}]},
+    {id:'filterStyle',label:'Filters',type:'choice',locked:true,options:[{id:'chips',label:'Bonus category chips'}]},
+    {id:'fBrand',label:'Brand filter',type:'toggle',locked:true,default:false},
+    {id:'fUnknown',label:'Unknown merchant chip',type:'toggle',locked:true,default:false},
+    {id:'search',label:'Search box',type:'choice',locked:true,options:[{id:'box',label:'Outlined box'}]},
+    {id:'group',label:'Grouping',type:'choice',locked:true,options:[{id:'none',label:'None, latest first'}]},
+    {id:'sortable',label:'Click a header to sort',type:'toggle',locked:true,default:true},
+    {id:'length',label:'Long lists',type:'choice',locked:true,options:[{id:'more',label:'Latest 12, then Show all'}]},
+    {id:'spEdit',label:'Spender',type:'choice',locked:true,options:[{id:'click',label:'Click the cell: pick or add a name'}]},
+    {id:'extrasD',label:'Splits and notes',type:'choice',locked:true,options:[{id:'none',label:'Not here'}]},
+    {id:'selBar',label:'Selection bar',type:'choice',locked:true,options:[{id:'spender',label:'Tag a spender'}]},
+    {id:'totals',label:'Totals',type:'choice',locked:true,options:[{id:'bar',label:'Totals bar'}]},
+    {id:'totCredits',label:'Credits and refunds in the totals',type:'toggle',locked:true,default:false},
+    {id:'empty',label:'Empty list',type:'choice',locked:true,options:[{id:'plain',label:'“No transactions for this period.”'}]},
    ]},
    {id:'decided',label:'Decided earlier (Card page, rounds 1-8)',open:false,controls:[
     {id:'look',label:'Look',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud, brand blue, Outfit + Plus Jakarta, 13px corners',tokens:Object.assign(light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F'),{'--f-h':"'Outfit',system-ui,sans-serif",'--f-b':"'Plus Jakarta Sans',system-ui,sans-serif"})}]},
@@ -415,12 +523,14 @@ Gallery.define({
     {id:'linkD',label:'Linked purchase',type:'choice',locked:true,options:[{id:'dot',label:'Green $ circle after the merchant'}]},
    ]},
   ],
-  render(p,d,h){if(!L||L.card!==p.card||L.data!==p.data||L.period!==p.period||L.fs!==p.filterStyle){resetS();S.r=defPeriod(p)}
+  render(p,d,h){p=fill(p);
+    if(!L||L.card!==p.card||L.data!==p.data||L.period!==p.period||L.fs!==p.filterStyle){const keep=L&&L.data===p.data?S.ed:{};resetS();S.ed=keep;S.r=defPeriod(p)}
+    if(!L||L.d!==d){RC={};ALL=[];Object.entries(d.cards).forEach(([n,c])=>c.rows.forEach(r=>{RC[r.id]=n;ALL.push(r)}))}
     if(L&&(L.group!==p.group||L.groupCat!==p.groupCat||L.fold!==p.groupFold))S.coll=null;
     L=Object.assign(L||{},{d,h,picks:p,card:p.card,data:p.data,period:p.period,fs:p.filterStyle,group:p.group,groupCat:p.groupCat,fold:p.groupFold});
-    TODAY=d.today;PAR={};d.cats.forEach(c=>{if(c.p)PAR[c.n]=c.p});S.pop=null;S.modal=null;
+    TODAY=d.today;PAR={};d.cats.forEach(c=>{if(c.p)PAR[c.n]=c.p});S.pop=null;S.modal=null;S.fx=null;
     return page(p)},
-  after(root,p){L.root=root;L.picks=p;wire(root,p)},
+  after(root,p){p=fill(p);L.root=root;L.picks=p;wire(root,p)},
   css:`
 #pv{--c-radius:13px;--c-density:1.25;background:var(--bg);color:var(--tx);font-family:var(--f-b);font-size:14px;--p:calc(16px*var(--c-density));--gap:calc(12px*var(--c-density))}
 #pv *{box-sizing:border-box}
@@ -581,6 +691,32 @@ Gallery.define({
 #pv .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}#pv .tl{border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:grid;gap:2px}#pv .tl span{font-size:10.5px;color:var(--tx3)}#pv .tl b{font-size:12.5px;font-weight:600}
 #pv .fld{display:grid;gap:4px;font-size:12px;color:var(--tx2)}
 #pv .toast{position:absolute;right:28px;z-index:40;background:#0F172A;color:#fff;font-size:12.5px;padding:8px 14px;border-radius:9px;box-shadow:0 8px 20px rgba(15,23,42,.25)}
+/* Fixing a charge (round 2) */
+#pv .bnd{color:var(--tx3);font-weight:400}
+#pv .fixb{max-width:100%}#pv .fixb .cv{opacity:.3;margin-left:1px}#pv .fixb:hover .cv,#pv .fixb:focus-visible .cv{opacity:.9}
+#pv .tx tr.fxon td{background:color-mix(in srgb,var(--ac) 9%,transparent)!important}
+#pv .po .pol{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#pv .po .pp{color:var(--tx3);font-weight:400}
+#pv .prt{font-size:11px;color:var(--tx3);white-space:nowrap;font-weight:400}#pv .prt.hi{color:var(--ac);font-weight:600}
+#pv .po .ok{color:var(--ac);font-size:11px}
+#pv .psec{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);padding:7px 8px 3px}
+#pv .rck{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}#pv .rck.sm{font-size:12px;padding:0 4px}#pv .rck b{font-weight:600}
+#pv .rin{display:grid;gap:5px;padding:0 4px}
+#pv .pat{display:flex;gap:6px;align-items:center;flex-wrap:wrap}#pv .pat .inp{flex:1 1 130px}
+#pv .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex:none}#pv .seg button{font-size:11.5px;padding:4px 9px;color:var(--tx2)}#pv .seg button.on{background:var(--ac-soft);color:var(--ac);font-weight:600}
+#pv .rl{margin:0;font-size:12px;color:var(--tx2)}
+#pv .rbox{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:8px}#pv .rh{font-size:11.5px;color:var(--tx3)}
+#pv .ba{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--raised)}#pv .ba>div{display:grid;gap:2px;flex:1;min-width:0}
+#pv .ba span{font-size:10.5px;color:var(--tx3);text-transform:uppercase;letter-spacing:.06em}#pv .ba b{font-size:13px;font-weight:600}#pv .ba b span{font-size:inherit;text-transform:none;letter-spacing:0}#pv .ba i{font-style:normal;color:var(--tx3)}
+#pv .mdl .pl{max-height:210px;border:1px solid var(--line);border-radius:9px;padding:3px}
+#pv .fld>span{font-size:12px;color:var(--tx2)}#pv .fld.in{display:flex;align-items:center;gap:8px;padding:0 4px}
+#pv .chl{display:grid;font-size:12px;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+#pv .chh,#pv .chr{display:grid;grid-template-columns:44px 92px minmax(0,1fr) auto;gap:8px;padding:5px 10px;align-items:center}
+#pv .chh{font-size:10.5px;color:var(--tx3);background:var(--raised)}#pv .chr{border-top:1px solid var(--line)}#pv .chr.more{display:block;color:var(--tx3)}
+#pv .chr .cm{min-width:0}#pv .chr .cm b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#pv .chr .cm small{color:var(--tx3);font-size:10.5px}#pv .chr .n,#pv .chh .n{text-align:right;white-space:nowrap}
+#pv .askbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 14px;padding:8px 12px;margin-bottom:10px;border-radius:9px;background:color-mix(in srgb,var(--ac) 7%,var(--surface));border:1px solid color-mix(in srgb,var(--ac) 25%,transparent);font-size:12.5px}#pv .askbar>span:last-child{display:flex;gap:6px}
+#pv .mi.off{color:var(--tx3);cursor:default;display:block}
+#pv .pf.col{display:grid;gap:7px;justify-content:stretch}#pv .bt2{display:flex;gap:6px;justify-content:flex-end}
+#pv .btn.trunc{max-width:220px;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:980px){#pv .rail{grid-template-columns:minmax(0,1fr)}}
 `});
 })();
