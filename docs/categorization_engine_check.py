@@ -49,10 +49,9 @@ RULES = {
     'Platinum': (1, {'Airlines': 5, 'Portal>Amex Travel': 5}),
     'Biz Gold': (1, {'Portal>Amex Travel': 3, 'Dining:US': 'top2', 'Gas Stations': 'top2', 'Transit': 'top2'}),
     'Strata Prem': (1, {'Airlines': 3, 'Hotels': 3, 'Dining': 3, 'Groceries': 3, 'Gas Stations': 3}),
-    'Sapphire Pref': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Food Delivery': 3, 'Streaming': 3,
+    'Sapphire Pref': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Streaming': 3,
                           'Groceries:online': 3, 'Airlines': 2, 'Hotels': 2, 'Transit': 2}),
-    'Freedom Flex': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Drugstores': 3, 'Food Delivery': 3,
-                         'rotating': 'Q'}),
+    'Freedom Flex': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Drugstores': 3, 'rotating': 'Q'}),
     'Bilt Obsidian': (1, {'Groceries': '3 to cap', 'Airlines': 2, 'Hotels': 2}),
 }
 
@@ -93,7 +92,8 @@ SCENARIOS = [
      {'pfc': 'FOOD_AND_DRINK_RESTAURANT'}),
     ('Foreign restaurant', 'MINENE ramat hashar', None, -100, 'Dining',
      {'foreign': True, 'pfc': 'FOOD_AND_DRINK_RESTAURANT'}),
-    ('DoorDash food', 'DD *DOORDASH', 'DoorDash', -100, 'Food Delivery', {}),
+    ('DoorDash food', 'DD *DOORDASH', 'DoorDash', -100, 'Dining>DoorDash', {}),   # delivery is dining
+    ('Uber Eats food', 'UBER EATS', 'Uber Eats', -100, 'Dining>Uber Eats', {}),
     ('DoorDash gift card', 'DD *DOORDASH GIFTCARDS', 'DoorDash', -100, 'Gift Cards', {}),
     ('Giftcards.com', 'BHN*GIFTCARDS.COM', 'Giftcards.com', -100, 'Gift Cards', {}),
     ('CVS', 'CVS', 'CVS', -100, 'Drugstores', {}),

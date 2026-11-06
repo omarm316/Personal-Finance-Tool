@@ -54,7 +54,8 @@ Built to the plan Omer approved on 2026-11-03, implementing `docs/cards-categori
 
 **Taught-rule migration choices:**
 - "King" was dropped; the code rule "Kings" covers the stores and no longer matches "Parking".
-- "DoorDash → Dining" was dropped in favour of Food Delivery.
+- "DoorDash → Dining" was dropped as a duplicate of the code rule.
+- **Food Delivery folded into Dining (2026-11-05).** It sat beside Dining as its own top-level merchant category, so card rules on Dining missed delivery orders (Aspire paid 3x instead of 7x on DoorDash, Strata Premier 1x instead of 3x). DoorDash, Uber Eats and Grubhub are now brands under Dining. `RETIRED_MERCHANT_CATEGORIES` in `core/earn_rules_seed.py` moves brands, merchant rules, earn rules, selections and rows to Dining on startup, then deletes the old category. Omer's personal Dining › Food Delivery stays; it only feeds budgets.
 - Giftcards.com → Gift Cards; Lululemon → Other.
 - "Aspire", "Liberty Science" and "TPA" are migrated **inactive** for Omer to decide.
 - Old news patterns (NYT, WSJ, Washington Post) → Other, not Streaming.

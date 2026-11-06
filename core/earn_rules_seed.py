@@ -21,7 +21,7 @@ from datetime import date
 
 from database import (
     Brand, Card, CardCategorySelection, CardProduct, CategorizationRule,
-    EarnRule, MerchantCategory, MerchantPointsMapping, MerchantRule,
+    EarnRule, MerchantCategory, MerchantPointsMapping, MerchantRule, Transaction,
 )
 
 # (name, parent, display_order). Rates name these levels, so a rule on
@@ -34,8 +34,7 @@ MERCHANT_CATEGORIES: list[tuple[str, str | None, int]] = [
     ('Vacation Rentals',  'Travel',    14),
     ('Transit',           'Travel',    15),   # rideshare, taxis, trains, subway, parking, tolls
     ('Portal',            None,        20),   # booking portals are merchants (rule 7)
-    ('Dining',            None,        30),
-    ('Food Delivery',     None,        31),
+    ('Dining',            None,        30),   # restaurants and food delivery (DoorDash, Uber Eats, Grubhub)
     ('Groceries',         None,        40),
     ('Superstores',       None,        41),   # Walmart, Target — not Groceries (rule 4)
     ('Wholesale Clubs',   None,        42),   # Costco, Sam's Club
@@ -64,7 +63,7 @@ BRANDS: list[tuple[str, str]] = [
     ('Alaska Airlines', 'Airlines'), ('Hawaiian Airlines', 'Airlines'), ('Southwest', 'Airlines'),
     ('JetBlue', 'Airlines'), ('El Al', 'Airlines'), ('Air Canada', 'Airlines'), ('Air France', 'Airlines'),
     ('Uber', 'Transit'), ('Lyft', 'Transit'),
-    ('DoorDash', 'Food Delivery'), ('Uber Eats', 'Food Delivery'), ('Grubhub', 'Food Delivery'),
+    ('DoorDash', 'Dining'), ('Uber Eats', 'Dining'), ('Grubhub', 'Dining'),
     ('Whole Foods', 'Groceries'), ('Instacart', 'Groceries'),
     ('Walmart', 'Superstores'), ('Target', 'Superstores'),
     ('Costco', 'Wholesale Clubs'), ("Sam's Club", 'Wholesale Clubs'), ("BJ's", 'Wholesale Clubs'),
@@ -80,7 +79,7 @@ LEGACY_CATEGORY_MAP: dict[str, tuple[str | None, str | None]] = {
     'Ground Transportation': ('Transit', None),
     'Transit & Rideshare': ('Transit', None),
     'Drugstore': ('Drugstores', None), 'Drug Store': ('Drugstores', None),
-    'Dining & Restaurants': ('Dining', None),
+    'Dining & Restaurants': ('Dining', None), 'Food Delivery': ('Dining', None),
     'Gas & EV Charging': ('Gas & EV', None),
     'Streaming & Subscriptions': ('Streaming', None),
     'Fitness & Gyms': ('Fitness', None),
@@ -94,6 +93,11 @@ LEGACY_CATEGORY_MAP: dict[str, tuple[str | None, str | None]] = {
     'Other / Uncategorized': ('Other', None), 'Healthcare & Medical': ('Other', None),
     'Online Retail': ('Online Shopping', None),
 }
+
+# Categories folded into another; the seed moves everything that points at
+# the old one, then deletes it. Food Delivery sat beside Dining, so card
+# rules on Dining missed delivery orders (Omer, 2026-11-05: delivery is dining).
+RETIRED_MERCHANT_CATEGORIES: dict[str, str] = {'Food Delivery': 'Dining'}
 
 _CATEGORY_NAMES = {name for name, _, _ in MERCHANT_CATEGORIES}
 _BRAND_NAMES = {name for name, _ in BRANDS}
@@ -164,7 +168,6 @@ EARN_RULES: dict[str, dict] = {
         'checked': 'verified 2026-11-02', 'base': 1, 'rules': [
             {'brand': 'Chase Travel', 'rate': 5},
             {'category': 'Dining', 'rate': 3},
-            {'category': 'Food Delivery', 'rate': 3},
             {'category': 'Drugstores', 'rate': 3},
             {'type': 'selected', 'slot': 'rotating', 'rate': 5, 'cap': 1500, 'per': 'quarter', 'group': 'rotating'},
         ]},
@@ -183,7 +186,6 @@ EARN_RULES: dict[str, dict] = {
         'checked': 'ported (rates from memory, June 2026 refresh unconfirmed — B35)', 'base': 1, 'rules': [
             {'brand': 'Chase Travel', 'rate': 5},
             {'category': 'Dining', 'rate': 3},
-            {'category': 'Food Delivery', 'rate': 3},
             {'category': 'Streaming', 'rate': 3},
             {'category': 'Groceries', 'rate': 3, 'online': True},
             {'category': 'Travel', 'rate': 2},
@@ -411,7 +413,7 @@ _OLD_PATTERN_OVERRIDES: dict[str, tuple[str | None, str | None]] = {
 # drops the row; 'review' migrates it inactive for Omer to decide.
 _TAUGHT_OVERRIDES: dict[int, object] = {
     29: 'skip',      # "King" → Groceries matched "Parking"; the code rule "Kings" covers the stores
-    16: 'skip',      # "DoorDash" → Dining contradicted the Food Delivery rule
+    16: 'skip',      # "DoorDash" → Dining duplicates the code rule (brand DoorDash, path Dining)
     15: ('Gift Cards', None),     # Giftcards.com
     23: ('Other', None),          # Lululemon
     17: 'review', 8: 'review', 9: 'review',   # "Aspire" → Hilton, "Liberty Science"/"TPA" → Dining
@@ -475,6 +477,24 @@ def seed_earning_catalog(session) -> None:
     session.flush()
     for name, parent, _order in MERCHANT_CATEGORIES:
         cats[name].parent_id = cats[parent].id if parent else None
+    for old, new in RETIRED_MERCHANT_CATEGORIES.items():
+        gone = cats.pop(old, None)
+        if gone is None:
+            continue
+        to = cats[new]
+        session.query(Brand).filter_by(default_category_id=gone.id).update(
+            {'default_category_id': to.id}, synchronize_session=False)
+        for model in (MerchantRule, EarnRule, CardCategorySelection):
+            session.query(model).filter_by(merchant_category_id=gone.id).update(
+                {'merchant_category_id': to.id}, synchronize_session=False)
+        session.query(MerchantCategory).filter_by(parent_id=gone.id).update(
+            {'parent_id': to.id}, synchronize_session=False)
+        for t in session.query(Transaction).filter_by(merchant_category=old).all():
+            t.merchant_category = new
+            if t.points_category == old:     # 2027 rows mirror their path here
+                t.points_category = new
+        session.delete(gone)
+    session.flush()
 
     brands = {b.name: b for b in session.query(Brand).all()}
     for name, cat in BRANDS:

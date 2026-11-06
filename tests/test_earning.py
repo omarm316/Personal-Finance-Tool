@@ -50,7 +50,7 @@ class TestClassifier:
         gift = _classify('DD *DOORDASH GIFTCARDS', 'DoorDash')
         food = _classify('DD *DOORDASH', 'DoorDash')
         assert (gift.merchant_category, gift.brand) == ('Gift Cards', None)
-        assert (food.merchant_category, food.brand) == ('Food Delivery', 'DoorDash')
+        assert (food.merchant_category, food.brand) == ('Dining', 'DoorDash')
         assert _classify('UBER EATS', 'Uber Eats').brand == 'Uber Eats'
         assert _classify('COSTCO GAS #1', 'Costco Gas').merchant_category == 'Gas Stations'
 
@@ -136,6 +136,35 @@ class TestEngine:
         assert old.points_earned == 300 and old.merchant_category is None and old.txn_kind is None
         assert new.points_earned == 100 and new.merchant_category == 'Superstores'
         assert new.points_category == 'Walmart'          # display label mirrored for old pages
+
+    def test_food_delivery_earns_dining(self, catalog):
+        db = catalog
+        aspire = make_card(db, 'hilton_aspire', issuer='AMEX')
+        strata = make_card(db, 'citi_strata_premier', issuer='CITI')
+        assert spend(db, aspire, -100, 'DD *DOORDASH', 'DoorDash').points_earned == 700
+        assert spend(db, strata, -100, 'UBER EATS', 'Uber Eats').points_earned == 300
+
+    def test_retired_category_folds_into_dining(self, catalog):
+        from database import Brand, MerchantRule
+        db = catalog
+        old = MerchantCategory(name='Food Delivery', display_order=31)
+        db.add(old)
+        db.flush()
+        db.query(Brand).filter_by(name='DoorDash').update({'default_category_id': old.id})
+        rule = MerchantRule(pattern='postmates', merchant_category_id=old.id)
+        db.add(rule)
+        card = make_card(db, 'chase_sapphire_preferred')
+        t = spend(db, card, -20, 'SEAMLESS NYC', 'Seamless')
+        t.merchant_category = t.points_category = 'Food Delivery'
+        db.commit()
+
+        seed_earning_catalog(db)
+        dining = db.query(MerchantCategory).filter_by(name='Dining').one()
+        assert db.query(MerchantCategory).filter_by(name='Food Delivery').first() is None
+        assert db.query(Brand).filter_by(name='DoorDash').one().default_category_id == dining.id
+        assert db.get(MerchantRule, rule.id).merchant_category_id == dining.id
+        assert (t.merchant_category, t.points_category) == ('Dining', 'Dining')
+        seed_earning_catalog(db)                         # second run is a no-op
 
     def test_fees_and_credits_earn_zero(self, catalog):
         card = make_card(catalog, 'hilton_aspire', issuer='AMEX')

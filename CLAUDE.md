@@ -29,6 +29,7 @@ Cards module, in this order (see `PLAN.md` "Cards module layout work" and `BACKL
 - **Parked:** duplicate-import cleanup (94 rows flagged); editing a transaction's spender and category (waits on item 2).
 
 ## Recently Completed
+- 2026-11-05 — 2027 engine: Food Delivery folded into Dining, so delivery orders earn each card's dining rate. Tests 113 passed; engine check 200/200.
 - 2026-11-04 — Two-level personal categories (top level › sub-category) with a Settings › Categories editor (`routers/categories.py`, `CategoryEditor.jsx`, design in `docs/settings-categories-design.md`). History moved by `docs/category_tree_migration.py`. The For Others tag is now the Other › For Others category. Tests 111 passed.
 - 2026-11-03 — Cards step 2 stage 1: the 2027 earning engine (merchant path, brand, kinds, earn rules with caps, top categories, selections and country limits; review list and before-and-after recalculation). Engine check 195/195; tests 85 passed (B27 fixed).
 - 2026-11-03 — Sync fix: real same-day repeat charges no longer dropped (`cb4e4cd`).
