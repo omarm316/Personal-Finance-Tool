@@ -1,6 +1,6 @@
 # Cards: Card page transactions table
 
-Chosen with the design gallery in three rounds (2026-11-05 to 2026-11-07). This is the desktop design, and it is not built yet. The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
+Chosen with the design gallery in three rounds (2026-11-05 to 2026-11-07). Omer approved this desktop design on 2026-11-07; it is not built yet. The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
 
 - **Gallery:** https://claude.ai/artifact/Td3kGZkHsEvw7YvkVX5sQa.
 - **Source spec:** `mockups/design-gallery/cards-card-transactions.spec.js` (id `cards-card-tx-final`).
