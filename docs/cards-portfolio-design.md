@@ -5,7 +5,7 @@ Source spec: `mockups/design-gallery/cards-portfolio.spec.js`.
 
 - **Look:** Cloud color scheme, brand blue accent, Outfit + Plus Jakarta (the gallery default; no other typeface was picked), hairline panels, 13px corners, 1.25 spacing.
 - **Chrome:** top navigation bar; boxed header bar with underlined Cards tabs and underlined period selector.
-- **Order:** programs, cards, challenges.
+- **Order:** programs, cards, challenges. The Actions strip (chosen 2026-11-07, `docs/cards-actions-design.md`) goes above programs, so the build order is actions, programs, cards, challenges.
 - **Programs:** compact tiles, logo on the surface, highest balance first, cash back as a normal tile. Each tile shows earned this period and pending when above zero.
 - **Cards:** row with arrows, whole cards only, 175px target width, digits on the art (decided: keep, even though they cover the printed name), cardholder filter chips.
 - **Card art:** 1000 x 630 PNG, edge to edge, 44px transparent corners. Replacement files are in `mockups/design-gallery/card-art`; they replace `static/cards` when this page is built, after shrinking them. No new art will be sourced for now.

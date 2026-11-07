@@ -1,31 +1,64 @@
 # Cards: Actions strip (Portfolio and Ecosystem)
 
-Proposed 2026-11-05; **design gallery round 1 published 2026-11-07, waiting on Omer's picks**: https://claude.ai/artifact/UMrPe1TgDKxY4byEWpMEGq (spec `mockups/design-gallery/cards-actions.spec.js`, id `cards-actions-r1`). This brief stays the starting point until the picks come back. Desktop only; phone design comes later. Built together with the Portfolio and Ecosystem pages (Cards step 4), after the benefits data model (step 3), so it never shows wrong amounts.
+Chosen with the design gallery (round 1, 2026-11-07; brief written 2026-11-05). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Gallery: https://claude.ai/artifact/UMrPe1TgDKxY4byEWpMEGq, source spec `mockups/design-gallery/cards-actions.spec.js` (id `cards-actions-final`, every choice locked). Inherits the look in `docs/cards-portfolio-design.md` and the expiring-credit card in `docs/cards-card-design.md`.
+
+Built together with the Portfolio and Ecosystem pages (Cards step 4), after the benefits data model (step 3), so it never shows wrong amounts.
 
 ## Why
 Today, expiring credits appear only on each Card page (Expiring credits row plus the Benefits "Expires if unused" box). Nothing gathers what needs doing across all cards. Portfolio lists every challenge but doesn't separate the urgent ones. Ecosystem has challenges but no credits.
 
-## Proposal (starting point for the gallery)
-- **Portfolio placement:** a strip above programs. Order becomes actions, programs, cards, challenges.
-- **Ecosystem placement:** the same strip, filtered to that program's cards, under the header (above the balance ledger).
-- **Contents, phase 1:**
-  1. **Expiring credits from every card in scope.** Same rule as the Card page: the current period still has money left and resets within 60 days, soonest first, then the larger amount first.
-  2. **Challenges at risk.** Active, not complete, and `end_date` within 30 days, or behind the pace needed to finish by `end_date`. Challenges that are on track stay only in the challenges grid, so the strip doesn't repeat it.
-- **Item card:** the same component as the Card page's expiring-credit card (same height, countdown circle, red at 14 days or less, amber at 30 or less, otherwise blue). Added: a small card-art thumbnail and the card name, because items come from several cards. Credits read "$X left, by <date>"; challenges read "$X to go, by <date>".
-- **Actions:** credits use the Card page's mark-used flow unchanged (hover check, "Marked used", Undo, 5-second bar, then the next item slides in). Challenges have no quick action, because spend is calculated. Clicking one opens its Card page.
-- **Overflow:** up to 4 or 5 items, then a dashed "+N more" card that opens the full list grouped by card. Per the working rules, a window closes only with its buttons.
-- **Heading:** "Actions · N items · $X in credits expiring". Credit amounts are real dollars only; no value per point is ever shown.
-- **Empty state:** one line, "All caught up for the next 60 days. Next: <credit>, $X by <date>", so the strip takes almost no room.
+## Design
+- **Look:** Cloud color scheme, brand blue accent, Outfit + Plus Jakarta, 13px corners, 1.25 spacing, top navigation bar.
+- **Placement:** a strip at the top of the page.
+  - **Portfolio:** the first section under the header bar, above Rewards programs. Page order becomes actions, programs, cards, challenges.
+  - **Ecosystem:** under the balance header, above the balance ledger, with only that program's cards in scope.
+- **Heading:** "Actions" on the left; two count chips on the right, "N credits, $X" (amber dot) and "N challenges at risk" (red dot). A chip hides when its count is zero. Amounts are real dollars only; no value per point is ever shown.
+- **Two labeled rows:** "Credits expiring", then "Challenges at risk". A row with nothing in it is not shown.
+- **How many:** each row shows as many items as fit on one line, with a 240px smallest item width. When more are waiting, a narrow dashed "+N more" card (about 112px) closes the row. Clicking it expands that row in place to show every item as cards, and the same card then reads "Show fewer". Each row expands on its own.
+- **Order within a row:** soonest first, then the larger amount first.
 
-## Questions for the gallery
-- Strip at the top vs. a side rail vs. a header badge that opens a panel.
-- How many items before "+N more" (4 or 5), and whether credits and challenges are mixed by date or grouped.
-- The challenge "at risk" rule: days left only, or also pace.
-- How the card thumbnail sits on the item card.
+### Item card
+The Card page's expiring-credit card, plus a header line for the card it comes from.
+- **Header line:** a small card-art thumbnail, then the card name and whose card it is ("Amex Platinum 1008 · Omer"), with a hairline under it. A card with no cardholder shows the name only.
+- **Body:** a countdown circle on the left (days left in the middle, the arc showing the share of the period left), then the name and one line of detail.
+  - Credits: "$X left, by <date>".
+  - Challenges: "$X to go, by <date>", in whole dollars.
+  - The amount takes the circle's color.
+- **Circle color:** red at 14 days or less, amber at 30 or less, otherwise blue. Challenges use the same countdown as credits: days left to the end date, the arc showing the share of the challenge window left.
+- **Height:** the card is about 18px taller than the Card page's expiring card, for the header line. Every card in the strip is the same height.
+
+### Which items
+- **Credits:** any credit whose current period still has money left and resets within 60 days. This is the Card page's rule, applied to every card in scope.
+- **Challenges at risk:** active and not complete, and either:
+  - the end date is within 30 days, or
+  - it is behind pace: spent less than the target times the share of the challenge window already gone. The window counts from the activation date when that is later than the start date.
+
+  Challenges on track appear only in the challenge grid.
+
+### Actions
+- **Credits:** the Card page's mark-used flow, unchanged. Hover or keyboard focus shows a check in a circle. A click marks the whole remaining amount used: the card turns green with "Marked used", an Undo button and a 5-second bar. When the time runs out:
+  - the card fades out;
+  - the next waiting item slides in;
+  - the chips' counts and total update;
+  - the credit shows as Used in that card's Benefits.
+
+  Partial amounts are logged in Benefits.
+- **Challenges:** no quick action, because spend is calculated. Hover shows a blue border and a "›". A click (or Enter) opens the challenge's Card page.
+- **Challenge grid:** a challenge in the strip is also marked in the challenge grid below it, with a red border and a red line "At risk, N days left" under its bonus. The grid still lists every challenge.
+
+### Nothing due
+One line in place of the strip: "ACTIONS ✓ All caught up for the next 60 days. Next: <credit> on <card>, $X by <date>." Next is the soonest credit whose period ends after the 60-day window, in its current or a coming period. When there is none, the line stops after the first sentence. The same line appears when the last item is marked used.
+
+## Seen in the gallery (Nov 7, 2026 figures)
+- From the statement model (Platinum 1008, Aspire 2007, SP 3698), the Portfolio strip holds 10 credits ($697.81) and 2 challenges. The challenges are Atmos Ascent 5707's companion certificate ($1,076 to go by Nov 19) and Prime Visa 6639's $100 off $750 ($750 to go by Nov 20).
+- With every stored credit counted as unused, it reaches 43 credits ($3,981.56), because most annual credits reset Dec 31. In that case the "+N more" card carries most of the load in November and December.
+- The Freedom Q4 challenges and AA's flight discount are on pace, so today the "behind pace" half of the rule adds nothing.
 
 ## Later, not in phase 1
 Annual fee coming due, payment due day, the earning engine's review list of unknown merchants, and missing card data (statement close days, networks).
 
 ## Depends on
 - Cards step 3, the benefits data model: per-period amounts, reset frequency, calendar or card year, uses with source, mark used with undo. Today's `CardBenefit` and `BenefitUsage` tables can't answer "resets within 60 days" reliably, and Platinum's stored credits are out of date.
-- `SpendChallenge.end_date` and the existing challenge progress in `core/challenges_helpers.py`.
+- `SpendChallenge.start_date`, `activation_date` and `end_date`, and the existing challenge progress in `core/challenges_helpers.py` (`lap_spend`, `progress_target`, `remaining_spend`).
+- A read endpoint for the strip (credits and challenges for one scope, with the "Next" credit) is a build-time decision; the gallery computed it all in the browser.

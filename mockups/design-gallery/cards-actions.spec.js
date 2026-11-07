@@ -101,8 +101,8 @@ function cats(e,d,h){if(!e.cats||!e.cats.length)return '';const max=Math.max(...
 const activity=()=>`<section><div class="s-head"><h2>Activity</h2></div><div class="sf pn"><p class="emp">Timeline, filters and add buttons as approved for the Ecosystem page; not repeated in this gallery.</p></div></section>`;
 
 Gallery.define({
-  id:'cards-actions-r1',
-  name:'Cards: Actions strip, round 1',
+  id:'cards-actions-final',
+  name:'Cards: Actions strip, final',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
@@ -119,61 +119,19 @@ Gallery.define({
       {id:'none',label:'All caught up',hint:'Everything due has been used.'},
     ]},
    ]},
-   {id:'place',label:'Where it goes',open:true,controls:[
-    {id:'place',label:'Placement',type:'choice',options:[
-      {id:'strip',label:'Strip at the top',hint:'The brief’s proposal. Portfolio: above programs. Ecosystem: under the balance header, above the ledger.'},
-      {id:'rail',label:'Side rail',hint:'A column beside programs and cards (Portfolio) or beside the ledger (Ecosystem). Items stack.'},
-      {id:'badge',label:'Header badge that opens a panel',hint:'Takes no room on the page. The count sits beside the period selector; the panel closes with × or Done.'},
-    ]},
-   ]},
-   {id:'items',label:'The item card',open:true,controls:[
-    {id:'thumb',label:'Card thumbnail',type:'choice',options:[
-      {id:'top',label:'Card art and name across the top',hint:'A small header line names the card; the countdown and credit sit below.'},
-      {id:'left',label:'Larger art on the left, circle on the right',hint:'The art leads, the countdown closes the row.'},
-      {id:'badge',label:'Small art pinned to the circle',hint:'Card name as a third line of text.'},
-      {id:'text',label:'No art, card name in text',hint:'Same card as the Card page, plus one line.'},
-    ]},
-    {id:'showOwner',label:'Show whose card it is',type:'toggle',default:true},
-    {id:'chCircle',label:'Circle on a challenge',type:'choice',options:[
-      {id:'days',label:'Days left, like credits',hint:'The brief’s proposal: the same countdown for both.'},
-      {id:'progress',label:'Spend progress with $ to go',hint:'Matches the challenge cards below; the color still shows urgency.'},
-    ]},
-    {id:'itemW',label:'Smallest item card (as many as fit)',type:'slider',min:200,max:290,step:5,default:230,unit:'px'},
-   ]},
-   {id:'list',label:'How many, and in what order',open:true,controls:[
-    {id:'cap',label:'Items before “+N more”',type:'choice',options:[
-      {id:'4',label:'4'},
-      {id:'5',label:'5'},
-      {id:'fit',label:'As many as fit one row',hint:'In the side rail: as many as fit beside programs and cards.'},
-    ]},
-    {id:'order',label:'Credits and challenges',type:'choice',options:[
-      {id:'date',label:'Mixed, soonest first'},
-      {id:'group',label:'Credits first, then challenges',hint:'Each kind sorted soonest first.'},
-      {id:'rows',label:'Two labeled rows',hint:'“Credits expiring” and “Challenges at risk”, each with its own “+N more”.'},
-    ]},
-    {id:'more',label:'“+N more” opens',type:'choice',options:[
-      {id:'modal',label:'A window, grouped by card',hint:'The brief’s proposal. Closes only with × or Done. Credits can be marked used there too.'},
-      {id:'drawer',label:'A side panel, grouped by card',hint:'Same list, from the right edge.'},
-      {id:'expand',label:'Expands the strip in place',hint:'All items as cards, then “Show fewer”.'},
-    ]},
-    {id:'head',label:'Heading',type:'choice',options:[
-      {id:'line',label:'One line',hint:'The brief’s “Actions · N items · $X in credits expiring”.'},
-      {id:'split',label:'Count left, totals right'},
-      {id:'chips',label:'Count chips',hint:'One chip for credits and one for challenges.'},
-    ]},
-   ]},
-   {id:'risk',label:'Which challenges show',open:true,controls:[
-    {id:'risk',label:'At risk means',type:'choice',options:[
-      {id:'pace',label:'Ends within 30 days, or behind pace',hint:'The brief’s proposal. Behind pace: spent less than the target times the share of the window gone. Today both rules pick the same two (Prime Visa and Atmos).'},
-      {id:'days',label:'Ends within 30 days only'},
-    ]},
-    {id:'flagGrid',label:'Mark at-risk challenges in the challenge grid',type:'toggle',default:false},
-   ]},
-   {id:'empty',label:'When nothing is due',open:true,controls:[
-    {id:'empty',label:'Empty state',type:'choice',options:[
-      {id:'line',label:'One line with the next credit',hint:'The brief’s proposal. Try Marriott Bonvoy, or mark everything used.'},
-      {id:'hide',label:'Hide it completely'},
-    ]},
+   {id:'r1',label:'Decided: round 1',open:false,controls:[
+    {id:'place',label:'Placement',type:'choice',locked:true,options:[{id:'strip',label:'Strip at the top'}]},
+    {id:'thumb',label:'Card thumbnail',type:'choice',locked:true,options:[{id:'top',label:'Card art and name across the top'}]},
+    {id:'showOwner',label:'Show whose card it is',type:'toggle',locked:true,default:true},
+    {id:'chCircle',label:'Circle on a challenge',type:'choice',locked:true,options:[{id:'days',label:'Days left, like credits'}]},
+    {id:'itemW',label:'Smallest item card',type:'slider',locked:true,min:200,max:290,step:5,default:240,unit:'px'},
+    {id:'cap',label:'Items before “+N more”',type:'choice',locked:true,options:[{id:'fit',label:'As many as fit one row'}]},
+    {id:'order',label:'Credits and challenges',type:'choice',locked:true,options:[{id:'rows',label:'Two labeled rows'}]},
+    {id:'more',label:'“+N more” opens',type:'choice',locked:true,options:[{id:'expand',label:'Expands the strip in place'}]},
+    {id:'head',label:'Heading',type:'choice',locked:true,options:[{id:'chips',label:'Count chips'}]},
+    {id:'risk',label:'At risk means',type:'choice',locked:true,options:[{id:'pace',label:'Ends within 30 days, or behind pace'}]},
+    {id:'flagGrid',label:'Mark at-risk challenges in the challenge grid',type:'toggle',locked:true,default:true},
+    {id:'empty',label:'Empty state',type:'choice',locked:true,options:[{id:'line',label:'One line with the next credit'}]},
    ]},
    {id:'decided',label:'Decided in the Cards galleries',open:false,controls:[
     {id:'scheme',label:'Color scheme',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud',tokens:light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F')}]},
