@@ -1,6 +1,6 @@
 # Transactions page design
 
-Chosen with the design gallery (rounds 1-2, 2026-11-04 to 2026-11-05). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1-2, 2026-11-04 to 2026-11-05). Two follow-ups were settled on 2026-11-07: the Excluded chip, and the Card earning box in the details window. Desktop approved; not yet implemented. Phone design is a separate, later exercise.
 Source spec: `mockups/design-gallery/transactions.spec.js` (id `transactions-final`). Final rendering with real rows: https://claude.ai/artifact/HrVA3kE5bYSmXCGFS4Fe6W
 Replaces the layout of today's `frontend/src/pages/TransactionsPage.jsx`, `components/TxnRow.jsx` and `components/ReviewModal.jsx`. Behavior stays as today unless a section below says otherwise.
 Example figures are from October 2026, using rows pulled 2026-11-04 (Aug 1 to Nov 3).
@@ -29,18 +29,24 @@ One row at the top of the list card that wraps when it runs out of room, in this
    - **Category** lists each top level with its subcategories indented under it. Ticking a top level also matches its subcategories.
 3. **Amount chip:** opens Min $ and Max $ fields, matched on dollar size in either direction, with Clear and Done. While set, the label reads "Amount: $50 – $200" ("any" for an empty side).
 4. **Needs review chip:** an ⚠ icon, the label and the count ("Needs review 36" in October). Clicking it shows only rows that need review; clicking again shows all rows. The count follows the period and the other filters.
-5. **Period** (outlined boxes):
+5. **Excluded chip:** a ⊘ icon, "Excluded" and the count ("Excluded 3" in October). Clicking it shows only the excluded rows, which are otherwise hidden; clicking again goes back. It follows the period and the other filters.
+   - Excluded and Needs review are separate views, so turning one on turns the other off.
+   - An exclusion is undone from the details window's ⊘ "Excluded" pill. The row then leaves the excluded view and counts in totals again.
+   - Fixes B37 for exclusions.
+6. **Period** (outlined boxes):
    - A **Year** dropdown ("All years", then each year).
    - A **Month** dropdown ("All months", Jan to Dec), shown once a year is picked.
    - **From → To** date fields, always shown. They fill in from the year and month. Editing either one switches to a custom range.
    - The default is the current month, through today.
-6. **Clear filters:** a text link at the end, shown only while a search or filter is on.
+7. **Clear filters:** a text link at the end, shown only while a search, filter or chip is on. It also turns off Needs review and Excluded.
 
 ## Totals strip
 An uppercase line under the toolbar, for exactly the rows shown: "262 TRANSACTIONS · EXPENSES: $10,498.71 · INCOME: $28,674.94". It uses today's rules:
 - GCB and For Others rows are left out.
 - Income booked in a spending category reduces spending; it doesn't count as income.
-- Excluded rows and the credit-card payment duplicates stay hidden from the list and the totals.
+- Excluded rows and the credit-card payment duplicates stay out of the list and the totals.
+- In the excluded view, the strip reads "3 EXCLUDED TRANSACTIONS · LEFT OUT OF EVERY TOTAL" instead of dollar totals.
+- The credit-card payment duplicates (the card side of a payment already shown from checking) stay hidden, as today, with no control to show them.
 
 ## Selection bar
 - **Checkboxes:** a checkbox column is always shown, and the header checkbox selects every row shown.
@@ -113,21 +119,35 @@ A window in the middle, laid out as a grid of fact tiles. It is read-only; editi
 3. **Tiles:**
    - Always: Date, Amount, Account, Type, Category ("Top › Sub", or "—" for types outside Expense and Income), Confidence, Import source (Plaid, CSV, OFX or Manual) and Enrichment (AI, Rule, Manual override, Fallback or Plaid category).
    - When present: Network and Spender.
-4. **Merchant category box:** shows the value with an **Edit** link, or "Not classified" with **Set**. The old scope selector (this card / every network card / all cards) is gone, because merchant rules are global from 2027. On rows dated 2027-01-01 on, the box also shows and edits brand, kind and foreign, through the `PATCH /api/transactions/{id}` fields from the earning engine. Earlier rows show the note "Brand, kind and foreign fill in on rows from January 1, 2027."
-5. **Points:**
-   - The label is "Points earned", "Points clawback", "Not counted for points" or "Manual override".
-   - Then the merchant category (or base rate) with the rate ("4x") and the signed points with the program.
-   - Accounts without points say "No card points on this account."
-   - There is no estimated dollar value. This fixes B38.
-6. **Tag pills:**
+4. **Card earning box:** one box for how the card scores the row, headed "Card earning" with an **Edit** link at the top right. Today's separate Merchant category box and points block merge into it.
+   - **Four cells in a row:** Merchant category, Brand, Kind and Foreign, sized 1.7 / 1.2 / 1 / 0.8 shares. An empty merchant category shows "Not classified".
+   - **Edit** turns the four cells into fields in place, with Cancel and Save under them:
+     - Merchant category: a dropdown with "Not classified" first.
+     - Brand: a dropdown from `/api/brands` with "None" first. Picking a brand with no merchant category fills in the brand's default category, as the API does.
+     - Kind: a dropdown of Purchase, Refund, Fee, Interest, Credit, Payment, Person to person and Adjustment.
+     - Foreign: a checkbox.
+   - **Saving** sends the fields to `PATCH /api/transactions/{id}`, and a "Card earning saved" toast confirms. On a 2027 row the API marks the classification manual.
+   - **Rows dated 2027-01-01 on:** all four fields show and edit. The merchant category list is the 2027 one (`/api/merchant-categories`).
+   - **Earlier rows:**
+     - Brand, Kind and Foreign show "—" and stay disabled in edit mode, since the API accepts them only on 2027 rows.
+     - The note "Brand, kind and foreign fill in on rows from January 1, 2027." sits under the cells.
+     - Merchant category edits today's points category from today's list.
+   - **No scope selector** (this card / every network card / all cards): merchant rules are global from 2027.
+   - **Points**, at the bottom of the box:
+     - The label is "Points earned", "Points clawback", "Not counted for points" or "Manual override".
+     - Then the merchant category (or base rate) with the rate ("2x") and the signed points with the program ("+148 AA AAdvantage").
+     - Accounts without points say "No card points on this account."
+     - There is no estimated dollar value. This fixes B38.
+5. **Tag pills:**
    - ⭐ "Tag as GCB" / "GCB tagged"
    - 👥 "Mark for others" / "For others"
    - ⊘ "Exclude" / "Excluded"
    - 🔒 "Locked", shown only when the row is locked
    - A "⚠ Needs review" label when the row needs review
-7. **Splits:** when the row is split, its parts, each with its note, category, type and amount.
-8. **Footer:** ⊕ Split (or ✎ Edit splits), Create rule, and Delete (red, behind the existing confirmation) on the left, with Close on the right.
+6. **Splits:** when the row is split, its parts, each with its note, category, type and amount.
+7. **Footer:** ⊕ Split (or ✎ Edit splits), Create rule, and Delete (red, behind the existing confirmation) on the left, with Close on the right.
 
 ## Open questions for the build
-- **B37, excluded rows:** the chosen toolbar has no way to see excluded rows or undo an exclusion. A suggestion in the same style is an "Excluded" chip with a count after Needs review that shows only excluded rows. It is not decided.
-- **2027 fields:** where brand, kind and foreign sit inside the merchant category box. They are small enough to lay out while building.
+None from the gallery. Omer settled both remaining questions on 2026-11-07:
+- Excluded rows get a chip.
+- Brand, kind and foreign go in the Card earning box, as recommended.

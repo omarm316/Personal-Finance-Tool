@@ -25,7 +25,7 @@ const FKEYS=[['act','Type','All types'],['cat','Category','All categories'],['ac
 // Preview state that survives re-renders. Edits live in S.ed and never leave the page.
 const S={per:'m:2026-10',from:'',to:'',q:'',f:{act:null,cat:null,acct:null,net:null},min:'',max:'',rev:false,tab:'all',
   sel:new Set(),open:null,sort:null,dir:'asc',exp:new Set(),pop:null,draft:null,edit:null,ed:{},queue:null,fpanel:false,
-  ropen:new Set(),batch:false,bd:{act:'',cat:''},cd:null,dd:null,rv:null};
+  ropen:new Set(),batch:false,bd:{act:'',cat:''},cd:null,dd:null,rv:null,exc:false,ce:null};
 let L=null,PAR={},TODAY='2026-11-03';
 
 /* ── Small helpers ────────────────────────────────────────── */
@@ -102,6 +102,7 @@ function dateInputs(){const[a,b]=S.per==='all'?['','']:perRange();
 function inPeriod(){const[a,b]=perRange();return L.d.txns.map(T).filter(t=>t.d>=a&&t.d<=b)}
 function scoped(p,rows){
   if(p.reviewStyle==='tabs'&&S.tab==='excluded')return rows.filter(t=>t.exc);
+  if(p.excCtl==='chip'&&S.exc)return rows.filter(t=>t.exc);
   let v=rows.filter(t=>!t.exc&&!isDup(t));
   if(p.reviewStyle==='tabs'){if(S.tab==='review')v=v.filter(t=>t.rev);else if(S.tab==='gcb')v=v.filter(t=>t.gcb);else if(S.tab==='split')v=v.filter(t=>t.spl)}
   else if(S.rev)v=v.filter(t=>t.rev);
@@ -185,16 +186,21 @@ function revCtlH(p){
   const n=facet(inPeriod().filter(t=>!t.exc&&!isDup(t))).filter(t=>t.rev).length;
   return `<button type="button" class="fb fb-${p.filterCtl} ${S.rev?'on':''}" data-revchip aria-pressed="${S.rev}">${ic('alert',13)}Needs review<em>${n}</em></button>`;
 }
-const anyFilter=()=>S.q||S.min||S.max||S.rev||FKEYS.some(([k])=>S.f[k]);
+function excChip(p){
+  if(p.excCtl!=='chip')return '';
+  const n=facet(inPeriod().filter(t=>t.exc)).length;
+  return `<button type="button" class="fb fb-${p.filterCtl} ${S.exc?'on':''}" data-excchip aria-pressed="${S.exc}" title="Rows left out of every total">${ic('ban',13)}Excluded<em>${n}</em></button>`;
+}
+const anyFilter=()=>S.q||S.min||S.max||S.rev||S.exc||FKEYS.some(([k])=>S.f[k]);
 const clearBtn=()=>anyFilter()?`<button type="button" class="lnk" data-clear>Clear filters</button>`:'';
 function filters(p){
   const st=p.filterPlace,perHere=p.header==='none'||p.perPlace==='toolbar',acts=actsInHeader(p)?'':actionBtns(p);
   const srch=p.searchStyle==='large'||(p.searchStyle==='header'&&p.header!=='none')?'':search(p);
   if(S.sel.size&&p.batchBar==='toolbar')return `<div class="fz sel-tb" data-region="r1">${batchInner(p)}</div>`;
   if(st==='toolbar'){const amt=amtCtl(p),rev=revCtlH(p),per=perHere?period(p):'',fb=FKEYS.map(([k,l,a])=>fBtn(p,k,l,a)).join('');
-    if(p.row2==='one')return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${fb}${amt}${rev}${per}</div><div class="fbs end">${clearBtn()}${acts}${moreHere(p)}</div></div></div>`;
+    if(p.row2==='one')return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${fb}${amt}${rev}${excChip(p)}${per}</div><div class="fbs end">${clearBtn()}${acts}${moreHere(p)}</div></div></div>`;
     return `<div class="fz tb" data-region="filters"><div class="tb1">${srch}<div class="fbs">${fb}${acts}</div></div>
-    <div class="tb2"><div class="fbs">${per}${amt}${rev}</div><div class="fbs end">${clearBtn()}${moreHere(p)}</div></div></div>`}
+    <div class="tb2"><div class="fbs">${per}${amt}${rev}${excChip(p)}</div><div class="fbs end">${clearBtn()}${moreHere(p)}</div></div></div>`}
   if(st==='panel'){const n=FKEYS.filter(([k])=>S.f[k]).length+(S.min||S.max?1:0)+(S.rev?1:0);
     return `<div class="fz row1" data-region="filters"><div class="fbs grow">${srch}<button type="button" class="fb fb-${p.filterCtl} ${S.fpanel||n?'on':''}" data-fpanel aria-expanded="${S.fpanel}">${ic('filter',14)}Filters${n?` · ${n}`:''}${ic(S.fpanel?'upc':'down',12)}</button>${perHere?period(p):''}</div><div class="fbs end">${clearBtn()}${acts}${moreHere(p)}</div></div>
       ${S.fpanel?`<div class="fpanel sf" data-region="filters">${FKEYS.map(([k,l])=>{const o=options(p,k).filter(x=>k!=='cat'||x.top||S.f.cat&&S.f.cat.has(x.v));
@@ -253,6 +259,7 @@ function summary(p,v,where){
   const s=p.summary;if(s==='none')return '';
   if((s==='bar'||s==='sentence')!==(where==='card'))return '';
   const tt=totals(v);
+  if(s==='bar'&&S.exc&&p.excCtl==='chip')return `<div class="ib" data-region="r1"><span><b>${tt.n}</b> EXCLUDED ${tt.n===1?'TRANSACTION':'TRANSACTIONS'}</span><span>LEFT OUT OF EVERY TOTAL</span></div>`;
   if(s==='bar')return `<div class="ib" data-region="r1"><span><b>${tt.n}</b> TRANSACTIONS</span>${tt.exp?`<span>EXPENSES: <b class="${tt.exp>0?'bad':'good'}">${money(tt.exp)}</b></span>`:''}${tt.inc>0?`<span>INCOME: <b class="good">${money(tt.inc)}</b></span>`:''}</div>`;
   if(s==='sentence')return `<p class="sent" data-region="r1"><b>${tt.n}</b> transactions · <b>${money(tt.exp)}</b> out · <b class="good">${money(tt.inc)}</b> in · net <b class="${tt.net<0?'bad':'good'}">${tt.net<0?'−':'+'}${money(tt.net)}</b></p>`;
   const fig=(l,val,cls='')=>`<div class="kv"><b class="kn val ${cls}">${val}</b><span class="kl">${l}</span></div>`;
@@ -469,6 +476,21 @@ function earn(t){
   return `<div class="earn ${t.pcls||'earn'}"><span class="lbl">${lab}</span><div class="er"><span>${t.pcat?esc(t.pcat):'<i>Base rate</i>'}${t.rate!=null?` · ${t.rate}x`:''}</span><b class="val">${t.pts>0?'+':''}${t.pts.toLocaleString('en-US')} <small>${esc(t.eco||'points')}</small></b></div></div>`;
 }
 const later='<p class="mut later">Brand, kind and foreign fill in on rows from January 1, 2027.</p>';
+const KINDS=[['purchase','Purchase'],['refund','Refund'],['fee','Fee'],['interest','Interest'],['credit','Credit'],['payment','Payment'],['p2p','Person to person'],['adjustment','Adjustment']];
+// One box for how the card scores the row: the four merchant fields, edited in place, then the points.
+function earnBox(t,p){
+  const is27=t.d>='2027-01-01',ed=S.ce&&S.ce.id===t.id,c=S.ce||{},dash='<span class="mut">—</span>';
+  const PC=[...new Set(L.d.txns.map(x=>x.pcat).filter(Boolean))].sort();
+  const off='disabled title="Fills in on rows from January 1, 2027"';
+  const mc=ed?`<select data-ce="pcat" aria-label="Merchant category"><option value="">Not classified</option>${PC.map(x=>`<option ${c.pcat===x?'selected':''}>${esc(x)}</option>`).join('')}</select>`:t.pcat?`<b>${esc(t.pcat)}</b>`:'<i class="mut">Not classified</i>';
+  const br=ed?(is27?`<select data-ce="brand" aria-label="Brand"><option value="">None</option>${c.brand?`<option selected>${esc(c.brand)}</option>`:''}</select>`:`<select ${off} aria-label="Brand"><option>—</option></select>`):is27&&t.brand?`<b>${esc(t.brand)}</b>`:dash;
+  const kd=ed?`<select data-ce="kind" ${is27?'':off} aria-label="Kind">${is27?KINDS.map(([k,l])=>`<option value="${k}" ${c.kind===k?'selected':''}>${l}</option>`).join(''):'<option>—</option>'}</select>`:is27&&t.kind?`<b>${esc((KINDS.find(k=>k[0]===t.kind)||[,t.kind])[1])}</b>`:dash;
+  const fg=ed?`<label class="cb"><input type="checkbox" data-ce="foreign" ${c.foreign?'checked':''} ${is27?'':off}> Foreign</label>`:is27?`<b>${t.foreign?'Yes':'No'}</b>`:dash;
+  const cell=(l,v)=>`<div class="ecl"><span class="lbl">${l}</span>${v}</div>`;
+  return `<div class="dbox ebox" data-region="after"><div class="dbr"><span class="lbl">Card earning</span>${ed?'':`<button type="button" class="lnk" data-ceedit="${t.id}">Edit</button>`}</div>
+    <div class="ecells">${cell('Merchant category',mc)}${cell('Brand',br)}${cell('Kind',kd)}${cell('Foreign',fg)}</div>
+    ${ed?`<div class="eacts"><button type="button" class="btn sm ghost" data-cecancel>Cancel</button><button type="button" class="btn pri sm" data-cesave="${t.id}">Save</button></div>`:''}${is27?'':later}${earn(t)}</div>`;
+}
 function editBlock(p){
   return `<div class="dedit" data-region="editctl"><label class="fld"><span>Display name</span><input data-nm="dd" value="${esc(S.dd.n)}"></label><div class="fld"><span>Type</span>${typeCtl(p,S.dd.act,'dd')}</div>${isBudget(S.dd.act)?`<div class="fld"><span>Category</span>${catCtl(p,S.dd.cat,'dd')}</div>`:''}</div>`;
 }
@@ -499,8 +521,8 @@ function detail(t,p){
   return `<div class="dt dt-tiles"><div class="dh"><div><h3>Transaction details</h3><span class="mut">ID #${t.id}</span></div>${close}</div>
     <div class="dbox"><span class="lbl">Description</span><b>${nm(t,p)}</b>${t.raw!==t.n?`<span class="mut">Raw: <code>${esc(t.raw)}</code></span>`:''}</div>${ed?editBlock(p):''}
     <div class="tiles">${facts.map(([k,x])=>`<div class="tile"><span class="lbl">${k}</span><b>${esc(x)}</b></div>`).join('')}</div>
-    <div class="dbox"><div class="dbr"><span class="lbl">Merchant category</span><button type="button" class="lnk">${t.pcat?'Edit':'Set'}</button></div><b>${t.pcat?esc(t.pcat):'<i class="mut">Not classified</i>'}</b>${later}</div>
-    ${earn(t)}<div data-region="editctl">${tagCtl(p,t)}</div>${splits}${foot}</div>`;
+    ${p.earnBox==='box'?earnBox(t,p):`<div class="dbox"><div class="dbr"><span class="lbl">Merchant category</span><button type="button" class="lnk">${t.pcat?'Edit':'Set'}</button></div><b>${t.pcat?esc(t.pcat):'<i class="mut">Not classified</i>'}</b>${later}</div>
+    ${earn(t)}`}<div data-region="editctl">${tagCtl(p,t)}</div>${splits}${foot}</div>`;
 }
 function detailWrap(p){
   const t=S.open!=null?byId(S.open):null,m=p.detailOpen;
@@ -570,7 +592,7 @@ function save(id,sc){
 }
 function openRow(id,p){
   const toggle=p.detailOpen==='pane'||p.detailOpen==='expand';
-  S.open=toggle&&S.open===id?null:id;S.dd=null;S.pop=null;S.queue=null;S.dedit=false;
+  S.open=toggle&&S.open===id?null:id;S.dd=null;S.pop=null;S.queue=null;S.dedit=false;S.ce=null;
 }
 function qNext(done){
   const q=S.queue,i=q.ids.indexOf(S.open);
@@ -605,9 +627,10 @@ function wire(root,p){
     if(has('unf')){stop();S.f[D.unf]=null;rr();return}
     if(has('unamt')){stop();S.min=S.max='';rr();return}
     if(has('unrev')){stop();S.rev=false;rr();return}
-    if(has('clear')){stop();S.q='';S.min=S.max='';S.rev=false;FKEYS.forEach(([k])=>S.f[k]=null);rr();return}
+    if(has('clear')){stop();S.q='';S.min=S.max='';S.rev=false;S.exc=false;FKEYS.forEach(([k])=>S.f[k]=null);rr();return}
     if(has('fpanel')){stop();S.fpanel=!S.fpanel;rr();return}
-    if(has('revchip')){stop();S.rev=!S.rev;rr();return}
+    if(has('revchip')){stop();S.rev=!S.rev;if(S.rev)S.exc=false;rr();return}
+    if(has('excchip')){stop();S.exc=!S.exc;if(S.exc)S.rev=false;rr();return}
     if(has('amtdone')){stop();S.pop=null;rr();return}
     if(has('tpick')){stop();setEd(S.pop.id,{act:D.tpick,rev:0});S.pop=null;rr();toast('Type saved');return}
     if(has('oedit')){stop();openRow(Number(D.oedit),p);S.dedit=true;rr();return}
@@ -643,7 +666,10 @@ function wire(root,p){
     if(has('queue')){stop();const ids=visible({...p,reviewStyle:'checkbox'}).filter(t=>t.rev).map(t=>t.id);openRow(ids[0],p);S.queue={ids};rr();return}
     if(has('qok')){stop();save(S.open,'dd');const m=qNext(true);rr();toast(m||'Saved');return}
     if(has('qskip')){stop();const m=qNext(false);rr();if(m)toast(m);return}
-    if(has('close')){stop();S.open=null;S.dd=null;S.queue=null;S.dedit=false;rr();return}
+    if(has('close')){stop();S.open=null;S.dd=null;S.queue=null;S.dedit=false;S.ce=null;rr();return}
+    if(has('ceedit')){stop();const t=byId(Number(D.ceedit));S.ce={id:t.id,pcat:t.pcat||'',brand:t.brand||'',kind:t.kind||'purchase',foreign:!!t.foreign};rr();return}
+    if(has('cecancel')){stop();S.ce=null;rr();return}
+    if(has('cesave')){stop();const c=S.ce,o={pcat:c.pcat||null};if(byId(c.id).d>='2027-01-01')Object.assign(o,{brand:c.brand||null,kind:c.kind,foreign:c.foreign?1:0});setEd(c.id,o);S.ce=null;rr();toast('Card earning saved');return}
     if(has('open')){stop();openRow(Number(D.open),p);rr();return}
     if(has('row')){stop();if(e.target.closest('.c-chk'))return;openRow(Number(D.row),p);rr();return}
   });
@@ -662,6 +688,7 @@ function wire(root,p){
     if(D.date){if(S.per!=='custom'){const[a,b]=S.per==='all'?['','']:perRange();S.from=a.startsWith('0000')?'':a;S.to=b.startsWith('9999')?'':b}S[D.date]=el.value;S.per='custom';rr();return}
     if('rev' in D){S.rev=el.checked;rr();return}
     if('rvrule' in D){S.rv.rule=el.checked;return}
+    if(D.ce&&S.ce){S.ce[D.ce]=el.type==='checkbox'?el.checked:el.value;return}
     if(D.ts){if(el.value)S[D.ts].act=el.value;else if(D.ts==='bd')S.bd.act='';rr();return}
     if(D.cs){if(D.cs==='cell'){setEd(S.pop.id,{cat:el.value,man:1,rev:0});S.pop=null;rr();toast('Category saved')}else S[D.cs].cat=el.value;return}
   });
@@ -694,6 +721,10 @@ Gallery.define({
     {id:'typeClick',label:'Click the type badge to change it too',type:'toggle',locked:true,default:true},
     {id:'editOpens',label:'The row\'s Edit button',type:'choice',locked:true,options:[{id:'cells',label:'Turns the row\'s cells into fields, as today'}]},
     {id:'reviewOpens',label:'The row\'s Review button',type:'choice',locked:true,options:[{id:'window',label:'Opens the Review window, as today'}]},
+   ]},
+   {id:'after',label:'Decided after round 2',open:true,controls:[
+    {id:'excCtl',label:'Excluded rows',type:'choice',locked:true,options:[{id:'chip',label:'A chip with the count, after Needs review'}]},
+    {id:'earnBox',label:'Brand, kind and foreign',type:'choice',locked:true,options:[{id:'box',label:'Beside the merchant category in one Card earning box'}]},
    ]},
    {id:'r1',label:'Decided in round 1',open:false,controls:[
     {id:'header',label:'Header',type:'choice',locked:true,options:[{id:'bar',label:'Slim bar, like Cards and the Dashboard'}]},
@@ -1143,6 +1174,12 @@ Gallery.define({
 #pv .er{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;color:var(--tx2)}
 #pv .er .val{font-size:18px;color:var(--good)}#pv .er small{font-size:11.5px;font-weight:400}
 #pv .later{margin:2px 0 0;font-size:11.5px}
+#pv .ecells{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr);gap:10px;margin:4px 0 2px}
+#pv .ecl{display:grid;gap:3px;align-content:start;min-width:0}
+#pv .ecl b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pv .ecl select,#pv .ecl input:not([type=checkbox]){width:100%;min-width:0}
+#pv .ebox .eacts{display:flex;justify-content:flex-end;gap:8px}
+#pv .ebox .earn{margin-top:6px}
 #pv .dedit{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:14px;border-radius:10px;border:1px solid var(--line);background:var(--raised)}
 #pv .rvf{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:12px}
 #pv .rvf select{width:100%}

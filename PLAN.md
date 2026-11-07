@@ -1032,7 +1032,11 @@ Same method as the Dashboard: design gallery first, desktop only, code after. Th
 - Round 1's combination left no way to edit a name or type: the Edit button opened read-only details. Round 2 fixes that by default (Edit opens the details with fields).
 - **Round 2 picks (2026-11-05):** dates back in the toolbar as outlined boxes with the from and to fields always shown; one toolbar row that wraps, an Amount chip, a Needs review chip with its count; striped rows with a line under each, 10/31 dates, AI labels after the name, row buttons as icons; clicking a category opens the grouped list with search, clicking the type changes it too, Edit turns the row's cells into fields as today. No notes.
 - **Final design written 2026-11-05:** `docs/transactions-design.md`. The gallery link shows it with every pick locked (spec id `transactions-final`). The picks didn't cover what the Review button opens, so today's Review window stays (type, category, rule checkbox, Ignore / Discard / Save), restyled; the final gallery shows it. Not implemented; build only when Omer says so.
-- **Next:** build the Transactions page to `docs/transactions-design.md` only when Omer says so. Still open for the build: B37 (no way to see excluded rows; the doc suggests an "Excluded" chip, undecided) and where brand, kind and foreign sit in the details' merchant category box. B38 is fixed by the new details.
+- **Settled 2026-11-07:**
+  - An "Excluded n" chip after Needs review shows only excluded rows, and the two chips turn each other off. This fixes B37 for exclusions; the card-payment duplicates stay hidden.
+  - Brand, kind and foreign sit with the merchant category in one "Card earning" box in the details, edited in place. The points sit at the bottom of the box. On rows before 2027, those three show "—" and stay disabled.
+  - Both are in the doc and the final gallery.
+- **Next:** build the Transactions page to `docs/transactions-design.md` only when Omer says so. Nothing is left open from the gallery. B37 and B38 are fixed by the new page.
 
 ## Card page transactions table (2026-11-05)
 What the transactions table on the individual Card page shows and lets Omer do, now that personal categories are two-level. Same method: design gallery first, desktop only, code after. The rest of the Card page stays as approved in `docs/cards-card-design.md`; the page is still built last, after the benefits data model.
