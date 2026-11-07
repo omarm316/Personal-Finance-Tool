@@ -183,11 +183,12 @@ EARN_RULES: dict[str, dict] = {
             {'brand': 'Lyft', 'rate': 5},              # Lyft promo from the 2026 catalog; end date unconfirmed
         ]},
     'chase_sapphire_preferred': {
-        'checked': 'ported (rates from memory, June 2026 refresh unconfirmed — B35)', 'base': 1, 'rules': [
+        'checked': 'ported; gas and EV verified 2026-11-07 (June 2026 refresh), rest of B35 open', 'base': 1, 'rules': [
             {'brand': 'Chase Travel', 'rate': 5},
             {'category': 'Dining', 'rate': 3},
             {'category': 'Streaming', 'rate': 3},
             {'category': 'Groceries', 'rate': 3, 'online': True},
+            {'category': 'Gas & EV', 'rate': 3},       # since the 2026-06-15 refresh, no cap
             {'category': 'Travel', 'rate': 2},
             {'brand': 'Lyft', 'rate': 5},              # Lyft promo from the 2026 catalog; end date unconfirmed
         ]},

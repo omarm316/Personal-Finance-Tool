@@ -49,7 +49,7 @@ RULES = {
     'Platinum': (1, {'Airlines': 5, 'Portal>Amex Travel': 5}),
     'Biz Gold': (1, {'Portal>Amex Travel': 3, 'Dining:US': 'top2', 'Gas Stations': 'top2', 'Transit': 'top2'}),
     'Strata Prem': (1, {'Airlines': 3, 'Hotels': 3, 'Dining': 3, 'Groceries': 3, 'Gas Stations': 3}),
-    'Sapphire Pref': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Streaming': 3,
+    'Sapphire Pref': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Streaming': 3, 'Gas Stations': 3,
                           'Groceries:online': 3, 'Airlines': 2, 'Hotels': 2, 'Transit': 2}),
     'Freedom Flex': (1, {'Portal>Chase Travel': 5, 'Dining': 3, 'Drugstores': 3, 'rotating': 'Q'}),
     'Bilt Obsidian': (1, {'Groceries': '3 to cap', 'Airlines': 2, 'Hotels': 2}),
