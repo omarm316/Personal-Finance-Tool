@@ -110,7 +110,7 @@ function view(r,p){const nw=p.data==='new',w=r.w,o=r.o,ed=S.ed[r.id]||{};let kin
     rate=kind==='purchase'||kind==='refund'?rateFor(RC[r.id]||p.card,mc,brand,nw):0;pts=ptsOf(r.amt,rate,kind)}
   const exc='exc' in ed?ed.exc:!!r.exc;
   const t={id:r.id,d:r.d,n:r.n,raw:r.raw,amt:r.amt,act:r.act,cat:ed.cat||r.cat,man:ed.cat?1:r.man,sp:'sp' in ed?ed.sp:(r.sp||''),note:ed.note!=null?ed.note:'',
-    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:pts,rate:exc?0:rate,demo:r.id===8720,fixed,mfix:'mc' in ed,kfix:'kind' in ed};
+    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:('pov' in ed?ed.pov:pts),rate:exc?0:rate,epts:pts,pman:'pov' in ed,demo:r.id===8720,fixed,mfix:'mc' in ed,kfix:'kind' in ed};
   t.earn=kind==='purchase'||kind==='refund';t.unk=t.earn&&!mc;return t}
 function cardRows(c,p){let R=c.rows;if(p.splitDemo)R=R.concat([L.d.splitDemo]).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:b.id-a.id);return R.map(r=>view(r,p))}
 function scoped(c,p){const[a,b]=rangeOf(c);let R=cardRows(c,p).filter(t=>t.d>=a&&t.d<=b);if(p.payments==='hide')R=R.filter(t=>t.kind!=='payment');if(p.emptyDemo)R=[];
@@ -224,6 +224,22 @@ function typeCell(t,p,pd){const inner=typeLabel(t,p)+(p.fixMark&&t.kfix?'<span c
   if(p.data==='old'&&t.kind!=='payment')return `<span title="Types are set from January 1, 2027. History keeps its stored points: use ⋯ › Exclude from points or Set points by hand.">${inner}</span>`;
   return inner}
 function amtCell(t,p){if(p.amtStyle==='card')return t.amt<0?money(t.amt):`<span class="up">−${money(t.amt)}</span>`;const cls=t.kind==='payment'?'':t.amt<0?'neg':'up';return `<span class="${cls}">${t.amt<0?'−':'+'}${money(t.amt)}</span>`}
+/* Row actions (round 4): icons in place of the ⋯ menu. */
+const ICO={
+  log:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.6 9.3c-.5-.8-1.5-1.3-2.6-1.3-1.4 0-2.5.7-2.5 1.9 0 2.7 5.1 1.4 5.1 4.2 0 1.2-1.1 2-2.6 2-1.1 0-2.1-.5-2.6-1.3M12 6.4V8m0 8v1.6"/></svg>',
+  exc:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>',
+  pts:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>'};
+function ptsCell(t,p){const inner=ptsSpan(t.pts)+(p.fixMark&&t.pman?'<span class="pen" title="Set by hand">✎</span>':'');
+  return p.ptsEdit==='cell'?`<button type="button" class="cbtn ptsb" data-act="pts:${t.id}" title="Set points by hand">${inner}</button>`:inner}
+function actCell(t,p){const b=(a,label,on)=>`<button type="button" class="aic ${on?'on '+a:''}" data-act="${a}:${t.id}" title="${label}" aria-label="${label}: ${esc(t.n)}">${ICO[a]}</button>`;
+  let h='';
+  if(p.logWhere==='icon')h+=t.kind==='purchase'?b('log','Log credit use…'):'<span class="aic sp" aria-hidden="true"></span>';
+  h+=b('exc',t.exc?'Include again (counts for points and spend)':'Exclude: no points, not counted toward a sign-up bonus or spend challenges',t.exc);
+  if(p.ptsEdit==='icon')h+=b('pts',t.pman?'Points set by hand: change or clear':'Set points by hand',t.pman);
+  if(p.logWhere==='menu')h+=t.kind==='purchase'?`<button type="button" class="dotb" data-pop="menu:${t.id}" aria-label="More for ${esc(t.n)}">⋯</button>`:'<span class="dotb sp" aria-hidden="true"></span>';
+  return `<span class="acts ${p.actShow} ${p.actStyle}">${h}</span>`}
+function ptsPop(t,p){const e=t.epts,r=t.rate;
+  return `<div class="ph">Points for ${esc(t.n)}</div><p class="pn2">The card’s figure: ${ptsSpan(e)}${r?' at '+rateTxt(r):''}. Your number replaces it; rules and recalculation leave it alone.</p><div class="padd"><input class="inp" type="number" step="1" data-povv value="${t.pman?t.pts:e}" aria-label="Points"><button type="button" class="btn pri" data-povsave>Save</button></div><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button>${t.pman?'<button type="button" class="lnk" data-povclear>Use the card’s figure</button>':''}</div>`}
 const dateTxt=(s,p)=>{const x=dt(s);return p.dateFmt==='num'?`${x.getMonth()+1}/${x.getDate()}`:md(s)};
 function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   D.push({k:'chk',h:'<input type="checkbox" data-allsel aria-label="Select all shown">',cls:'ck',cell:(t,pd)=>pd?'':`<input type="checkbox" data-sel="${t.id}" ${S.sel.has(t.id)?'checked':''} aria-label="Select ${esc(t.n)}">`});
@@ -234,11 +250,11 @@ function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   if(p.brandCol==='col')D.push({k:'brand',h:'Brand',s:'brand',cls:'nw',cell:t=>t.brand?esc(t.brand):'<span class="dim">–</span>'});
   if(p.spCol==='always'||(p.spCol==='auto'&&hasSp))D.push({k:'sp',h:'Spender',s:'sp',cls:'nw',cell:t=>spCell(t,p)});
   if(p.typeCol!=='off')D.push({k:'kind',h:'Type',s:'kind',cls:'nw ty',cell:(t,pd)=>typeCell(t,p,pd)});
-  if(p.ptsCol==='two'){D.push({k:'rate',h:'Rate',s:'rate',cls:'n',cell:(t,pd)=>pd||!t.rate?'<span class="dim">–</span>':`<span class="ac">${rateTxt(t.rate)}</span>`});D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">–</span>':ptsSpan(t.pts)})}
+  if(p.ptsCol==='two'){D.push({k:'rate',h:'Rate',s:'rate',cls:'n',cell:(t,pd)=>pd||!t.rate?'<span class="dim">–</span>':`<span class="ac">${rateTxt(t.rate)}</span>`});D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">–</span>':ptsCell(t,p)})}
   else if(p.ptsCol==='one')D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">when posted</span>':`<span class="p2">${ptsSpan(t.pts)}${t.rate?`<small>${rateTxt(t.rate)}</small>`:''}</span>`});
   else D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">–</span>':`<span title="${t.rate?rateTxt(t.rate)+' on this purchase':'No points'}">${ptsSpan(t.pts)}</span>`});
   D.push({k:'amt',h:'Amount',s:'amt',cls:'n am',cell:(t,pd)=>pd?`<span class="dim">${t.amt<0?money(t.amt):'−'+money(t.amt)}</span>`:amtCell(t,p)});
-  D.push({k:'act',h:'<span class="sr">Actions</span>',cls:'ra',cell:(t,pd)=>pd?'':`<button type="button" class="dotb" data-pop="menu:${t.id}" aria-label="Actions for ${esc(t.n)}">⋯</button>`});
+  D.push({k:'act',h:'<span class="sr">Actions</span>',cls:'ra',cell:(t,pd)=>pd?'':actCell(t,p)});
   return D}
 function th(col,p){if(!p.sortable||!col.s)return `<th class="${col.cls||''}">${col.h}</th>`;const on=S.sort===col.s;
   return `<th class="${col.cls||''}"><button type="button" class="sb ${on?'on':''}" data-sort="${col.s}">${col.h}<i>${on?(S.dir==='asc'?'▲':'▼'):'⇅'}</i></button></th>`}
@@ -277,6 +293,7 @@ function mcPicker(t){const q=(S.pq||'').toLowerCase();let h=`<div class="ph">Mer
   mcatTree().forEach(g=>{const tm=!q||g.top.toLowerCase().includes(q),kids=g.kids.filter(k=>tm||k.toLowerCase().includes(q));if(!tm&&!kids.length)return;h+=`<button type="button" class="po top" data-pick="${esc(g.top)}">${esc(g.top)}</button>`+kids.map(k=>`<button type="button" class="po sub" data-pick="${esc(k)}">${esc(k)}</button>`).join('')});return h+'</div>'}
 function spPicker(title,cur){const N=L.d.spenders;return `<div class="ph">${esc(title)}</div><div class="pl">${N.map(n=>`<button type="button" class="po ${cur===n?'on':''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="po dim2" data-pick="">Nobody</button></div><div class="padd"><input class="inp" data-newsp placeholder="Add a name" aria-label="Add a name"><button type="button" class="btn" data-addsp>Add</button></div>`}
 function menuPop(t,p){const it=(a,l,cls='')=>`<button type="button" class="mi ${cls}" data-ma="${a}">${l}</button>`;let h='';
+  if(p.logWhere==='menu')return it('log','Log credit use…');
   if(p.fixStart==='menu'){if(canFix(t,p))h+=it('fix','Fix category…');else if(p.data==='old'&&p.history==='lock'&&t.earn)h+='<span class="mi off">Fix category… (from 2027)</span>'}
   if(p.typeEdit==='menu'){if(canType(t,p))h+=it('ty','Change type…');else if(p.data==='old'&&t.kind!=='payment')h+='<span class="mi off">Change type… (from 2027)</span>'}
   if(t.kind==='purchase')h+=it('log','Log credit use…');if(h)h+='<hr>';
@@ -348,7 +365,7 @@ function typePop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)re
     return `<button type="button" class="po ${cur?'on':''}" data-tpick="${k}">${lab}${tail}${cur?'<span class="ok">✓</span>':''}</button>`}).join('')+'</div>';
   return h}
 function popLayer(c,p){const P=S.pop;if(!P)return '';const all=cardRows(c,p),t=P.id!=null?all.find(x=>x.id===P.id):null;let inner='';
-  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='ty')inner=typePop(c,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
+  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='ty')inner=typePop(c,p);else if(P.k==='pts'&&t)inner=ptsPop(t,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
   else if(P.k==='menu'&&t)inner=menuPop(t,p);else if(P.k==='cat'&&t)inner=catPicker(`Category for ${t.n}`,t.cat);else if(P.k==='bcat')inner=catPicker(`Category for ${S.sel.size} selected`,'');
   else if(P.k==='sp'&&t)inner=spPicker(`Spender for ${t.n}`,t.sp);else if(P.k==='bsp')inner=spPicker(`Spender for ${S.sel.size} selected`,'');
   else if(P.k==='mc'&&t)inner=mcPicker(t);else if(P.k==='note'&&t)inner=`<div class="ph">Note on ${esc(t.n)}</div><textarea class="inp nt" data-notev rows="3" aria-label="Note">${esc(t.note)}</textarea><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button><button type="button" class="btn pri" data-notesave>Save</button></div>`;
@@ -415,10 +432,16 @@ function doSave(mode,c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!
   closeFix();S.ask=ask;toast(Object.keys(o).length?'Saved':'No change');redraw()}
 function wire(root,p){const c=L.d.cards[p.card];
   root.onclick=e=>{const g=e.target,q=s=>g.closest(s);let el;
-    if(S.pop&&!q('.pop')&&!q('[data-pop]')&&!(S.pop.k==='ty'&&q('[data-ty]'))){if(S.pop.k==='fix'||S.pop.k==='ty')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
+    if(S.pop&&!q('.pop')&&!q('[data-pop]')&&!(S.pop.k==='ty'&&q('[data-ty]'))&&!(S.pop.k==='pts'&&q('[data-act^="pts:"]'))){if(S.pop.k==='fix'||S.pop.k==='ty')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
     if(el=q('[data-fix]')){openFix(Number(el.dataset.fix),c,p);return}
     if(el=q('[data-ty]')){openType(Number(el.dataset.ty),c,p);return}
     if(el=q('[data-tpick]')){saveType(el.dataset.tpick,c,p);return}
+    if(el=q('[data-act]')){const [a,ids]=el.dataset.act.split(':'),id=Number(ids),t=cardRows(c,p).find(x=>x.id===id);if(!t)return;
+      if(a==='exc'){S.pop=null;setEd(id,{exc:!t.exc});S.ty=rel(el,10).y;toast(t.exc?'Included again':'Excluded: no points, not counted toward a sign-up bonus or spend challenges');redraw();return}
+      if(a==='log'){S.pop=null;S.ty=rel(el,10).y;toast('Opens the two-step Log credit use window (decided in round 8)');redraw();return}
+      if(a==='pts'){if(S.pop&&S.pop.key==='pts:'+id){S.pop=null;redraw();return}const W=250,pos=rel(el,W,true);S.pop={key:'pts:'+id,k:'pts',id,x:pos.x,y:pos.y,w:W};S.ty=pos.y;redraw('[data-povv]');return}}
+    if(q('[data-povsave]')){const v=Math.round(Number(root.querySelector('[data-povv]').value));if(!isFinite(v))return;setEd(S.pop.id,{pov:v});S.pop=null;toast(`Points set by hand: ${v>0?'+':v<0?'−':''}${f0(Math.abs(v))}`);redraw();return}
+    if(q('[data-povclear]')){const e=S.ed[S.pop.id];if(e)delete e.pov;S.pop=null;toast('Back to the card’s figure');redraw();return}
     if(el=q('[data-fpick]')){const v=el.dataset.fpick;
       if(S.pop&&S.pop.k==='bfix'){let n=0;cardRows(c,p).forEach(t=>{if(S.sel.has(t.id)&&t.earn){setEd(t.id,{mc:v});n++}});S.pop=null;S.pq='';toast(`${v} set on ${n} charge${n===1?'':'s'}`);redraw();return}
       S.fx.cat=v;S.fx.picked=true;
@@ -481,7 +504,7 @@ function wire(root,p){const c=L.d.cards[p.card];
       if(p.fixStart==='row'&&el.classList.contains('clk')){openFix(id,c,p);return}
       if(p.rowClick==='expand'){S.exp.has(id)?S.exp.delete(id):S.exp.add(id);redraw()}
       else if(p.rowClick==='details'){S.modal={k:'details',id,y:Math.max(8,rel(el,10).y-200)};redraw()}}};
-  root.onkeydown=e=>{const tr=e.target.closest&&e.target.closest('tr[data-row].clk');if(tr&&e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();tr.click()}};
+  root.onkeydown=e=>{if(e.target.matches&&e.target.matches('[data-povv]')&&e.key==='Enter'){e.preventDefault();const b=root.querySelector('[data-povsave]');if(b)b.click();return}const tr=e.target.closest&&e.target.closest('tr[data-row].clk');if(tr&&e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();tr.click()}};
   root.oninput=e=>{const g=e.target;
     if(g.matches('[data-q]')){S.q=g.value;S.all=false;redraw('[data-q]')}
     else if(g.matches('[data-pq]')){S.pq=g.value;redraw('[data-pq]')}
@@ -500,8 +523,8 @@ function page(p){const c=L.d.cards[p.card];
   return chrome(c,p,`<div class="rail"><div class="col">${txSection(c,p)}</div>${side}</div>`)}
 
 Gallery.define({
-  id:'cards-card-tx-final',
-  name:'Cards: Card page transactions, final',
+  id:'cards-card-tx-r4',
+  name:'Cards: Card page transactions, round 4',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
@@ -516,7 +539,22 @@ Gallery.define({
     {id:'splitDemo',label:'Add a split row (real, from Bilt 8961, Aug 6)',type:'toggle',default:false},
     {id:'emptyDemo',label:'Show the empty list',type:'toggle',default:false},
    ]},
-   {id:'r3',label:'Decided in round 3',open:true,controls:[
+   {id:'acts',label:'Row actions (your note)',open:true,controls:[
+    {id:'ptsEdit',label:'Setting points by hand',type:'choice',default:'icon',options:[
+      {id:'icon',label:'A pencil icon',hint:'Opens a small box under it: your number, Save, and “Use the card’s figure” once set.'},
+      {id:'cell',label:'Click the Points cell',current:true,hint:'Today’s page edits points in the cell. Same box; the icons drop to two.'}]},
+    {id:'logWhere',label:'Log credit use… (purchases only)',type:'choice',options:[
+      {id:'icon',label:'A $ icon',hint:'After logging, the purchase gets the green $ circle after its name. Other rows keep the slot empty so icons line up.'},
+      {id:'menu',label:'A ⋯ that holds only Log credit use…',hint:'Shown on purchases only.'}]},
+    {id:'actShow',label:'When the icons show',type:'choice',options:[
+      {id:'always',label:'Always',hint:'Easiest to find. Three icons take about 82px, against 32px for ⋯; the merchant name gives up the difference.'},
+      {id:'faint',label:'Faint, full on row hover',hint:'Quieter rows; an excluded or hand-set row keeps its icon in color.'},
+      {id:'hover',label:'Only on row hover or focus',hint:'Cleanest; the space stays reserved. Excluded and hand-set icons stay visible.'}]},
+    {id:'actStyle',label:'Icon style',type:'choice',options:[
+      {id:'bare',label:'Bare icons',hint:'Gray, blue on hover.'},
+      {id:'boxed',label:'Small outlined buttons',hint:'Clearly clickable.'}]},
+   ]},
+   {id:'r3',label:'Decided in round 3',open:false,controls:[
     {id:'typeCol',label:'What the Type column says',type:'choice',locked:true,options:[{id:'kind',label:'Purchase, Refund, Credit, Fee, Interest, P2P'}]},
     {id:'typeEdit',label:'How you change it',type:'choice',locked:true,options:[{id:'cell',label:'Click the Type cell'}]},
     {id:'typeList',label:'What the type list shows',type:'choice',locked:true,options:[{id:'effect',label:'Each type with its points on this row'}]},
@@ -564,7 +602,6 @@ Gallery.define({
    {id:'decided',label:'Decided earlier (Card page, rounds 1-8)',open:false,controls:[
     {id:'look',label:'Look',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud, brand blue, Outfit + Plus Jakarta, 13px corners',tokens:Object.assign(light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F'),{'--f-h':"'Outfit',system-ui,sans-serif",'--f-b':"'Plus Jakarta Sans',system-ui,sans-serif"})}]},
     {id:'layoutD',label:'Layout',type:'choice',locked:true,options:[{id:'rail',label:'Transactions in the main column, Earnings then Benefits beside it'}]},
-    {id:'menuD',label:'Row ⋯ menu',type:'choice',locked:true,options:[{id:'m',label:'Log credit use…, Exclude, Set points by hand'}]},
     {id:'credD',label:'Statement credits',type:'choice',locked:true,options:[{id:'g',label:'Green −$100.00'}]},
     {id:'ptsD',label:'Points',type:'choice',locked:true,options:[{id:'c',label:'+14 green, −14 red, 0 grey'}]},
     {id:'linkD',label:'Linked purchase',type:'choice',locked:true,options:[{id:'dot',label:'Green $ circle after the merchant'}]},
@@ -767,6 +804,15 @@ Gallery.define({
 /* Type (round 3) */
 #pv .tyb .cv{opacity:.3}#pv .tyb:hover .cv,#pv .tyb:focus-visible .cv{opacity:.9}#pv .tx td.ty{color:var(--tx2)}
 #pv .po .pol.two{display:grid;gap:1px;white-space:normal}#pv .pol.two b{font-weight:inherit}#pv .pol.two small{font-size:11px;color:var(--tx3);font-weight:400}
+/* Row actions (round 4) */
+#pv .acts{display:inline-flex;gap:2px;align-items:center;vertical-align:middle}
+#pv .aic{width:24px;height:24px;border-radius:7px;display:inline-grid;place-items:center;color:var(--tx3)}#pv .aic.sp{visibility:hidden}
+#pv .aic:hover{background:var(--ac-soft);color:var(--ac)}#pv .aic.on.exc{color:var(--bad)}#pv .aic.on.pts{color:var(--ac)}
+#pv .acts.boxed{gap:4px}#pv .acts.boxed .aic:not(.sp){border:1px solid var(--line);width:26px;background:var(--surface)}
+#pv .acts.faint .aic:not(.on){opacity:.35}#pv .acts.hover .aic:not(.on){opacity:0}
+#pv .tx tr:hover .acts .aic,#pv .tx tr:focus-within .acts .aic{opacity:1}
+#pv .dotb.sp{visibility:hidden;display:inline-block}
+#pv .ptsb{justify-content:flex-end}
 @media (max-width:980px){#pv .rail{grid-template-columns:minmax(0,1fr)}}
 `});
 })();
