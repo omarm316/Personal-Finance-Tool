@@ -1,0 +1,187 @@
+<title>__TITLE__</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: fixed options panel on the left, the preview takes the rest of the screen. The chrome stays quiet so the preview is what you look at. */
+:root{--g-bg:#f4f5f7;--g-panel:#ffffff;--g-fg:#1b1f27;--g-fg2:#5d6573;--g-line:#dfe2e8;--g-accent:#1f5fd6;--g-accent-fg:#fff;--g-sel:#e9f0fd}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--g-bg:#0b0d12;--g-panel:#14171e;--g-fg:#e9ebf0;--g-fg2:#99a1af;--g-line:#2a2f3a;--g-accent:#7aa7f7;--g-accent-fg:#0b1426;--g-sel:#1b2638;color-scheme:dark}}
+:root[data-theme="dark"]{--g-bg:#0b0d12;--g-panel:#14171e;--g-fg:#e9ebf0;--g-fg2:#99a1af;--g-line:#2a2f3a;--g-accent:#7aa7f7;--g-accent-fg:#0b1426;--g-sel:#1b2638;color-scheme:dark}
+html,body{height:100%}
+body{background:var(--g-bg);color:var(--g-fg);font:14px/1.4 'Instrument Sans',system-ui,sans-serif}
+#gal{display:grid;grid-template-columns:348px minmax(0,1fr);height:100%}
+#panel{background:var(--g-panel);border-right:1px solid var(--g-line);display:flex;flex-direction:column;min-height:0}
+#phead{padding:14px 16px 12px;border-bottom:1px solid var(--g-line);display:grid;gap:10px}
+#phead h1{font-size:15px;font-weight:600;margin:0;text-wrap:balance}
+.gbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.gbtn{font:inherit;font-size:13px;font-weight:500;padding:7px 11px;border-radius:7px;border:1px solid var(--g-line);background:transparent;color:var(--g-fg);cursor:pointer}
+.gbtn.primary{background:var(--g-accent);border-color:var(--g-accent);color:var(--g-accent-fg);flex:1}
+.gbtn[aria-pressed="true"]{background:var(--g-sel);border-color:var(--g-accent)}
+.gbtn:focus-visible,.opt input:focus-visible,#notes:focus-visible,input[type=range]:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
+#controls{overflow-y:auto;flex:1;min-height:0;padding:4px 0 16px}
+details.grp{border-bottom:1px solid var(--g-line)}
+details.grp>summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:13px;list-style-position:outside;margin-left:14px;padding-left:2px}
+.grp.flash{background:var(--g-sel)}
+.ctl{padding:2px 16px 14px;display:grid;gap:6px;border:0;margin:0;min-width:0}
+.ctl legend,.ctl .lab{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--g-fg2);padding:0 0 6px}
+.opt{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:2px 8px;align-items:start;padding:8px 9px;border:1px solid var(--g-line);border-radius:8px;cursor:pointer;margin-bottom:6px}
+.opt:has(input:checked){border-color:var(--g-accent);background:var(--g-sel)}
+.opt input{margin:2px 0 0;accent-color:var(--g-accent)}
+.opt b{font-weight:500}
+.opt small{grid-column:2/4;color:var(--g-fg2);font-size:12px}
+.tag{font-size:10px;font-weight:600;color:var(--g-fg2);border:1px solid var(--g-line);border-radius:4px;padding:0 4px}
+.sw{grid-column:2/4;display:flex;gap:3px;margin-top:3px}.sw i{width:18px;height:12px;border-radius:3px;border:1px solid var(--g-line)}
+.rng{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.rng input{width:100%;accent-color:var(--g-accent)}
+.rng output{font-variant-numeric:tabular-nums;font-size:12px;color:var(--g-fg2)}
+.tog{display:flex;gap:8px;align-items:center;padding:4px 16px 12px;cursor:pointer}.tog input{accent-color:var(--g-accent)}
+.lock{display:flex;justify-content:space-between;gap:12px;padding:3px 16px;font-size:12.5px;color:var(--g-fg2)}.lock b{font-weight:500;color:var(--g-fg);text-align:right}
+#notewrap{padding:14px 16px;display:grid;gap:6px}
+#notes,#copyout{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:8px;border-radius:7px;border:1px solid var(--g-line);background:transparent;color:var(--g-fg);resize:vertical}
+#copied{font-size:12px;color:var(--g-fg2)}
+#stage{overflow:auto;min-width:0;min-height:0}
+#frame{min-height:100%;margin:0 auto}
+#frame.phone{width:390px;max-width:100%;border-inline:1px solid var(--g-line)}
+#pv{container-type:inline-size;container-name:pv;min-height:100vh}
+#pv [data-region]{cursor:pointer}
+#pv [data-region].g-hi{outline:2px dashed var(--g-accent);outline-offset:3px}
+@media (max-width:860px){
+  #gal{grid-template-columns:minmax(0,1fr);grid-template-rows:52% 48%}
+  #stage{grid-row:1}#panel{grid-row:2;border-right:0;border-top:1px solid var(--g-line)}
+  #widths{display:none}#frame.phone{width:auto;border:0}
+  #pv{min-height:100%}
+}
+</style>
+<div id="gal">
+  <aside id="panel" aria-label="Design options">
+    <div id="phead">
+      <h1 id="gname"></h1>
+      <div class="gbar">
+        <button type="button" class="gbtn primary" id="copy">Copy my picks</button>
+        <button type="button" class="gbtn" id="reset">Reset</button>
+      </div>
+      <div class="gbar" id="widths" role="group" aria-label="Preview width">
+        <button type="button" class="gbtn" id="wdesk" aria-pressed="true">Desktop</button>
+        <button type="button" class="gbtn" id="wphone" aria-pressed="false">Phone</button>
+      </div>
+      <span id="copied" role="status"></span>
+      <textarea id="copyout" rows="6" hidden aria-label="Your picks, ready to copy"></textarea>
+    </div>
+    <div id="controls"></div>
+  </aside>
+  <main id="stage"><div id="frame"><div id="pv"></div></div></main>
+</div>
+<script>
+window.__G_DATA=__DATA__;window.__G_IMG=__IMAGES__;
+window.Gallery={spec:null,define(s){this.spec=s}};
+</script>
+<script>
+/*__SPEC__*/
+</script>
+<script>
+(function(){
+  var spec=Gallery.spec,data=window.__G_DATA,imgs=window.__G_IMG;
+  var pv=document.getElementById('pv'),stage=document.getElementById('stage'),box=document.getElementById('controls');
+  var KEY='design-gallery:'+spec.id;
+  var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
+  var h={esc:esc,img:function(k){return imgs[k]||''},num:function(n){return Math.round(n||0).toLocaleString('en-US')}};
+  var ctls=[];spec.groups.forEach(function(g){g.controls.forEach(function(c){ctls.push(c)})});
+  function defaults(){var o={};ctls.forEach(function(c){
+    if(c.type==='choice'){var cur=c.options.filter(function(x){return x.current})[0];o[c.id]=c.default||(cur||c.options[0]).id}
+    else o[c.id]=c.default});return o}
+  function load(){var o=defaults();try{var s=JSON.parse(localStorage.getItem(KEY)||'{}');ctls.forEach(function(c){
+    if(c.locked||!(c.id in(s.picks||{})))return;var v=s.picks[c.id];
+    if(c.type!=='choice'||c.options.some(function(x){return x.id===v}))o[c.id]=v});
+    return{picks:o,notes:s.notes||''}}catch(e){return{picks:o,notes:''}}}
+  var st=load(),picks=st.picks;
+  function save(){try{localStorage.setItem(KEY,JSON.stringify({picks:picks,notes:notes.value}))}catch(e){}}
+  (spec.fonts||[]).forEach(function(u){var l=document.createElement('link');l.rel='stylesheet';l.href=u;document.head.appendChild(l)});
+  var css=document.createElement('style');css.textContent=spec.css||'';document.head.appendChild(css);
+  document.getElementById('gname').textContent=spec.name;
+
+  function apply(){
+    pv.removeAttribute('style');
+    ctls.forEach(function(c){var v=picks[c.id];pv.setAttribute('data-'+c.id,c.type==='toggle'?(v?'on':'off'):v);
+      if(c.type==='choice'){var o=c.options.filter(function(x){return x.id===v})[0];
+        Object.keys(o.tokens||{}).forEach(function(k){pv.style.setProperty(k,o.tokens[k])})}
+      if(c.type==='slider')pv.style.setProperty('--c-'+c.id,v+(c.unit||''));});
+    var top=stage.scrollTop;
+    pv.innerHTML=spec.render(picks,data,h);
+    if(spec.after)spec.after(pv,picks);
+    stage.scrollTop=top;
+  }
+  spec.groups.forEach(function(g,i){
+    var d=document.createElement('details');d.className='grp';d.open=g.open!=null?g.open:i<2;d.dataset.group=g.id;
+    var html='<summary>'+esc(g.label)+'</summary>';
+    g.controls.forEach(function(c){
+      var id='c_'+c.id;
+      if(c.locked){
+        var lv=picks[c.id];
+        if(c.type==='choice')lv=c.options.filter(function(o){return o.id===lv})[0].label;
+        if(c.type==='toggle')lv=lv?'On':'Off';
+        html+='<div class="lock"><span>'+esc(c.label)+'</span><b>'+esc(lv)+(c.unit||'')+'</b></div>';
+      }else if(c.type==='choice'){
+        html+='<fieldset class="ctl"><legend>'+esc(c.label)+'</legend>';
+        c.options.forEach(function(o){
+          html+='<label class="opt"><input type="radio" id="'+id+'_'+o.id+'" name="'+id+'" value="'+o.id+'"'+(picks[c.id]===o.id?' checked':'')+'>'
+          +'<b'+(o.sample?' style="'+esc(o.sample)+'"':'')+'>'+esc(o.label)+'</b>'+(o.current?'<span class="tag">Now</span>':'<span></span>')
+          +(o.hint?'<small>'+esc(o.hint)+'</small>':'')
+          +(o.swatches?'<span class="sw">'+o.swatches.map(function(s){return'<i style="background:'+esc(s)+'"></i>'}).join('')+'</span>':'')+'</label>'});
+        html+='</fieldset>';
+      }else if(c.type==='slider'){
+        html+='<div class="ctl"><label class="lab" for="'+id+'">'+esc(c.label)+'</label><div class="rng"><input type="range" id="'+id+'" min="'+c.min+'" max="'+c.max+'" step="'+c.step+'" value="'+picks[c.id]+'"><output id="'+id+'_o">'+picks[c.id]+(c.unit||'')+'</output></div></div>';
+      }else{
+        html+='<label class="tog"><input type="checkbox" id="'+id+'"'+(picks[c.id]?' checked':'')+'>'+esc(c.label)+'</label>';
+      }
+    });
+    d.innerHTML=html;box.appendChild(d);
+    d.addEventListener('mouseenter',function(){var r=pv.querySelectorAll('[data-region="'+g.id+'"]');r.forEach(function(e){e.classList.add('g-hi')})});
+    d.addEventListener('mouseleave',function(){pv.querySelectorAll('.g-hi').forEach(function(e){e.classList.remove('g-hi')})});
+  });
+  var nw=document.createElement('div');nw.id='notewrap';
+  nw.innerHTML='<label class="lab" for="notes" style="font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--g-fg2)">Notes for Claude</label><textarea id="notes" rows="4" placeholder="Anything the options missed, or what you would change"></textarea>';
+  box.appendChild(nw);
+  var notes=document.getElementById('notes');notes.value=st.notes;notes.addEventListener('input',save);
+  box.addEventListener('input',function(e){
+    var t=e.target;if(t===notes)return;
+    ctls.forEach(function(c){var id='c_'+c.id;
+      if(c.type==='choice'&&t.name===id)picks[c.id]=t.value;
+      if(c.type==='slider'&&t.id===id){picks[c.id]=Number(t.value);document.getElementById(id+'_o').textContent=t.value+(c.unit||'')}
+      if(c.type==='toggle'&&t.id===id)picks[c.id]=t.checked;});
+    save();apply();
+  });
+  pv.addEventListener('click',function(e){
+    if(e.target.closest('button,input,select,label,a'))return;
+    var r=e.target.closest('[data-region]');if(!r)return;
+    var d=box.querySelector('[data-group="'+r.dataset.region+'"]');if(!d)return;
+    d.open=true;d.scrollIntoView({block:'start'});d.classList.add('flash');setTimeout(function(){d.classList.remove('flash')},900);
+  });
+  function setWidth(phone){document.getElementById('frame').classList.toggle('phone',phone);
+    document.getElementById('wphone').setAttribute('aria-pressed',phone);document.getElementById('wdesk').setAttribute('aria-pressed',!phone)}
+  document.getElementById('wdesk').onclick=function(){setWidth(false)};
+  document.getElementById('wphone').onclick=function(){setWidth(true)};
+  if(spec.phone)setWidth(true);else document.getElementById('widths').style.display='none';
+  document.getElementById('reset').onclick=function(){
+    picks=defaults();notes.value='';save();
+    ctls.forEach(function(c){var id='c_'+c.id;if(c.locked)return;
+      if(c.type==='choice'){document.getElementById(id+'_'+picks[c.id]).checked=true}
+      else if(c.type==='slider'){document.getElementById(id).value=picks[c.id];document.getElementById(id+'_o').textContent=picks[c.id]+(c.unit||'')}
+      else document.getElementById(id).checked=picks[c.id]});
+    apply();
+  };
+  function picksText(){
+    var out=['Design gallery picks: '+spec.name];
+    spec.groups.forEach(function(g){out.push('','['+g.label+']');g.controls.forEach(function(c){var v=picks[c.id],shown=v;
+      if(c.type==='choice')shown=c.options.filter(function(o){return o.id===v})[0].label;
+      if(c.type==='toggle')shown=v?'On':'Off';
+      if(c.type==='slider')shown=v+(c.unit||'');
+      out.push(c.label+': '+shown)})});
+    if(notes.value.trim())out.push('','Notes: '+notes.value.trim());
+    return out.join('\n');
+  }
+  document.getElementById('copy').onclick=function(){
+    var text=picksText(),msg=document.getElementById('copied'),ta=document.getElementById('copyout');
+    function fallback(){ta.hidden=false;ta.value=text;ta.focus();ta.select();msg.textContent='Select this text and copy it, then paste it to Claude.'}
+    if(!navigator.clipboard){fallback();return}
+    navigator.clipboard.writeText(text).then(function(){ta.hidden=true;msg.textContent='Copied. Paste it into your Claude chat.'},fallback);
+  };
+  apply();
+})();
+</script>
