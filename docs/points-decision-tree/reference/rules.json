@@ -1,0 +1,801 @@
+{
+ "hilton_aspire": {
+  "checked": "verified 2026-11-02",
+  "base": 3,
+  "rules": [
+   {
+    "brand": "Hilton",
+    "rate": 14
+   },
+   {
+    "category": "Airlines",
+    "rate": 7
+   },
+   {
+    "category": "Car Rental",
+    "rate": 7
+   },
+   {
+    "category": "Dining",
+    "rate": 7,
+    "domestic": true
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "amex_platinum": {
+  "checked": "ported (rates from memory 2026-10-25, confirm)",
+  "base": 1,
+  "rules": [
+   {
+    "category": "Airlines",
+    "rate": 5,
+    "cap": 500000,
+    "per": "calendar_year",
+    "group": "flights"
+   },
+   {
+    "brand": "Amex Travel",
+    "rate": 5
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "amex_business_gold": {
+  "checked": "verified 2026-07-31",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Amex Travel",
+    "rate": 3
+   },
+   {
+    "category": "Advertising",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "advertising",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Electronics",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "electronics_software",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Software & Cloud",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "electronics_software",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Gas Stations",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "gas",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Dining",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "dining",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Transit",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "transit",
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   },
+   {
+    "category": "Wireless",
+    "rate": 4,
+    "type": "top_n",
+    "top_n": 2,
+    "slot": "wireless",
+    "domestic": true,
+    "cap": 150000,
+    "per": "calendar_year",
+    "group": "top2"
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "citi_strata_premier": {
+  "checked": "verified 2026-11-02",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Citi Travel",
+    "rate": 10
+   },
+   {
+    "category": "Airlines",
+    "rate": 3
+   },
+   {
+    "category": "Hotels",
+    "rate": 3
+   },
+   {
+    "category": "Dining",
+    "rate": 3
+   },
+   {
+    "category": "Groceries",
+    "rate": 3
+   },
+   {
+    "category": "Gas & EV",
+    "rate": 3
+   }
+  ],
+  "owners": [
+   "?"
+  ]
+ },
+ "chase_freedom_flex": {
+  "checked": "verified 2026-11-02",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Chase Travel",
+    "rate": 5
+   },
+   {
+    "category": "Dining",
+    "rate": 3
+   },
+   {
+    "category": "Drugstores",
+    "rate": 3
+   },
+   {
+    "type": "selected",
+    "slot": "rotating",
+    "rate": 5,
+    "cap": 1500,
+    "per": "quarter",
+    "group": "rotating"
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "chase_freedom": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "type": "selected",
+    "slot": "rotating",
+    "rate": 5,
+    "cap": 1500,
+    "per": "quarter",
+    "group": "rotating"
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "chase_freedom_unlimited": {
+  "checked": "ported",
+  "base": 1.5,
+  "rules": [
+   {
+    "brand": "Chase Travel",
+    "rate": 5
+   },
+   {
+    "category": "Dining",
+    "rate": 3
+   },
+   {
+    "category": "Drugstores",
+    "rate": 3
+   },
+   {
+    "brand": "Lyft",
+    "rate": 5
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "chase_sapphire_preferred": {
+  "checked": "ported; gas and EV verified 2026-11-07 (June 2026 refresh), rest of B35 open",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Chase Travel",
+    "rate": 5
+   },
+   {
+    "category": "Dining",
+    "rate": 3
+   },
+   {
+    "category": "Streaming",
+    "rate": 3
+   },
+   {
+    "category": "Groceries",
+    "rate": 3,
+    "online": true
+   },
+   {
+    "category": "Gas & EV",
+    "rate": 3
+   },
+   {
+    "category": "Travel",
+    "rate": 2
+   },
+   {
+    "brand": "Lyft",
+    "rate": 5
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "chase_amazon_prime": {
+  "checked": "ported (from memory, confirm)",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Amazon",
+    "rate": 5
+   },
+   {
+    "brand": "Whole Foods",
+    "rate": 5
+   },
+   {
+    "brand": "Chase Travel",
+    "rate": 5
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Gas Stations",
+    "rate": 2
+   },
+   {
+    "category": "Transit",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "bilt_obsidian": {
+  "checked": "verified 2026-10-25",
+  "base": 1,
+  "rules": [
+   {
+    "type": "selected",
+    "slot": "choice",
+    "rate": 3,
+    "cap": 25000,
+    "per": "calendar_year",
+    "group": "choice"
+   },
+   {
+    "category": "Travel",
+    "rate": 2
+   },
+   {
+    "category": "Transit",
+    "rate": 1
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "united_quest": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "United",
+    "rate": 3
+   },
+   {
+    "category": "Travel",
+    "rate": 2
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Streaming",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "united_explorer": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "United",
+    "rate": 2
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Hotels",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder B"
+  ]
+ },
+ "amex_blue_business_plus": {
+  "checked": "ported",
+  "base": {
+   "rate": 2,
+   "cap": 50000,
+   "per": "calendar_year",
+   "after": 1
+  },
+  "rules": [],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "marriott_bonvoy_brilliant": {
+  "checked": "ported (Hotels 6x narrowed to Marriott)",
+  "base": 2,
+  "rules": [
+   {
+    "brand": "Marriott",
+    "rate": 6
+   },
+   {
+    "category": "Dining",
+    "rate": 3
+   },
+   {
+    "category": "Airlines",
+    "rate": 3
+   }
+  ],
+  "owners": [
+   "Holder B"
+  ]
+ },
+ "marriott_bonvoy_boundless": {
+  "checked": "ported (cap period unconfirmed)",
+  "base": 2,
+  "rules": [
+   {
+    "brand": "Marriott",
+    "rate": 6
+   },
+   {
+    "category": "Groceries",
+    "rate": 3,
+    "cap": 6000,
+    "per": "calendar_year",
+    "group": "everyday3x"
+   },
+   {
+    "category": "Gas Stations",
+    "rate": 3,
+    "cap": 6000,
+    "per": "calendar_year",
+    "group": "everyday3x"
+   },
+   {
+    "category": "Dining",
+    "rate": 3,
+    "cap": 6000,
+    "per": "calendar_year",
+    "group": "everyday3x"
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "hilton_honors": {
+  "checked": "ported",
+  "base": 3,
+  "rules": [
+   {
+    "brand": "Hilton",
+    "rate": 7
+   },
+   {
+    "category": "Dining",
+    "rate": 5,
+    "domestic": true
+   },
+   {
+    "category": "Groceries",
+    "rate": 5,
+    "domestic": true
+   },
+   {
+    "category": "Gas Stations",
+    "rate": 5,
+    "domestic": true
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "hyatt_personal": {
+  "checked": "ported (from memory, confirm)",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Hyatt",
+    "rate": 4
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Airlines",
+    "rate": 2
+   },
+   {
+    "category": "Transit",
+    "rate": 2
+   },
+   {
+    "category": "Fitness",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "citi_custom_cash": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "category": "Dining",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "dining",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Gas & EV",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "gas",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Groceries",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "grocery",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Airlines",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "travel",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Hotels",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "travel",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Transit",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "transit",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Streaming",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "streaming",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Drugstores",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "drugstores",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Home Improvement",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "home_improvement",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Fitness",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "fitness",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   },
+   {
+    "category": "Live Entertainment",
+    "rate": 5,
+    "type": "top_n",
+    "top_n": 1,
+    "slot": "live_entertainment",
+    "cap": 500,
+    "per": "billing_cycle",
+    "group": "top1"
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "citi_double_cash": {
+  "checked": "ported",
+  "base": 2,
+  "rules": [],
+  "owners": [
+   "Holder B"
+  ]
+ },
+ "citi_aa_platinum_select": {
+  "checked": "verified 2026-07-26",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "American Airlines",
+    "rate": 2
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Gas Stations",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "delta_gold": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Delta",
+    "rate": 2
+   },
+   {
+    "category": "Dining",
+    "rate": 2
+   },
+   {
+    "category": "Groceries",
+    "rate": 2,
+    "domestic": true
+   }
+  ],
+  "owners": [
+   "Holder B"
+  ]
+ },
+ "atmos_ascent": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "brand": "Alaska Airlines",
+    "rate": 3
+   },
+   {
+    "brand": "Hawaiian Airlines",
+    "rate": 3
+   },
+   {
+    "category": "Gas & EV",
+    "rate": 2
+   },
+   {
+    "category": "Cable & Internet",
+    "rate": 2
+   },
+   {
+    "category": "Streaming",
+    "rate": 2
+   },
+   {
+    "category": "Transit",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder B"
+  ]
+ },
+ "discover_it": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "type": "selected",
+    "slot": "rotating",
+    "rate": 5,
+    "cap": 1500,
+    "per": "quarter",
+    "group": "rotating"
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "us_bank_cash_plus": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "type": "selected",
+    "slot": "five",
+    "rate": 5,
+    "cap": 2000,
+    "per": "quarter",
+    "group": "five"
+   },
+   {
+    "type": "selected",
+    "slot": "two",
+    "rate": 2
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ },
+ "bofa_customized_cash": {
+  "checked": "ported",
+  "base": 1,
+  "rules": [
+   {
+    "type": "selected",
+    "slot": "choice",
+    "rate": 3,
+    "cap": 2500,
+    "per": "quarter",
+    "group": "bonus"
+   },
+   {
+    "category": "Groceries",
+    "rate": 2,
+    "cap": 2500,
+    "per": "quarter",
+    "group": "bonus"
+   },
+   {
+    "category": "Wholesale Clubs",
+    "rate": 2,
+    "cap": 2500,
+    "per": "quarter",
+    "group": "bonus"
+   }
+  ],
+  "owners": [
+   "Holder A",
+   "Holder B"
+  ]
+ },
+ "capital_one_venture_one": {
+  "checked": "ported",
+  "base": 1.25,
+  "rules": [
+   {
+    "brand": "Capital One Travel",
+    "rate": 5
+   }
+  ],
+  "owners": [
+   "Holder A"
+  ]
+ }
+}

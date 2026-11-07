@@ -1,0 +1,836 @@
+<title>Points Decision Tree</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column; the tree's trunk forks into two card lanes, then a best-card table with path switches. Moresheth's Cards look (Cloud, brand blue, hairline panels, 13px corners). */
+:root {
+  --bg: #EEF2F7; --surface: #FFFFFF; --raised: #F5F8FB;
+  --line: rgba(15,23,42,.10); --line-2: rgba(15,23,42,.20);
+  --tx: #0F172A; --tx2: #475569; --tx3: #6B7A8F;
+  --ac: #2563EB; --ac-fg: #FFFFFF; --ac-soft: rgba(37,99,235,.09);
+  --good: #047857; --good-soft: rgba(4,120,87,.10);
+  --warn: #B45309; --warn-soft: rgba(180,83,9,.10);
+  --f-h: 'Outfit', 'Avenir Next', system-ui, sans-serif;
+  --f-b: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
+  --r: 13px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0B1220; --surface: #111A2B; --raised: #172236;
+  --line: rgba(226,232,240,.11); --line-2: rgba(226,232,240,.22);
+  --tx: #E6ECF4; --tx2: #A9B6C8; --tx3: #8392A8;
+  --ac: #60A5FA; --ac-fg: #06122A; --ac-soft: rgba(96,165,250,.15);
+  --good: #34D399; --good-soft: rgba(52,211,153,.13);
+  --warn: #FBBF24; --warn-soft: rgba(251,191,36,.13);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0B1220; --surface: #111A2B; --raised: #172236;
+  --line: rgba(226,232,240,.11); --line-2: rgba(226,232,240,.22);
+  --tx: #E6ECF4; --tx2: #A9B6C8; --tx3: #8392A8;
+  --ac: #60A5FA; --ac-fg: #06122A; --ac-soft: rgba(96,165,250,.15);
+  --good: #34D399; --good-soft: rgba(52,211,153,.13);
+  --warn: #FBBF24; --warn-soft: rgba(251,191,36,.13);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--tx); font-family: var(--f-b); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--f-h); text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+h1 { font-size: clamp(30px, 4.4vw, 42px); font-weight: 700; line-height: 1.1; }
+h2 { font-size: 24px; font-weight: 600; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--ac); }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--tx3); }
+.lede { color: var(--tx2); max-width: 66ch; font-size: 16px; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--tx3); }
+header.top { display: grid; gap: 12px; margin-bottom: 36px; }
+section { display: grid; gap: 18px; }
+section + section { margin-top: 64px; }
+.sec-head { display: grid; gap: 6px; }
+.sec-head p { color: var(--tx2); max-width: 70ch; }
+
+/* Sample picker */
+.picker { display: grid; gap: 10px; }
+.pgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pgroup > span { font-size: 12px; font-weight: 600; color: var(--tx3); min-width: 84px; letter-spacing: .04em; text-transform: uppercase; }
+.chip { font: inherit; font-size: 13.5px; border: 1px solid var(--line-2); background: var(--surface); color: var(--tx);
+  border-radius: 999px; padding: 5px 12px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.chip:hover { border-color: var(--ac); }
+.chip[aria-pressed="true"] { background: var(--ac); border-color: var(--ac); color: var(--ac-fg); }
+.chip:focus-visible, .seg button:focus-visible, .btn:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+
+/* Tree */
+.tree { display: grid; justify-items: stretch; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; display: grid; gap: 12px; transition: opacity .2s; }
+.node.off { opacity: .38; }
+.node-h { display: flex; align-items: baseline; gap: 10px; }
+.step { font-family: var(--f-h); font-weight: 600; font-size: 13px; color: var(--ac); border: 1px solid currentColor; border-radius: 999px;
+  width: 24px; height: 24px; display: inline-grid; place-items: center; flex: none; transform: translateY(-1px); }
+.node-h p { color: var(--tx3); font-size: 13px; margin-left: auto; text-align: right; }
+.wire { width: 2px; height: 22px; background: var(--line-2); justify-self: center; }
+.wire.off { opacity: .4; }
+.branches { display: flex; flex-wrap: wrap; gap: 6px; }
+.br { font-size: 13px; padding: 4px 11px; border-radius: 999px; border: 1px dashed var(--line-2); color: var(--tx3); }
+.br.on { border-style: solid; border-color: var(--ac); background: var(--ac-soft); color: var(--tx); font-weight: 600; }
+.endbox { display: flex; gap: 12px; align-items: baseline; background: var(--raised); border-radius: 10px; padding: 10px 14px; }
+.endbox b { font-family: var(--f-h); font-size: 22px; font-weight: 700; }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.chain .lk { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx3); }
+.chain .lk.tried { text-decoration: line-through; text-decoration-color: var(--tx3); }
+.chain .lk.used { border-color: var(--ac); color: var(--tx); background: var(--ac-soft); font-weight: 600; }
+.chain .arr { color: var(--tx3); }
+.paths { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 10px; }
+.pathbox { border-radius: 10px; padding: 10px 14px; display: grid; gap: 2px; }
+.pathbox.merchant { background: var(--ac-soft); }
+.pathbox.mine { border: 1px dashed var(--line-2); }
+.pathbox .lbl { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); }
+.pathbox .val { font-family: var(--f-h); font-size: 17px; font-weight: 600; }
+.pathbox.mine .val { color: var(--tx2); font-weight: 500; }
+.pathbox small { color: var(--tx3); font-size: 12.5px; }
+.why { color: var(--tx2); font-size: 13.5px; }
+.fork { width: 100%; height: 34px; display: block; }
+.fork path { fill: none; stroke: var(--line-2); stroke-width: 2; }
+.lanes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.lane { display: grid; gap: 0; align-content: start; }
+.lane .node { gap: 10px; }
+.cardhead { display: flex; align-items: center; gap: 12px; }
+.art { width: 46px; height: 29px; border-radius: 5px; flex: none; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+.art::after { content: ""; position: absolute; left: 6px; top: 9px; width: 9px; height: 7px; border-radius: 2px; background: rgba(255,224,160,.85); }
+.art.hilton { background: linear-gradient(135deg, #4c1d95, #2e1065); }
+.art.citi { background: linear-gradient(135deg, #155e75, #0c4a5e); }
+.cardhead h3 { line-height: 1.2; }
+.cardhead p { font-size: 12.5px; color: var(--tx3); }
+.ladder { display: grid; gap: 6px; }
+.rung { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 10px; border-radius: 9px; border: 1px solid transparent; transition: background .2s, opacity .2s; }
+.rung .rl { font-size: 12px; font-weight: 600; color: var(--tx3); letter-spacing: .03em; padding-top: 3px; }
+.rung .rl small { display: block; font-weight: 500; letter-spacing: 0; font-size: 11.5px; }
+.rung.hit { background: var(--ac-soft); border-color: color-mix(in srgb, var(--ac) 40%, transparent); }
+.rung.hit .rl { color: var(--ac); }
+.rung.skip { opacity: .42; }
+.rules { display: flex; flex-wrap: wrap; gap: 5px; }
+.rc { font-size: 12.5px; padding: 3px 9px; border-radius: 7px; background: var(--raised); color: var(--tx2); border: 1px solid var(--line); white-space: nowrap; }
+.rc b { font-weight: 700; color: var(--tx); }
+.rc.win { background: var(--ac); color: var(--ac-fg); border-color: var(--ac); }
+.rc.win b { color: var(--ac-fg); }
+.rc.fail { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.rc.fail b { color: var(--warn); text-decoration: line-through; }
+.rc.lower { border-style: dashed; }
+.rc .tag { font-size: 11px; opacity: .85; margin-left: 4px; }
+.capline { font-size: 13px; color: var(--tx2); }
+.result { display: grid; gap: 2px; }
+.result .pts { font-family: var(--f-h); font-size: 30px; font-weight: 700; line-height: 1.1; }
+.result .pts span { font-size: 14px; font-weight: 500; color: var(--tx2); margin-left: 6px; font-family: var(--f-b); }
+.result .neg { color: var(--warn); }
+.result .fx { font-size: 13px; color: var(--tx2); }
+.flag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 2px 8px; margin-top: 4px; }
+.tree-note { color: var(--tx3); font-size: 13px; margin-top: 14px; max-width: 80ch; }
+
+/* Best card */
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line-2); border-radius: 11px; padding: 3px; gap: 2px; }
+.seg button { font: inherit; font-size: 14px; font-weight: 600; border: 0; background: transparent; color: var(--tx2); padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ac); color: var(--ac-fg); }
+.seg.small button { font-size: 13px; padding: 5px 11px; font-weight: 500; }
+.seg.small button[aria-pressed="true"] { font-weight: 600; }
+.modenote { color: var(--tx2); font-size: 14px; max-width: 80ch; }
+.wallet { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 18px; display: grid; gap: 10px; }
+.wallet-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.wallet-h p { color: var(--tx3); font-size: 13px; }
+.wcards { display: flex; flex-wrap: wrap; gap: 8px; }
+.wc { display: grid; gap: 1px; padding: 8px 12px; border-radius: 10px; background: var(--raised); min-width: 0; }
+.wc b { font-size: 14px; }
+.wc span { font-size: 12.5px; color: var(--tx3); }
+.tablewrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+table.best { width: 100%; border-collapse: collapse; font-size: 14px; }
+.best th { text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--raised); }
+.best td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.best tr:last-child td { border-bottom: 0; }
+.best tr.grp td { background: var(--raised); font-family: var(--f-h); font-weight: 600; font-size: 13px; padding: 7px 14px; color: var(--tx2); }
+.best .what b { display: block; font-weight: 600; }
+.best .what small { color: var(--tx3); font-size: 12.5px; }
+.best .ret { font-family: var(--f-h); font-size: 20px; font-weight: 700; white-space: nowrap; }
+.best .ret small { display: block; font-family: var(--f-b); font-size: 12px; font-weight: 500; color: var(--tx3); white-space: normal; }
+.cardnames { display: grid; gap: 3px; }
+.cn { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cn b { font-weight: 600; }
+.owner { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--raised); color: var(--tx2); border: 1px solid var(--line); }
+.unconf { font-size: 11px; color: var(--warn); }
+.more { font-size: 12.5px; color: var(--tx3); }
+.beyond { font-size: 13px; color: var(--tx2); }
+.beyond b { color: var(--tx); font-weight: 600; }
+.capchip { display: inline-block; font-size: 11.5px; font-weight: 600; color: var(--warn); background: var(--warn-soft); padding: 1px 7px; border-radius: 6px; }
+.rownote { display: block; color: var(--tx3); font-size: 12.5px; margin-top: 3px; }
+.slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.slot { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+.slot .sv { font-family: var(--f-h); font-size: 20px; font-weight: 700; }
+.slot p { font-size: 13px; color: var(--tx2); }
+.slot .set { font-size: 12px; color: var(--warn); font-weight: 600; }
+details.values { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+details.values > summary { cursor: pointer; padding: 14px 18px; font-family: var(--f-h); font-weight: 600; font-size: 16px; list-style: none; display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+details.values > summary::-webkit-details-marker { display: none; }
+details.values > summary span { font-family: var(--f-b); font-weight: 500; font-size: 13px; color: var(--tx3); }
+details.values > summary::after { content: "Show"; font-family: var(--f-b); font-size: 13px; font-weight: 600; color: var(--ac); }
+details.values[open] > summary::after { content: "Hide"; }
+.vbody { padding: 0 18px 16px; display: grid; gap: 12px; }
+.vscroll { overflow-x: auto; }
+table.vals { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 13.5px; }
+.vals th { text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--tx3); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.vals td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.vals td small { display: block; color: var(--tx3); font-size: 12px; }
+.vals input { width: 74px; font: inherit; font-variant-numeric: tabular-nums; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--raised); color: var(--tx); }
+.vals .na { color: var(--tx3); font-size: 12.5px; }
+.btn { font: inherit; font-size: 13px; font-weight: 600; border: 1px solid var(--line-2); background: var(--surface); color: var(--tx); border-radius: 9px; padding: 6px 12px; cursor: pointer; justify-self: start; }
+.notes { display: grid; gap: 8px; color: var(--tx2); font-size: 13.5px; max-width: 86ch; }
+.notes h3 { color: var(--tx); }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
+
+@media (max-width: 760px) {
+  .lanes { grid-template-columns: minmax(0, 1fr); }
+  .fork { display: none; }
+  .lane + .lane { margin-top: 18px; }
+  .paths { grid-template-columns: minmax(0, 1fr); }
+  .node-h { flex-wrap: wrap; }
+  .node-h p { margin-left: 0; text-align: left; flex-basis: 100%; }
+  .rung { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  table.best thead { display: none; }
+  table.best, .best tbody, .best tr, .best td { display: block; width: 100%; }
+  .best tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .best tr.grp { padding: 0; }
+  .best td { border-bottom: 0; padding: 4px 14px; }
+  .best td[data-l]::before { content: attr(data-l); display: block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); }
+  .pgroup > span { min-width: 0; flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Moresheth · Cards</div>
+    <h1>How a purchase becomes points</h1>
+    <p class="lede">The steps the app follows for every card purchase dated 1 January 2027 or later, shown on two of your cards: Hilton Aspire, which earns one hotel's points, and Citi Strata Premier, which earns points you can move to airlines and hotels. Below that, the best card in the household for each kind of spending, once for cash back and once for travel.</p>
+  </header>
+
+  <section id="tree-sec" aria-labelledby="tree-h">
+    <div class="sec-head">
+      <h2 id="tree-h">The decision tree</h2>
+      <p>Pick a purchase. The highlighted route is the one the app takes, and both cards are scored from the same merchant path.</p>
+    </div>
+    <div class="picker" id="picker"></div>
+    <div class="tree" id="tree" aria-live="polite"></div>
+    <p class="tree-note">Purchases dated before 1 January 2027 keep the points the old engine stored. A rate you set by hand on a transaction overrides all of this.</p>
+  </section>
+
+  <section id="best-sec" aria-labelledby="best-h">
+    <div class="sec-head">
+      <h2 id="best-h">Best card for each kind of spending</h2>
+      <p>Every household card the app has terms for, scored with the same rules. Cash back counts only what turns into cash in one step. Travel counts what the points are typically worth on awards.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Path">
+        <button type="button" id="path-cash" data-path="cash">Cash back</button>
+        <button type="button" id="path-travel" data-path="travel">Travel</button>
+      </div>
+      <div class="seg small" role="group" aria-label="Travel values" id="presetseg">
+        <button type="button" id="preset-fm" data-preset="fm">Frequent Miler values</button>
+        <button type="button" id="preset-min" data-preset="min">Minimum value</button>
+      </div>
+    </div>
+    <p class="modenote" id="modenote"></p>
+    <div class="wallet" id="wallet"></div>
+    <div class="tablewrap"><table class="best" id="best"></table></div>
+
+    <h3>Bonus slots that can beat the table</h3>
+    <p class="modenote">These pay more on categories that change with your spending or your choices, up to a limit. When one covers a purchase, it usually wins.</p>
+    <div class="slots" id="slots"></div>
+
+    <details class="values" id="values">
+      <summary>Values used <span>Cents per point for each currency. Change any of them and the table updates.</span></summary>
+      <div class="vbody">
+        <div class="vscroll"><table class="vals" id="vals"></table></div>
+        <button type="button" class="btn" id="reset">Reset to the published values</button>
+      </div>
+    </details>
+
+    <div class="notes">
+      <h3>Where the numbers come from</h3>
+      <ul>
+        <li>Earn rates are the app's card terms (<code>core/earn_rules_seed.py</code>). Cards marked <span class="unconf">terms not confirmed</span> were copied from the old catalog and haven't been checked against current terms yet.</li>
+        <li>Travel values: Frequent Miler's <a href="https://frequentmiler.com/reasonable-redemption-values-rrvs/" target="_blank" rel="noopener">Reasonable Redemption Values</a>, read 5 November 2026. These are estimates of typical award value, not amounts you've redeemed.</li>
+        <li>Cash-out rates: Chase 1¢; Amex 0.6¢ as a statement credit; Citi 0.75¢ from a Strata Premier account <a href="https://thepointsguy.com/news/citi-slashing-cash-back-strata-premier" target="_blank" rel="noopener">since August 2025</a> and 1¢ from Custom Cash or Double Cash. Citi has told cardholders that Strata Premier points in the same ThankYou account as a Custom Cash or Double Cash also cash out at 1¢ (<a href="https://www.doctorofcredit.com/citi-reducing-citi-strata-premier-thankyou-rewards-cashout-offer-from-1%C2%A2-to-0-75%C2%A2-per-point/" target="_blank" rel="noopener">Doctor of Credit</a>, 2025, not reconfirmed); this page uses 0.75¢, which you can change in the values table. Capital One 0.5¢; Bilt 0.55¢ (<a href="https://upgradedpoints.com/credit-cards/best-ways-to-redeem-bilt-rewards-points/" target="_blank" rel="noopener">Upgraded Points</a>).</li>
+        <li>Minimum values are the least a travel booking always gets: Chase 1¢ (cash or Chase Travel), Amex 1¢ (flights paid with points on <a href="https://thepointsguy.com/guide/amex-points-value/" target="_blank" rel="noopener">Amex Travel</a>), Citi 1¢ (Citi Travel), Capital One 1¢ (erasing a travel purchase), Bilt 1.25¢ (Bilt Travel). Hotel and airline points have no floor, so they keep Frequent Miler's value.</li>
+        <li>For travel, Freedom points count as transferable because they can move to a Sapphire Preferred, and Custom Cash and Double Cash points because they can move to the Strata Premier.</li>
+        <li>Foreign transaction fees (3% on the Freedom cards, Custom Cash, Double Cash, BofA and U.S. Bank; 2.7% on Blue Business Plus) are taken off the restaurants-abroad row. The app doesn't store these fees yet.</li>
+        <li>Not counted, because the app has no terms set up for them: Fidelity Rewards, Amex Cash Magnet, Atmos Summit, Best Buy, Rakuten and the store cards.</li>
+        <li>This compares the cards' published terms. It isn't advice from a licensed financial advisor.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+const RULES = {"hilton_aspire": {"checked": "verified 2026-11-02", "base": 3, "rules": [{"brand": "Hilton", "rate": 14}, {"category": "Airlines", "rate": 7}, {"category": "Car Rental", "rate": 7}, {"category": "Dining", "rate": 7, "domestic": true}], "owners": ["Holder A"]}, "amex_platinum": {"checked": "ported (rates from memory 2026-10-25, confirm)", "base": 1, "rules": [{"category": "Airlines", "rate": 5, "cap": 500000, "per": "calendar_year", "group": "flights"}, {"brand": "Amex Travel", "rate": 5}], "owners": ["Holder A", "Holder B"]}, "amex_business_gold": {"checked": "verified 2026-07-31", "base": 1, "rules": [{"brand": "Amex Travel", "rate": 3}, {"category": "Advertising", "rate": 4, "type": "top_n", "top_n": 2, "slot": "advertising", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Electronics", "rate": 4, "type": "top_n", "top_n": 2, "slot": "electronics_software", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Software & Cloud", "rate": 4, "type": "top_n", "top_n": 2, "slot": "electronics_software", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Gas Stations", "rate": 4, "type": "top_n", "top_n": 2, "slot": "gas", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Dining", "rate": 4, "type": "top_n", "top_n": 2, "slot": "dining", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Transit", "rate": 4, "type": "top_n", "top_n": 2, "slot": "transit", "cap": 150000, "per": "calendar_year", "group": "top2"}, {"category": "Wireless", "rate": 4, "type": "top_n", "top_n": 2, "slot": "wireless", "domestic": true, "cap": 150000, "per": "calendar_year", "group": "top2"}], "owners": ["Holder A"]}, "citi_strata_premier": {"checked": "verified 2026-11-02", "base": 1, "rules": [{"brand": "Citi Travel", "rate": 10}, {"category": "Airlines", "rate": 3}, {"category": "Hotels", "rate": 3}, {"category": "Dining", "rate": 3}, {"category": "Groceries", "rate": 3}, {"category": "Gas & EV", "rate": 3}], "owners": ["?"]}, "chase_freedom_flex": {"checked": "verified 2026-11-02", "base": 1, "rules": [{"brand": "Chase Travel", "rate": 5}, {"category": "Dining", "rate": 3}, {"category": "Drugstores", "rate": 3}, {"type": "selected", "slot": "rotating", "rate": 5, "cap": 1500, "per": "quarter", "group": "rotating"}], "owners": ["Holder A"]}, "chase_freedom": {"checked": "ported", "base": 1, "rules": [{"type": "selected", "slot": "rotating", "rate": 5, "cap": 1500, "per": "quarter", "group": "rotating"}], "owners": ["Holder A", "Holder B"]}, "chase_freedom_unlimited": {"checked": "ported", "base": 1.5, "rules": [{"brand": "Chase Travel", "rate": 5}, {"category": "Dining", "rate": 3}, {"category": "Drugstores", "rate": 3}, {"brand": "Lyft", "rate": 5}], "owners": ["Holder A", "Holder B"]}, "chase_sapphire_preferred": {"checked": "ported; gas and EV verified 2026-11-07 (June 2026 refresh), rest of B35 open", "base": 1, "rules": [{"brand": "Chase Travel", "rate": 5}, {"category": "Dining", "rate": 3}, {"category": "Streaming", "rate": 3}, {"category": "Groceries", "rate": 3, "online": true}, {"category": "Gas & EV", "rate": 3}, {"category": "Travel", "rate": 2}, {"brand": "Lyft", "rate": 5}], "owners": ["Holder A", "Holder B"]}, "chase_amazon_prime": {"checked": "ported (from memory, confirm)", "base": 1, "rules": [{"brand": "Amazon", "rate": 5}, {"brand": "Whole Foods", "rate": 5}, {"brand": "Chase Travel", "rate": 5}, {"category": "Dining", "rate": 2}, {"category": "Gas Stations", "rate": 2}, {"category": "Transit", "rate": 2}], "owners": ["Holder A"]}, "bilt_obsidian": {"checked": "verified 2026-10-25", "base": 1, "rules": [{"type": "selected", "slot": "choice", "rate": 3, "cap": 25000, "per": "calendar_year", "group": "choice"}, {"category": "Travel", "rate": 2}, {"category": "Transit", "rate": 1}], "owners": ["Holder A"]}, "united_quest": {"checked": "ported", "base": 1, "rules": [{"brand": "United", "rate": 3}, {"category": "Travel", "rate": 2}, {"category": "Dining", "rate": 2}, {"category": "Streaming", "rate": 2}], "owners": ["Holder A"]}, "united_explorer": {"checked": "ported", "base": 1, "rules": [{"brand": "United", "rate": 2}, {"category": "Dining", "rate": 2}, {"category": "Hotels", "rate": 2}], "owners": ["Holder B"]}, "amex_blue_business_plus": {"checked": "ported", "base": {"rate": 2, "cap": 50000, "per": "calendar_year", "after": 1}, "rules": [], "owners": ["Holder A"]}, "marriott_bonvoy_brilliant": {"checked": "ported (Hotels 6x narrowed to Marriott)", "base": 2, "rules": [{"brand": "Marriott", "rate": 6}, {"category": "Dining", "rate": 3}, {"category": "Airlines", "rate": 3}], "owners": ["Holder B"]}, "marriott_bonvoy_boundless": {"checked": "ported (cap period unconfirmed)", "base": 2, "rules": [{"brand": "Marriott", "rate": 6}, {"category": "Groceries", "rate": 3, "cap": 6000, "per": "calendar_year", "group": "everyday3x"}, {"category": "Gas Stations", "rate": 3, "cap": 6000, "per": "calendar_year", "group": "everyday3x"}, {"category": "Dining", "rate": 3, "cap": 6000, "per": "calendar_year", "group": "everyday3x"}], "owners": ["Holder A", "Holder B"]}, "hilton_honors": {"checked": "ported", "base": 3, "rules": [{"brand": "Hilton", "rate": 7}, {"category": "Dining", "rate": 5, "domestic": true}, {"category": "Groceries", "rate": 5, "domestic": true}, {"category": "Gas Stations", "rate": 5, "domestic": true}], "owners": ["Holder A", "Holder B"]}, "hyatt_personal": {"checked": "ported (from memory, confirm)", "base": 1, "rules": [{"brand": "Hyatt", "rate": 4}, {"category": "Dining", "rate": 2}, {"category": "Airlines", "rate": 2}, {"category": "Transit", "rate": 2}, {"category": "Fitness", "rate": 2}], "owners": ["Holder A"]}, "citi_custom_cash": {"checked": "ported", "base": 1, "rules": [{"category": "Dining", "rate": 5, "type": "top_n", "top_n": 1, "slot": "dining", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Gas & EV", "rate": 5, "type": "top_n", "top_n": 1, "slot": "gas", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Groceries", "rate": 5, "type": "top_n", "top_n": 1, "slot": "grocery", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Airlines", "rate": 5, "type": "top_n", "top_n": 1, "slot": "travel", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Hotels", "rate": 5, "type": "top_n", "top_n": 1, "slot": "travel", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Transit", "rate": 5, "type": "top_n", "top_n": 1, "slot": "transit", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Streaming", "rate": 5, "type": "top_n", "top_n": 1, "slot": "streaming", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Drugstores", "rate": 5, "type": "top_n", "top_n": 1, "slot": "drugstores", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Home Improvement", "rate": 5, "type": "top_n", "top_n": 1, "slot": "home_improvement", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Fitness", "rate": 5, "type": "top_n", "top_n": 1, "slot": "fitness", "cap": 500, "per": "billing_cycle", "group": "top1"}, {"category": "Live Entertainment", "rate": 5, "type": "top_n", "top_n": 1, "slot": "live_entertainment", "cap": 500, "per": "billing_cycle", "group": "top1"}], "owners": ["Holder A"]}, "citi_double_cash": {"checked": "ported", "base": 2, "rules": [], "owners": ["Holder B"]}, "citi_aa_platinum_select": {"checked": "verified 2026-07-26", "base": 1, "rules": [{"brand": "American Airlines", "rate": 2}, {"category": "Dining", "rate": 2}, {"category": "Gas Stations", "rate": 2}], "owners": ["Holder A"]}, "delta_gold": {"checked": "ported", "base": 1, "rules": [{"brand": "Delta", "rate": 2}, {"category": "Dining", "rate": 2}, {"category": "Groceries", "rate": 2, "domestic": true}], "owners": ["Holder B"]}, "atmos_ascent": {"checked": "ported", "base": 1, "rules": [{"brand": "Alaska Airlines", "rate": 3}, {"brand": "Hawaiian Airlines", "rate": 3}, {"category": "Gas & EV", "rate": 2}, {"category": "Cable & Internet", "rate": 2}, {"category": "Streaming", "rate": 2}, {"category": "Transit", "rate": 2}], "owners": ["Holder B"]}, "discover_it": {"checked": "ported", "base": 1, "rules": [{"type": "selected", "slot": "rotating", "rate": 5, "cap": 1500, "per": "quarter", "group": "rotating"}], "owners": ["Holder A"]}, "us_bank_cash_plus": {"checked": "ported", "base": 1, "rules": [{"type": "selected", "slot": "five", "rate": 5, "cap": 2000, "per": "quarter", "group": "five"}, {"type": "selected", "slot": "two", "rate": 2}], "owners": ["Holder A"]}, "bofa_customized_cash": {"checked": "ported", "base": 1, "rules": [{"type": "selected", "slot": "choice", "rate": 3, "cap": 2500, "per": "quarter", "group": "bonus"}, {"category": "Groceries", "rate": 2, "cap": 2500, "per": "quarter", "group": "bonus"}, {"category": "Wholesale Clubs", "rate": 2, "cap": 2500, "per": "quarter", "group": "bonus"}], "owners": ["Holder A", "Holder B"]}, "capital_one_venture_one": {"checked": "ported", "base": 1.25, "rules": [{"brand": "Capital One Travel", "rate": 5}], "owners": ["Holder A"]}};
+// Points decision tree engine (see SPEC.md). A JavaScript mirror of the original
+// app's Python engine. RULES comes from rules.json (earn rules + holders).
+// In Node: const E = require('./engine.js'); E.buildCards(require('./rules.json')).
+
+const CATS = {
+  'Travel': null, 'Airlines': 'Travel', 'Hotels': 'Travel', 'Car Rental': 'Travel',
+  'Vacation Rentals': 'Travel', 'Transit': 'Travel', 'Portal': null, 'Dining': null,
+  'Groceries': null, 'Superstores': null, 'Wholesale Clubs': null,
+  'Gas & EV': null, 'Gas Stations': 'Gas & EV', 'EV Charging': 'Gas & EV', 'Drugstores': null,
+  'Streaming': null, 'Online Shopping': null, 'Electronics': null, 'Home Improvement': null,
+  'Fitness': null, 'Live Entertainment': null, 'Phone & Internet': null,
+  'Wireless': 'Phone & Internet', 'Cable & Internet': 'Phone & Internet', 'Advertising': null,
+  'Software & Cloud': null, 'Gift Cards': null, 'Other': null,
+};
+const parentOf = c => CATS[c] || null;
+const levelOf = c => (CATS[c] ? 2 : 1);
+
+// Values in cents per point. kind: brand (hotel/airline), flex (transferable), cash.
+const CUR_DEFAULTS = {
+  ur:      { name: 'Chase Ultimate Rewards', short: 'Chase UR', kind: 'flex', fm: 1.5, cash: 1.0, floor: 1.0,
+             floorHow: 'cash, or Chase Travel', cashHow: 'deposit or statement credit' },
+  mr:      { name: 'Amex Membership Rewards', short: 'Amex MR', kind: 'flex', fm: 1.5, cash: 0.6, floor: 1.0,
+             floorHow: 'flights paid with points on Amex Travel', cashHow: 'statement credit' },
+  ty:      { name: 'Citi ThankYou', short: 'Citi TY', kind: 'flex', fm: 1.5, cash: 0.75, cashCC: 1.0, floor: 1.0,
+             floorHow: 'Citi Travel', cashHow: 'Strata Premier account, since Aug 2025',
+             cashCCHow: 'Custom Cash and Double Cash accounts' },
+  c1:      { name: 'Capital One Miles', short: 'Capital One', kind: 'flex', fm: 1.45, cash: 0.5, floor: 1.0,
+             floorHow: 'erase a travel purchase', cashHow: 'statement credit' },
+  bilt:    { name: 'Bilt Points', short: 'Bilt', kind: 'flex', fm: 1.55, cash: 0.55, floor: 1.25,
+             floorHow: 'Bilt Travel', cashHow: 'statement credit' },
+  hilton:  { name: 'Hilton Honors', short: 'Hilton', kind: 'brand', fm: 0.35 },
+  marriott:{ name: 'Marriott Bonvoy', short: 'Marriott', kind: 'brand', fm: 0.73 },
+  hyatt:   { name: 'World of Hyatt', short: 'Hyatt', kind: 'brand', fm: 1.5 },
+  united:  { name: 'United MileagePlus', short: 'United', kind: 'brand', fm: 1.3 },
+  delta:   { name: 'Delta SkyMiles', short: 'Delta', kind: 'brand', fm: 1.1 },
+  aa:      { name: 'American AAdvantage', short: 'AAdvantage', kind: 'brand', fm: 1.4 },
+  atmos:   { name: 'Atmos Rewards', short: 'Atmos', kind: 'brand', fm: 1.5 },
+  cash:    { name: 'Cash back', short: 'cash', kind: 'cash', cash: 1.0 },
+  amazon:  { name: 'Amazon points', short: 'Amazon', kind: 'cash', cash: 1.0 },
+};
+
+// product_key → display, currency, network, portal brand, foreign fee (%)
+const PRODUCTS = {
+  hilton_aspire:            { name: 'Hilton Aspire', cur: 'hilton', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  amex_platinum:            { name: 'Amex Platinum', cur: 'mr', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  amex_business_gold:       { name: 'Amex Business Gold', cur: 'mr', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  citi_strata_premier:      { name: 'Citi Strata Premier', cur: 'ty', net: 'Mastercard', issuer: 'CITI', portal: 'Citi Travel' },
+  chase_freedom_flex:       { name: 'Chase Freedom Flex', cur: 'ur', net: 'Mastercard', issuer: 'CHASE', portal: 'Chase Travel', ftf: 3 },
+  chase_freedom:            { name: 'Chase Freedom', cur: 'ur', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel', ftf: 3 },
+  chase_freedom_unlimited:  { name: 'Chase Freedom Unlimited', cur: 'ur', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel', ftf: 3 },
+  chase_sapphire_preferred: { name: 'Chase Sapphire Preferred', cur: 'ur', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  chase_amazon_prime:       { name: 'Amazon Prime Visa', cur: 'amazon', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  bilt_obsidian:            { name: 'Bilt Obsidian', cur: 'bilt', net: 'Mastercard', issuer: 'BILT', portal: 'Bilt Travel' },
+  united_quest:             { name: 'United Quest', cur: 'united', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  united_explorer:          { name: 'United Explorer', cur: 'united', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  amex_blue_business_plus:  { name: 'Amex Blue Business Plus', cur: 'mr', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel', ftf: 2.7 },
+  marriott_bonvoy_brilliant:{ name: 'Marriott Bonvoy Brilliant', cur: 'marriott', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  marriott_bonvoy_boundless:{ name: 'Marriott Bonvoy Boundless', cur: 'marriott', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  hilton_honors:            { name: 'Hilton Honors (Amex)', cur: 'hilton', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  hyatt_personal:           { name: 'World of Hyatt', cur: 'hyatt', net: 'Visa', issuer: 'CHASE', portal: 'Chase Travel' },
+  citi_custom_cash:         { name: 'Citi Custom Cash', cur: 'ty', cashKey: 'cashCC', net: 'Mastercard', issuer: 'CITI', portal: 'Citi Travel', ftf: 3 },
+  citi_double_cash:         { name: 'Citi Double Cash', cur: 'ty', cashKey: 'cashCC', net: 'Mastercard', issuer: 'CITI', portal: 'Citi Travel', ftf: 3 },
+  citi_aa_platinum_select:  { name: 'Citi AAdvantage Platinum Select', cur: 'aa', net: 'Mastercard', issuer: 'CITI', portal: 'Citi Travel' },
+  delta_gold:               { name: 'Delta SkyMiles Gold', cur: 'delta', net: 'Amex', issuer: 'AMEX', portal: 'Amex Travel' },
+  atmos_ascent:             { name: 'Atmos Ascent', cur: 'atmos', net: 'Visa', issuer: 'BOA' },
+  discover_it:              { name: 'Discover it', cur: 'cash', net: 'Discover', issuer: 'DISCOVER' },
+  us_bank_cash_plus:        { name: 'U.S. Bank Cash+', cur: 'cash', net: 'Visa', issuer: 'US BANK', ftf: 3 },
+  bofa_customized_cash:     { name: 'BofA Customized Cash', cur: 'cash', net: 'Visa', issuer: 'BOA', ftf: 3 },
+  capital_one_venture_one:  { name: 'Capital One VentureOne', cur: 'c1', net: 'Mastercard', issuer: 'CAPITALONE', portal: 'Capital One Travel' },
+};
+
+// Card-level choices already in the app (card_category_selections).
+const SELECTIONS = { bilt_obsidian: { choice: 'Groceries' } };
+
+function normRules(spec) {
+  const base = typeof spec.base === 'object' ? spec.base : { rate: spec.base };
+  return [{ ...base, isBase: true, type: 'fixed' }, ...spec.rules.map(r => ({ type: 'fixed', ...r }))];
+}
+
+function buildCards(RULES) {
+  return Object.entries(RULES).map(([key, spec]) => ({
+    key, ...PRODUCTS[key], owners: spec.owners, checked: spec.checked,
+    verified: spec.checked.startsWith('verified'), rules: normRules(spec),
+    selections: SELECTIONS[key] || {},
+  }));
+}
+
+function targetLevel(category, brand, t) {
+  if (brand) return brand === t.brand ? 3 : 0;
+  if (category && t.cat) {
+    if (category === t.cat) return levelOf(category);
+    if (category === parentOf(t.cat)) return 1;
+  }
+  return 0;
+}
+
+function condFail(r, t) {
+  if (r.domestic && t.foreign) return 'US only';
+  if (r.foreign && !t.foreign) return 'abroad only';
+  if (r.online && !t.online) return 'online only';
+  return null;
+}
+
+// Every rule of the card, with how it fares against transaction t.
+// Order of the matching ones follows the engine: most specific level, then highest rate.
+function evaluate(card, t) {
+  const rows = [];
+  for (const r of card.rules) {
+    if (r.isBase) continue;
+    let lvl, target;
+    if (r.type === 'selected') {
+      const sel = card.selections[r.slot];
+      if (!sel) { rows.push({ r, lvl: 0, status: 'unset' }); continue; }
+      target = sel;
+      lvl = targetLevel(sel, null, t);
+    } else {
+      lvl = targetLevel(r.category, r.brand, t);
+    }
+    if (!lvl) { rows.push({ r, lvl: 0, status: 'no', target }); continue; }
+    const fail = condFail(r, t);
+    rows.push({ r, lvl, status: fail ? 'fail' : 'match', why: fail, target });
+  }
+  const cands = rows.filter(x => x.status === 'match').sort((a, b) => b.lvl - a.lvl || b.r.rate - a.r.rate);
+  return { rows, cands, base: card.rules.find(r => r.isBase) };
+}
+
+// What one dollar can earn on this card for t: the first offer in the
+// engine's order, then what applies once a cap is used up or a top-category
+// condition doesn't hold. A top-N rule is shown as conditional.
+function offers(card, t) {
+  const { cands, base } = evaluate(card, t);
+  const out = [];
+  for (const c of cands) {
+    const r = c.r;
+    if (r.type === 'top_n') { out.push({ rate: r.rate, cond: 'top', r }); continue; }
+    if (r.cap) {
+      out.push({ rate: r.rate, cond: 'cap', r });
+      if (r.after != null) { out.push({ rate: r.after, cond: null, after: r }); return out; }
+      continue;
+    }
+    out.push({ rate: r.rate, cond: null, r });
+    return out;
+  }
+  if (base.cap) {
+    out.push({ rate: base.rate, cond: 'cap', r: base });
+    out.push({ rate: base.after ?? 1, cond: null, after: base });
+  } else out.push({ rate: base.rate, cond: null, r: base });
+  return out;
+}
+
+function centsPerPoint(card, path, preset, CUR) {
+  const c = CUR[card.cur];
+  if (path === 'cash') return c.kind === 'brand' ? null : c[card.cashKey || 'cash'] ?? c.cash;
+  if (c.kind === 'cash') return c.cash;
+  if (preset === 'fm') return c.fm;
+  return c.kind === 'flex' ? c.floor : c.fm;
+}
+
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+const YEARLY = { billing_cycle: 12, quarter: 4, calendar_year: 1, card_year: 1 };
+// A cap matters for picking when it is under $100,000 a year.
+const capMatters = r => r && r.cap && r.cap * (YEARLY[r.per] || 1) < 100000;
+
+// Best card for one kind of spending on one path. Top-category bonuses
+// (Custom Cash, Business Gold) move with your spending each cycle, so they
+// are left out here and shown with the other bonus slots.
+function pick(CARDS, row, path, preset, CUR) {
+  const all = [];
+  for (const card of CARDS) {
+    if (row.portal && !card.portal) continue;
+    if (row.network && card.net !== row.network) continue;
+    const t = row.portal ? { ...row.t, brand: card.portal } : row.t;
+    const cpp = centsPerPoint(card, path, preset, CUR);
+    if (cpp == null) continue;
+    const fee = row.t.foreign ? (card.ftf || 0) : 0;
+    for (const o of offers(card, t)) {
+      if (o.cond === 'top') continue;
+      const capped = o.cond === 'cap' && capMatters(o.r);
+      all.push({ card, rate: o.rate, r: o.r || o.after, capped, cpp, fee, value: o.rate * cpp - fee });
+    }
+  }
+  const best = list => {
+    const m = Math.max(...list.map(o => o.value));
+    const seen = new Set();
+    return { value: m, offers: list.filter(o => near(o.value, m) && !seen.has(o.card.key) && seen.add(o.card.key)) };
+  };
+  const top = best(all);
+  const steady = best(all.filter(o => !o.capped));
+  return { top, steady, capped: !near(top.value, steady.value) };
+}
+
+if (typeof module !== 'undefined') module.exports = { CATS, CUR_DEFAULTS, PRODUCTS, buildCards, evaluate, offers, pick, centsPerPoint, parentOf, levelOf, capMatters };
+
+
+const CARDS = buildCards(RULES);
+const CARD = Object.fromEntries(CARDS.map(c => [c.key, c]));
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem('pdt:' + k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem('pdt:' + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+/* ---------- The tree ---------- */
+const KINDS = [
+  { id: 'purchase', label: 'Purchase' }, { id: 'refund', label: 'Refund' },
+  { id: 'credit', label: 'Statement credit' }, { id: 'fee', label: 'Fee or interest' },
+  { id: 'payment', label: 'Payment or transfer' },
+];
+const SOURCES = [
+  { id: 'manual', label: 'Your fix' }, { id: 'rule', label: 'Merchant rule' },
+  { id: 'plaid', label: "Plaid's category" }, { id: 'none', label: 'Unknown' },
+];
+const SAMPLES = [
+  { id: 'hilton', g: 'Travel', label: 'Hilton stay, booked with Hilton', amt: 400, kind: 'purchase', t: { cat: 'Hotels', brand: 'Hilton' }, src: 'rule',
+    why: 'A merchant rule matches “Hilton”. The brand Hilton sits under Travel › Hotels.', mine: 'Travel › Hotels' },
+  { id: 'hilton-citi', g: 'Travel', label: 'Hilton stay, booked on Citi Travel', amt: 400, kind: 'purchase', t: { cat: 'Portal', brand: 'Citi Travel' }, src: 'rule',
+    why: 'A booking site is the merchant, so the brand is Citi Travel, not Hilton. Your category can still say Hotels.', mine: 'Travel › Hotels' },
+  { id: 'marriott', g: 'Travel', label: 'Marriott stay, booked with Marriott', amt: 300, kind: 'purchase', t: { cat: 'Hotels', brand: 'Marriott' }, src: 'rule',
+    why: 'A merchant rule matches “Marriott”, which sits under Travel › Hotels.', mine: 'Travel › Hotels' },
+  { id: 'united', g: 'Travel', label: 'United flight, booked with United', amt: 600, kind: 'purchase', t: { cat: 'Airlines', brand: 'United' }, src: 'rule',
+    why: 'A merchant rule matches “United”, which sits under Travel › Airlines.', mine: 'Travel › Airlines' },
+  { id: 'uber', g: 'Travel', label: 'Uber ride', amt: 35, kind: 'purchase', t: { cat: 'Transit', brand: 'Uber' }, src: 'rule',
+    why: 'A merchant rule matches “Uber”. Rides, taxis, trains, parking and tolls sit under Travel › Transit.', mine: 'Transportation › Ground Transportation' },
+  { id: 'dinner-us', g: 'Everyday', label: 'Dinner in Hoboken', amt: 120, kind: 'purchase', t: { cat: 'Dining' }, src: 'plaid',
+    why: 'No merchant rule matches. Plaid calls it a restaurant, which maps to Dining.', mine: 'Dining' },
+  { id: 'dinner-il', g: 'Everyday', label: 'Dinner in Tel Aviv', amt: 120, kind: 'purchase', t: { cat: 'Dining', foreign: true }, src: 'plaid',
+    why: 'Plaid calls it a restaurant (Dining). The merchant is in Israel, so it counts as abroad.', mine: 'Dining' },
+  { id: 'doordash', g: 'Everyday', label: 'DoorDash order', amt: 45, kind: 'purchase', t: { cat: 'Dining', brand: 'DoorDash' }, src: 'rule',
+    why: 'A merchant rule matches “DoorDash”, a delivery brand that sits under Dining, so every card’s dining rate applies.', mine: 'Dining › Food Delivery' },
+  { id: 'wholefoods', g: 'Everyday', label: 'Whole Foods', amt: 180, kind: 'purchase', t: { cat: 'Groceries', brand: 'Whole Foods' }, src: 'rule',
+    why: 'A merchant rule matches “Whole Foods”, which sits under Groceries.', mine: 'Groceries' },
+  { id: 'costco', g: 'Everyday', label: 'Costco', amt: 250, kind: 'purchase', t: { cat: 'Wholesale Clubs', brand: 'Costco' }, src: 'rule',
+    why: 'Costco sits under Wholesale Clubs, not Groceries, so grocery rates don’t apply, even though your category says Groceries.', mine: 'Groceries' },
+  { id: 'gas', g: 'Everyday', label: 'Shell gas station', amt: 60, kind: 'purchase', t: { cat: 'Gas Stations' }, src: 'plaid',
+    why: 'Plaid calls it a gas station, which maps to Gas & EV › Gas Stations.', mine: 'Transportation › Gas' },
+  { id: 'giftcard', g: 'Edge cases', label: 'Gift card', amt: 200, kind: 'purchase', t: { cat: 'Gift Cards' }, src: 'rule',
+    why: 'Gift cards have their own merchant category and are reported apart, so a change in card terms is easy to spot.', mine: 'Family › Gifts' },
+  { id: 'unknown', g: 'Edge cases', label: 'A merchant nobody knows', amt: 80, kind: 'purchase', t: {}, src: 'none',
+    why: 'No merchant rule and no Plaid category. It earns the base rate and goes to the review list until you name the merchant.', mine: 'Unclassified' },
+  { id: 'refund', g: 'Edge cases', label: 'Refund of the Hilton stay', amt: 400, kind: 'refund', t: { cat: 'Hotels', brand: 'Hilton' }, src: 'rule',
+    why: 'Same merchant path as the stay. The refund finds that purchase on the same card within 120 days and takes back what it earned.', mine: 'Travel › Hotels' },
+  { id: 'credit', g: 'Edge cases', label: 'Statement credit', amt: 50, kind: 'credit',
+    end: 'Earns nothing, and the points you already earned on the purchase stay.' },
+  { id: 'fee', g: 'Edge cases', label: 'Annual fee', amt: 550, kind: 'fee',
+    end: 'Fees and interest earn nothing, whatever the merchant line says.' },
+  { id: 'payment', g: 'Edge cases', label: 'Card payment', amt: 1200, kind: 'payment',
+    end: 'Payments, transfers and bookkeeping lines earn nothing.' },
+];
+const LANES = [
+  { key: 'hilton_aspire', art: 'hilton', unit: 'Hilton Honors points', sub: 'Hotel points · Amex' },
+  { key: 'citi_strata_premier', art: 'citi', unit: 'ThankYou points', sub: 'Transferable points · Mastercard' },
+];
+
+let sampleId = store.get('sample') || 'hilton';
+if (!SAMPLES.some(s => s.id === sampleId)) sampleId = 'hilton';
+
+function pathText(t) {
+  if (!t.cat) return 'None';
+  return [parentOf(t.cat), t.cat, t.brand].filter(Boolean).join(' › ');
+}
+
+function renderPicker() {
+  const groups = [...new Set(SAMPLES.map(s => s.g))];
+  document.getElementById('picker').innerHTML = groups.map(g => `
+    <div class="pgroup" role="group" aria-label="${esc(g)}"><span>${esc(g)}</span>
+      ${SAMPLES.filter(s => s.g === g).map(s => `<button type="button" class="chip" id="s-${s.id}" data-s="${s.id}" aria-pressed="${s.id === sampleId}">${esc(s.label)}</button>`).join('')}
+    </div>`).join('');
+}
+
+function ruleLabel(r, t) {
+  const name = r.brand || r.category;
+  let tag = '';
+  if (r.domestic) tag = 'US only';
+  if (r.online) tag = 'online only';
+  if (r.category && t.cat && parentOf(t.cat) === r.category) tag = (tag ? tag + ' · ' : '') + 'covers ' + t.cat;
+  return `<b>${esc(name)} ${r.rate}x</b>${tag ? `<span class="tag">${esc(tag)}</span>` : ''}`;
+}
+
+function laneHTML(lane, s) {
+  const card = CARD[lane.key];
+  const terminal = !['purchase', 'refund'].includes(s.kind);
+  const t = s.t || {};
+  const ev = evaluate(card, t);
+  const winner = ev.cands[0] || null;
+  const winLvl = winner ? winner.lvl : 0;
+  const rungs = [
+    { lvl: 3, label: 'Brand', hint: 'the merchant itself', rules: card.rules.filter(r => !r.isBase && r.brand) },
+    { lvl: 2, label: 'Sub-category', hint: 'e.g. Hotels', rules: card.rules.filter(r => !r.isBase && r.category && CATS[r.category]) },
+    { lvl: 1, label: 'Category', hint: 'e.g. Dining', rules: card.rules.filter(r => !r.isBase && r.category && !CATS[r.category]) },
+    { lvl: 0, label: 'Base rate', hint: 'everything else', rules: [ev.base] },
+  ];
+  const ladder = rungs.map(g => {
+    let state = terminal ? 'skip' : g.lvl > winLvl ? 'miss' : g.lvl === winLvl ? 'hit' : 'skip';
+    const chips = g.rules.length ? g.rules.map(r => {
+      const row = ev.rows.find(x => x.r === r);
+      let cls = '';
+      if (!terminal) {
+        if (r.isBase) cls = winLvl === 0 ? 'win' : '';
+        else if (winner && winner.r === r) cls = 'win';
+        else if (row && row.status === 'fail') cls = 'fail';
+        else if (row && row.status === 'match') cls = 'lower';
+      }
+      const title = cls === 'fail' ? `Matches the path, but this rate is ${row.why}` : cls === 'lower' ? 'Matches, but a more specific or higher rule wins' : '';
+      return `<span class="rc ${cls}"${title ? ` title="${esc(title)}"` : ''}>${r.isBase ? `<b>${r.rate}x</b>` : ruleLabel(r, t)}</span>`;
+    }).join('') : `<span class="rc">none on this card</span>`;
+    const failed = terminal ? [] : g.rules.map(r => ev.rows.find(x => x.r === r)).filter(x => x && x.status === 'fail');
+    const note = failed.length ? `<p class="why">${esc(failed.map(x => `${x.r.category || x.r.brand} matches, but its ${x.r.rate}x is ${x.why}`).join('; '))}, so the next rung down pays.</p>` : '';
+    return `<div class="rung ${state}"><div class="rl">${g.label}<small>${g.hint}</small></div><div class="rules">${chips}${note}</div></div>`;
+  }).join('');
+
+  const rate = winner ? winner.r.rate : ev.base.rate;
+  const dollars = card.issuer === 'AMEX' ? Math.floor(Math.abs(s.amt) + 0.5) : Math.abs(s.amt);
+  let result;
+  if (terminal) {
+    result = `<div class="pts num">0<span>${lane.unit}</span></div><div class="fx">${esc(s.end)}</div>`;
+  } else {
+    const pts = dollars * rate;
+    const neg = s.kind === 'refund';
+    result = `<div class="pts num ${neg ? 'neg' : ''}">${neg ? '−' : ''}${pts.toLocaleString('en-US')}<span>${lane.unit}</span></div>
+      <div class="fx num">${neg ? '−' : ''}$${dollars.toLocaleString('en-US')} × ${rate} ${neg ? '= points taken back at the rate the stay earned' : ''}</div>
+      ${card.issuer === 'AMEX' ? '<div class="fx">Amex rounds the amount to the nearest dollar first.</div>' : ''}
+      ${s.src === 'none' ? '<span class="flag">Goes to the review list</span>' : ''}`;
+  }
+  const capText = terminal ? 'Not reached.' : (winner && winner.r.cap) ? `Capped at $${winner.r.cap.toLocaleString()}.` :
+    'No cap on this rule. On a capped rule the rate pays until the limit is used up, then the next rung down pays the rest.';
+  return `<div class="lane">
+    <div class="node ${terminal ? 'off' : ''}">
+      <div class="cardhead"><span class="art ${lane.art}" aria-hidden="true"></span><div><h3>${esc(card.name)}</h3><p>${esc(lane.sub)}</p></div></div>
+      <div class="node-h"><span class="step">3</span><h3>Which rule pays?</h3><p>Top rung that matches wins</p></div>
+      <div class="ladder">${ladder}</div>
+    </div>
+    <div class="wire ${terminal ? 'off' : ''}"></div>
+    <div class="node ${terminal ? 'off' : ''}">
+      <div class="node-h"><span class="step">4</span><h3>Any limit?</h3></div>
+      <p class="capline">${capText}</p>
+    </div>
+    <div class="wire"></div>
+    <div class="node">
+      <div class="node-h"><span class="step">5</span><h3>Points</h3></div>
+      <div class="result">${result}</div>
+    </div>
+  </div>`;
+}
+
+function renderTree() {
+  const s = SAMPLES.find(x => x.id === sampleId);
+  const terminal = !['purchase', 'refund'].includes(s.kind);
+  const kinds = KINDS.map(k => `<span class="br ${k.id === s.kind ? 'on' : ''}">${k.label}</span>`).join('');
+  const kindEnd = terminal ? `<div class="endbox"><b>0</b><span>${esc(s.end)}</span></div>` :
+    s.kind === 'refund' ? `<p class="why">A refund goes on through the tree to find the rate it reverses.</p>` : `<p class="why">A purchase goes on to find its merchant.</p>`;
+  const usedIx = terminal ? -1 : SOURCES.findIndex(x => x.id === s.src);
+  const chain = SOURCES.map((x, i) => `${i ? '<span class="arr" aria-hidden="true">→</span>' : ''}<span class="lk ${i < usedIx ? 'tried' : i === usedIx ? 'used' : ''}">${x.label}</span>`).join('');
+  const merchant = terminal ? `<p class="why">Skipped: this line can’t earn.</p>` : `
+    <div class="chain" aria-label="Lookup order">${chain}</div>
+    <div class="paths">
+      <div class="pathbox merchant"><span class="lbl">Merchant path · used for points</span><span class="val">${esc(pathText(s.t))}</span><small>${s.t.foreign ? 'Abroad' : 'In the US'}</small></div>
+      <div class="pathbox mine"><span class="lbl">Your category · budgets only</span><span class="val">${esc(s.mine)}</span><small>Points never read it</small></div>
+    </div>
+    <p class="why">${esc(s.why)}</p>`;
+  document.getElementById('tree').innerHTML = `
+    <div class="node">
+      <div class="node-h"><span class="step">1</span><h3>What kind of line is it?</h3><p>Read from the transaction itself, not the merchant</p></div>
+      <div class="branches">${kinds}</div>
+      ${kindEnd}
+    </div>
+    <div class="wire ${terminal ? 'off' : ''}"></div>
+    <div class="node ${terminal ? 'off' : ''}">
+      <div class="node-h"><span class="step">2</span><h3>Where does the merchant sit?</h3><p>The first one that answers is used</p></div>
+      ${merchant}
+    </div>
+    <svg class="fork" viewBox="0 0 1000 34" preserveAspectRatio="none" aria-hidden="true"><path d="M500 0 V12 M500 12 H250 V34 M500 12 H750 V34" vector-effect="non-scaling-stroke"/></svg>
+    <div class="lanes">${LANES.map(l => laneHTML(l, s)).join('')}</div>`;
+}
+
+document.getElementById('picker').addEventListener('click', e => {
+  const b = e.target.closest('[data-s]');
+  if (!b) return;
+  sampleId = b.dataset.s;
+  store.set('sample', sampleId);
+  document.querySelectorAll('#picker .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.s === sampleId));
+  renderTree();
+});
+
+/* ---------- Best card ---------- */
+const ROWS = [
+  { g: 'Everyday' },
+  { label: 'Restaurants in the US', t: { cat: 'Dining' } },
+  { label: 'Restaurants abroad', t: { cat: 'Dining', foreign: true }, note: 'After any foreign transaction fee.' },
+  { label: 'DoorDash and other delivery', t: { cat: 'Dining', brand: 'DoorDash' }, note: 'Delivery counts as dining.' },
+  { label: 'Supermarkets, in store', t: { cat: 'Groceries' } },
+  { label: 'Whole Foods', t: { cat: 'Groceries', brand: 'Whole Foods' } },
+  { label: 'Amazon', t: { cat: 'Online Shopping', brand: 'Amazon' } },
+  { label: 'Walmart and Target', t: { cat: 'Superstores' } },
+  { label: 'Costco', t: { cat: 'Wholesale Clubs', brand: 'Costco' }, network: 'Visa', note: 'Costco warehouses take only Visa, so only Visa cards count here.' },
+  { label: 'Gas stations', t: { cat: 'Gas Stations' } },
+  { label: 'Streaming', t: { cat: 'Streaming' } },
+  { label: 'Drugstores', t: { cat: 'Drugstores' } },
+  { g: 'Travel' },
+  { label: 'Flights, booked with the airline', t: { cat: 'Airlines' } },
+  { label: 'United flights', t: { cat: 'Airlines', brand: 'United' } },
+  { label: 'Hilton stays', t: { cat: 'Hotels', brand: 'Hilton' } },
+  { label: 'Marriott stays', t: { cat: 'Hotels', brand: 'Marriott' } },
+  { label: 'Hyatt stays', t: { cat: 'Hotels', brand: 'Hyatt' } },
+  { label: 'Other hotels, booked direct', t: { cat: 'Hotels' } },
+  { label: 'Hotels on a card’s own travel site', t: { cat: 'Portal' }, portal: true, note: 'Each card on its own issuer’s site. Bookings made this way usually earn no hotel points or elite nights.' },
+  { label: 'Car rental, booked direct', t: { cat: 'Car Rental' } },
+  { label: 'Uber, taxis and transit', t: { cat: 'Transit', brand: 'Uber' } },
+  { g: 'Everything else' },
+  { label: 'Anything without a bonus', t: { cat: 'Other' } },
+];
+
+const CUR = JSON.parse(JSON.stringify(CUR_DEFAULTS));
+const savedVals = store.get('vals');
+if (savedVals) for (const [k, v] of Object.entries(savedVals)) if (CUR[k]) Object.assign(CUR[k], v);
+let path = store.get('path') === 'travel' ? 'travel' : 'cash';
+let preset = store.get('preset') === 'min' ? 'min' : 'fm';
+
+const PER = { billing_cycle: 'a billing cycle', quarter: 'a quarter', calendar_year: 'a year', card_year: 'a card year' };
+const capText = r => `$${r.cap.toLocaleString('en-US')} ${PER[r.per] || 'a year'}`;
+const unit = v => path === 'cash' ? `${fmt(v)}%` : `${fmt(v)}¢`;
+const ownerText = o => o.includes('?') ? 'Owner not set' : o.length > 1 ? 'Both' : o[0];
+
+function breakdown(o) {
+  const c = CUR[o.card.cur];
+  const rate = o.rate;
+  let s = c.kind === 'cash' ? `${fmt(rate)}% cash back` : `${fmt(rate)}x ${c.short} at ${fmt(o.cpp)}¢`;
+  if (o.fee) s += `, less the ${o.fee}% fee`;
+  return s;
+}
+
+function namesHTML(offers, max = 3) {
+  const shown = offers.slice(0, max);
+  const rest = offers.length - shown.length;
+  return `<div class="cardnames">${shown.map(o => `<div class="cn"><b>${esc(o.card.name)}</b><span class="owner">${esc(ownerText(o.card.owners))}</span>${o.capped ? `<span class="capchip">up to ${esc(capText(o.r))}</span>` : ''}${o.card.verified ? '' : '<span class="unconf">terms not confirmed</span>'}</div>`).join('')}${rest > 0 ? `<span class="more">or ${rest} more at the same rate: ${esc(offers.slice(max).map(o => o.card.name).join(', '))}</span>` : ''}</div>`;
+}
+
+function sortOffers(list) {
+  return [...list].sort((a, b) => (b.card.verified - a.card.verified) || (a.capped - b.capped) || a.card.name.localeCompare(b.card.name));
+}
+
+function renderBest() {
+  document.querySelectorAll('[data-path]').forEach(b => b.setAttribute('aria-pressed', b.dataset.path === path));
+  document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', b.dataset.preset === preset));
+  document.getElementById('presetseg').hidden = path !== 'travel';
+  document.getElementById('modenote').textContent = path === 'cash'
+    ? 'Rewards count at the rate they turn into cash in one step: a deposit or a statement credit. Hotel and airline points can’t be cashed out, so those cards are left out.'
+    : preset === 'fm'
+      ? 'Points count at Frequent Miler’s typical award value for each currency. Cash back counts at face value, since it can pay for travel too.'
+      : 'Transferable points count at the least a travel booking always gets them. Hotel and airline points keep Frequent Miler’s value, since they have no floor. Cash back counts at face value.';
+
+  const head = `<thead><tr><th scope="col">Spending</th><th scope="col">Best card</th><th scope="col">${path === 'cash' ? 'Cash back' : 'Travel value per $'}</th><th scope="col">Past the limit</th></tr></thead>`;
+  const needs = [];
+  let body = '';
+  for (const row of ROWS) {
+    if (row.g) { body += `<tr class="grp"><td colspan="4">${esc(row.g)}</td></tr>`; continue; }
+    const p = pick(CARDS, row, path, preset, CUR);
+    const top = sortOffers(p.top.offers);
+    needs.push({ row, keys: top.map(o => o.card.key) });
+    const first = top[0];
+    let beyond = '<span class="muted">No limit</span>';
+    if (p.capped) {
+      const st = sortOffers(p.steady.offers);
+      beyond = `<span class="beyond">Then <b>${esc(st[0].card.name)}</b>${st.length > 1 ? ` or ${st.length - 1} more` : ''} at ${unit(p.steady.value)}</span>`;
+    }
+    body += `<tr>
+      <td class="what" data-l="Spending"><b>${esc(row.label)}</b>${row.note ? `<span class="rownote">${esc(row.note)}</span>` : ''}</td>
+      <td data-l="Best card">${namesHTML(top)}</td>
+      <td class="ret num" data-l="${path === 'cash' ? 'Cash back' : 'Travel value per $'}">${unit(p.top.value)}<small>${esc(breakdown(first))}</small></td>
+      <td data-l="Past the limit">${beyond}</td>
+    </tr>`;
+  }
+  document.getElementById('best').innerHTML = head + `<tbody>${body}</tbody>`;
+  renderWallet(needs);
+  renderSlots();
+}
+
+// Fewest cards that cover the best return on every row (greedy).
+function renderWallet(needs) {
+  const left = needs.slice();
+  const picks = [];
+  while (left.length) {
+    const count = {};
+    for (const n of left) for (const k of n.keys) count[k] = (count[k] || 0) + 1;
+    const key = Object.keys(count).sort((a, b) => count[b] - count[a] || (CARD[b].verified - CARD[a].verified) || CARD[a].name.localeCompare(CARD[b].name))[0];
+    const rows = left.filter(n => n.keys.includes(key));
+    picks.push({ card: CARD[key], rows: rows.map(n => n.row.label) });
+    for (const r of rows) left.splice(left.indexOf(r), 1);
+  }
+  document.getElementById('wallet').innerHTML = `
+    <div class="wallet-h"><h3>${picks.length} cards cover every row</h3><p>The fewest cards that get the best ${path === 'cash' ? 'cash back' : 'travel value'} on each row above. Where several cards tie, the one that covers more rows is used.</p></div>
+    <div class="wcards">${picks.map(p => `<div class="wc"><b>${esc(p.card.name)}</b><span>${esc(p.rows.join(', '))}</span></div>`).join('')}</div>`;
+}
+
+function slotValue(key, rate) {
+  const card = CARD[key];
+  return rate * centsPerPoint(card, path, preset, CUR);
+}
+function renderSlots() {
+  const S = [
+    { key: 'citi_custom_cash', rate: 5, title: 'Citi Custom Cash', body: '5x on whichever eligible category you spend most on each billing cycle, first $500. Dining, groceries, gas, travel, streaming, drugstores and more.', set: '' },
+    { key: 'amex_business_gold', rate: 4, title: 'Amex Business Gold', body: '4x on its top two of six categories each billing cycle, US purchases, $150,000 a year combined. Includes dining, gas, transit and wireless.', set: '' },
+    { key: 'chase_freedom_flex', rate: 5, title: 'Chase Freedom and Freedom Flex', body: '5x on the quarter’s categories, first $1,500 a quarter on each card.', set: 'Q1 2027 categories aren’t in the app yet' },
+    { key: 'discover_it', rate: 5, title: 'Discover it', body: '5% on the quarter’s categories, first $1,500 a quarter.', set: 'Q1 2027 categories aren’t in the app yet' },
+    { key: 'us_bank_cash_plus', rate: 5, title: 'U.S. Bank Cash+', body: '5% on two categories you choose, first $2,000 a quarter combined; 2% on one everyday category.', set: 'Your choices aren’t in the app yet' },
+    { key: 'bofa_customized_cash', rate: 3, title: 'BofA Customized Cash', body: '3% on the category you choose, sharing $2,500 a quarter with the 2% on groceries and wholesale clubs.', set: 'Your choice isn’t in the app yet' },
+  ];
+  document.getElementById('slots').innerHTML = S.map(s => {
+    const v = slotValue(s.key, s.rate);
+    return `<div class="slot"><h3>${esc(s.title)}</h3><span class="sv num">${v == null ? '—' : unit(v)}</span><p>${esc(s.body)}</p>${s.set ? `<span class="set">${esc(s.set)}</span>` : ''}</div>`;
+  }).join('');
+}
+
+function renderVals() {
+  const order = ['ur', 'mr', 'ty', 'c1', 'bilt', 'hilton', 'marriott', 'hyatt', 'united', 'delta', 'aa', 'atmos'];
+  const inp = (k, f) => `<input type="number" step="0.01" min="0" id="v-${k}-${f}" data-k="${k}" data-f="${f}" value="${CUR[k][f]}" aria-label="${esc(CUR[k].name)} ${f}">`;
+  const rows = order.map(k => {
+    const c = CUR[k];
+    const cash = c.kind === 'brand' ? '<span class="na">Can’t be cashed out</span>' :
+      k === 'ty' ? `${inp(k, 'cash')}<small>${esc(c.cashHow)}</small>${inp(k, 'cashCC')}<small>${esc(c.cashCCHow)}</small>` :
+      `${inp(k, 'cash')}<small>${esc(c.cashHow)}</small>`;
+    const floor = c.kind === 'flex' ? `${inp(k, 'floor')}<small>${esc(c.floorHow)}</small>` : '<span class="na">Uses Frequent Miler’s value</span>';
+    return `<tr><td><b>${esc(c.name)}</b><small>${c.kind === 'flex' ? 'Transferable' : 'Hotel or airline'}</small></td><td>${cash}</td><td>${inp(k, 'fm')}</td><td>${floor}</td></tr>`;
+  }).join('');
+  document.getElementById('vals').innerHTML = `<thead><tr><th scope="col">Currency</th><th scope="col">Cash-out, ¢</th><th scope="col">Frequent Miler, ¢</th><th scope="col">Minimum for travel, ¢</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+function saveVals() {
+  const out = {};
+  for (const [k, c] of Object.entries(CUR)) out[k] = { fm: c.fm, cash: c.cash, cashCC: c.cashCC, floor: c.floor };
+  store.set('vals', out);
+}
+document.getElementById('vals').addEventListener('input', e => {
+  const i = e.target.closest('input[data-k]');
+  if (!i) return;
+  const v = parseFloat(i.value);
+  if (!isFinite(v) || v < 0) return;
+  CUR[i.dataset.k][i.dataset.f] = v;
+  saveVals();
+  renderBest();
+});
+document.getElementById('reset').addEventListener('click', () => {
+  for (const [k, c] of Object.entries(CUR_DEFAULTS)) Object.assign(CUR[k], JSON.parse(JSON.stringify(c)));
+  store.set('vals', null);
+  renderVals();
+  renderBest();
+});
+document.querySelector('.controls').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.path) { path = b.dataset.path; store.set('path', path); }
+  if (b.dataset.preset) { preset = b.dataset.preset; store.set('preset', preset); }
+  renderBest();
+});
+
+renderPicker();
+renderTree();
+renderVals();
+renderBest();
+</script>
