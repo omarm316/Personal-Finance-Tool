@@ -8,9 +8,9 @@ const GRAD={'Chase UR':'#1e40af,#0f2a5f','Amex MR':'#0a2f6b,#2563eb','Hilton Hon
 const HUE={Groceries:'#0D9488',Dining:'#EA580C',Transportation:'#0284C7',Travel:'#7C3AED','Health & Wellness':'#16A34A',Housing:'#475569',Shopping:'#DB2777',Financial:'#64748B',Entertainment:'#9333EA',Family:'#D97706',Vehicle:'#A16207',Business:'#4F46E5',Other:'#78716C',Work:'#15803D',Unclassified:'#CBD5E1',Transfer:'#94A3B8'};
 const KIND={purchase:'Purchase',refund:'Refund',credit:'Credit',fee:'Fee',interest:'Interest',payment:'Payment',p2p:'P2P',adjustment:'Adjustment'};
 const KINDS_PL={credit:'Credits',fee:'Fees',interest:'Interest',payment:'Payments',p2p:'P2P',adjustment:'Adjustments'};
-// The types a row can take follow its sign: a charge is a purchase, a fee or interest; money back is a refund or a credit.
-const CHG=['purchase','fee','interest'],BACK=['refund','credit'];
-const KRULE={refund:'Takes back what the purchase earned',credit:'Earns nothing, takes nothing back',fee:'Earns nothing',interest:'Earns nothing',p2p:'Earns nothing',adjustment:'Earns nothing'};
+// The types a row can take follow its sign: a charge is a purchase, fee, interest or P2P; money back is a refund or a credit.
+const CHG=['purchase','fee','interest','p2p'],BACK=['refund','credit'];
+const KRULE={refund:'Takes back what the purchase earned',credit:'Earns nothing, takes nothing back',fee:'Earns nothing',interest:'Earns nothing',p2p:'Earns nothing; not counted toward spend goals',adjustment:'Earns nothing'};
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const FIRST='2026-06-01';   // the preview data starts here
@@ -285,7 +285,7 @@ function menuPop(t,p){const it=(a,l,cls='')=>`<button type="button" class="mi ${
   if(p.extras==='menu')h+=it('split',t.spl?'Edit split…':'Split…')+it('note',t.note?'Edit note…':'Add note…');
   if(p.merchEdit==='details'||p.extras==='details'||p.rowClick==='details')h+=it('details','Transaction details');
   if(h&&!h.endsWith('<hr>'))h+='<hr>';
-  return h+it('exc',t.exc?'Include in points':'Exclude from points')+it('pts','Set points by hand')}
+  return h+it('exc',t.exc?'Include':'Exclude')+it('pts','Set points by hand')}
 function fPop(k,R){const O=options(k,R),D=S.fd;return `<div class="ph">${esc(FL[k][0])}</div><div class="pl ck">${O.map(o=>`<label class="fo ${o.sub?'sub':''}"><input type="checkbox" data-fx="${esc(o.v)}" ${!D||D.has(o.v)?'checked':''}><span>${esc(o.l)}</span><em>${o.n}</em></label>`).join('')||'<p class="emp">Nothing in this period.</p>'}</div><div class="pf"><span><button type="button" class="lnk" data-fall="0">Clear all</button><button type="button" class="lnk" data-fall="1">Select all</button></span><button type="button" class="btn pri" data-fapply>Apply</button></div>`}
 /* The list a fix picks from. 2027 rows: merchant categories. 2026 history: the old bonus categories. */
 function fixOpts(p){const c=L.d.cards[p.card],nw=p.data==='new',q=(S.pq||'').toLowerCase();let I=[];
@@ -339,7 +339,7 @@ function ruleWin(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)re
     <div class="mf"><span></span><span><button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn pri" data-rsave>Save rule</button></span></div>`}
 // The Type list: only the types that fit the row's sign, so a charge can't become a refund.
 function typePop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';const back=t.amt>0;
-  let h=`<div class="ph">Type for ${esc(t.n)}</div><p class="pn2">${back?'Money back is a refund or a credit.':'A charge is a purchase, a fee or interest.'}</p>`;
+  let h=`<div class="ph">Type for ${esc(t.n)}</div><p class="pn2">${back?'Money back is a refund or a credit.':'A charge is a purchase, fee, interest or P2P transfer.'}</p>`;
   if(p.typeRule!=='none')h+=`<label class="rck sm"><input type="checkbox" data-frule ${F.rule?'checked':''}><span>Use for every ${back?'money-back line':'charge'} from <b>${esc(F.pat)}</b></span></label>${F.rule?`<div class="rin">${patRow()}<p class="pn2">${typeCount(p,t,null,F.pat,F.mt)}. ${back?'Charges from it keep their own type.':'Money back from it keeps its own type.'}</p></div>`:''}`;
   h+='<div class="pl">'+kindsFor(t).map(k=>{const cur=k===t.kind,e=cur?{r:t.rate,pts:t.pts}:kindPts(t,k,p);
     const rule=k==='purchase'?`Earns ${rateTxt(kindPts(t,k,p).r)} on this card`:KRULE[k];
@@ -449,7 +449,7 @@ function wire(root,p){const c=L.d.cards[p.card];
       if(a==='fix'){S.pop=null;openFix(t.id,c,p);return}
       if(a==='ty'){S.pop=null;openType(t.id,c,p);return}
       S.pop=null;
-      if(a==='exc'){setEd(t.id,{exc:!t.exc});toast(t.exc?'Counted for points again':'Excluded from points')}
+      if(a==='exc'){setEd(t.id,{exc:!t.exc});toast(t.exc?'Included again':'Excluded: no points, not counted toward a sign-up bonus or spend challenges')}
       else if(a==='details'){S.modal={k:'details',id:t.id,y:Math.max(8,P.y-160)}}
       else if(a==='log')toast('Opens the two-step Log credit use window (decided in round 8)');
       else if(a==='pts')toast('Set points by hand: unchanged from the approved design');
@@ -500,8 +500,8 @@ function page(p){const c=L.d.cards[p.card];
   return chrome(c,p,`<div class="rail"><div class="col">${txSection(c,p)}</div>${side}</div>`)}
 
 Gallery.define({
-  id:'cards-card-tx-r3',
-  name:'Cards: Card page transactions, round 3',
+  id:'cards-card-tx-final',
+  name:'Cards: Card page transactions, final',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
@@ -516,23 +516,14 @@ Gallery.define({
     {id:'splitDemo',label:'Add a split row (real, from Bilt 8961, Aug 6)',type:'toggle',default:false},
     {id:'emptyDemo',label:'Show the empty list',type:'toggle',default:false},
    ]},
-   {id:'type',label:'Type (your note)',open:true,controls:[
-    {id:'typeCol',label:'What the Type column says',type:'choice',options:[
-      {id:'kind',label:'Purchase, Refund, Credit, Fee, Interest',hint:'Every row names its type, since each earns differently. Round 1’s “Expense or Credit” couldn’t tell a refund from a credit, or a fee from a purchase.'},
-      {id:'tag',label:'Blank for purchases, named for the rest',hint:'Most rows are purchases, so only refunds, credits, fees and interest stand out.'}]},
-    {id:'typeEdit',label:'How you change it',type:'choice',options:[
-      {id:'cell',label:'Click the Type cell',hint:'A list under the cell, as for the bonus category and spender. One click saves.'},
-      {id:'menu',label:'⋯ → Change type…',hint:'Keeps the column plain; one more click.'}]},
-    {id:'typeList',label:'What the type list shows',type:'choice',options:[
-      {id:'names',label:'Names only',hint:'Only the types that fit: a charge is a purchase, a fee or interest; money back is a refund or a credit.'},
-      {id:'effect',label:'Each type with its points on this row',hint:'Purchase 1x +895, Fee 0: you see what the change does before you click.'},
-      {id:'rule',label:'Each type with its rule in words',hint:'“Takes back what the purchase earned”, “Earns nothing, takes nothing back”.'}]},
-    {id:'typeRule',label:'Making a rule for the merchant',type:'choice',options:[
-      {id:'box',label:'A tick box, on',hint:'Same as the bonus category. A rule covers one direction only: charges from the merchant, or money back from it.'},
-      {id:'boxoff',label:'A tick box, off',hint:'Type changes are usually one-offs; tick it when the merchant always posts that way.'},
-      {id:'none',label:'This row only',hint:'No rules from the Type cell.'}]},
-    {id:'fixKind',label:'Type in the bonus category list too (round 2 pick)',type:'toggle',default:true},
-    {id:'totFees',label:'Fees and interest count as spend',type:'toggle',default:false},
+   {id:'r3',label:'Decided in round 3',open:true,controls:[
+    {id:'typeCol',label:'What the Type column says',type:'choice',locked:true,options:[{id:'kind',label:'Purchase, Refund, Credit, Fee, Interest, P2P'}]},
+    {id:'typeEdit',label:'How you change it',type:'choice',locked:true,options:[{id:'cell',label:'Click the Type cell'}]},
+    {id:'typeList',label:'What the type list shows',type:'choice',locked:true,options:[{id:'effect',label:'Each type with its points on this row'}]},
+    {id:'typeRule',label:'Making a rule for the merchant',type:'choice',locked:true,options:[{id:'box',label:'A tick box, on'}]},
+    {id:'fixKind',label:'Type in the bonus category list too',type:'toggle',locked:true,default:true},
+    {id:'totFees',label:'Fees and interest count as spend',type:'toggle',locked:true,default:false},
+    {id:'excD',label:'Excluding a charge (your note)',type:'choice',locked:true,options:[{id:'x',label:'⋯ → Exclude: no points, not toward a sign-up bonus or spend challenges. Venmo, Zelle and Cash App are typed P2P.'}]},
    ]},
    {id:'r2',label:'Decided in round 2',open:false,controls:[
     {id:'fixStart',label:'How a fix starts',type:'choice',locked:true,options:[{id:'cell',label:'Click the bonus category'}]},
@@ -573,7 +564,7 @@ Gallery.define({
    {id:'decided',label:'Decided earlier (Card page, rounds 1-8)',open:false,controls:[
     {id:'look',label:'Look',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud, brand blue, Outfit + Plus Jakarta, 13px corners',tokens:Object.assign(light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F'),{'--f-h':"'Outfit',system-ui,sans-serif",'--f-b':"'Plus Jakarta Sans',system-ui,sans-serif"})}]},
     {id:'layoutD',label:'Layout',type:'choice',locked:true,options:[{id:'rail',label:'Transactions in the main column, Earnings then Benefits beside it'}]},
-    {id:'menuD',label:'Row ⋯ menu',type:'choice',locked:true,options:[{id:'m',label:'Log credit use…, Exclude from points, Set points by hand'}]},
+    {id:'menuD',label:'Row ⋯ menu',type:'choice',locked:true,options:[{id:'m',label:'Log credit use…, Exclude, Set points by hand'}]},
     {id:'credD',label:'Statement credits',type:'choice',locked:true,options:[{id:'g',label:'Green −$100.00'}]},
     {id:'ptsD',label:'Points',type:'choice',locked:true,options:[{id:'c',label:'+14 green, −14 red, 0 grey'}]},
     {id:'linkD',label:'Linked purchase',type:'choice',locked:true,options:[{id:'dot',label:'Green $ circle after the merchant'}]},
