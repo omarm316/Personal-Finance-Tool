@@ -8,6 +8,9 @@ const GRAD={'Chase UR':'#1e40af,#0f2a5f','Amex MR':'#0a2f6b,#2563eb','Hilton Hon
 const HUE={Groceries:'#0D9488',Dining:'#EA580C',Transportation:'#0284C7',Travel:'#7C3AED','Health & Wellness':'#16A34A',Housing:'#475569',Shopping:'#DB2777',Financial:'#64748B',Entertainment:'#9333EA',Family:'#D97706',Vehicle:'#A16207',Business:'#4F46E5',Other:'#78716C',Work:'#15803D',Unclassified:'#CBD5E1',Transfer:'#94A3B8'};
 const KIND={purchase:'Purchase',refund:'Refund',credit:'Credit',fee:'Fee',interest:'Interest',payment:'Payment',p2p:'P2P',adjustment:'Adjustment'};
 const KINDS_PL={credit:'Credits',fee:'Fees',interest:'Interest',payment:'Payments',p2p:'P2P',adjustment:'Adjustments'};
+// The types a row can take follow its sign: a charge is a purchase, a fee or interest; money back is a refund or a credit.
+const CHG=['purchase','fee','interest'],BACK=['refund','credit'];
+const KRULE={refund:'Takes back what the purchase earned',credit:'Earns nothing, takes nothing back',fee:'Earns nothing',interest:'Earns nothing',p2p:'Earns nothing',adjustment:'Earns nothing'};
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const FIRST='2026-06-01';   // the preview data starts here
@@ -50,16 +53,32 @@ const ptsOf=(amt,rate,kind)=>kind==='purchase'&&amt<0?Math.round(-amt*rate):kind
 const nrm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const defPat=t=>String(t.n||'').replace(/[^A-Za-z0-9]+$/,'').trim();
 const shortCard=n=>String(n||'').split(' ').slice(1).join(' ');
-const canFix=(t,p)=>t.kind!=='payment'&&!(p.data==='old'&&p.history==='lock')&&(t.earn||p.fixKind);
+const canFix=(t,p)=>t.kind!=='payment'&&!(p.data==='old'&&p.history==='lock')&&(t.earn||p.fixKind&&p.data==='new');
+const hit=(r,n,mt)=>{const a=nrm(r.raw),b=nrm(r.n);return mt==='contains'?a.includes(n)||b.includes(n):` ${a} `.includes(` ${n} `)||` ${b} `.includes(` ${n} `)};
 // Every purchase or refund, on any card, whose bank text or name holds the match text.
 function ruleRows(p,pat,mt){const n=nrm(pat);if(!n)return [];
-  return ALL.filter(r=>{const a=nrm(r.raw),b=nrm(r.n);return mt==='contains'?a.includes(n)||b.includes(n):` ${a} `.includes(` ${n} `)||` ${b} `.includes(` ${n} `)}).map(r=>view(r,p)).filter(t=>t.earn&&t.id!==S.pendId)}
+  return ALL.filter(r=>hit(r,n,mt)).map(r=>view(r,p)).filter(t=>t.earn&&t.id!==S.pendId)}
 function changesOf(p,t,cat,rows){const nw=p.data==='new';
   return rows.filter(x=>x.id!==t.id&&(x.mc||null)!==(cat||null)).map(x=>({x,after:x.exc?0:ptsOf(x.amt,rateFor(RC[x.id],cat,x.brand,nw),x.kind)}))}
 const ptsDelta=d=>d?`${d<0?'−':'+'}${f0(Math.abs(d))} points`:'same points';
 function countTxt(p,t,cat,pat,mt){const rows=ruleRows(p,pat,mt),ch=cat?changesOf(p,t,cat,rows):[],d=ch.reduce((s,c)=>s+c.after-c.x.pts,0);
   let s=`Matches ${rows.length} charge${rows.length===1?'':'s'} on your cards`;
   if(cat)s+=ch.length?`; ${ch.length} other${ch.length===1?'':'s'} change, ${ptsDelta(d)}`:'; no others change';
+  return s}
+
+/* ── Type: what each type earns, and rules by type ───────── */
+// Types are set from 2027 on. History keeps the old engine's points (⋯ › Exclude or Set points by hand fixes one).
+const canType=(t,p)=>p.data==='new'&&t.kind!=='payment';
+function kindsFor(t){const K=(t.amt<0?CHG:BACK).slice();if(!K.includes(t.kind)&&t.kind!=='payment')K.push(t.kind);return K}
+function kindPts(t,k,p){const r=k==='purchase'||k==='refund'?rateFor(RC[t.id]||p.card,t.mc,t.brand,p.data==='new'):0;return {r,pts:t.exc?0:ptsOf(t.amt,r,k)}}
+// A type rule covers one direction only: charges from the merchant, or money back from it.
+function typeRows(p,t,pat,mt){const n=nrm(pat);if(!n)return [];const back=t.amt>0;
+  return ALL.filter(r=>back===(r.amt>0)&&hit(r,n,mt)).map(r=>view(r,p)).filter(x=>x.kind!=='payment'&&x.id!==S.pendId)}
+const typeChanges=(p,t,k,rows)=>rows.filter(x=>x.id!==t.id&&x.kind!==k).map(x=>({x,after:kindPts(x,k,p).pts}));
+const dirWord=(t,n)=>t.amt>0?`money-back line${n===1?'':'s'}`:`charge${n===1?'':'s'}`;
+function typeCount(p,t,k,pat,mt){const rows=typeRows(p,t,pat,mt),ch=k?typeChanges(p,t,k,rows):[],d=ch.reduce((s,c)=>s+c.after-c.x.pts,0);
+  let s=`Matches ${rows.length} ${dirWord(t,rows.length)} on your cards`;
+  if(k)s+=ch.length?`; ${ch.length} other${ch.length===1?'':'s'} change, ${ptsDelta(d)}`:'; no others change';
   return s}
 
 /* ── Statement periods ───────────────────────────────────── */
@@ -81,15 +100,17 @@ function rangeOf(c){const r=S.r,t=dt(TODAY);
   const a=r.from||FIRST,b=r.to||TODAY;return [a,b,`${md(a)} – ${md(b)}`]}
 
 /* ── Rows ────────────────────────────────────────────────── */
-function view(r,p){const nw=p.data==='new',w=r.w,o=r.o,ed=S.ed[r.id]||{};let kind,mc,mtop,brand,pts,rate;
-  if(nw){kind=w.k;mc=w.c;mtop=w.t;brand=w.b;pts=w.p;rate=w.r}
-  else{kind=r.act==='Transfer'?'payment':r.amt>0?(o.k==='clawback'?'refund':'credit'):(r.cat==='Fees & Interest'?'fee':'purchase');mc=o.c;mtop=null;brand=null;pts=o.p;rate=o.r}
+// History shows each row's type as the old engine scored it: what earned is a purchase, what took points back is a refund.
+function baseKind(r,nw){if(nw)return r.w.k;if(r.act==='Transfer')return 'payment';return r.o.k==='earn'?'purchase':r.o.k==='clawback'?'refund':r.w.k}
+function view(r,p){const nw=p.data==='new',w=r.w,o=r.o,ed=S.ed[r.id]||{};let kind=baseKind(r,nw),mc,mtop,brand,pts,rate;
+  if(nw){mc=w.c;mtop=w.t;brand=w.b;pts=w.p;rate=w.r}
+  else{mc=o.c;mtop=null;brand=null;pts=o.p;rate=o.r}
   const fixed='mc' in ed||'kind' in ed;
   if(fixed){if('kind' in ed)kind=ed.kind;if('mc' in ed){mc=ed.mc||null;mtop=nw&&mc?(L.d.mparent[mc]||null):null}
     rate=kind==='purchase'||kind==='refund'?rateFor(RC[r.id]||p.card,mc,brand,nw):0;pts=ptsOf(r.amt,rate,kind)}
   const exc='exc' in ed?ed.exc:!!r.exc;
   const t={id:r.id,d:r.d,n:r.n,raw:r.raw,amt:r.amt,act:r.act,cat:ed.cat||r.cat,man:ed.cat?1:r.man,sp:'sp' in ed?ed.sp:(r.sp||''),note:ed.note!=null?ed.note:'',
-    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:pts,rate:exc?0:rate,demo:r.id===8720,fixed};
+    spl:r.spl,exc,link:r.link,kind,mc,mtop,brand,pts:exc?0:pts,rate:exc?0:rate,demo:r.id===8720,fixed,mfix:'mc' in ed,kfix:'kind' in ed};
   t.earn=kind==='purchase'||kind==='refund';t.unk=t.earn&&!mc;return t}
 function cardRows(c,p){let R=c.rows;if(p.splitDemo)R=R.concat([L.d.splitDemo]).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:b.id-a.id);return R.map(r=>view(r,p))}
 function scoped(c,p){const[a,b]=rangeOf(c);let R=cardRows(c,p).filter(t=>t.d>=a&&t.d<=b);if(p.payments==='hide')R=R.filter(t=>t.kind!=='payment');if(p.emptyDemo)R=[];
@@ -104,7 +125,8 @@ function matches(t){if(S.q){const n=S.q.toLowerCase();if(![t.n,t.raw,t.brand,t.m
 const anyFilter=()=>S.q||S.chip||S.top||S.unk||Object.values(S.f).some(Boolean);
 const SORTV={d:t=>t.d,n:t=>t.n.toLowerCase(),cat:t=>catPath(t.cat),mc:t=>t.mc||'~',brand:t=>t.brand||'~',sp:t=>t.sp||'~',kind:t=>t.kind,rate:t=>t.rate||0,pts:t=>t.pts,amt:t=>-t.amt};
 function sorted(R){if(!S.sort)return R;const f=SORTV[S.sort],k=S.dir==='asc'?1:-1;return R.slice().sort((a,b)=>{const x=f(a),y=f(b);return x<y?-k:x>y?k:0})}
-function totalsOf(R){let spend=0,cred=0,pts=0,unk=0;R.forEach(t=>{if(t.kind==='payment')return;if(t.amt<0&&!t.exc)spend-=t.amt;if(t.amt>0)cred+=t.amt;pts+=t.pts;if(t.unk)unk++});return {n:R.length,spend,cred,pts,unk}}
+// Spend counts purchases; fees and interest only when that choice is on.
+function totalsOf(R,p){let spend=0,cred=0,pts=0,unk=0;R.forEach(t=>{if(t.kind==='payment')return;if(t.amt<0&&!t.exc&&(t.kind==='purchase'||p&&p.totFees&&(t.kind==='fee'||t.kind==='interest')))spend-=t.amt;if(t.amt>0)cred+=t.amt;pts+=t.pts;if(t.unk)unk++});return {n:R.length,spend,cred,pts,unk}}
 
 /* ── Grouping ────────────────────────────────────────────── */
 function groupsOf(R,c,p){if(p.group==='none')return [{key:'',rows:R}];const G=new Map();let kf,lab;
@@ -114,7 +136,7 @@ function groupsOf(R,c,p){if(p.group==='none')return [{key:'',rows:R}];const G=ne
   else{kf=t=>t.earn?(t.mtop||t.mc||'~Unknown'):'~'+(KINDS_PL[t.kind]||KIND[t.kind]);lab=k=>({label:k==='~Unknown'?'Unknown merchant':k.replace(/^~/,'')})}
   R.forEach(t=>{const k=kf(t);(G.get(k)||G.set(k,[]).get(k)).push(t)});
   const arr=[...G].map(([k,rows])=>Object.assign({key:k,rows},lab(k)));
-  if(p.group==='cat')arr.sort((a,b)=>(a.key.startsWith('~')-b.key.startsWith('~'))||(totalsOf(b.rows).spend-totalsOf(a.rows).spend));else arr.sort((a,b)=>a.key<b.key?1:-1);
+  if(p.group==='cat')arr.sort((a,b)=>(a.key.startsWith('~')-b.key.startsWith('~'))||(totalsOf(b.rows,p).spend-totalsOf(a.rows,p).spend));else arr.sort((a,b)=>a.key<b.key?1:-1);
   return arr}
 
 /* ── Page chrome (decided; context only) ─────────────────── */
@@ -159,7 +181,7 @@ function filters(c,p,R){const hasSp=c.rows.some(r=>r.sp),unkN=R.filter(t=>t.unk)
   return `<div class="t-ch"><button type="button" class="chip ${!S.chip?'on':''}" data-chip="">All</button>${mcs.map(x=>`<button type="button" class="chip ${S.chip===x?'on':''}" data-chip="${esc(x)}">${esc(x)}</button>`).join('')}${unkN?`<button type="button" class="chip warn ${S.chip==='__none__'?'on':''}" data-chip="__none__">${p.cardCol==='bonus'?'No bonus category':'Unknown merchant'} (${unkN})</button>`:''}</div>${extra?`<div class="fl">${extra}</div>`:''}`}
 
 /* ── Totals ──────────────────────────────────────────────── */
-function totals(R,p){if(!R.length)return '';const T=totalsOf(R),unk=T.unk?`${T.unk} ${p.cardCol==='bonus'?'with no bonus category':'unknown merchant'+(T.unk>1?'s':'')}`:'';
+function totals(R,p){if(!R.length)return '';const T=totalsOf(R,p),unk=T.unk?`${T.unk} ${p.cardCol==='bonus'?'with no bonus category':'unknown merchant'+(T.unk>1?'s':'')}`:'';
   if(p.totals==='strip')return `<div class="strip" data-region="tot">${T.n} transaction${T.n===1?'':'s'} · Spend: ${money(T.spend)}${p.totCredits&&T.cred?` · Credits and refunds: ${money(T.cred)}`:''} · Points: ${T.pts<0?'−':'+'}${f0(Math.abs(T.pts))}${unk?` · <span class="warn-t">${unk}</span>`:''}</div>`;
   if(p.totals==='figs'){const ppd=T.spend?T.pts/T.spend:0,fig=(l,v,s='')=>`<div class="fg"><b class="val ${s}">${v}</b><span>${l}</span></div>`;
     return `<div class="figs" data-region="tot">${fig('Spend',money(T.spend))}${p.totCredits?fig('Credits and refunds',T.cred?'−'+money(T.cred):'$0.00','up'):''}${fig('Points',(T.pts<0?'−':'+')+f0(Math.abs(T.pts)),'up')}${fig('Points per dollar',ppd.toFixed(2)+'x')}${unk?`<div class="fg w"><b class="val">${T.unk}</b><span>${p.cardCol==='bonus'?'No bonus category':'Unknown merchant'}</span></div>`:''}</div>`}
@@ -186,7 +208,7 @@ function cardInner(t,p){const st=p.cardCol,br=p.brandCol==='card'&&t.brand?`<spa
   const rf=st==='kind'&&t.kind==='refund'?' <span class="kb">Refund</span>':'';
   if(st==='bonus')return `<span class="ctx">${esc(t.mc)}${br}</span>${rf}`;
   return `<span class="ctx">${t.mtop?`<span class="pp">${esc(t.mtop)} › </span>`:''}${esc(t.mc)}${br}</span>${rf}`}
-function cardCell(t,p){const inner=cardInner(t,p)+(p.fixMark&&t.fixed?'<span class="pen" title="Fixed by hand">✎</span>':'');
+function cardCell(t,p){const inner=cardInner(t,p)+(p.fixMark&&t.mfix?'<span class="pen" title="Fixed by hand">✎</span>':'');
   if(p.fixStart==='cell'&&canFix(t,p))return `<button type="button" class="cbtn fixb${t.unk?' unk':''}" data-fix="${t.id}" title="Fix the bonus category">${inner}<span class="cv">▾</span></button>`;
   if(p.data==='old'&&p.history==='lock'&&t.earn)return `<span title="History keeps its stored points. Fixes start with charges from January 1, 2027.">${inner}</span>`;
   return inner}
@@ -195,7 +217,12 @@ function nameCell(t,p,pd){const car=t.spl?`<button type="button" class="car ${S.
   const nt=t.note&&p.extras!=='none'?`<small class="note">${esc(t.note)}</small>`:'';
   return `<div class="nmw">${car}<span class="mn" title="${esc(t.raw)}">${esc(t.n)}</span>${tags}</div>${nt}`}
 function spCell(t,p){const inner=t.sp?`<span class="spn">${esc(t.sp)}</span>`:'<span class="dim">–</span>';return p.spEdit==='click'?`<button type="button" class="cbtn" data-pop="sp:${t.id}" title="Set spender">${inner}</button>`:inner}
-function typeCell(t,p){if(p.typeCol==='type')return t.kind==='payment'?'Payment':t.amt>0?'Credit':'Expense';if(p.typeCol==='kind')return KIND[t.kind];return t.kind==='purchase'?'':`<span class="kb">${KIND[t.kind]}</span>`}
+function typeLabel(t,p){if(p.typeCol==='type')return t.kind==='payment'?'Payment':t.amt>0?'Credit':'Expense';if(p.typeCol==='kind')return KIND[t.kind];return t.kind==='purchase'?'':`<span class="kb">${KIND[t.kind]}</span>`}
+function typeCell(t,p,pd){const inner=typeLabel(t,p)+(p.fixMark&&t.kfix?'<span class="pen" title="Changed by hand">✎</span>':'');
+  if(pd)return inner;
+  if(p.typeEdit==='cell'&&canType(t,p))return `<button type="button" class="cbtn tyb" data-ty="${t.id}" title="Change the type">${inner}<span class="cv">▾</span></button>`;
+  if(p.data==='old'&&t.kind!=='payment')return `<span title="Types are set from January 1, 2027. History keeps its stored points: use ⋯ › Exclude from points or Set points by hand.">${inner}</span>`;
+  return inner}
 function amtCell(t,p){if(p.amtStyle==='card')return t.amt<0?money(t.amt):`<span class="up">−${money(t.amt)}</span>`;const cls=t.kind==='payment'?'':t.amt<0?'neg':'up';return `<span class="${cls}">${t.amt<0?'−':'+'}${money(t.amt)}</span>`}
 const dateTxt=(s,p)=>{const x=dt(s);return p.dateFmt==='num'?`${x.getMonth()+1}/${x.getDate()}`:md(s)};
 function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
@@ -206,7 +233,7 @@ function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   D.push({k:'mc',h:p.cardCol==='bonus'?'Bonus category':'Merchant category',s:'mc',cls:'cc',cell:(t,pd)=>pd?cardInner(t,p):cardCell(t,p)});
   if(p.brandCol==='col')D.push({k:'brand',h:'Brand',s:'brand',cls:'nw',cell:t=>t.brand?esc(t.brand):'<span class="dim">–</span>'});
   if(p.spCol==='always'||(p.spCol==='auto'&&hasSp))D.push({k:'sp',h:'Spender',s:'sp',cls:'nw',cell:t=>spCell(t,p)});
-  if(p.typeCol!=='off')D.push({k:'kind',h:p.typeCol==='kind'?'Kind':'Type',s:'kind',cls:'nw',cell:t=>typeCell(t,p)});
+  if(p.typeCol!=='off')D.push({k:'kind',h:'Type',s:'kind',cls:'nw ty',cell:(t,pd)=>typeCell(t,p,pd)});
   if(p.ptsCol==='two'){D.push({k:'rate',h:'Rate',s:'rate',cls:'n',cell:(t,pd)=>pd||!t.rate?'<span class="dim">–</span>':`<span class="ac">${rateTxt(t.rate)}</span>`});D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">–</span>':ptsSpan(t.pts)})}
   else if(p.ptsCol==='one')D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">when posted</span>':`<span class="p2">${ptsSpan(t.pts)}${t.rate?`<small>${rateTxt(t.rate)}</small>`:''}</span>`});
   else D.push({k:'pts',h:'Points',s:'pts',cls:'n',cell:(t,pd)=>pd?'<span class="dim">–</span>':`<span title="${t.rate?rateTxt(t.rate)+' on this purchase':'No points'}">${ptsSpan(t.pts)}</span>`});
@@ -215,7 +242,7 @@ function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   return D}
 function th(col,p){if(!p.sortable||!col.s)return `<th class="${col.cls||''}">${col.h}</th>`;const on=S.sort===col.s;
   return `<th class="${col.cls||''}"><button type="button" class="sb ${on?'on':''}" data-sort="${col.s}">${col.h}<i>${on?(S.dir==='asc'?'▲':'▼'):'⇅'}</i></button></th>`}
-function gHead(g,n,p){const col=S.coll.has(g.key),T=totalsOf(g.rows);
+function gHead(g,n,p){const col=S.coll.has(g.key),T=totalsOf(g.rows,p);
   return `<tr class="gh"><td colspan="${n}"><div class="ghw"><button type="button" class="gt" data-gt="${esc(g.key)}" aria-expanded="${!col}"><span class="chev ${col?'':'on'}">▸</span>${g.dot?`<i class="gd" style="background:${g.dot}"></i>`:''}${esc(g.label)}${g.tag?`<span class="gtag ${g.open?'o':''}">${esc(g.tag)}</span>`:''}</button>${p.groupSub?`<span class="gs">${T.n} · ${money(T.spend)} · ${ptsSpan(T.pts)} pts</span>`:`<span class="gs">${T.n}</span>`}</div></td></tr>`}
 function stripRow(t,n,p){const dl=(k,v)=>`<dt>${k}</dt><dd>${v}</dd>`;
   return `<tr class="xp"><td colspan="${n}"><div class="xpg"><div><h4>How the card sees it</h4><dl>${dl('Merchant category',t.mc?esc((t.mtop?t.mtop+' › ':'')+t.mc):t.earn?'<span class="warn-t">Unknown</span>, earns the base rate':'—')}${dl('Brand',esc(t.brand||'—'))}${dl('Kind',KIND[t.kind])}${dl('Points',`${ptsSpan(t.pts)}${t.rate?' at '+rateTxt(t.rate):''}`)}</dl></div><div><h4>Your side</h4><dl>${dl('Category',esc(catPath(t.cat)))}${dl('Spender',esc(t.sp||'—'))}${dl('Note',esc(t.note||'—'))}${t.spl?dl('Parts',t.spl.map(s=>`${esc(catPath(s.cat))} ${money(s.amt)}`).join('<br>')):''}</dl></div></div></td></tr>`}
@@ -251,6 +278,7 @@ function mcPicker(t){const q=(S.pq||'').toLowerCase();let h=`<div class="ph">Mer
 function spPicker(title,cur){const N=L.d.spenders;return `<div class="ph">${esc(title)}</div><div class="pl">${N.map(n=>`<button type="button" class="po ${cur===n?'on':''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="po dim2" data-pick="">Nobody</button></div><div class="padd"><input class="inp" data-newsp placeholder="Add a name" aria-label="Add a name"><button type="button" class="btn" data-addsp>Add</button></div>`}
 function menuPop(t,p){const it=(a,l,cls='')=>`<button type="button" class="mi ${cls}" data-ma="${a}">${l}</button>`;let h='';
   if(p.fixStart==='menu'){if(canFix(t,p))h+=it('fix','Fix category…');else if(p.data==='old'&&p.history==='lock'&&t.earn)h+='<span class="mi off">Fix category… (from 2027)</span>'}
+  if(p.typeEdit==='menu'){if(canType(t,p))h+=it('ty','Change type…');else if(p.data==='old'&&t.kind!=='payment')h+='<span class="mi off">Change type… (from 2027)</span>'}
   if(t.kind==='purchase')h+=it('log','Log credit use…');if(h)h+='<hr>';
   if(p.catEdit==='menu')h+=it('cat','Change category…');if(p.spEdit==='menu')h+=it('sp','Set spender…');
   if(p.merchEdit==='unknown'&&t.unk)h+=it('mc','Set merchant category…');
@@ -282,9 +310,9 @@ function changeList(p,t,cat){const ch=changesOf(p,t,cat,ruleRows(p,S.fx.pat,S.fx
 function ruleSec(p,t,cat){const F=S.fx;
   return (p.ruleDetail==='count'?`<p class="rl">Every charge whose bank text has “${esc(F.pat)}”.</p>`:patRow())+`<p class="rl">${countTxt(p,t,cat,F.pat,F.mt)}.</p>`+(p.ruleDetail==='review'&&cat?changeList(p,t,cat):'')}
 function fixPop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';let h=`<div class="ph">${p.data==='new'?'Merchant category':'Bonus category'} for ${esc(t.n)}</div>`;
-  if(p.ruleAsk==='box')h+=`<label class="rck sm"><input type="checkbox" data-frule ${F.rule?'checked':''}> Use for every charge from <b>${esc(F.pat)}</b></label>${F.rule?`<div class="rin">${p.ruleDetail==='count'?'':patRow()}<p class="pn2">${countTxt(p,t,null,F.pat,F.mt)}${p.ruleDetail==='review'?'. You see each change before it saves.':'.'}</p></div>`:''}`;
+  if(p.ruleAsk==='box')h+=`<label class="rck sm"><input type="checkbox" data-frule ${F.rule?'checked':''}><span>Use for every charge from <b>${esc(F.pat)}</b></span></label>${F.rule?`<div class="rin">${p.ruleDetail==='count'?'':patRow()}<p class="pn2">${countTxt(p,t,null,F.pat,F.mt)}${p.ruleDetail==='review'?'. You see each change before it saves.':'.'}</p></div>`:''}`;
   h+=fixList(p,p.ruleAsk==='two'&&F.picked?F.cat:t.mc);
-  if(p.fixKind)h+=`<label class="fld in">Kind<select class="inp" data-fkind>${Object.keys(KIND).filter(k=>k!=='payment').map(k=>`<option value="${k}" ${F.kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`;
+  if(p.fixKind&&p.data==='new')h+=`<label class="fld in">Type<select class="inp" data-fkind>${kindsFor(t).map(k=>`<option value="${k}" ${F.kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`;
   if(p.ruleAsk==='two'&&F.picked){const kind=F.kind,r2=kind==='purchase'||kind==='refund'?rateFor(p.card,F.cat,t.brand,p.data==='new'):0;
     h+=`<div class="pf col"><span class="mut">${esc(F.cat)}: ${r2?rateTxt(r2):'no points'}, ${ptsSpan(ptsOf(t.amt,r2,kind))} points.</span>${p.ruleDetail==='count'?'':patRow()}<span class="mut">Every charge: ${countTxt(p,t,F.cat,F.pat,F.mt)}.</span><span class="bt2"><button type="button" class="btn" data-fsave="one">Just this charge</button><button type="button" class="btn pri trunc" data-fsave="all">Every ${esc(F.pat)} charge</button></span></div>`}
   return h}
@@ -296,7 +324,7 @@ function fixWin(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)ret
   if(p.ruleAsk==='box')rule=`<div class="rbox"><label class="rck"><input type="checkbox" data-frule ${F.rule?'checked':''}> Use for every charge from <b>${esc(F.pat)}</b></label>${F.rule?ruleSec(p,t,cat):''}</div>`;
   else if(p.ruleAsk==='two')rule=`<div class="rbox"><div class="rh">“Every ${esc(F.pat)} charge” also saves a rule:</div>${ruleSec(p,t,cat)}</div>`;
   const note=nw?`<small class="mut">Brand: ${esc(t.brand||'none')}. Brand is changed on the Transactions page.</small>`:`<small class="mut">2026 history uses the old bonus categories. Rows from 2027 pick a merchant category.</small>`;
-  const kindF=p.fixKind?`<label class="fld">Kind<select class="inp" data-fkind>${Object.keys(KIND).filter(k=>k!=='payment').map(k=>`<option value="${k}" ${kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`:'';
+  const kindF=p.fixKind&&nw?`<label class="fld">Type<select class="inp" data-fkind>${kindsFor(t).map(k=>`<option value="${k}" ${kind===k?'selected':''}>${KIND[k]}</option>`).join('')}</select></label>`:'';
   const foot=p.ruleAsk==='two'?`<button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn" data-fsave="one" ${changed?'':'disabled'}>Just this charge</button><button type="button" class="btn pri trunc" data-fsave="all" ${cat?'':'disabled'}>Every ${esc(F.pat)} charge</button>`
     :`<button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn pri" data-fsave="${ruleOn?'all':'one'}" ${changed||ruleOn&&cat?'':'disabled'}>Save</button>`;
   return `<div class="mh"><div><h3 id="mdl-t">Fix this charge</h3><small>${dateTxt(t.d,p)} · ${money(t.amt)} · ${esc(p.card)}</small></div><button type="button" class="ib x" data-fxx aria-label="Close">×</button></div>
@@ -309,8 +337,18 @@ function ruleWin(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)re
   return `<div class="mh"><div><h3 id="mdl-t">${fromAsk?'Rule for this merchant':'Check before it saves'}</h3><small>${esc(t.n)} → ${esc(F.cat)}</small></div><button type="button" class="ib x" data-fxx aria-label="Close">×</button></div>
     <div class="mb"><p class="rl">Every charge from <b>${esc(F.pat)}</b> gets <b>${esc(F.cat)}</b>, on every card, from now on and for past charges.</p>${p.ruleDetail==='count'?`<p class="rl">${countTxt(p,t,F.cat,F.pat,F.mt)}.</p>`:patRow()+`<p class="rl">${countTxt(p,t,F.cat,F.pat,F.mt)}.</p>`}${p.ruleDetail==='review'?changeList(p,t,F.cat):''}</div>
     <div class="mf"><span></span><span><button type="button" class="btn" data-fxx>Cancel</button><button type="button" class="btn pri" data-rsave>Save rule</button></span></div>`}
+// The Type list: only the types that fit the row's sign, so a charge can't become a refund.
+function typePop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return '';const back=t.amt>0;
+  let h=`<div class="ph">Type for ${esc(t.n)}</div><p class="pn2">${back?'Money back is a refund or a credit.':'A charge is a purchase, a fee or interest.'}</p>`;
+  if(p.typeRule!=='none')h+=`<label class="rck sm"><input type="checkbox" data-frule ${F.rule?'checked':''}><span>Use for every ${back?'money-back line':'charge'} from <b>${esc(F.pat)}</b></span></label>${F.rule?`<div class="rin">${patRow()}<p class="pn2">${typeCount(p,t,null,F.pat,F.mt)}. ${back?'Charges from it keep their own type.':'Money back from it keeps its own type.'}</p></div>`:''}`;
+  h+='<div class="pl">'+kindsFor(t).map(k=>{const cur=k===t.kind,e=cur?{r:t.rate,pts:t.pts}:kindPts(t,k,p);
+    const rule=k==='purchase'?`Earns ${rateTxt(kindPts(t,k,p).r)} on this card`:KRULE[k];
+    const tail=p.typeList==='effect'?`<span class="prt">${e.r?rateTxt(e.r)+' · ':''}${ptsSpan(e.pts)}</span>`:'';
+    const lab=p.typeList==='rule'?`<span class="pol two"><b>${KIND[k]}</b><small>${esc(rule)}</small></span>`:`<span class="pol">${KIND[k]}</span>`;
+    return `<button type="button" class="po ${cur?'on':''}" data-tpick="${k}">${lab}${tail}${cur?'<span class="ok">✓</span>':''}</button>`}).join('')+'</div>';
+  return h}
 function popLayer(c,p){const P=S.pop;if(!P)return '';const all=cardRows(c,p),t=P.id!=null?all.find(x=>x.id===P.id):null;let inner='';
-  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
+  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='ty')inner=typePop(c,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
   else if(P.k==='menu'&&t)inner=menuPop(t,p);else if(P.k==='cat'&&t)inner=catPicker(`Category for ${t.n}`,t.cat);else if(P.k==='bcat')inner=catPicker(`Category for ${S.sel.size} selected`,'');
   else if(P.k==='sp'&&t)inner=spPicker(`Spender for ${t.n}`,t.sp);else if(P.k==='bsp')inner=spPicker(`Spender for ${S.sel.size} selected`,'');
   else if(P.k==='mc'&&t)inner=mcPicker(t);else if(P.k==='note'&&t)inner=`<div class="ph">Note on ${esc(t.n)}</div><textarea class="inp nt" data-notev rows="3" aria-label="Note">${esc(t.note)}</textarea><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button><button type="button" class="btn pri" data-notesave>Save</button></div>`;
@@ -348,6 +386,21 @@ function openFix(id,c,p){const t=cardRows(c,p).find(x=>x.id===id);if(!t)return;
   else{S.pop=null;S.modal={k:'fix',id,y:visTop()};S.ty=rel(cell,10).y}
   redraw(p.fixWhere==='pop'?'[data-pq]':null)}
 function closeFix(){S.pop=null;S.modal=null;S.fx=null;S.pq=''}
+// Type flow: a list under the Type cell; one click saves, with or without a rule.
+function openType(id,c,p){const t=cardRows(c,p).find(x=>x.id===id);if(!t)return;
+  if(S.pop&&S.pop.key==='ty:'+id){closeFix();redraw();return}
+  S.fx={id,mode:'type',kind:t.kind,rule:p.typeRule==='box',pat:defPat(t),mt:'word'};S.pq='';S.ask=null;S.modal=null;
+  const tr=L.root.querySelector(`tr[data-row="${id}"]`),cell=tr&&(tr.querySelector('td.ty')||tr);if(!cell)return;
+  const W=290,pos=rel(cell,W,false);S.pop={key:'ty:'+id,k:'ty',id,x:pos.x,y:pos.y,w:W};S.ty=pos.y;redraw()}
+// Setting a row back to the type the engine gave it clears the ✎.
+function setKind(x,k,p){const r=ALL.find(a=>a.id===x.id)||(L.d.splitDemo.id===x.id?L.d.splitDemo:null);
+  if(r&&baseKind(r,p.data==='new')===k){if(S.ed[x.id])delete S.ed[x.id].kind}else setEd(x.id,{kind:k})}
+function saveType(k,c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)return;
+  if(F.rule&&p.typeRule!=='none'){const ch=typeChanges(p,t,k,typeRows(p,t,F.pat,F.mt)),d=ch.reduce((s,x)=>s+x.after-x.x.pts,0);
+    setKind(t,k,p);ch.forEach(x=>setKind(x.x,k,p));closeFix();
+    toast(`Rule saved: ${t.amt>0?'money back':'charges'} from “${F.pat}” → ${KIND[k]}. ${ch.length?`${ch.length} other${ch.length===1?'':'s'} updated, ${ptsDelta(d)}`:'No others changed'}`)}
+  else{const was=t.kind;setKind(t,k,p);closeFix();toast(k!==was?`Type set to ${KIND[k]}`:'No change')}
+  redraw()}
 function applyRule(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id),ch=changesOf(p,t,F.cat,ruleRows(p,F.pat,F.mt)),d=ch.reduce((s,x)=>s+x.after-x.x.pts,0);
   const o=Object.assign({mc:F.cat},F.kind!==t.kind?{kind:F.kind}:{});setEd(t.id,o);ch.forEach(x=>setEd(x.x.id,{mc:F.cat}));
   closeFix();S.ask=null;toast(`Rule saved: “${F.pat}” → ${F.cat}. ${ch.length?`${ch.length} other charge${ch.length===1?'':'s'} updated, ${ptsDelta(d)}`:'No other charges changed'}`);redraw()}
@@ -362,8 +415,10 @@ function doSave(mode,c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!
   closeFix();S.ask=ask;toast(Object.keys(o).length?'Saved':'No change');redraw()}
 function wire(root,p){const c=L.d.cards[p.card];
   root.onclick=e=>{const g=e.target,q=s=>g.closest(s);let el;
-    if(S.pop&&!q('.pop')&&!q('[data-pop]')){if(S.pop.k==='fix')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
+    if(S.pop&&!q('.pop')&&!q('[data-pop]')&&!(S.pop.k==='ty'&&q('[data-ty]'))){if(S.pop.k==='fix'||S.pop.k==='ty')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
     if(el=q('[data-fix]')){openFix(Number(el.dataset.fix),c,p);return}
+    if(el=q('[data-ty]')){openType(Number(el.dataset.ty),c,p);return}
+    if(el=q('[data-tpick]')){saveType(el.dataset.tpick,c,p);return}
     if(el=q('[data-fpick]')){const v=el.dataset.fpick;
       if(S.pop&&S.pop.k==='bfix'){let n=0;cardRows(c,p).forEach(t=>{if(S.sel.has(t.id)&&t.earn){setEd(t.id,{mc:v});n++}});S.pop=null;S.pq='';toast(`${v} set on ${n} charge${n===1?'':'s'}`);redraw();return}
       S.fx.cat=v;S.fx.picked=true;
@@ -392,6 +447,7 @@ function wire(root,p){const c=L.d.cards[p.card];
     if(el=q('[data-ma]')){const a=el.dataset.ma,P=S.pop,t=cardRows(c,p).find(x=>x.id===P.id);
       if(a==='cat'||a==='sp'||a==='mc'||a==='note'){const w=a==='sp'?230:290;S.pop=Object.assign({},P,{key:a+':'+P.id,k:a,w,x:Math.max(8,P.x-(w-P.w))});redraw(a==='note'?'[data-notev]':a==='sp'?null:'[data-pq]');return}
       if(a==='fix'){S.pop=null;openFix(t.id,c,p);return}
+      if(a==='ty'){S.pop=null;openType(t.id,c,p);return}
       S.pop=null;
       if(a==='exc'){setEd(t.id,{exc:!t.exc});toast(t.exc?'Counted for points again':'Excluded from points')}
       else if(a==='details'){S.modal={k:'details',id:t.id,y:Math.max(8,P.y-160)}}
@@ -444,54 +500,54 @@ function page(p){const c=L.d.cards[p.card];
   return chrome(c,p,`<div class="rail"><div class="col">${txSection(c,p)}</div>${side}</div>`)}
 
 Gallery.define({
-  id:'cards-card-tx-r2',
-  name:'Cards: Card page transactions, round 2',
+  id:'cards-card-tx-r3',
+  name:'Cards: Card page transactions, round 3',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
-    {id:'card',label:'Card',type:'choice',default:'Chase SP 3698',options:[
-      {id:'Amex Platinum 1008',label:'Amex Platinum 1008',hint:'Brands on airlines, hotels and Walmart; statement credits; a linked purchase (Martha’s, Oct 2).'},
-      {id:'Hilton Aspire 2007',label:'Hilton Aspire 2007',hint:'Fees, interest, refunds, and 16 rows excluded from points.'},
-      {id:'Chase SP 3698',label:'Chase SP 3698',hint:'Try City Bistro or Pura Vida Nomad (None, should be Dining at 3x), or Paz Oil (gas).'},
-      {id:'Amex BBP 1008',label:'Amex BBP 1008',hint:'2x on everything, so a fix changes no points. No rows after Oct 15.'}]},
+    {id:'card',label:'Card',type:'choice',default:'Amex Platinum 1008',options:[
+      {id:'Amex Platinum 1008',label:'Amex Platinum 1008',hint:'Refunds (Walmart, Oct 4), statement credits (Resy, Oct 3; Equinox; Lululemon) and the $895 renewal fee (Sep 11, under Show all).'},
+      {id:'Hilton Aspire 2007',label:'Hilton Aspire 2007',hint:'Interest charges, a late fee, the $550 renewal fee, refunds and a $325 credit.'},
+      {id:'Chase SP 3698',label:'Chase SP 3698',hint:'Two credits: $10 Paze and an annual fee refund. City Bistro shows None (should be Dining).'},
+      {id:'Amex BBP 1008',label:'Amex BBP 1008',hint:'2x on everything; four refunds.'}]},
     {id:'data',label:'Rows shown as',type:'choice',default:'new',options:[
-      {id:'new',label:'From 2027 on',hint:'A fix sets the merchant category, which decides the bonus category on every card. Unknown is overcounted here: Plaid’s category isn’t stored on these rows.'},
-      {id:'old',label:'2026 history, as stored',hint:'A fix picks one of the old bonus categories, as today.'}]},
+      {id:'new',label:'From 2027 on',hint:'Purchases earn; refunds take back what the purchase earned; credits, fees and interest earn nothing. Unknown is overcounted here: Plaid’s category isn’t stored on these rows.'},
+      {id:'old',label:'2026 history, as stored',hint:'Types as the old engine scored them: the $895 fee earned points and the Resy credit took 100 back. Types are read-only here; ⋯ › Exclude from points or Set points by hand fixes a row.'}]},
     {id:'splitDemo',label:'Add a split row (real, from Bilt 8961, Aug 6)',type:'toggle',default:false},
     {id:'emptyDemo',label:'Show the empty list',type:'toggle',default:false},
    ]},
-   {id:'fix',label:'Fixing a charge (your note)',open:true,controls:[
-    {id:'fixStart',label:'How a fix starts',type:'choice',options:[
-      {id:'cell',label:'Click the bonus category',current:true,hint:'Today the cell is a dropdown. A faint ▾ marks it on every row; None is outlined in amber.'},
-      {id:'menu',label:'⋯ → Fix category…',hint:'Keeps the table plain; one more click.'},
-      {id:'row',label:'Click anywhere on the row',hint:'The checkbox, spender and ⋯ keep their own clicks.'}]},
-    {id:'fixWhere',label:'Where you fix it',type:'choice',options:[
-      {id:'pop',label:'A list under the cell',current:true,hint:'One click saves.'},
-      {id:'win',label:'A window',hint:'Shows the points now and after, then Save. Closes only with its buttons.'}]},
-    {id:'fixList',label:'What the list shows',type:'choice',options:[
-      {id:'mc',label:'Every category, grouped',current:true,hint:'From 2027: the merchant categories (Travel › Hotels). 2026 history: the old bonus categories, always a plain list.'},
-      {id:'rate',label:'Grouped, with this card’s rate on each',hint:'Blue where the card pays more than its base rate.'},
-      {id:'bonus',label:'This card’s bonus categories first',hint:'Then everything else, at the base rate.'}]},
-    {id:'ruleAsk',label:'Making a rule for the merchant',type:'choice',options:[
-      {id:'after',label:'Ask after saving',current:true,hint:'Today: a bar over the table offers to apply the fix to every charge from that merchant.'},
-      {id:'box',label:'A tick box, on',hint:'“Use for every charge from …”, as in the Transactions page review window.'},
-      {id:'two',label:'Two buttons',hint:'Just this charge, or every charge from the merchant.'}]},
-    {id:'ruleDetail',label:'What a rule shows before it saves',type:'choice',options:[
-      {id:'count',label:'A count',hint:'How many charges match and how many points change.'},
-      {id:'match',label:'Match text you can edit',hint:'Whole words or Contains, for bank text like TST*CITY BISTRO - 2024. The count updates as you type.'},
-      {id:'review',label:'Match text and every change',hint:'Each charge that changes, with its points before and after.'}]},
-    {id:'fixKind',label:'Also fix the kind (purchase, refund, credit, fee)',type:'toggle',default:false},
-    {id:'history',label:'Rows before 2027',type:'choice',options:[
-      {id:'edit',label:'Fixable, as today',current:true,hint:'Picks an old bonus category; points recalculate the old way.'},
-      {id:'lock',label:'Read-only',hint:'History keeps its stored points; fixes start with 2027 rows. The API already refuses 2027 fields on older rows. Shows with “2026 history”.'}]},
-    {id:'fixMark',label:'✎ on rows you fixed',type:'toggle',default:true},
-    {id:'bulkFix',label:'Selection bar sets the bonus category too',type:'toggle',default:false},
+   {id:'type',label:'Type (your note)',open:true,controls:[
+    {id:'typeCol',label:'What the Type column says',type:'choice',options:[
+      {id:'kind',label:'Purchase, Refund, Credit, Fee, Interest',hint:'Every row names its type, since each earns differently. Round 1’s “Expense or Credit” couldn’t tell a refund from a credit, or a fee from a purchase.'},
+      {id:'tag',label:'Blank for purchases, named for the rest',hint:'Most rows are purchases, so only refunds, credits, fees and interest stand out.'}]},
+    {id:'typeEdit',label:'How you change it',type:'choice',options:[
+      {id:'cell',label:'Click the Type cell',hint:'A list under the cell, as for the bonus category and spender. One click saves.'},
+      {id:'menu',label:'⋯ → Change type…',hint:'Keeps the column plain; one more click.'}]},
+    {id:'typeList',label:'What the type list shows',type:'choice',options:[
+      {id:'names',label:'Names only',hint:'Only the types that fit: a charge is a purchase, a fee or interest; money back is a refund or a credit.'},
+      {id:'effect',label:'Each type with its points on this row',hint:'Purchase 1x +895, Fee 0: you see what the change does before you click.'},
+      {id:'rule',label:'Each type with its rule in words',hint:'“Takes back what the purchase earned”, “Earns nothing, takes nothing back”.'}]},
+    {id:'typeRule',label:'Making a rule for the merchant',type:'choice',options:[
+      {id:'box',label:'A tick box, on',hint:'Same as the bonus category. A rule covers one direction only: charges from the merchant, or money back from it.'},
+      {id:'boxoff',label:'A tick box, off',hint:'Type changes are usually one-offs; tick it when the merchant always posts that way.'},
+      {id:'none',label:'This row only',hint:'No rules from the Type cell.'}]},
+    {id:'fixKind',label:'Type in the bonus category list too (round 2 pick)',type:'toggle',default:true},
+    {id:'totFees',label:'Fees and interest count as spend',type:'toggle',default:false},
+   ]},
+   {id:'r2',label:'Decided in round 2',open:false,controls:[
+    {id:'fixStart',label:'How a fix starts',type:'choice',locked:true,options:[{id:'cell',label:'Click the bonus category'}]},
+    {id:'fixWhere',label:'Where you fix it',type:'choice',locked:true,options:[{id:'pop',label:'A list under the cell'}]},
+    {id:'fixList',label:'What the list shows',type:'choice',locked:true,options:[{id:'rate',label:'Grouped, with this card’s rate on each'}]},
+    {id:'ruleAsk',label:'Making a rule for the merchant',type:'choice',locked:true,options:[{id:'box',label:'A tick box, on'}]},
+    {id:'ruleDetail',label:'What a rule shows before it saves',type:'choice',locked:true,options:[{id:'match',label:'Match text you can edit'}]},
+    {id:'history',label:'Rows before 2027',type:'choice',locked:true,options:[{id:'edit',label:'Fixable, as today'}]},
+    {id:'fixMark',label:'✎ on rows you fixed',type:'toggle',locked:true,default:true},
+    {id:'bulkFix',label:'Selection bar sets the bonus category too',type:'toggle',locked:true,default:false},
    ]},
    {id:'r1',label:'Decided in round 1',open:false,controls:[
     {id:'yourColD',label:'Your category',type:'choice',locked:true,options:[{id:'off',label:'Not on this page'}]},
     {id:'cardCol',label:'The card’s category',type:'choice',locked:true,options:[{id:'bonus',label:'Bonus category'}]},
     {id:'brandCol',label:'Brand',type:'choice',locked:true,options:[{id:'card',label:'In the card’s category cell'}]},
-    {id:'typeCol',label:'Type',type:'choice',locked:true,options:[{id:'type',label:'Expense or Credit'}]},
     {id:'spCol',label:'Spender',type:'choice',locked:true,options:[{id:'always',label:'Always'}]},
     {id:'ptsCol',label:'Rate and points',type:'choice',locked:true,options:[{id:'two',label:'Rate and Points columns'}]},
     {id:'amtStyle',label:'Amount',type:'choice',locked:true,options:[{id:'card',label:'Card statement style'}]},
@@ -717,6 +773,9 @@ Gallery.define({
 #pv .mi.off{color:var(--tx3);cursor:default;display:block}
 #pv .pf.col{display:grid;gap:7px;justify-content:stretch}#pv .bt2{display:flex;gap:6px;justify-content:flex-end}
 #pv .btn.trunc{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+/* Type (round 3) */
+#pv .tyb .cv{opacity:.3}#pv .tyb:hover .cv,#pv .tyb:focus-visible .cv{opacity:.9}#pv .tx td.ty{color:var(--tx2)}
+#pv .po .pol.two{display:grid;gap:1px;white-space:normal}#pv .pol.two b{font-weight:inherit}#pv .pol.two small{font-size:11px;color:var(--tx3);font-weight:400}
 @media (max-width:980px){#pv .rail{grid-template-columns:minmax(0,1fr)}}
 `});
 })();
