@@ -1,6 +1,6 @@
 # Cards: Actions strip (Portfolio and Ecosystem)
 
-Proposed 2026-11-05; **not yet chosen in the design gallery**. This is the brief for a gallery round. Omer will run it on the Mac, where the `design-gallery` skill is available. Desktop only; phone design comes later. Built together with the Portfolio and Ecosystem pages (Cards step 4), after the benefits data model (step 3), so it never shows wrong amounts.
+Proposed 2026-11-05; **design gallery round 1 published 2026-11-07, waiting on Omer's picks**: https://claude.ai/artifact/UMrPe1TgDKxY4byEWpMEGq (spec `mockups/design-gallery/cards-actions.spec.js`, id `cards-actions-r1`). This brief stays the starting point until the picks come back. Desktop only; phone design comes later. Built together with the Portfolio and Ecosystem pages (Cards step 4), after the benefits data model (step 3), so it never shows wrong amounts.
 
 ## Why
 Today, expiring credits appear only on each Card page (Expiring credits row plus the Benefits "Expires if unused" box). Nothing gathers what needs doing across all cards. Portfolio lists every challenge but doesn't separate the urgent ones. Ecosystem has challenges but no credits.
