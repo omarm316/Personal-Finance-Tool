@@ -3,6 +3,7 @@ import {BankAccountRow} from './BankAccountRow';
 import {ConfirmModal} from './ConfirmModal';
 import {apiFetch} from '../lib/api';
 import {fmtDate} from '../lib/format';
+import {saveLinkState,clearLinkState,reconnectMessage,linkErrorMessage} from '../lib/plaidLink';
 
 export function BankRow({item,toast,onRenamed,onSynced}){
   const[editing,setEditing]=useState(false);
@@ -16,22 +17,25 @@ export function BankRow({item,toast,onRenamed,onSynced}){
     setReconnecting(true);
     try{
       const{link_token}=await apiFetch(`/plaid/update-link-token/${item.item_id}`);
+      // Kept for the OAuth return page, which must reopen Link with this same token.
+      saveLinkState({token:link_token,mode:'update',item_id:item.item_id,name:item.institution_name});
       const handler=window.Plaid.create({
         token:link_token,
         onSuccess:async()=>{
+          clearLinkState();
           try{
             const r=await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
-            const accts=r.accounts||[];
-            const kept=accts.filter(a=>a.status==='matched'||a.status==='relinked').length;
-            const added=accts.filter(a=>a.status==='created').map(a=>a.name);
-            let msg=`✓ ${item.institution_name}: ${kept} account${kept!==1?'s':''} kept their history`;
-            if(added.length)msg+=` · new: ${added.join(', ')}`;
-            toast(msg+' — syncing…');
+            toast(reconnectMessage(item.institution_name,r));
             setTimeout(()=>onSynced&&onSynced(),15000);
           }catch(e){toast(`${item.institution_name}: ${e.message||e}`,'error');}
           finally{setReconnecting(false);}
         },
-        onExit:()=>setReconnecting(false),
+        onExit:(err)=>{
+          clearLinkState();
+          setReconnecting(false);
+          const m=linkErrorMessage(item.institution_name,err);
+          if(m)toast(m,'error');
+        },
       });
       handler.open();
     }catch(e){toast('Failed to open Plaid: '+(e.message||e),'error');setReconnecting(false);}

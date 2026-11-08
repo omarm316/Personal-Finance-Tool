@@ -1,5 +1,6 @@
 import React,{useState,useEffect,useCallback,useRef} from 'react';
 import {apiFetch,parseHash} from '../lib/api';
+import {saveLinkState,takeLinkState,clearLinkState,reconnectMessage,linkErrorMessage} from '../lib/plaidLink';
 
 export function usePullToRefresh(contentRef,onRefresh){
   const[ptrState,setPtrState]=useState('idle'); // idle|pulling|releasing|done
@@ -89,17 +90,35 @@ export function usePlaidLink(toast,onSuccess){
     }
   };
 
-  /* Handle OAuth return — bank redirects back to /plaid/oauth-return */
+  /* Handle OAuth return — the bank redirects back to /plaid/oauth-return. Plaid
+     requires Link to reopen with the same token it started with, so it comes from
+     what was saved before Link opened (a new connection or a reconnect). */
   React.useEffect(()=>{
     if(!window.location.pathname.startsWith('/plaid/oauth-return'))return;
     (async()=>{
+      const saved=takeLinkState();
+      const name=(saved&&saved.name)||'Bank';
       try{
-        const{link_token}=await apiFetch('/plaid/link-token');
+        const token=saved&&saved.token?saved.token:(await apiFetch('/plaid/link-token')).link_token;
         const handler=window.Plaid.create({
-          token:link_token,
+          token,
           receivedRedirectUri:window.location.href,
-          onSuccess:async(public_token)=>handleLinkSuccess(public_token,true),
-          onExit:()=>{window.history.replaceState({},'','/');},
+          onSuccess:async(public_token)=>{
+            if(saved&&saved.mode==='update'){
+              try{
+                const r=await apiFetch(`/plaid/update-complete/${saved.item_id}`,{method:'POST'});
+                toast(reconnectMessage(name,r));
+              }catch(e){toast(`${name}: ${e.message||e}`,'error');}
+              window.history.replaceState({},'','/');
+            }else{
+              handleLinkSuccess(public_token,true);
+            }
+          },
+          onExit:(err)=>{
+            const m=linkErrorMessage(name,err,saved&&saved.mode==='update'?'update':'new');
+            if(m)toast(m,'error');
+            window.history.replaceState({},'','/');
+          },
         });
         handler.open();
       }catch(e){toast('OAuth return failed: '+(e.message||e),'error');}
@@ -109,10 +128,16 @@ export function usePlaidLink(toast,onSuccess){
   const openPlaid=async()=>{
     try{
       const{link_token}=await apiFetch('/plaid/link-token');
+      // Kept for the OAuth return page, which must reopen Link with this same token.
+      saveLinkState({token:link_token,mode:'new',name:'Bank'});
       const handler=window.Plaid.create({
         token:link_token,
-        onSuccess:async(public_token)=>handleLinkSuccess(public_token,false),
-        onExit:()=>{},
+        onSuccess:async(public_token)=>{clearLinkState();handleLinkSuccess(public_token,false);},
+        onExit:(err)=>{
+          clearLinkState();
+          const m=linkErrorMessage('Bank',err,'new');
+          if(m)toast(m,'error');
+        },
       });
       handler.open();
     }catch(e){toast('Failed to start connection: '+(e.message||e),'error');}

@@ -23,8 +23,12 @@ For each account Plaid reports, in this order:
      but missing from Plaid's list, unlinked (its connection was removed), or
      on a connection that is switched off or needs a login. Taken when the
      official names agree (the oldest row if several), or when it is the only
-     candidate and one side has no official name. Different official names
-     never match, so a new card sharing a last 4 with an old one gets its own row.
+     candidate and one side has no official name. On the same connection,
+     different official names never match, so a new card sharing a last 4
+     with an old one gets its own row. When a new login replaces a connection
+     that is off or needs a login, the only candidate is taken even if the
+     bank renamed the account (Bank of America, Nov 2026: Plaid refused to
+     refresh the March connections, INSTITUTION_NO_LONGER_SUPPORTED).
   4. Already synced by another working connection at the same bank (same
      last 4, type and official name, e.g. a joint account) → left there and
      not added twice.
@@ -201,6 +205,20 @@ def link_plaid_accounts(db: Session, item: PlaidItem, plaid_accounts: list) -> L
             continue
         cands = free_candidates(pa)
         if len(cands) == 1 and _names_agree(cands[0], pa) is None:
+            matched[pa['account_id']] = (cands[0], RELINKED)
+            claimed.add(cands[0].id)
+
+    # Step 3c: replacing a connection that is switched off or needs a login
+    # (e.g. Plaid can no longer refresh it and the bank was connected again).
+    # The new login sees the same accounts, but the bank may name them
+    # differently, so the only candidate with this last 4 and type is taken
+    # even when the official names differ.
+    for pa in pending:
+        if pa['account_id'] in matched:
+            continue
+        cands = free_candidates(pa)
+        if (len(cands) == 1 and cands[0].plaid_item_id
+                and cands[0].plaid_item_id != item.item_id):
             matched[pa['account_id']] = (cands[0], RELINKED)
             claimed.add(cands[0].id)
 

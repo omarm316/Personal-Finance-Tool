@@ -114,6 +114,37 @@ class TestAddConnection:
         assert retire_emptied_items(db_session, outcome) == ["Bank of America (Omer)"]
         assert db_session.query(PlaidItem).filter_by(item_id="boa-old").one().is_active is False
 
+    def test_replacement_login_where_the_bank_renamed_accounts(self, db_session):
+        """Bank of America, Nov 2026: Plaid would not refresh the March connection,
+        so it is connected again; the new OAuth data may name accounts differently."""
+        old = _item(db_session, "boa-old", BOFA, "Bank of America (Omer)", error="ITEM_LOGIN_REQUIRED")
+        chk = _acct(db_session, old, "o1", "4574", "Adv SafeBalance Banking", acct_type="Checking")
+        card = _acct(db_session, old, "o2", "7384", "Customized Cash Rewards Visa Signature")
+        new = _item(db_session, "boa-new", BOFA, "Bank of America")
+        outcome = link_plaid_accounts(db_session, new, [
+            _pa("n1", "4574", "BofA Advantage SafeBalance Banking", subtype="checking", type_="depository"),
+            _pa("n2", "7384", "Bank of America Customized Cash Rewards Visa Signature"),
+        ])
+        assert _by_status(outcome) == {RELINKED: [chk.id, card.id]}
+        assert outcome.emptied_items == ["boa-old"]
+
+    def test_renamed_but_two_candidates_is_not_guessed(self, db_session):
+        old = _item(db_session, "x-old", "ins_x", "Bank X", error="ITEM_LOGIN_REQUIRED")
+        _acct(db_session, old, "a", "1111", "Gold Card")
+        _acct(db_session, old, "b", "1111", "Silver Card")
+        new = _item(db_session, "x-new", "ins_x", "Bank X")
+        outcome = link_plaid_accounts(db_session, new, [_pa("n", "1111", "Platinum Card")])
+        assert [r["status"] for r in outcome.results] == [CREATED]
+
+    def test_renamed_account_on_a_working_connection_is_not_taken(self, db_session):
+        """Only a connection that is off or needs a login gives up its rows."""
+        omer = _item(db_session, "amex-o", AMEX, "American Express (Omer)")
+        gold = _acct(db_session, omer, "o1", "1000", "Business Gold Card")
+        dani = _item(db_session, "amex-d", AMEX, "American Express (Daniella)")
+        outcome = link_plaid_accounts(db_session, dani, [_pa("d1", "1000", "Gold Card")])
+        assert [r["status"] for r in outcome.results] == [CREATED]
+        assert gold.plaid_item_id == "amex-o"
+
     def test_adopts_rows_left_by_a_removed_connection(self, db_session):
         """Remove severs rows (no Plaid IDs) but keeps the bank's institution_id."""
         row = _acct(db_session, None, None, "7384", "Customized Cash Rewards Visa Signature")
