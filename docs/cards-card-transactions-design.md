@@ -1,6 +1,6 @@
 # Cards: Card page transactions table
 
-Chosen with the design gallery in three rounds (2026-11-05 to 2026-11-07). Omer approved this desktop design on 2026-11-07; it is not built yet. The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
+Chosen with the design gallery in four rounds (2026-11-05 to 2026-11-07). Omer approved this desktop design on 2026-11-07, and the row icons in round 4 the same day; it is not built yet. The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
 
 - **Gallery:** https://claude.ai/artifact/Td3kGZkHsEvw7YvkVX5sQa.
 - **Source spec:** `mockups/design-gallery/cards-card-transactions.spec.js` (id `cards-card-tx-final`).
@@ -8,7 +8,7 @@ Chosen with the design gallery in three rounds (2026-11-05 to 2026-11-07). Omer 
 
 ## Columns
 
-Checkbox · Date · Merchant · Bonus category · Spender · Type · Rate · Points · Amount · ⋯
+Checkbox · Date · Merchant · Bonus category · Spender · Type · Rate · Points · Amount · row icons
 
 - **Date:** month/day, as on the Transactions page (10/25).
 - **Merchant:** the clean name; the bank text shows on hover. Tags after the name:
@@ -21,7 +21,7 @@ Checkbox · Date · Merchant · Bonus category · Spender · Type · Rate · Poi
 - **Spender:** always shown. Click the cell to pick a name or add one.
 - **Type:** every row names its type: Purchase, Refund, Credit, Fee, Interest or P2P. Adjustment appears only when the engine sets it.
 - **Rate:** "3x" in blue; "–" when the row earns no rate.
-- **Points:** +14 green, −14 red, 0 gray.
+- **Points:** +14 green, −14 red, 0 gray. A ✎ follows points set by hand.
 - **Amount:** card statement style. Charges read $13.81; money back reads −$100.00 in green.
 - **Your category** (the personal category) is not on this page.
 
@@ -32,7 +32,7 @@ Checkbox · Date · Merchant · Bonus category · Spender · Type · Rate · Poi
 - Card payments are hidden.
 - **Pending charges:** at the top, under a "Pending" divider (charges that haven't posted yet). They are italic and earn no points until they post. They can't be edited. This needs a sync change (see Open items).
 - Excluded rows are dimmed and tagged ⊘ Excluded.
-- Clicking a row does nothing. The cells and ⋯ have their own actions.
+- Clicking a row does nothing. The cells and the row icons have their own actions.
 - **Empty list:** "No transactions for this period." When filters hide every row: "No matches."
 
 ## Toolbar, totals and selection
@@ -70,7 +70,7 @@ Checkbox · Date · Merchant · Bonus category · Spender · Type · Rate · Poi
 - **Rule tick box:** same as for categories, on by default: "Use for every charge from <merchant>" or "Use for every money-back line from <merchant>". It has the editable match text, Whole words / Contains, and the live count.
   - A type rule covers one direction only. A rule made from money back leaves that merchant's charges alone, and the other way round.
 - One click saves. A ✎ follows the type when it was changed by hand. Setting it back to the engine's type removes the ✎.
-- **Rows before 2027:** the type is read-only (the API refuses `txn_kind` there). Its tooltip points to ⋯ › Exclude or Set points by hand.
+- **Rows before 2027:** the type is read-only (the API refuses `txn_kind` there). Its tooltip points to the Exclude and Set points icons.
 
 ## What each type earns
 
@@ -91,18 +91,24 @@ From 2027, only purchases count toward a sign-up bonus or spend challenge (`core
 Omer's round 3 note: some charges, such as Venmo transfers, should earn no points and not count toward a sign-up bonus or spend challenges.
 
 - **Venmo, Zelle and Cash App:** existing kind rules in `core/earn_rules_seed.py` already type them P2P. From 2027 they earn nothing and don't count toward challenges, without being excluded, and they still count in budgets. Any other transfer can be set to P2P in the Type cell, with a rule if it repeats.
-- **⋯ → Exclude** (renamed from "Exclude from points") is for anything else, and for history. It works on every row and sets the existing `is_excluded` flag, which already removes the row from:
+- **The ⊘ Exclude icon** is for anything else, and for history. It works on every row and sets the existing `is_excluded` flag, which already removes the row from:
   - points (old and 2027 engines);
   - sign-up bonus and challenge spend;
   - the Spend total;
   - budgets and the dashboard totals (`/api/stats`). It is the same flag as the Transactions page's Exclude, so an excluded row leaves those pages too. That's why P2P, not Exclude, is the right fix for a Venmo payment that is real spending.
-- **On screen:** the row dims and shows ⊘ Excluded, and ⋯ → Include undoes it. Toast: "Excluded: no points, not counted toward a sign-up bonus or spend challenges".
+- **On screen:** one click excludes. The row dims and shows ⊘ Excluded, and the icon turns red; clicking it again includes the row. Toast: "Excluded: no points, not counted toward a sign-up bonus or spend challenges".
 
-## ⋯ menu
+## Row icons
 
-- **A purchase:** Log credit use…, then Exclude and Set points by hand.
-- **Any other row:** Exclude and Set points by hand.
-- **An excluded row:** Include replaces Exclude.
+Icons replace the row ⋯ menu (round 4). They are bare icons, faint on every row and full strength when the row is hovered or has keyboard focus. An icon that shows a state (excluded, points set by hand) stays in color. Pending rows have none. Three icons take about 82px, against 32px for ⋯.
+
+- **$ Log credit use…:** purchases only. It opens the Log credit use window from `docs/cards-card-design.md`, and afterward the purchase gets the green $ circle after its name. On other rows the slot stays empty, so the icons line up.
+- **⊘ Exclude:** see Excluding a charge. Red when the row is excluded; click again to include it.
+- **Pencil, Set points by hand:** puts the Points cell into edit mode, in place, like a spreadsheet. The number is selected, ready to type.
+  - Enter saves and Escape cancels. Clicking elsewhere saves. Tab saves and moves to the next row's Points cell; Shift+Tab moves to the previous one.
+  - Typing the card's own figure leaves the row on the card's figure.
+  - Saved points show a ✎ after them and replace the card's figure, so rules and recalculation leave them alone. Toast: "Points set by hand: +250. ↺ goes back to the card's figure".
+- **↺ Back to the card's figure** (Omer's round 4 note): once points are set by hand, the pencil becomes ↺, in blue. Its tooltip gives the card's figure ("Back to the card's figure (+107)"). One click clears the hand-set number, and the pencil returns.
 
 ## What it is built on
 
@@ -113,6 +119,7 @@ Omer's round 3 note: some charges, such as Venmo transfers, should earn no point
 | Rule | `POST /api/merchant-rules` with `pattern`, `match_type` (`word` or `contains`) and `merchant_category` or `txn_kind`; then `POST /api/earning/recalculate` with `apply: true`. Rules are global (rule 1) |
 | Category fix (before 2027) | Today's flow: the stored bonus category plus the teach-merchant rule, scored by the old engine |
 | Exclude / Include | `PATCH /api/transactions/{id}` with `is_excluded` |
+| Points by hand / back to the card's figure | `PATCH /api/transactions/{id}` with `points_earn_override`, or `clear_points_earn_override: true` |
 | Spender | `PATCH /api/transactions/{id}` with `spender` |
 
 ## Open items (also in BACKLOG.md)

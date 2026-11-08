@@ -19,7 +19,7 @@ const light=(bg,s,r,l,t,t2,t3)=>({'--bg':bg,'--surface':s,'--raised':r,'--line':
 // Preview state that survives re-renders. Edits stay on this page.
 const S={};
 function resetS(){Object.assign(S,{q:'',pq:'',f:{ycat:null,mcat:null,brand:null,sp:null,kind:null},fd:null,chip:'',top:'',sub:'',unk:false,
-  r:null,sort:null,dir:'desc',sel:new Set(),pop:null,ed:{},exp:new Set(),spx:new Set(),coll:null,all:false,modal:null,bd:null,fx:null,ask:null})}
+  r:null,sort:null,dir:'desc',sel:new Set(),pop:null,ed:{},exp:new Set(),spx:new Set(),coll:null,all:false,modal:null,bd:null,fx:null,ask:null,pedit:null})}
 resetS();
 let L=null,PAR={},TODAY='2026-11-05',RC={},ALL=[];
 // Round 1 choices that are settled and no longer shown as controls.
@@ -228,18 +228,18 @@ function amtCell(t,p){if(p.amtStyle==='card')return t.amt<0?money(t.amt):`<span 
 const ICO={
   log:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.6 9.3c-.5-.8-1.5-1.3-2.6-1.3-1.4 0-2.5.7-2.5 1.9 0 2.7 5.1 1.4 5.1 4.2 0 1.2-1.1 2-2.6 2-1.1 0-2.1-.5-2.6-1.3M12 6.4V8m0 8v1.6"/></svg>',
   exc:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>',
+  rev:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></svg>',
   pts:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>'};
-function ptsCell(t,p){const inner=ptsSpan(t.pts)+(p.fixMark&&t.pman?'<span class="pen" title="Set by hand">✎</span>':'');
+function ptsCell(t,p){if(S.pedit===t.id)return `<input class="inp pin" type="number" step="1" data-pin="${t.id}" value="${t.pts}" aria-label="Points for ${esc(t.n)}" title="Enter saves, Tab saves and moves to the next row, Escape cancels">`;
+  const inner=ptsSpan(t.pts)+(p.fixMark&&t.pman?'<span class="pen" title="Set by hand">✎</span>':'');
   return p.ptsEdit==='cell'?`<button type="button" class="cbtn ptsb" data-act="pts:${t.id}" title="Set points by hand">${inner}</button>`:inner}
 function actCell(t,p){const b=(a,label,on)=>`<button type="button" class="aic ${on?'on '+a:''}" data-act="${a}:${t.id}" title="${label}" aria-label="${label}: ${esc(t.n)}">${ICO[a]}</button>`;
   let h='';
   if(p.logWhere==='icon')h+=t.kind==='purchase'?b('log','Log credit use…'):'<span class="aic sp" aria-hidden="true"></span>';
   h+=b('exc',t.exc?'Include again (counts for points and spend)':'Exclude: no points, not counted toward a sign-up bonus or spend challenges',t.exc);
-  if(p.ptsEdit==='icon')h+=b('pts',t.pman?'Points set by hand: change or clear':'Set points by hand',t.pman);
+  if(p.ptsEdit==='icon')h+=t.pman?b('rev',`Back to the card’s figure (${t.epts>0?'+':t.epts<0?'−':''}${f0(Math.abs(t.epts))})`,true):b('pts','Set points by hand');
   if(p.logWhere==='menu')h+=t.kind==='purchase'?`<button type="button" class="dotb" data-pop="menu:${t.id}" aria-label="More for ${esc(t.n)}">⋯</button>`:'<span class="dotb sp" aria-hidden="true"></span>';
   return `<span class="acts ${p.actShow} ${p.actStyle}">${h}</span>`}
-function ptsPop(t,p){const e=t.epts,r=t.rate;
-  return `<div class="ph">Points for ${esc(t.n)}</div><p class="pn2">The card’s figure: ${ptsSpan(e)}${r?' at '+rateTxt(r):''}. Your number replaces it; rules and recalculation leave it alone.</p><div class="padd"><input class="inp" type="number" step="1" data-povv value="${t.pman?t.pts:e}" aria-label="Points"><button type="button" class="btn pri" data-povsave>Save</button></div><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button>${t.pman?'<button type="button" class="lnk" data-povclear>Use the card’s figure</button>':''}</div>`}
 const dateTxt=(s,p)=>{const x=dt(s);return p.dateFmt==='num'?`${x.getMonth()+1}/${x.getDate()}`:md(s)};
 function cols(c,p){const hasSp=c.rows.some(r=>r.sp),D=[];
   D.push({k:'chk',h:'<input type="checkbox" data-allsel aria-label="Select all shown">',cls:'ck',cell:(t,pd)=>pd?'':`<input type="checkbox" data-sel="${t.id}" ${S.sel.has(t.id)?'checked':''} aria-label="Select ${esc(t.n)}">`});
@@ -365,7 +365,7 @@ function typePop(c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!t)re
     return `<button type="button" class="po ${cur?'on':''}" data-tpick="${k}">${lab}${tail}${cur?'<span class="ok">✓</span>':''}</button>`}).join('')+'</div>';
   return h}
 function popLayer(c,p){const P=S.pop;if(!P)return '';const all=cardRows(c,p),t=P.id!=null?all.find(x=>x.id===P.id):null;let inner='';
-  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='ty')inner=typePop(c,p);else if(P.k==='pts'&&t)inner=ptsPop(t,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
+  if(P.k==='fix')inner=fixPop(c,p);else if(P.k==='ty')inner=typePop(c,p);else if(P.k==='bfix')inner=`<div class="ph">Bonus category for ${S.sel.size} selected</div><p class="pn2">Sets it on the selected charges only; no rule.</p>${fixList(p,null)}`;
   else if(P.k==='menu'&&t)inner=menuPop(t,p);else if(P.k==='cat'&&t)inner=catPicker(`Category for ${t.n}`,t.cat);else if(P.k==='bcat')inner=catPicker(`Category for ${S.sel.size} selected`,'');
   else if(P.k==='sp'&&t)inner=spPicker(`Spender for ${t.n}`,t.sp);else if(P.k==='bsp')inner=spPicker(`Spender for ${S.sel.size} selected`,'');
   else if(P.k==='mc'&&t)inner=mcPicker(t);else if(P.k==='note'&&t)inner=`<div class="ph">Note on ${esc(t.n)}</div><textarea class="inp nt" data-notev rows="3" aria-label="Note">${esc(t.note)}</textarea><div class="pf"><button type="button" class="lnk" data-popx>Cancel</button><button type="button" class="btn pri" data-notesave>Save</button></div>`;
@@ -430,18 +430,25 @@ function doSave(mode,c,p){const F=S.fx,t=cardRows(c,p).find(x=>x.id===F.id);if(!
   if(Object.keys(o).length)setEd(t.id,o);
   const ask=p.ruleAsk==='after'&&'mc' in o&&F.cat?{id:t.id,cat:F.cat,pat:F.pat}:null;
   closeFix();S.ask=ask;toast(Object.keys(o).length?'Saved':'No change');redraw()}
+// Points edit in the cell, like a spreadsheet. Typing the card's own figure goes back to it.
+function commitPts(c,p,move){const id=S.pedit;if(id==null)return;const inp=L.root.querySelector('[data-pin]'),t=cardRows(c,p).find(x=>x.id===id);S.pedit=null;
+  if(inp&&t){const v=Math.round(Number(inp.value));S.ty=rel(inp,10).y;
+    if(inp.value!==''&&isFinite(v)){if(v===t.epts){if(t.pman){delete S.ed[id].pov;toast('Back to the card’s figure')}}
+      else if(!(t.pman&&v===t.pts)){setEd(id,{pov:v});toast(`Points set by hand: ${v>0?'+':v<0?'−':''}${f0(Math.abs(v))}. ↺ goes back to the card’s figure`)}}}
+  if(move){const ids=[...L.root.querySelectorAll('tr.tr:not(.pend)[data-row]')].map(r=>Number(r.dataset.row)),k=ids.indexOf(id)+move;if(k>=0&&k<ids.length)S.pedit=ids[k]}
+  redraw(S.pedit!=null?'[data-pin]':null);if(S.pedit!=null){const n=L.root.querySelector('[data-pin]');if(n)n.select()}}
 function wire(root,p){const c=L.d.cards[p.card];
   root.onclick=e=>{const g=e.target,q=s=>g.closest(s);let el;
-    if(S.pop&&!q('.pop')&&!q('[data-pop]')&&!(S.pop.k==='ty'&&q('[data-ty]'))&&!(S.pop.k==='pts'&&q('[data-act^="pts:"]'))){if(S.pop.k==='fix'||S.pop.k==='ty')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
+    if(S.pedit!=null&&!q('[data-pin]')){commitPts(c,p,0);if(!q('[data-act],[data-fix],[data-ty],[data-pop],[data-sort],[data-all]'))return}
+    if(S.pop&&!q('.pop')&&!q('[data-pop]')&&!(S.pop.k==='ty'&&q('[data-ty]'))){if(S.pop.k==='fix'||S.pop.k==='ty')S.fx=null;S.pop=null;S.pq='';S.fd=null;redraw();return}
     if(el=q('[data-fix]')){openFix(Number(el.dataset.fix),c,p);return}
     if(el=q('[data-ty]')){openType(Number(el.dataset.ty),c,p);return}
     if(el=q('[data-tpick]')){saveType(el.dataset.tpick,c,p);return}
     if(el=q('[data-act]')){const [a,ids]=el.dataset.act.split(':'),id=Number(ids),t=cardRows(c,p).find(x=>x.id===id);if(!t)return;
       if(a==='exc'){S.pop=null;setEd(id,{exc:!t.exc});S.ty=rel(el,10).y;toast(t.exc?'Included again':'Excluded: no points, not counted toward a sign-up bonus or spend challenges');redraw();return}
       if(a==='log'){S.pop=null;S.ty=rel(el,10).y;toast('Opens the two-step Log credit use window (decided in round 8)');redraw();return}
-      if(a==='pts'){if(S.pop&&S.pop.key==='pts:'+id){S.pop=null;redraw();return}const W=250,pos=rel(el,W,true);S.pop={key:'pts:'+id,k:'pts',id,x:pos.x,y:pos.y,w:W};S.ty=pos.y;redraw('[data-povv]');return}}
-    if(q('[data-povsave]')){const v=Math.round(Number(root.querySelector('[data-povv]').value));if(!isFinite(v))return;setEd(S.pop.id,{pov:v});S.pop=null;toast(`Points set by hand: ${v>0?'+':v<0?'−':''}${f0(Math.abs(v))}`);redraw();return}
-    if(q('[data-povclear]')){const e=S.ed[S.pop.id];if(e)delete e.pov;S.pop=null;toast('Back to the card’s figure');redraw();return}
+      if(a==='pts'){S.pop=null;S.pedit=id;redraw('[data-pin]');const inp=L.root.querySelector('[data-pin]');if(inp)inp.select();return}
+      if(a==='rev'){const e=S.ed[id];if(e)delete e.pov;S.pedit=null;S.ty=rel(el,10).y;toast(`Back to the card’s figure: ${t.epts>0?'+':t.epts<0?'−':''}${f0(Math.abs(t.epts))}`);redraw();return}}
     if(el=q('[data-fpick]')){const v=el.dataset.fpick;
       if(S.pop&&S.pop.k==='bfix'){let n=0;cardRows(c,p).forEach(t=>{if(S.sel.has(t.id)&&t.earn){setEd(t.id,{mc:v});n++}});S.pop=null;S.pq='';toast(`${v} set on ${n} charge${n===1?'':'s'}`);redraw();return}
       S.fx.cat=v;S.fx.picked=true;
@@ -504,7 +511,7 @@ function wire(root,p){const c=L.d.cards[p.card];
       if(p.fixStart==='row'&&el.classList.contains('clk')){openFix(id,c,p);return}
       if(p.rowClick==='expand'){S.exp.has(id)?S.exp.delete(id):S.exp.add(id);redraw()}
       else if(p.rowClick==='details'){S.modal={k:'details',id,y:Math.max(8,rel(el,10).y-200)};redraw()}}};
-  root.onkeydown=e=>{if(e.target.matches&&e.target.matches('[data-povv]')&&e.key==='Enter'){e.preventDefault();const b=root.querySelector('[data-povsave]');if(b)b.click();return}const tr=e.target.closest&&e.target.closest('tr[data-row].clk');if(tr&&e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();tr.click()}};
+  root.onkeydown=e=>{if(e.target.matches&&e.target.matches('[data-pin]')){if(e.key==='Enter'){e.preventDefault();commitPts(c,p,0)}else if(e.key==='Tab'){e.preventDefault();commitPts(c,p,e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();S.pedit=null;redraw()}return}const tr=e.target.closest&&e.target.closest('tr[data-row].clk');if(tr&&e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();tr.click()}};
   root.oninput=e=>{const g=e.target;
     if(g.matches('[data-q]')){S.q=g.value;S.all=false;redraw('[data-q]')}
     else if(g.matches('[data-pq]')){S.pq=g.value;redraw('[data-pq]')}
@@ -523,8 +530,8 @@ function page(p){const c=L.d.cards[p.card];
   return chrome(c,p,`<div class="rail"><div class="col">${txSection(c,p)}</div>${side}</div>`)}
 
 Gallery.define({
-  id:'cards-card-tx-r4',
-  name:'Cards: Card page transactions, round 4',
+  id:'cards-card-tx-final',
+  name:'Cards: Card page transactions, final',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'What to preview (not design choices)',open:true,controls:[
@@ -539,20 +546,12 @@ Gallery.define({
     {id:'splitDemo',label:'Add a split row (real, from Bilt 8961, Aug 6)',type:'toggle',default:false},
     {id:'emptyDemo',label:'Show the empty list',type:'toggle',default:false},
    ]},
-   {id:'acts',label:'Row actions (your note)',open:true,controls:[
-    {id:'ptsEdit',label:'Setting points by hand',type:'choice',default:'icon',options:[
-      {id:'icon',label:'A pencil icon',hint:'Opens a small box under it: your number, Save, and “Use the card’s figure” once set.'},
-      {id:'cell',label:'Click the Points cell',current:true,hint:'Today’s page edits points in the cell. Same box; the icons drop to two.'}]},
-    {id:'logWhere',label:'Log credit use… (purchases only)',type:'choice',options:[
-      {id:'icon',label:'A $ icon',hint:'After logging, the purchase gets the green $ circle after its name. Other rows keep the slot empty so icons line up.'},
-      {id:'menu',label:'A ⋯ that holds only Log credit use…',hint:'Shown on purchases only.'}]},
-    {id:'actShow',label:'When the icons show',type:'choice',options:[
-      {id:'always',label:'Always',hint:'Easiest to find. Three icons take about 82px, against 32px for ⋯; the merchant name gives up the difference.'},
-      {id:'faint',label:'Faint, full on row hover',hint:'Quieter rows; an excluded or hand-set row keeps its icon in color.'},
-      {id:'hover',label:'Only on row hover or focus',hint:'Cleanest; the space stays reserved. Excluded and hand-set icons stay visible.'}]},
-    {id:'actStyle',label:'Icon style',type:'choice',options:[
-      {id:'bare',label:'Bare icons',hint:'Gray, blue on hover.'},
-      {id:'boxed',label:'Small outlined buttons',hint:'Clearly clickable.'}]},
+   {id:'r4',label:'Decided in round 4',open:true,controls:[
+    {id:'ptsEdit',label:'Setting points by hand',type:'choice',locked:true,options:[{id:'icon',label:'A pencil icon; the Points cell is edited in place'}]},
+    {id:'revD',label:'After points are set by hand (your note)',type:'choice',locked:true,options:[{id:'r',label:'The pencil becomes ↺, which goes back to the card’s figure'}]},
+    {id:'logWhere',label:'Log credit use… (purchases only)',type:'choice',locked:true,options:[{id:'icon',label:'A $ icon'}]},
+    {id:'actShow',label:'When the icons show',type:'choice',locked:true,options:[{id:'faint',label:'Faint, full on row hover'}]},
+    {id:'actStyle',label:'Icon style',type:'choice',locked:true,options:[{id:'bare',label:'Bare icons'}]},
    ]},
    {id:'r3',label:'Decided in round 3',open:false,controls:[
     {id:'typeCol',label:'What the Type column says',type:'choice',locked:true,options:[{id:'kind',label:'Purchase, Refund, Credit, Fee, Interest, P2P'}]},
@@ -561,7 +560,7 @@ Gallery.define({
     {id:'typeRule',label:'Making a rule for the merchant',type:'choice',locked:true,options:[{id:'box',label:'A tick box, on'}]},
     {id:'fixKind',label:'Type in the bonus category list too',type:'toggle',locked:true,default:true},
     {id:'totFees',label:'Fees and interest count as spend',type:'toggle',locked:true,default:false},
-    {id:'excD',label:'Excluding a charge (your note)',type:'choice',locked:true,options:[{id:'x',label:'⋯ → Exclude: no points, not toward a sign-up bonus or spend challenges. Venmo, Zelle and Cash App are typed P2P.'}]},
+    {id:'excD',label:'Excluding a charge (your note)',type:'choice',locked:true,options:[{id:'x',label:'⊘ icon → Exclude: no points, not toward a sign-up bonus or spend challenges. Venmo, Zelle and Cash App are typed P2P.'}]},
    ]},
    {id:'r2',label:'Decided in round 2',open:false,controls:[
     {id:'fixStart',label:'How a fix starts',type:'choice',locked:true,options:[{id:'cell',label:'Click the bonus category'}]},
@@ -612,7 +611,7 @@ Gallery.define({
     if(!L||L.d!==d){RC={};ALL=[];Object.entries(d.cards).forEach(([n,c])=>c.rows.forEach(r=>{RC[r.id]=n;ALL.push(r)}))}
     if(L&&(L.group!==p.group||L.groupCat!==p.groupCat||L.fold!==p.groupFold))S.coll=null;
     L=Object.assign(L||{},{d,h,picks:p,card:p.card,data:p.data,period:p.period,fs:p.filterStyle,group:p.group,groupCat:p.groupCat,fold:p.groupFold});
-    TODAY=d.today;PAR={};d.cats.forEach(c=>{if(c.p)PAR[c.n]=c.p});S.pop=null;S.modal=null;S.fx=null;
+    TODAY=d.today;PAR={};d.cats.forEach(c=>{if(c.p)PAR[c.n]=c.p});S.pop=null;S.modal=null;S.fx=null;S.pedit=null;
     return page(p)},
   after(root,p){p=fill(p);L.root=root;L.picks=p;wire(root,p)},
   css:`
@@ -813,6 +812,7 @@ Gallery.define({
 #pv .tx tr:hover .acts .aic,#pv .tx tr:focus-within .acts .aic{opacity:1}
 #pv .dotb.sp{visibility:hidden;display:inline-block}
 #pv .ptsb{justify-content:flex-end}
+#pv .inp.pin{width:72px;text-align:right;padding:2px 6px;font-variant-numeric:tabular-nums}#pv .aic.on.rev{color:var(--ac)}
 @media (max-width:980px){#pv .rail{grid-template-columns:minmax(0,1fr)}}
 `});
 })();
