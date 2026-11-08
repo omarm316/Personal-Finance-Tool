@@ -1,12 +1,44 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-11-04
+> Last updated: 2026-11-05
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-11-05 — Daily Balances rebuilt around liquidity: design gallery round 1; Net Worth hidden
+
+**Net Worth hidden** from the sidebar at Omer's request (`Sidebar.jsx`). The page and the `#networth` route still work; nothing else links to it.
+
+**Daily Balances brief (Omer):** the page exists to show what liquid money is available to cover bills as they come due, mainly card payments. The Excel `balances` sheet he used has one column per account (about 64), so it scrolls sideways; the app's grid copies that.
+
+**Gallery round 1:** https://claude.ai/artifact/UVCZsGR6u9sacGWmg8UU49, spec `mockups/design-gallery/daily-balances.spec.js` (id `daily-balances-r1`). The look is locked from Cards and the Dashboard (Cloud, brand blue, Outfit + Plus Jakarta, hairline panels, top bar, underlined controls, value-first figures). Open choices:
+- Header: page name (Daily Balances / Liquidity / Cash & Bills), tabs (as today / Upcoming, Balance history, Reconciliation / no tabs).
+- How the forecast counts: shortfalls judged per account, all cash pooled, or a switch on the page; each card planned at its unpaid statement balance or everything owed; next statements (charges so far) on or off; cards with no due date listed apart or counted today; a cushion per account (default $1,000); last-changed dates on or off.
+- Sections, each with today's version where one exists: summary (net worth figures today / verdict sentence / cash + in − due = left / coverage bars), forecast chart (day boxes today / balance line / one small chart per paying account / daily in-out bars), what is due (register / calendar / week by week / card list), cover the gap (panel / inline at the first short day / off), what can cover it (ladder / stacked bar / account list with sparklines), balance history (today's wide grid / group columns with a click-open day / accounts down the side with a few dates across / one account's register / off), and stacked or split arrangement.
+- Planning a move from "cover the gap" works in the preview and reruns the forecast.
+
+**How the gallery computes the forecast** (plain arithmetic, same anchor model as `/api/daily-balances`):
+- Statement balance: the card's balance at the end of its last close day, from `cards.statement_close_day`, less credits posted since. The due date is the next `payment_due_day` after that close. These match the amounts in today's `cc_payment` overlays.
+- Next statement: charges since the close, due on the following due day.
+- Pay-from comes from `cards.payment_account_id`, defaulting to Chase Checking 8997.
+- Paychecks come from `salary_payments`, and the mortgage from `loans` (UNFCU $4,935.25 on the 10th from TD 7553).
+- The data pull was read-only and its output stayed in the session scratchpad; no figures are in the repo.
+
+**What the real figures show (as of Nov 5, next 30 days):**
+- $33,430.52 cash on hand; $56,351.56 due (20 payments); $15,770.84 coming in.
+- Chase Checking 8997 drops below $1,000 on Nov 15, when Amex BBP ($15,718.81) and Hilton Aspire ($12,483.61) are paid, and bottoms out at −$22,114.25 on Nov 28.
+- TD Checking 7553 dips to −$65.12 on Nov 10, when the mortgage lands before the Nov 15 paycheck.
+- Pooled, all cash bottoms out at −$13,888.98 on Nov 28.
+- $68,865.36 is owed across all cards.
+
+Input gaps are logged as B39: six cards with no due day ($14,344.89), two cards with no pay-from account, stale Hyatt, BOA checking and Chase Investing balances, and empty Plaid Liabilities fields.
+
+**Next:** Omer picks in the gallery and pastes "Copy my picks". Round 2 narrows (spec id `-r2`), then the final choices go into `docs/daily-balances-design.md`. Build only after that; the build will likely need a small endpoint for statement balances and due dates instead of the overlay table.
 
 ---
 

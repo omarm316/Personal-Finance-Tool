@@ -6,7 +6,7 @@ export function Sidebar({page,setPage,banks,onConnectBank,onSync,collapsed,setCo
     {id:'dashboard',icon:<Icon name="home"/>,label:'Dashboard'},
     {id:'transactions',icon:<Icon name="arrowUpDown"/>,label:'Transactions'},
     {id:'budgets',icon:<Icon name="target"/>,label:'Budgets'},
-    {id:'networth',icon:<Icon name="trendingUp"/>,label:'Net Worth'},
+    // Net Worth hidden from the menu 2026-11-05 (Omer). The page and its #networth route still work.
     {id:'cashflow',icon:<Icon name="calendar"/>,label:'Daily Balances'},
     {id:'cashplanner',icon:<Icon name="banknote"/>,label:'Cash Flow'},
     {id:'loans',icon:<Icon name="building"/>,label:'Loans'},
