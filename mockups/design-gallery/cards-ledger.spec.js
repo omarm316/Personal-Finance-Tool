@@ -14,11 +14,11 @@ const dd=(a,b)=>Math.round((Date.parse(b)-Date.parse(a))/864e5);
 const light=(bg,s,r,l,t,t2,t3)=>({'--bg':bg,'--surface':s,'--raised':r,'--line':l,'--tx':t,'--tx2':t2,'--tx3':t3,'--ac':'#2563EB','--ac-fg':'#fff','--ac-soft':'color-mix(in srgb,#2563EB 10%,transparent)','--good':'#047857','--warn':'#B45309','--bad':'#B91C1C'});
 const JAN1='2027-01-01',NOOWN='No owner';
 const REASONS=[['Stay or flight',1,'Points from a hotel stay or a flight'],['Sign-up bonus',1,'A bonus with no challenge in the app'],['Referral',1,'For referring someone'],['Promotion',1,'An offer, a promo or a goodwill credit'],['Points expired',-1,'Points the program took away'],['Balance check',0,'A difference found when checking the balance'],['Other',0,'Anything else; say what in the note']];
-const KIND={open:'Opening',earn:'Card earnings',bonus:'Adjustment',red:'Redemption',xout:'Transfer',xin:'Transfer',adj:'Adjustment',check:'Adjustment',p2p:'Between us'};
+const KIND={open:'Opening',earn:'Card points',bonus:'Adjustment',red:'Redemption',xout:'Transfer',xin:'Transfer',adj:'Adjustment',check:'Adjustment',p2p:'Between us'};
 const RANK={open:0,earn:1,check:3};
 
 /* ---------- Preview state (lives across re-renders) ---------- */
-const S={win:null,pw:null,pp:null,pm:null,kf:'',pf:'',posted:{},undo:null,box:null,added:{},openSet:{},ck:{},adj:null,grid:{},toast:'',uid:0};
+const S={win:null,pw:null,pp:null,pm:null,kf:'',pf:'',posted:{},undo:null,box:null,exp:null,added:{},openSet:{},ck:{},adj:null,grid:{},toast:'',uid:0};
 let LAST=null,TT=0,UT=0;
 const esc=s=>LAST.h.esc(s);
 const today=p=>p.moment==='jan1'?JAN1:LAST.d.today;
@@ -138,64 +138,75 @@ function challenges(p,d,h,L){const e=prog(p,d);if(!e.challenges.length)return ''
     if(c.pendingBonus&&showB){const x=L.find(y=>y.id===c.pendingBonus);if(x)extra=x.status==='pending'?`<span class="ch-wait">Bonus waiting to post</span>${markCtl(p,x,true)}`:`<span class="ch-ok">✓ Bonus posted ${dt(x.date)}</span>${S.undo&&S.undo.id===x.id?undoCtl(x):''}`;}
     return `<div class="ch-card sf"><div class="rings"><figure>${ring(c)}<figcaption>${c.done?'':'to go'}</figcaption></figure></div><div class="ch-t"><b>${esc(c.name)}</b><span>${esc(c.card)} ${esc(c.mask)}</span><span class="ch-bonus">${esc(c.bonus)}</span>${extra}</div>${c.done?'<button type="button" class="arch">Archive</button>':''}</div>`}).join('');
   return `<section data-region="bonus"><h2>Active challenges <span class="ct">${e.challenges.length}</span></h2><div class="ch-grid">${body}<button type="button" class="ch-add" aria-label="Add a challenge"><span>+</span></button></div></section>`;}
-function markCtl(p,x,small){
-  if(S.box===x.id)return `<span class="mk-box"><label>Posted on<input type="date" data-mk-date value="${today(p)}"></label><label>Points<input data-mk-pts inputmode="numeric" value="${f(x.pts)}"></label><span class="mk-b"><button type="button" class="btn sm" data-act="mark-cancel">Cancel</button><button type="button" class="btn sm pri" data-act="mark-save" data-id="${x.id}">Save</button></span></span>`;
-  return `<button type="button" class="btn ${small?'sm':'sm'} pri mk" data-act="mark" data-id="${x.id}">Mark posted</button>`;}
-const undoCtl=x=>`<span class="mk-undo"><button type="button" class="btn sm" data-act="undo" data-id="${x.id}">Undo</button><span class="tm"></span></span>`;
 
-/* ---------- Ecosystem: activity ---------- */
+/* ---------- Ecosystem: activity, a table with one line per entry ---------- */
+const TYPE={open:'Opening',earn:'Card points',red:'Redemption',xout:'Transfer out',xin:'Transfer in',p2p:'Between us',adj:'Adjustment',check:'Adjustment',bonus:'Adjustment'};
+const TGRP={open:'o',earn:'e',red:'r',xout:'t',xin:'t',p2p:'t',adj:'a',check:'a',bonus:'a'};
+const reasonOf=x=>x.kind==='check'?'Balance check':x.kind==='bonus'?(x.reason||'Sign-up bonus'):x.kind==='adj'?(x.reason||'Other'):'';
+const fd=(s,p)=>{const[y,m,dd]=s.split('-');return p.dateFmt==='mon'?`${MON[m-1]} ${Number(dd)}`:`${Number(m)}/${Number(dd)}`};
+const isSample=x=>!!(x.sample||/^Sample:/.test(x.title||''));
+function descOf(x){if(x.kind==='earn')return x.cardName||x.title;if(x.kind==='check')return 'Balance check';if(x.kind==='open')return 'Opening balance';return (x.title||'').replace(/^Sample:\s*/,'');}
+function detailOf(x,p){const k=x.kind;
+  if(k==='earn'){
+    if(x.merged)return `${x.cnt} statement${x.cnt===1?'':'s'} in ${MONL[Number(x.date.slice(5,7))-1]}, ${x.n} charges`;
+    if(x.monthly)return `${MONL[Number(x.to.slice(5,7))-1]} charges (${x.n}); no statement close day set, so counted as charged`;
+    return `Statement ${fd(x.from,p)} to ${fd(x.to,p)}, ${x.n} charge${x.n===1?'':'s'}${x.pre?` (${x.pre} from before the start)`:''}${x.status==='pending'?`; posts ${fd(x.date,p)}`:''}`;}
+  if(k==='check')return (x.pts?`Program showed ${f(x.pa)}, the app had ${f(x.pb)}`:`Matched the program at ${f(x.pa)}`)+(x.note?`. ${x.note}`:'');
+  if(k==='bonus')return x.status==='pending'?`${x.sub}; waiting for you to mark it posted`:`${x.sub}; marked posted ${fd(x.date,p)}`;
+  return x.sub||'';}
 function displayList(p,L){
   let D=L.map(x=>({...x}));
   if(p.cardLines==='none')D=D.filter(x=>x.kind!=='earn');
   else if(p.cardLines==='month'){const G=new Map(),keep=[];
     D.forEach(x=>{if(x.kind!=='earn'||x.status==='pending'){keep.push(x);return}const k=x.cardName+'|'+x.person+'|'+x.date.slice(0,7);
-      if(!G.has(k))G.set(k,{...x,id:'m-'+k,pts:0,n:0,cnt:0,date:x.date,last:null});const g=G.get(k);g.pts+=x.pts;g.n+=x.n||0;g.cnt++;if(x.date>g.date)g.date=x.date;if(!g.last||order(x,g.last)>0)g.last=x;});
-    G.forEach(g=>{g.lastId=g.last.id;delete g.last;const[y,m]=g.date.split('-');g.date=`${y}-${m}-${String(new Date(Number(y),Number(m),0).getDate()).padStart(2,'0')}`;if(g.date>LAST.d.today)g.date=LAST.d.today;g.sub=`${MONL[Number(m)-1]}, ${g.cnt} statement${g.cnt===1?'':'s'}, ${g.n} charges`;keep.push(g)});D=keep;}
-  if(p.pendAt==='hidden')D=D.filter(x=>x.status!=='pending');
+      if(!G.has(k))G.set(k,{...x,id:'m-'+k,pts:0,n:0,cnt:0,merged:true,last:null});const g=G.get(k);g.pts+=x.pts;g.n+=x.n||0;g.cnt++;if(!g.last||order(x,g.last)>0)g.last=x;});
+    G.forEach(g=>{g.lastId=g.last.id;delete g.last;const[y,m]=g.date.split('-');g.date=`${y}-${m}-${String(new Date(Number(y),Number(m),0).getDate()).padStart(2,'0')}`;if(g.date>LAST.d.today)g.date=LAST.d.today;keep.push(g)});D=keep;}
+  if(p.pendShow==='hidden')D=D.filter(x=>x.status!=='pending');
   return D;}
-function rowText(p,x,T){const k=x.kind;let title=x.title,sub=x.sub||'',tag='';
-  if(k==='check'){title='Balance check';sub=x.pts?`Program showed ${f(x.pa)}, the app had ${f(x.pb)}`:`Matched the program, ${f(x.pa)}`;if(x.note)sub+=`. ${x.note}`;if(x.sample)title='Sample: Balance check';}
-  if(k==='adj'||(k==='bonus'&&x.status!=='pending'))tag=x.reason||'Other';
-  if(k==='bonus'&&x.status==='pending')sub=`${x.sub}. Waiting for you to mark it posted`;
-  if(k==='earn'&&x.status==='pending')sub=`${x.sub}. Posts ${dt(x.date)}`;
-  if(k==='bonus'&&x.postedNow)sub=`Marked posted ${dt(x.date)}`;
-  return {title,sub,tag};}
-function ptsCell(x){if(x.kind==='check'&&!x.pts)return '<b class="val mut">±0</b>';if(x.kind==='open')return `<b class="val">${f(x.pts)}</b>`;
-  return `<b class="val ${x.status==='pending'?'pend':cl(x.pts)}">${sg(x.pts)}</b>`;}
-function actCell(p,x){if(x.status==='pending'&&x.kind==='bonus'&&p.bonusWhere!=='challenge')return markCtl(p,x);
-  if(S.undo&&S.undo.id===x.id)return undoCtl(x);
-  if(x.status==='pending')return '';return `<span class="ev-a"><button type="button" class="btn-g sm">Edit</button></span>`;}
-function activity(p,d,h,L){const e=prog(p,d),T=today(p),jan=p.moment==='jan1';
+function markCtl(p,x){
+  if(S.box===x.id)return `<span class="mk-box"><span class="mk-l">Mark ${esc(descOf(x))} posted</span><label>Posted on<input type="date" data-mk-date value="${today(p)}"></label><label>Points<input data-mk-pts inputmode="numeric" value="${f(x.pts)}"></label><span class="mk-b"><button type="button" class="btn sm" data-act="mark-cancel">Cancel</button><button type="button" class="btn sm pri" data-act="mark-save" data-id="${x.id}">Save</button></span></span>`;
+  return `<button type="button" class="btn sm pri mk" data-act="mark" data-id="${x.id}">Mark posted</button>`;}
+const undoCtl=x=>`<span class="mk-undo"><button type="button" class="btn sm" data-act="undo" data-id="${x.id}">Undo</button><span class="tm"></span></span>`;
+function activity(p,d,h,L){const e=prog(p,d),jan=p.moment==='jan1';
   const scope=(p.histPerson==='chips'||p.histPerson==='ledger')&&S.pf?S.pf:null;
   // Balances come from the whole ledger, so hiding card lines never changes a figure.
   const full=L.map(x=>({...x}));runBalances(full,scope);const B=new Map(full.map(x=>[x.id,x]));
   const D=displayList(p,L);D.forEach(x=>{const s=B.get(x.lastId||x.id);if(s){x.pb=s.pb;x.pa=s.pa;x.sb=s.sb;x.sa=s.sa}});
-  const chips=['',...(p.cardLines!=='none'?['Card earnings']:[]),'Redemption','Transfer','Adjustment','Between us'];
+  const chips=['',...(p.cardLines!=='none'?['Card points']:[]),'Redemption','Transfer','Adjustment','Between us'];
   if(S.kf&&!chips.includes(S.kf))S.kf='';
   const V=D.filter(x=>(!scope||x.person===scope)&&(!S.kf||KIND[x.kind]===S.kf));
   const desc=(a,b)=>-order(a,b);
-  const pend=V.filter(x=>x.status==='pending'),post=V.filter(x=>x.status!=='pending');
-  let top=[],rest;
-  if(p.pendAt==='top'){top=[...pend].sort(order);rest=post.sort(desc)}else rest=V.sort(desc);
-  const showP=!scope;
-  const red=L.filter(x=>x.kind==='red'),rp=-red.reduce((t,x)=>t+x.pts,0),rc=red.reduce((t,x)=>t+(parseFloat((x.sub||'').replace(/[^0-9.]/g,''))||0),0);
-  const stats=rp?`<div class="r-st"><div><span>Points redeemed</span><b class="val">${f(rp)}</b></div><div><span>Cash value realized</span><b class="val">$${rc.toFixed(2)}</b></div><div><span>Realized ¢ per point</span><b class="val">${(rc/rp*100).toFixed(2)}¢</b></div></div>`:'';
+  const rows=p.pendShow==='top'?[...V.filter(x=>x.status==='pending').sort(order),...V.filter(x=>x.status!=='pending').sort(desc)]:V.sort(desc);
+  const showOwner=!scope,rc=p.typeCol==='reasonCol',io=p.ptsCols==='inout',dc=p.detail==='col',st=p.pendShow==='status',bal=p.runBal,ex=p.detail==='expand';
+  const cols=[['Date','d'],['Type',''],...(rc?[['Reason','']]:[]),['Description','ds'],...(dc?[['Details','dt']]:[]),...(showOwner?[['Owner','']]:[]),...(io?[['In','n'],['Out','n']]:[['Points','n']]),...(bal?[[scope?'Balance':'Balance, total','n']]:[]),...(st?[['Status','']]:[]),['','ac']];
+  const red=L.filter(x=>x.kind==='red'),rp=-red.reduce((t,x)=>t+x.pts,0),rcash=red.reduce((t,x)=>t+(parseFloat((x.sub||'').replace(/[^0-9.]/g,''))||0),0);
+  const stats=rp?`<div class="r-st"><div><span>Points redeemed</span><b class="val">${f(rp)}</b></div><div><span>Cash value realized</span><b class="val">$${rcash.toFixed(2)}</b></div><div><span>Realized ¢ per point</span><b class="val">${(rcash/rp*100).toFixed(2)}¢</b></div></div>`:'';
   const chipH=`<div class="a-chips"><span class="cg">${chips.map(c=>`<button type="button" class="chip ${S.kf===c?'on':''}" data-kf="${c}">${c||'All'}</button>`).join('')}</span>${p.histPerson==='chips'&&e.people.length>1?`<span class="cg pg">${['',...e.people].map(x=>`<button type="button" class="chip ${S.pf===x?'on':''}" data-pf="${esc(x)}">${x?esc(x):'Everyone'}</button>`).join('')}</span>`:''}</div>`;
-  const ledgerNote=p.histPerson==='ledger'?`<p class="a-note">${scope?`Showing ${esc(scope)}’s activity. <button type="button" class="lnk" data-pf="">Show everyone</button>`:'Click a person’s ledger card to see only their activity.'}</p>`:'';
-  const balTxt=x=>p.runBal&&x.status!=='pending'&&x.sa!=null?`<small class="rb">${f(x.sa)}</small>`:'';
-  const who=x=>showP&&x.person?`<span class="who ${x.person===NOOWN?'no':''}">${esc(x.person)}</span>`:'';
-  const evRow=x=>{const t=rowText(p,x,T);return `<div class="a-row ${x.status==='pending'?'is-pend':''}" data-k="${KIND[x.kind]}"><span class="ev-k">${x.status==='pending'?'Pending':KIND[x.kind]}</span><div class="ev"><div class="ev-t"><b>${esc(t.title)}${t.tag?` <em class="rs">${esc(t.tag)}</em>`:''}</b><span>${x.status==='pending'?'':dt(x.date)+' · '}${esc(t.sub)}${showP&&x.person?` · ${esc(x.person)}`:''}</span></div><div class="ev-v">${ptsCell(x)}${balTxt(x)}</div>${actCell(p,x)}</div></div>`};
-  const regRow=x=>{const t=rowText(p,x,T);return `<tr class="${x.status==='pending'?'is-pend':''}"><td class="d">${x.status==='pending'?'<span class="pt">Pending</span>':dt(x.date)}</td><td class="en"><b>${esc(t.title)}</b>${t.tag?`<em class="rs">${esc(t.tag)}</em>`:''}<small>${esc(t.sub)}</small></td>${showP?`<td>${who(x)}</td>`:''}<td class="n">${ptsCell(x)}</td>${p.runBal?`<td class="n bal">${x.status==='pending'||x.sa==null?'':f(x.sa)}</td>`:''}<td class="ac">${actCell(p,x)}</td></tr>`};
-  let body='';
-  if(!L.length)body=`<p class="emp">${jan?'Nothing yet. The ledger starts once the opening balance is set.':'No activity yet.'}</p>`;
-  else if(p.histForm==='register'){const head=`<thead><tr><th>Date</th><th>Entry</th>${showP?'<th>Person</th>':''}<th class="n">Points</th>${p.runBal?`<th class="n">Balance${scope?'':', total'}</th>`:''}<th></th></tr></thead>`;
-    body=`<div class="rg-w"><table class="rg">${head}<tbody>${top.length?top.map(regRow).join('')+`<tr class="rg-sep"><td colspan="6"></td></tr>`:''}${rest.map(regRow).join('')}</tbody></table></div>`;}
-  else if(p.histForm==='months'){const M=new Map();rest.forEach(x=>{const k=x.date.slice(0,7);if(!M.has(k))M.set(k,[]);M.get(k).push(x)});
-    const inScope=x=>x.status!=='pending'&&(!scope||x.person===scope);
-    body=(top.length?`<div class="mo"><div class="mo-h"><b>Waiting to post</b><span>${f(top.reduce((t,x)=>t+x.pts,0))} points</span></div>${top.map(evRow).join('')}</div>`:'')+[...M].map(([k,xs])=>{const[y,m]=k.split('-'),net=full.filter(x=>inScope(x)&&x.kind!=='open'&&x.date.slice(0,7)===k).reduce((t,x)=>t+(x.pts||0),0);
-      const close=full.filter(x=>inScope(x)&&x.date.slice(0,7)<=k).reduce((t,x)=>t+(x.pts||0),0);
-      return `<div class="mo"><div class="mo-h"><b>${MONL[m-1]} ${y}</b><span class="${cl(net)}">${sg(net)}</span><span>${Number(k.slice(0,4))*12+Number(m)>=Number(T.slice(0,4))*12+Number(T.slice(5,7))?'Balance so far':'Closing balance'} <b class="val">${f(close)}</b></span></div>${xs.map(evRow).join('')}</div>`}).join('');}
-  else body=`${top.length?`<div class="a-feed top">${top.map(evRow).join('')}</div>`:''}<div class="a-feed">${rest.map(evRow).join('')}</div>`;
+  const ledgerNote=p.histPerson==='ledger'?`<p class="a-note">${scope?`Showing ${esc(scope)} only. <button type="button" class="lnk" data-pf="">Show everyone</button>`:'Click a person’s ledger card to show only their lines.'}</p>`:'';
+  const typeCell=x=>{const t=rc?TYPE[x.kind]:(reasonOf(x)||TYPE[x.kind]);return `<td>${p.typeLook==='pill'?`<span class="tp g-${TGRP[x.kind]}">${esc(t)}</span>`:esc(t)}</td>`};
+  const ownerCell=x=>{if(!x.person)return '<td></td>';const no=x.person===NOOWN;
+    if(p.ownerLook==='chip')return `<td><span class="oc ${no?'no':'p-'+Math.max(0,e.people.indexOf(x.person))}" title="${esc(x.person)}" aria-label="${esc(x.person)}">${no?'?':esc(x.person[0])}</span></td>`;
+    return `<td class="${no?'pend':''}">${esc(x.person)}</td>`};
+  const ptsCells=x=>{const v=x.pts||0,pend=x.status==='pending';
+    if(io){if(x.kind==='open')return `<td class="n">${f(v)}</td><td class="n"></td>`;if(x.kind==='check'&&!v)return `<td class="n mut">0</td><td class="n"></td>`;
+      return v>=0?`<td class="n ${pend?'pend':'up'}">${f(v)}</td><td class="n"></td>`:`<td class="n"></td><td class="n ${pend?'pend':'neg'}">${f(-v)}</td>`;}
+    if(x.kind==='open')return `<td class="n">${f(v)}</td>`;if(x.kind==='check'&&!v)return `<td class="n mut">±0</td>`;
+    return `<td class="n ${pend?'pend':cl(v)}">${sg(v)}</td>`};
+  const dateCell=x=>p.pendShow==='top'&&x.status==='pending'?`<td class="d pend b">${x.kind==='bonus'?'To confirm':'Posts '+fd(x.date,p)}</td>`:`<td class="d">${fd(x.date,p)}</td>`;
+  const descCell=x=>{const dt2=detailOf(x,p),tip=p.detail==='hover'&&dt2?`<span class="tip" tabindex="0" aria-label="${esc(dt2)}">ⓘ<span role="tooltip">${esc(dt2)}</span></span>`:'';
+    return `<td class="ds"><span class="ds-i">${isSample(x)?'<span class="smp">Sample</span>':''}<span class="ds-t" title="${esc(descOf(x))}">${esc(descOf(x))}</span>${tip}</span></td>`};
+  const statusCell=x=>x.status!=='pending'?'<td class="mut">Posted</td>':`<td class="pend b">${x.kind==='bonus'?'To confirm':'Pending'}</td>`;
+  const actCell=x=>{let a='';
+    if(x.status==='pending'&&x.kind==='bonus'&&p.bonusWhere!=='challenge'&&S.box!==x.id)a=markCtl(p,x);
+    else if(S.undo&&S.undo.id===x.id)a=undoCtl(x);
+    else if(x.status!=='pending')a=`<span class="ev-a"><button type="button" class="btn-g sm">Edit</button></span>`;
+    return `<td class="ac">${a}${ex?`<span class="chev ${S.exp===x.id?'open':''}" aria-hidden="true">›</span>`:''}</td>`};
+  const row=x=>{const open=ex&&S.exp===x.id;let r=`<tr class="${x.status==='pending'?'is-pend':''} ${ex?'exr':''} ${open?'open':''}" ${ex?`data-exp="${x.id}" tabindex="0" aria-expanded="${open}"`:''}>${dateCell(x)}${typeCell(x)}${rc?`<td>${esc(reasonOf(x))}</td>`:''}${descCell(x)}${dc?`<td class="dt" title="${esc(detailOf(x,p))}">${esc(detailOf(x,p))}</td>`:''}${showOwner?ownerCell(x):''}${ptsCells(x)}${bal?`<td class="n bal">${x.status==='pending'||x.sa==null?'':f(x.sa)}</td>`:''}${st?statusCell(x):''}${actCell(x)}</tr>`;
+    if(open)r+=`<tr class="exd"><td colspan="${cols.length}">${esc(detailOf(x,p))}</td></tr>`;
+    if(S.box===x.id)r+=`<tr class="exd"><td colspan="${cols.length}">${markCtl(p,x)}</td></tr>`;
+    return r};
+  const body=!L.length?`<p class="emp">${jan?'Nothing yet. The ledger starts once the opening balance is set.':'No activity yet.'}</p>`:!rows.length?'<p class="emp">Nothing of this type yet.</p>':
+    `<div class="at-w"><table class="at ${dc?'with-dt':''}"><thead><tr>${cols.map(([c,k])=>`<th class="${k}">${c}</th>`).join('')}</tr></thead><tbody>${rows.map(row).join('')}</tbody></table></div>`;
   const inl=S.win&&S.win.t==='adjust'&&p.winStyle==='inline'?winBody(p,d,h,L):'';
   return `<section data-region="history"><div class="s-head"><h2>Activity</h2><span class="s-btns"><button type="button" class="btn-g sm">+ Redemption</button><button type="button" class="btn-g sm">+ Transfer</button><button type="button" class="btn-g sm" data-act="adjust">+ Adjustment</button><button type="button" class="btn-g sm">+ Between us</button></span></div>${inl}<div class="sf pn">${stats}${chipH}${ledgerNote}${body}</div></section>`;}
 
@@ -243,42 +254,43 @@ function winBody(p,d,h,L){if(!S.win)return '';const t=S.win.t;
   if(t==='check')return checkWin(p,d,h,L);if(t==='adjust')return adjWin(p,d,h);if(t==='open')return openWin(p,d,h,L);return '';}
 function windowLayer(p,d,h,L){if(!S.win||p.winStyle==='inline')return '';const b=winBody(p,d,h,L);return b?`<div class="mdl-bk"></div>${b}`:'';}
 
-/* ---------- Opening a window from the "What to preview" control ---------- */
-function syncPicks(p,d){
-  if(S.pp!==p.page||S.pm!==p.moment){S.kf='';S.pf='';S.box=null;S.undo=null;S.ck={};}
-  if(S.pw!==p.win||S.pp!==p.page||S.pm!==p.moment){const e=d.programs[p.page];
+/* ---------- The Screen control: which page, which day, and whether a window starts open ---------- */
+const SCREENS={amex:{page:'Amex MR'},chase:{page:'Chase UR'},hilton:{page:'Hilton Honors'},marriott:{page:'Marriott Bonvoy'},citi:{page:'Citi ThankYou'},
+  check:{page:'Amex MR',win:'check'},adjust:{page:'Amex MR',win:'adjust'},portfolio:{page:'Portfolio'},
+  jan1port:{page:'Portfolio',moment:'jan1'},jan1prog:{page:'Hilton Honors',moment:'jan1'},jan1enter:{moment:'jan1',win:'opening'}};
+function view(p){const s=SCREENS[p.screen]||SCREENS.amex,page=p.screen==='jan1enter'?(p.openWhere==='program'?'Hilton Honors':'Portfolio'):s.page;
+  return {...p,page,moment:s.moment||'running',win:s.win||'none'};}
+function syncPicks(p,d){const key=p.screen+'|'+p.page;
+  if(S.pp!==p.page||S.pm!==p.moment){S.kf='';S.pf='';S.box=null;S.undo=null;S.ck={};S.exp=null;}
+  if(S.pw!==key){const e=d.programs[p.page];
     S.win=null;
     if(p.win==='opening'){if(!e){if(gridOn(p))S.win={t:'grid'}}else if(progOn(p))S.win={t:'open',person:e.people[0]}}
     if(e&&p.win==='check')S.win={t:'check',person:p.checkBtn==='head'?'':e.people[0]};
     if(e&&p.win==='adjust')S.win={t:'adjust'};
     if(S.win&&S.win.t==='check'&&e&&p.moment!=='jan1'){const L=entries(p,d);const pp=S.win.person||e.people[0];S.ck={[pp]:f(sums(L,pp).cur+212)};}
     if(S.win&&S.win.t==='adjust')S.adj=newAdj(p,d);}
-  S.pw=p.win;S.pp=p.page;S.pm=p.moment;}
+  S.pw=key;S.pp=p.page;S.pm=p.moment;}
 function newAdj(p,d){const e=prog(p,d);return {person:e?e.people[0]:'Omer',reason:'Stay or flight',sign:1,raw:'',note:''};}
 
 Gallery.define({
-  id:'cards-ledger-r1',
-  name:'Cards: Points ledger and adjustments, round 1',
+  id:'cards-ledger-r1b',
+  name:'Cards: Points ledger and adjustments, round 1 (revised)',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'],
   groups:[
-   {id:'see',label:'What to preview (not design choices)',open:true,controls:[
-    {id:'page',label:'Page',type:'choice',options:[
-      {id:'Amex MR',label:'Ecosystem: Amex MR',hint:'Both of you, a sample sign-up bonus waiting to post, a transfer out, a referral and a check with a gap.'},
-      {id:'Chase UR',label:'Ecosystem: Chase UR',hint:'Five statements still pending, a transfer between you and a redemption.'},
-      {id:'Hilton Honors',label:'Ecosystem: Hilton Honors',hint:'A hotel program: points from a stay, a transfer in from Amex and an award stay.'},
-      {id:'Marriott Bonvoy',label:'Ecosystem: Marriott Bonvoy',hint:'Daniella checked and matched; Omer has expired points and no check yet.'},
-      {id:'Citi ThankYou',label:'Ecosystem: Citi ThankYou',hint:'Real gap: Strata Premier has no owner, so its points belong to no one.'},
-      {id:'Portfolio',label:'Portfolio',hint:'Program tiles and where the opening-balance grid starts.'},
-    ]},
-    {id:'moment',label:'Moment',type:'choice',options:[
-      {id:'running',label:'Nov 7, the ledger running',hint:'The preview opens the ledger on Sep 1, 2026 so it can use real card points; the app opens it on Jan 1, 2027. Opening balances are stand-ins. Redemptions, transfers, adjustments, checks and the bonus are labeled samples.'},
-      {id:'jan1',label:'Jan 1, 2027, opening day',hint:'No opening balances yet. Set some to see the ledger start.'},
-    ]},
-    {id:'win',label:'Open in the preview',type:'choice',options:[
-      {id:'none',label:'Nothing',hint:'The buttons on the page open these too.'},
-      {id:'check',label:'Check balance'},
-      {id:'adjust',label:'Add adjustment'},
-      {id:'opening',label:'Opening balance',hint:'The grid on Portfolio, or one program’s window, by your pick under Opening balances.'},
+   {id:'see',label:'Screen to look at (not a design choice)',open:true,controls:[
+    {id:'about',label:'About the figures',type:'choice',locked:true,options:[{id:'x',label:'Card points are real, counted from Sep 1, 2026 (in the app the ledger starts Jan 1, 2027). Opening balances are stand-ins. Rows tagged Sample are made up.'}]},
+    {id:'screen',label:'Screen',type:'choice',options:[
+      {id:'amex',label:'Amex MR page',hint:'Both of you. A sign-up bonus waiting for you to mark it posted, a referral, a transfer out and two balance checks.'},
+      {id:'chase',label:'Chase UR page',hint:'Card points still pending on five statements, a transfer between you and a redemption.'},
+      {id:'hilton',label:'Hilton Honors page',hint:'A hotel program: points from a stay, a transfer in from Amex and an award stay.'},
+      {id:'marriott',label:'Marriott Bonvoy page',hint:'Daniella checked and matched; Omer has expired points and no check yet.'},
+      {id:'citi',label:'Citi ThankYou page',hint:'Strata Premier has no owner in the app, so its points belong to no one.'},
+      {id:'check',label:'Check balance window (Amex MR)',hint:'What Check balance opens: type what the program shows and see the difference.'},
+      {id:'adjust',label:'Add adjustment window (Amex MR)',hint:'What + Adjustment opens.'},
+      {id:'portfolio',label:'Portfolio',hint:'The program tiles.'},
+      {id:'jan1port',label:'Jan 1, 2027: Portfolio before any balance is entered',hint:'The ledger’s first day.'},
+      {id:'jan1prog',label:'Jan 1, 2027: Hilton Honors before its balance is entered'},
+      {id:'jan1enter',label:'Jan 1, 2027: entering the opening balances',hint:'The grid on Portfolio, or one program’s window, depending on your pick under Opening balances.'},
     ]},
    ]},
    {id:'ledger',label:'Balance ledger',open:true,controls:[
@@ -319,28 +331,49 @@ Gallery.define({
       {id:'split',label:'Two figures',hint:'Pending from cards, and Bonus to confirm.'},
     ]},
    ]},
-   {id:'history',label:'Activity',open:true,controls:[
-    {id:'histForm',label:'Layout',type:'choice',options:[
-      {id:'timeline',label:'Timeline',current:true,hint:'The approved Activity list.'},
-      {id:'register',label:'Register table',hint:'Date, entry, person, points, balance, like a bank register.'},
-      {id:'months',label:'By month',hint:'Each month with its change and closing balance.'},
-    ]},
-    {id:'cardLines',label:'Card points in Activity',type:'choice',options:[
+   {id:'history',label:'Activity table',open:true,controls:[
+    {id:'cardLines',label:'Card points in the table',type:'choice',options:[
       {id:'none',label:'Not listed',current:true,hint:'Only the Earned row on the ledger card.'},
-      {id:'statement',label:'One line per statement',hint:'How programs post them. Cards with no close day get a line per month.'},
+      {id:'statement',label:'One line per statement',hint:'How programs post them. Cards with no close day get one line per month.'},
       {id:'month',label:'One line per card per month'},
     ]},
-    {id:'pendAt',label:'Pending lines',type:'choice',options:[
-      {id:'top',label:'At the top, soonest first'},
-      {id:'inline',label:'In date order'},
-      {id:'hidden',label:'Not listed',hint:'The bonus then can only be marked posted from its challenge.'},
+    {id:'typeCol',label:'Adjustment reason',type:'choice',options:[
+      {id:'reasonCol',label:'Its own Reason column',hint:'Type says Adjustment; Reason says Stay or flight, Balance check, and so on.'},
+      {id:'inType',label:'In the Type column',hint:'Type says Stay or flight, Balance check, and so on. One column fewer.'},
     ]},
-    {id:'histPerson',label:'Whose activity',type:'choice',options:[
-      {id:'tag',label:'Everyone, named on each row',current:true},
-      {id:'chips',label:'Person chips',hint:'Everyone, Omer, Daniella beside the type chips.'},
-      {id:'ledger',label:'Click a ledger card',hint:'The card you click filters the list.'},
+    {id:'typeLook',label:'Type look',type:'choice',options:[
+      {id:'text',label:'Plain text'},
+      {id:'pill',label:'Colored tag'},
     ]},
-    {id:'runBal',label:'Balance after each line',type:'toggle',default:false},
+    {id:'detail',label:'Details (statement dates, transfer ratio, check figures)',type:'choice',options:[
+      {id:'col',label:'Their own column'},
+      {id:'hover',label:'ⓘ after the description, on hover'},
+      {id:'expand',label:'Click a row to open them under it'},
+      {id:'none',label:'Not shown'},
+    ]},
+    {id:'ptsCols',label:'Points',type:'choice',options:[
+      {id:'signed',label:'One column with + and −'},
+      {id:'inout',label:'In and Out columns'},
+    ]},
+    {id:'pendShow',label:'Pending lines',type:'choice',options:[
+      {id:'status',label:'A Status column',hint:'Posted, Pending, or To confirm for a bonus; lines in date order.'},
+      {id:'top',label:'At the top, tinted',hint:'The Date column says “Posts 11/12” or “To confirm”.'},
+      {id:'hidden',label:'Not listed',hint:'A bonus can then only be marked posted on its challenge.'},
+    ]},
+    {id:'ownerLook',label:'Owner column',type:'choice',options:[
+      {id:'name',label:'Name'},
+      {id:'chip',label:'Initial in a circle'},
+    ]},
+    {id:'histPerson',label:'Showing one owner’s lines',type:'choice',options:[
+      {id:'col',label:'No filter, the Owner column only',current:true},
+      {id:'chips',label:'Owner chips beside the type chips'},
+      {id:'ledger',label:'Click a person’s ledger card'},
+    ]},
+    {id:'dateFmt',label:'Date',type:'choice',options:[
+      {id:'slash',label:'10/31, as on Transactions'},
+      {id:'mon',label:'Oct 31'},
+    ]},
+    {id:'runBal',label:'Balance column (balance after each line)',type:'toggle',default:false},
    ]},
    {id:'check',label:'Check balance window',open:true,controls:[
     {id:'gapShow',label:'How the difference reads',type:'choice',options:[
@@ -409,10 +442,11 @@ Gallery.define({
       {id:'dot',label:'Amber dot when not checked in 60 days'},
     ]},
    ]},
-   {id:'settled',label:'Settled in chat, 2026-11-07',open:false,controls:[
+   {id:'settled',label:'Settled in chat and your notes, 2026-11-07',open:false,controls:[
     {id:'anchor',label:'Balance check',type:'choice',locked:true,options:[{id:'gap',label:'One anchor on Jan 1, 2027; each check logs the gap as an adjustment'}]},
     {id:'other',label:'Points from outside card spend',type:'choice',locked:true,options:[{id:'reason',label:'An adjustment with a reason from a fixed list'}]},
     {id:'bonusModel',label:'Challenge bonuses',type:'choice',locked:true,options:[{id:'pending',label:'Added as pending when the challenge is met; you mark them posted'}]},
+    {id:'actTable',label:'Activity',type:'choice',locked:true,options:[{id:'table',label:'A table, one line per entry: Date, Type, Description, Owner and Points in their own columns'}]},
    ]},
    {id:'decided',label:'Decided in the Cards galleries',open:false,controls:[
     {id:'scheme',label:'Color scheme',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud',tokens:light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F')}]},
@@ -426,16 +460,16 @@ Gallery.define({
     {id:'noCpp',label:'Dollar value of points',type:'choice',locked:true,options:[{id:'never',label:'Never an assumed value per point'}]},
    ]},
   ],
-  render(p,d,h){LAST={d,h,p};syncPicks(p,d);
+  render(picks,d,h){const p=view(picks);LAST={d,h,p};syncPicks(p,d);
     let body,L=[];
     if(p.page==='Portfolio')body=portfolio(p,d,h);
     else{L=entries(p,d);body=hero(p,d,h,L)+`<p class="emp sf pn slim">Actions strip and Points by category sit here as approved; not repeated in this gallery.</p>`+ledger(p,d,h,L)+challenges(p,d,h,L)+activity(p,d,h,L);}
     const layer=p.page==='Portfolio'?(S.win&&S.win.t==='grid'&&p.winStyle!=='inline'?`<div class="mdl-bk"></div>${gridWin(p,d,h)}`:''):windowLayer(p,d,h,L);
     return `<div class="app">${nav()}<div class="main">${header(p,d)}${body}</div>${layer}${S.toast?`<div class="toast" role="status">${esc(S.toast)}</div>`:''}</div>`;
   },
-  after(root,p){
-    const app=root.querySelector('.app');if(!app)return;const d=LAST.d,stage=document.getElementById('stage');
-    const rr=()=>{const top=stage?stage.scrollTop:0;root.innerHTML=Gallery.spec.render(p,LAST.d,LAST.h);Gallery.spec.after(root,p);if(stage)stage.scrollTop=top};
+  after(root,picks){
+    const p=view(picks),app=root.querySelector('.app');if(!app)return;const d=LAST.d,stage=document.getElementById('stage');
+    const rr=()=>{const top=stage?stage.scrollTop:0;root.innerHTML=Gallery.spec.render(picks,LAST.d,LAST.h);Gallery.spec.after(root,picks);if(stage)stage.scrollTop=top};
     const toast=t=>{S.toast=t;rr()};
     const st=stage?stage.scrollTop:0,sh=stage?stage.clientHeight:800;
     const m=app.querySelector('.mdl');if(m)m.style.top=(st+40)+'px';
@@ -446,7 +480,8 @@ Gallery.define({
     const num=v=>{const n=Number(String(v).replace(/[,\s]/g,'').replace('−','-'));return isFinite(n)?n:NaN};
     const addEntry=x=>{(S.added[e.name]=S.added[e.name]||[]).push({id:'a'+(++S.uid),status:'posted',...x})};
     app.addEventListener('click',ev=>{
-      const b=ev.target.closest('[data-act],[data-kf],[data-pf],[data-lp],[data-adj-person],[data-adj-reason],[data-adj-sign],[data-adj-flip]');if(!b)return;
+      const b=ev.target.closest('[data-act],[data-kf],[data-pf],[data-lp],[data-adj-person],[data-adj-reason],[data-adj-sign],[data-adj-flip],[data-exp]');if(!b)return;
+      if(b.dataset.exp!=null){if(ev.target.closest('button,input,a'))return;S.exp=S.exp===b.dataset.exp?null:b.dataset.exp;return rr()}
       if(b.dataset.kf!=null){S.kf=b.dataset.kf;return rr()}
       if(b.dataset.pf!=null){S.pf=b.dataset.pf;return rr()}
       if(b.dataset.lp!=null){S.pf=S.pf===b.dataset.lp?'':b.dataset.lp;return rr()}
@@ -484,7 +519,7 @@ Gallery.define({
       if(a==='mark-save'){const di=app.querySelector('[data-mk-date]'),pi=app.querySelector('[data-mk-pts]'),x=L.find(y=>y.id===b.dataset.id);const v=num(pi.value);
         S.posted[b.dataset.id]={date:di.value||today(p),pts:isNaN(v)?x.pts:v};S.box=null;return toast(`Bonus posted ${dt(di.value||today(p))}`)}
     });
-    app.addEventListener('keydown',ev=>{const t=ev.target;if((ev.key==='Enter'||ev.key===' ')&&t.dataset&&t.dataset.lp!=null){ev.preventDefault();t.click()}});
+    app.addEventListener('keydown',ev=>{const t=ev.target;if((ev.key==='Enter'||ev.key===' ')&&t.dataset&&(t.dataset.lp!=null||t.dataset.exp!=null)){ev.preventDefault();t.click()}});
     app.addEventListener('input',ev=>{const i=ev.target,D=i.dataset;
       if(D.ck!=null){S.ck[D.ck]=i.value;const box=app.querySelector(`[data-ckgap="${CSS.escape(D.ck)}"]`),v=i.value.trim();if(box)box.innerHTML=gapHtml(p,Number(D.app),v===''?null:num(v));return}
       if(D.adjPts!=null){S.adj.raw=i.value;return}
@@ -638,19 +673,38 @@ Gallery.define({
 #pv .a-chips{display:flex;gap:6px 14px;flex-wrap:wrap;margin-bottom:8px;align-items:center;justify-content:space-between}
 #pv .cg{display:flex;gap:6px;flex-wrap:wrap}
 #pv .a-note{font-size:12px;color:var(--tx3);margin:2px 0 8px}
-#pv .a-feed>[data-k]{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px;align-items:center;border-bottom:1px solid var(--line)}
-#pv .a-feed>[data-k]:last-child{border:0}
-#pv .a-feed.top{border-radius:9px;background:color-mix(in srgb,#F59E0B 7%,transparent);padding:0 10px;margin-bottom:10px}
-#pv .a-feed.top>[data-k]{border-color:color-mix(in srgb,#F59E0B 20%,transparent)}
-#pv .ev-k{font-size:10.5px;color:var(--tx3);font-weight:600}
-#pv .is-pend .ev-k{color:var(--warn)}
-#pv .ev{display:flex;align-items:center;gap:12px;padding:9px 0;min-width:0}
-#pv .ev-t{flex:1;display:grid;gap:1px;min-width:0;font-size:13px}#pv .ev-t b{font-weight:500}#pv .ev-t span{font-size:11.5px;color:var(--tx3)}
-#pv .ev-v{display:grid;justify-items:end;gap:0}
-#pv .ev .val{font-size:14px;font-weight:600;white-space:nowrap}
-#pv .rb{font-size:10.5px;color:var(--tx3);font-variant-numeric:tabular-nums}
-#pv .rs{font-style:normal;font-size:10.5px;font-weight:600;color:var(--ac);background:var(--ac-soft);padding:1px 7px;border-radius:99px;margin-left:4px;white-space:nowrap}
-#pv .ev-a{opacity:0;transition:opacity .12s}#pv .ev:hover .ev-a,#pv .ev-a:focus-within{opacity:1}
+#pv .at-w{min-width:0}
+#pv table{color:var(--tx);font-family:var(--f-b)}
+#pv table.at{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+#pv .at th{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+#pv .at td{padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+#pv .at tbody tr:nth-child(even):not(.exd) td{background:color-mix(in srgb,var(--tx) 2.5%,transparent)}
+#pv .at tr.is-pend td{background:color-mix(in srgb,#F59E0B 8%,transparent)!important}
+#pv .at .d{color:var(--tx2);width:1%}
+#pv .at .n{text-align:right;width:1%}
+#pv .at .bal{color:var(--tx2)}
+#pv .at .ac{width:1%;text-align:right}
+#pv .at .b{font-weight:600}
+#pv .at td.ds{width:40%;max-width:0}
+#pv .at.with-dt td.ds{width:24%}
+#pv .ds-i{display:flex;align-items:center;gap:6px;min-width:0}
+#pv .ds-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+#pv .at td.dt{width:30%;max-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--tx3);font-size:12px}
+#pv .smp{flex:none;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--tx3);border:1px solid var(--line);border-radius:4px;padding:0 4px;line-height:15px}
+#pv .tip{position:relative;flex:none;color:var(--tx3);cursor:help;font-size:12.5px;line-height:1}
+#pv .tip:hover,#pv .tip:focus{color:var(--ac)}
+#pv .tip>span{display:none;position:absolute;left:50%;bottom:calc(100% + 7px);transform:translateX(-50%);background:#0F172A;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;line-height:1.35;white-space:normal;width:max-content;max-width:300px;z-index:6;box-shadow:0 8px 20px rgba(15,23,42,.25)}
+#pv .tip:hover>span,#pv .tip:focus>span{display:block}
+#pv .tp{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:600}
+#pv .tp.g-e{background:var(--ac-soft);color:var(--ac)}#pv .tp.g-a{background:#EDE9FE;color:#6D28D9}#pv .tp.g-r{background:#FEF3C7;color:#92400E}#pv .tp.g-t{background:#CCFBF1;color:#0F766E}#pv .tp.g-o{background:#E2E8F0;color:#334155}
+#pv .oc{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;color:#fff;background:#2563EB}
+#pv .oc.p-1{background:#7C3AED}#pv .oc.no{background:#D97706}
+#pv .ev-a{opacity:0;transition:opacity .12s}#pv .at tr:hover .ev-a,#pv .ev-a:focus-within{opacity:1}
+#pv .exr{cursor:pointer}#pv .exr:hover td{background:var(--ac-soft)!important}
+#pv .chev{display:inline-block;color:var(--tx3);margin-left:8px;font-size:15px;transition:transform .15s}#pv .chev.open{transform:rotate(90deg);color:var(--ac)}
+#pv .exd td{background:var(--raised);font-size:12px;color:var(--tx2);padding:8px 12px 10px 18px;white-space:normal}
+#pv .mk-l{font-size:12px;font-weight:600;color:var(--tx);align-self:center;margin-right:6px}
+@container pv (max-width:760px){#pv .at-w{overflow-x:auto}}
 #pv .mk-undo{display:flex;align-items:center;gap:6px;position:relative;padding-bottom:3px}
 #pv .mk-undo .tm{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--ac);transform-origin:left;animation:lg-shrink 5s linear forwards}
 @keyframes lg-shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}
@@ -658,23 +712,6 @@ Gallery.define({
 #pv .mk-box label{display:grid;gap:2px;font-size:10.5px;color:var(--tx3)}
 #pv .mk-box input{font:inherit;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;width:116px;color:var(--tx);background:var(--surface)}
 #pv .mk-b{display:flex;gap:6px}
-#pv .rg-w{overflow-x:auto}
-#pv table.rg{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
-#pv .rg th{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-#pv .rg td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
-#pv .rg tbody tr:nth-child(even):not(.rg-sep){background:color-mix(in srgb,var(--tx) 2.5%,transparent)}
-#pv .rg tr.is-pend{background:color-mix(in srgb,#F59E0B 7%,transparent)!important}
-#pv .rg .rg-sep td{padding:0;height:6px;border:0;background:var(--surface)}
-#pv .rg .d{white-space:nowrap;color:var(--tx2);width:62px}#pv .rg .pt{color:var(--warn);font-weight:600;font-size:11px}
-#pv .rg .en b{font-weight:500}#pv .rg .en small{display:block;font-size:11px;color:var(--tx3)}
-#pv .rg .n{text-align:right;white-space:nowrap}#pv .rg .bal{color:var(--tx2)}#pv .rg .ac{width:1%;white-space:nowrap;text-align:right}
-#pv .rg tr:hover .ev-a{opacity:1}
-#pv .who{font-size:11.5px;color:var(--tx2)}#pv .who.no{color:var(--warn)}
-#pv .mo{margin-bottom:12px}#pv .mo:last-child{margin:0}
-#pv .mo-h{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;padding:6px 10px;border-radius:8px;background:var(--raised);font-size:12px;color:var(--tx3)}
-#pv .mo-h>b{font-family:var(--f-h);font-size:13px;font-weight:600;color:var(--tx);margin-right:auto}#pv .mo-h span b{color:var(--tx);font-size:13px}
-#pv .mo .a-row{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:0 10px}
-#pv .mo .a-row:last-child{border:0}
 /* Windows */
 #pv .mdl-bk{position:absolute;inset:0;background:rgba(15,23,42,.32);z-index:30}
 #pv .mdl,#pv .drw{z-index:31;background:var(--surface);display:grid;grid-template-rows:auto minmax(0,1fr) auto}
