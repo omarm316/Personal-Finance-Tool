@@ -1,0 +1,148 @@
+/* The Cloud look chosen on the Cards pages (Cloud colors, brand blue, Outfit +
+   Plus Jakarta, hairline panels, 13px corners, 1.25 spacing). Pages rebuilt to
+   the new designs put `cloud` on their root; windows and popovers rendered
+   into document.body put it on their own root. Everything here is scoped to
+   .cloud and uses --c-* names, so it never touches the older pages. */
+
+.cloud {
+  --c-bg: #EEF2F7;
+  --c-surface: #FFFFFF;
+  --c-raised: #F5F8FB;
+  --c-line: rgba(15, 23, 42, .1);
+  --c-tx: #0F172A;
+  --c-tx2: #475569;
+  --c-tx3: #6B7A8F;
+  --c-ac: #2563EB;
+  --c-ac-fg: #FFFFFF;
+  --c-ac-soft: color-mix(in srgb, #2563EB 10%, transparent);
+  --c-good: #047857;
+  --c-warn: #B45309;
+  --c-bad: #B91C1C;
+  --c-warnbg: color-mix(in srgb, #F59E0B 12%, transparent);
+  --c-gold-bg: rgba(251, 191, 36, .12);
+  --c-gold-line: rgba(251, 191, 36, .35);
+  --c-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+  --c-radius: 13px;
+  --c-density: 1.25;
+  --c-fh: 'Outfit', system-ui, sans-serif;
+  --c-fb: 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: var(--c-tx);
+  font-family: var(--c-fb);
+  font-size: 14px;
+}
+/* The app still has a dark mode; Cloud was chosen light only, so dark mode
+   gets matching neutrals rather than an inversion. */
+[data-theme="dark"] .cloud {
+  --c-bg: #020617;
+  --c-surface: #0F172A;
+  --c-raised: #162036;
+  --c-line: rgba(255, 255, 255, .09);
+  --c-tx: #F1F5F9;
+  --c-tx2: #A5B4C8;
+  --c-tx3: #7A8BA3;
+  --c-ac: #60A5FA;
+  --c-ac-fg: #0B1220;
+  --c-ac-soft: color-mix(in srgb, #60A5FA 14%, transparent);
+  --c-good: #34D399;
+  --c-warn: #FBBF24;
+  --c-bad: #F87171;
+  --c-warnbg: color-mix(in srgb, #F59E0B 14%, transparent);
+  --c-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+.cloud *, .cloud *::before, .cloud *::after { box-sizing: border-box; }
+.cloud button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.cloud button:disabled { opacity: .4; cursor: default; }
+.cloud input, .cloud select, .cloud textarea { font: inherit; color: var(--c-tx); }
+/* index.css removes every outline with !important; keyboard focus needs one back */
+.cloud button:focus-visible, .cloud select:focus-visible, .cloud input:focus-visible,
+.cloud [tabindex]:focus-visible, .cloud a:focus-visible {
+  outline: 2px solid var(--c-ac) !important; outline-offset: 2px;
+}
+.cloud h1, .cloud h2, .cloud h3 { font-family: var(--c-fh); }
+.cloud .c-val { font-family: var(--c-fh); font-weight: 500; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.cloud .c-good { color: var(--c-good); }
+.cloud .c-bad { color: var(--c-bad); }
+.cloud .c-warn { color: var(--c-warn); }
+.cloud .c-mut { color: var(--c-tx3); font-size: 12px; }
+.cloud .c-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--c-tx3); }
+.cloud .c-panel { border-radius: var(--c-radius); background: var(--c-surface); border: 1px solid var(--c-line); }
+.cloud code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--c-tx); overflow-wrap: anywhere; }
+
+/* Buttons */
+.cloud .c-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--c-line); background: var(--c-surface); font-size: 13px; font-weight: 500; color: var(--c-tx); white-space: nowrap; }
+.cloud .c-btn:not(:disabled):hover { border-color: color-mix(in srgb, var(--c-ac) 45%, var(--c-line)); }
+.cloud .c-btn.pri { background: var(--c-ac); border-color: var(--c-ac); color: var(--c-ac-fg); }
+.cloud .c-btn.sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+.cloud .c-btn.ghost { border-color: transparent; background: none; color: var(--c-tx2); }
+.cloud .c-btn.ico { padding: 6px 8px; }
+.cloud .c-btn.danger { color: var(--c-bad); border-color: color-mix(in srgb, var(--c-bad) 35%, transparent); }
+.cloud .c-btn svg { flex: none; }
+.cloud .c-ib { width: 30px; height: 30px; border-radius: 7px; display: inline-grid; place-items: center; color: var(--c-tx2); flex: none; }
+.cloud .c-ib:not(:disabled):hover { background: color-mix(in srgb, var(--c-ac) 8%, transparent); color: var(--c-ac); }
+.cloud .c-lnk { color: var(--c-ac); font-size: 12.5px; font-weight: 500; }
+.cloud .c-lnk:hover { text-decoration: underline; }
+.cloud .c-x { width: 30px; height: 30px; border-radius: 8px; color: var(--c-tx2); display: grid; place-items: center; flex: none; }
+.cloud .c-x:hover { background: var(--c-raised); }
+
+/* Filter chips (soft grey; blue while filtering) */
+.cloud .c-fb { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; padding: 6px 11px; border-radius: 99px; background: var(--c-raised); border: 1px solid var(--c-line); color: var(--c-tx2); }
+.cloud .c-fb svg { opacity: .55; flex: none; }
+.cloud .c-fb.on { background: var(--c-ac-soft); border-color: transparent; color: var(--c-ac); font-weight: 600; }
+.cloud .c-fb em { font-style: normal; font-size: 11px; color: var(--c-tx3); font-variant-numeric: tabular-nums; }
+.cloud .c-fb.on em { color: inherit; }
+
+/* Fields */
+.cloud .c-sel, .cloud .c-inp { font-size: 12.5px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-tx); min-width: 0; }
+.cloud .c-sel:focus, .cloud .c-inp:focus { border-color: var(--c-ac); }
+.cloud .c-fld { display: grid; gap: 5px; min-width: 0; }
+.cloud .c-fld > span { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--c-tx3); }
+.cloud .c-fld .c-sel, .cloud .c-fld .c-inp { width: 100%; }
+.cloud .c-cb { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--c-tx2); cursor: pointer; white-space: nowrap; }
+.cloud .c-cb input { accent-color: var(--c-ac); margin: 0; }
+.cloud input[type=checkbox] { accent-color: var(--c-ac); }
+
+/* Popovers: one layer in document.body, placed under the button that opened it */
+.c-popl { position: fixed; z-index: 9000; }
+.cloud .c-pop { background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 10px; box-shadow: var(--c-shadow); min-width: 200px; text-align: left; color: var(--c-tx); }
+.cloud .c-menu { padding: 6px; display: grid; }
+.cloud .c-mi { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; font-size: 13px; white-space: nowrap; color: var(--c-tx); text-align: left; }
+.cloud .c-mi:not(:disabled):hover { background: var(--c-raised); }
+.cloud .c-mi.on { color: var(--c-ac); font-weight: 600; background: var(--c-ac-soft); }
+.cloud .c-mi-in { display: grid; gap: 6px; padding: 8px 10px; font-size: 12px; color: var(--c-tx2); }
+.cloud .c-pf { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--c-line); }
+/* Checklist (filter chips) */
+.cloud .c-chk { width: 280px; display: flex; flex-direction: column; max-height: min(420px, 70vh); }
+.cloud .c-psrch { margin: 8px; padding: 6px 10px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-raised); font-size: 12.5px; }
+.cloud .c-pl { overflow-y: auto; padding: 2px 0 6px; flex: 1; }
+.cloud .c-po { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.cloud .c-po:hover { background: var(--c-raised); }
+.cloud .c-po.kid { padding-left: 30px; color: var(--c-tx2); }
+.cloud .c-po span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud .c-po em { font-style: normal; color: var(--c-tx3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cloud .c-po input { margin: 0; }
+.cloud .c-empty-opt { padding: 10px 12px; font-size: 12.5px; color: var(--c-tx3); }
+/* Category list with search */
+.cloud .c-csr { display: grid; gap: 6px; min-width: 0; }
+.cloud .c-csl { max-height: 260px; overflow-y: auto; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-surface); padding: 4px; }
+.cloud .c-csg { display: grid; }
+.cloud .c-csl button { text-align: left; padding: 5px 10px 5px 26px; font-size: 12.5px; border-radius: 6px; color: var(--c-tx2); }
+.cloud .c-csl button.top { padding-left: 8px; font-weight: 600; color: var(--c-tx); display: flex; gap: 8px; align-items: center; }
+.cloud .c-csl button.top i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.cloud .c-csl button:hover { background: var(--c-raised); }
+.cloud .c-csl button.on { background: var(--c-ac-soft); color: var(--c-ac); }
+
+/* Windows: centered, closed only by their own buttons */
+.c-ovl { position: fixed; inset: 0; z-index: 8000; background: rgba(15, 23, 42, .42); display: grid; place-items: center; padding: 24px; overflow-y: auto; }
+.cloud .c-win { width: 600px; max-width: 100%; max-height: calc(100vh - 48px); overflow-y: auto; background: var(--c-surface); border-radius: 14px; border: 1px solid var(--c-line); box-shadow: 0 24px 64px rgba(15, 23, 42, .3); }
+.cloud .c-win.sm { width: 540px; }
+.cloud .c-win.xs { width: 440px; }
+.cloud .c-wb { padding: 22px; display: grid; gap: 14px; min-width: 0; }
+.cloud .c-wh { display: flex; align-items: flex-start; gap: 12px; }
+.cloud .c-wh > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.cloud .c-wh h3 { margin: 0; font-size: 18px; font-weight: 500; overflow-wrap: anywhere; }
+.cloud .c-wf { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--c-line); }
+.cloud .c-wf .c-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cloud .c-box { display: grid; gap: 4px; padding: 11px 13px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-bg); min-width: 0; }
+.cloud .c-box b { font-weight: 500; font-size: 14.5px; }
+.cloud .c-box-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

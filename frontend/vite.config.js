@@ -18,9 +18,12 @@ export default defineConfig({
   server: {
     // `npm run dev` proxies API calls to the running FastAPI server so the
     // Vite dev server can be used standalone with HMR.
+    // API_TARGET points it at another backend, e.g. one running on a SQLite
+    // copy for testing edits without touching production.
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/static': 'http://localhost:8000',
+      '/api': process.env.API_TARGET || 'http://localhost:8000',
+      // Card art and other server files; not /static/app/, which is this app.
+      '^/static/(?!app/)': process.env.API_TARGET || 'http://localhost:8000',
     },
   },
 });

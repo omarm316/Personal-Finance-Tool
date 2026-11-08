@@ -1,54 +1,12 @@
-import {useState,useRef} from 'react';
+import {useState} from 'react';
 import {MobileTxnModal} from './MobileTxnModal';
 import {SwipeRow} from './SwipeRow';
-import {TxnRow} from './TxnRow';
-import {useIsMobile,useVirtualScroll} from '../hooks/index';
 import {fmt,fmtDate} from '../lib/format';
 
 export function MobileTxnList({visible,categories,pointsCategories,onSave,onReview,selectedIds,toggleSelect,selectAll,setSelectedIds,sortCol,sortDir,toggleSort,setShowBatchEdit,toast,onSplit}){
-  const isMobile=useIsMobile();
-  // Desktop: full table with virtual scroll for large lists
-  const desktopScrollRef=useRef(null);
-  const ROW_H=56;
-  const virt=useVirtualScroll(desktopScrollRef,visible.length,ROW_H);
-  // Mobile-only state, but declared unconditionally — these used to sit below
-  // the `if(!isMobile)` early return, so the desktop branch called 4 hooks
-  // and the mobile branch called 6. Harmless until `isMobile` flips value
-  // between renders of the SAME mount (e.g. a resize event right after
-  // initial paint), at which point React throws "Rendered fewer hooks than
-  // expected" and the whole page goes blank. Hooks must run the same every
-  // render regardless of which branch's JSX gets returned.
+  /* Phone only: the desktop ledger is LedgerRow on TransactionsPage (2026-11-07). */
   const[editTxn,setEditTxn]=useState(null);
   const[swipedId,setSwipedId]=useState(null); // which txn has actions revealed
-  if(!isMobile){
-    const useVirt=visible.length>80;
-    const rows=useVirt?visible.slice(virt.start,virt.end):visible;
-    return(
-      <div className="table-wrap" ref={desktopScrollRef} style={useVirt?{maxHeight:'75vh',overflowY:'auto'}:undefined}>
-        <table>
-          <thead><tr>
-            <th style={{width:48,paddingLeft:24}}>
-              <input type="checkbox" title="Select / deselect all visible"
-                checked={visible.length>0&&visible.every(t=>selectedIds.has(t.id))}
-                onChange={e=>e.target.checked?selectAll():setSelectedIds(new Set())}
-                style={{cursor:'pointer'}}/>
-            </th>
-            {[['date','Date'],['description','Description'],['amount','Amount'],['type','Type'],['category','Category'],['account','Account']].map(([col,lbl])=>(
-              <th key={col} onClick={()=>toggleSort(col)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}}>
-                {lbl}<span style={{marginLeft:6,opacity:sortCol===col?1:0.3,fontSize:10}}>{sortCol===col?(sortDir==='asc'?'▲':'▼'):'⇅'}</span>
-              </th>
-            ))}
-            <th style={{textAlign:'right', paddingRight:24}}>Actions</th>
-          </tr></thead>
-          <tbody>
-            {useVirt&&<tr style={{height:virt.offsetY}}><td colSpan="8"/></tr>}
-            {rows.map(t=><TxnRow key={t.id} txn={t} categories={categories} pointsCategories={pointsCategories} onSave={onSave} onReview={onReview} onSplit={onSplit} selected={selectedIds.has(t.id)} onToggleSelect={toggleSelect} onBatchEdit={()=>setShowBatchEdit(true)} toast={toast}/>)}
-            {useVirt&&<tr style={{height:Math.max(0,virt.totalHeight-virt.end*ROW_H)}}><td colSpan="8"/></tr>}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
   // Mobile: card list with swipe-to-reveal actions
   return(
     <div>

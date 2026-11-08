@@ -69,7 +69,12 @@ class TransactionResponse(BaseModel):
     is_excluded: bool = False
     points_category: Optional[str] = None
     network: Optional[str] = None
+    # 2027 earning engine fields (NULL on rows before 2027-01-01); the
+    # Transactions page's Card earning box shows and edits them.
+    merchant_category: Optional[str] = None
     brand: Optional[str] = None   # shared with the merchant path; set on rows from 2027-01-01
+    txn_kind: Optional[str] = None
+    is_foreign: Optional[bool] = None
     spender: Optional[str] = None
     # Points earn summary — None when card/product is unknown or txn isn't an expense
     points_earn: Optional[dict] = None

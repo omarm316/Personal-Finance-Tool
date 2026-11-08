@@ -29,6 +29,7 @@ Cards module, in this order (see `PLAN.md` "Cards module layout work" and `BACKL
 - **Parked:** duplicate-import cleanup (94 rows flagged); editing a transaction's spender and category (waits on item 2).
 
 ## Recently Completed
+- 2026-11-07 — Transactions page rebuilt on desktop to `docs/transactions-design.md` (Excluded chip, Card earning box, no dollar value on points; B37 and B38 fixed). Shared Cloud-look pieces for the next builds: `styles/cloud.css` and `components/ui/` (Popover, Window, FilterChip, CategoryList). Phones keep the old layout.
 - 2026-11-07 — `design-gallery` skill now lives in the repo (`.claude/skills/design-gallery/`), so cloud sessions have it. Cards Actions strip designed in one gallery round; final spec in `docs/cards-actions-design.md`.
 - 2026-11-05 — 2027 engine: Food Delivery folded into Dining, so delivery orders earn each card's dining rate. Tests 113 passed; engine check 200/200.
 - 2026-11-04 — Two-level personal categories (top level › sub-category) with a Settings › Categories editor (`routers/categories.py`, `CategoryEditor.jsx`, design in `docs/settings-categories-design.md`). History moved by `docs/category_tree_migration.py`. The For Others tag is now the Other › For Others category. Tests 111 passed.

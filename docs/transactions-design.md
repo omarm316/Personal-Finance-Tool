@@ -1,6 +1,6 @@
 # Transactions page design
 
-Chosen with the design gallery (rounds 1-2, 2026-11-04 to 2026-11-05). Two follow-ups were settled on 2026-11-07: the Excluded chip, and the Card earning box in the details window. Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1-2, 2026-11-04 to 2026-11-05). Two follow-ups were settled on 2026-11-07: the Excluded chip, and the Card earning box in the details window. **Desktop built 2026-11-07;** see "Build notes" at the end for the small calls made while building. Phones keep the earlier layout; phone design is a separate, later exercise.
 Source spec: `mockups/design-gallery/transactions.spec.js` (id `transactions-final`). Final rendering with real rows: https://claude.ai/artifact/HrVA3kE5bYSmXCGFS4Fe6W
 Replaces the layout of today's `frontend/src/pages/TransactionsPage.jsx`, `components/TxnRow.jsx` and `components/ReviewModal.jsx`. Behavior stays as today unless a section below says otherwise.
 Example figures are from October 2026, using rows pulled 2026-11-04 (Aug 1 to Nov 3).
@@ -42,7 +42,7 @@ One row at the top of the list card that wraps when it runs out of room, in this
 
 ## Totals strip
 An uppercase line under the toolbar, for exactly the rows shown: "262 TRANSACTIONS · EXPENSES: $10,498.71 · INCOME: $28,674.94". It uses today's rules:
-- GCB and For Others rows are left out.
+- GCB rows are left out. For Others rows count, so a purchase made for someone nets out against its reimbursement, which is booked to the same category.
 - Income booked in a spending category reduces spending; it doesn't count as income.
 - Excluded rows and the credit-card payment duplicates stay out of the list and the totals.
 - In the excluded view, the strip reads "3 EXCLUDED TRANSACTIONS · LEFT OUT OF EVERY TOTAL" instead of dollar totals.
@@ -151,3 +151,18 @@ A window in the middle, laid out as a grid of fact tiles. It is read-only; editi
 None from the gallery. Omer settled both remaining questions on 2026-11-07:
 - Excluded rows get a chip.
 - Brand, kind and foreign go in the Card earning box, as recommended.
+
+## Build notes (2026-11-07)
+Calls made while building that the gallery didn't decide:
+- **Navigation:** the sidebar stays for now; the top bar comes with the app-wide change, best done with the Dashboard build. The app's own title bar still reads "Transactions" above the page's header bar until then.
+- **Look:** the Cloud tokens live in `frontend/src/styles/cloud.css`, scoped to `.cloud`. The app still has a dark mode, so dark gets matching neutrals rather than an inversion.
+- **Brand chip:** it appears after Network once rows carry a brand (from 2027), as today's page does.
+- **AI labels:** Plaid-categorized rows show "PLAID CATEGORY", matching the Enrichment tile.
+- **Unclassified:** an expense or income row with no category shows an "Unclassified" pill, not "Other".
+- **Split rows:** their type and category aren't clickable. The parts carry their own, so change them in the splits.
+- **👥 For others:** "Mark for others" sets the category to For Others and marks the row reviewed. Once set, the pill is a label; picking another category undoes it.
+- **Points:** today's Adjust link stays at the right of the points label (a manual points figure, or back to automatic).
+- **Card earning on rows before 2027:** saving sets the old points category only. It no longer teaches the old merchant-category rule to other rows, since there is no scope selector.
+- **Edit selected:** Type and Category only, as designed. Today's GCB and "mark reviewed" options are gone; applying always marks the rows reviewed.
+- **Loading:** the whole period loads (up to 5,000 rows, while all history is about 3,500). The list draws 200 at a time and more as you scroll, with a Show more button as a fallback. A note appears in the totals strip if a period ever hits the cap.
+- **Column widths:** a hidden row holds the widest type, amount and status chips among the rows shown, so columns don't shift as more rows draw or a row is edited.

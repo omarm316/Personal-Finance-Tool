@@ -1036,7 +1036,23 @@ Same method as the Dashboard: design gallery first, desktop only, code after. Th
   - An "Excluded n" chip after Needs review shows only excluded rows, and the two chips turn each other off. This fixes B37 for exclusions; the card-payment duplicates stay hidden.
   - Brand, kind and foreign sit with the merchant category in one "Card earning" box in the details, edited in place. The points sit at the bottom of the box. On rows before 2027, those three show "—" and stay disabled.
   - Both are in the doc and the final gallery.
-- **Next:** build the Transactions page to `docs/transactions-design.md` only when Omer says so. Nothing is left open from the gallery. B37 and B38 are fixed by the new page.
+- **Built 2026-11-07 (desktop),** to `docs/transactions-design.md`; its "Build notes" list the small calls made while building. Fixes B37 and B38.
+  - **Files:**
+    - `frontend/src/pages/TransactionsPage.jsx` (the page; phones get `TransactionsPhonePage.jsx`, today's layout unchanged).
+    - `components/LedgerRow.jsx`, `components/TxnDetailsWindow.jsx` (with the Card earning box) and `components/TxnWindows.jsx` (Review, Edit selected, Create rule).
+    - `pages/transactions.css`.
+    - `TxnRow.jsx` is gone, along with the desktop half of `MobileTxnList.jsx`.
+  - **Shared, for the Dashboard and Cards builds to reuse:**
+    - `styles/cloud.css`: the Cloud tokens, scoped to `.cloud`, with matching dark-mode neutrals.
+    - `components/ui/`: `Popover`, `Window` (closes only with its own buttons), `FilterChip` (checklist with counts and Apply), `CategoryList` (grouped list with search) and `CIcon`.
+  - **Navigation:** still the sidebar. The top bar is an app-wide change, best done with the Dashboard build.
+  - **Backend:** the list endpoint now returns `merchant_category`, `txn_kind` and `is_foreign`. They were already serialized but dropped by the response model.
+  - **Loading:** the whole period loads (limit 5,000; all history is about 3,500 rows). Rows are drawn 200 at a time, with more as you scroll.
+  - **Testing without touching production:**
+    - The local frontend proxy takes `API_TARGET`, and it no longer catches `/static/app/`.
+    - Checked against a SQLite copy of production, made read-only by a scratch script: type menu, category list, row edit with the rule prompt, review Save, Ignore and the rule, details tiles, Card earning on a pre-2027 row and on a 2027 test row (brand fills its category, the 2027 engine re-scores), Exclude and its undo through the Excluded chip, filter chips and counts, Amount, sorting, selection with Edit selected, splits, loading on scroll, Add and ⋯ menus, Create rule, Delete, and windows ignoring Escape and backdrop clicks.
+    - Also checked in dark mode, at 1100px and on the phone layout.
+    - October 2026 matched the design doc's figures before any test edits: 262 rows, $10,498.71 out, $28,674.94 in, 36 to review, 3 excluded.
 
 ## Card page transactions table (2026-11-05)
 What the transactions table on the individual Card page shows and lets Omer do, now that personal categories are two-level. Same method: design gallery first, desktop only, code after. The rest of the Card page stays as approved in `docs/cards-card-design.md`; the page is still built last, after the benefits data model.
