@@ -60,5 +60,11 @@ Annual fee coming due, payment due day, the earning engine's review list of unkn
 
 ## Depends on
 - Cards step 3, the benefits data model: per-period amounts, reset frequency, calendar or card year, uses with source, mark used with undo. Today's `CardBenefit` and `BenefitUsage` tables can't answer "resets within 60 days" reliably, and Platinum's stored credits are out of date.
+- **Every card's credits set up and checked before the strip ships** (Omer's question, 2026-11-07). The strip trusts the data completely: a card with no credits stored adds nothing, so the page can say "All caught up" while a credit is open. The gallery shows this on Marriott Bonvoy, where Bonvoy Brilliant's $25 monthly dining credit isn't in the statement model. Only Platinum 1008, Aspire 2007 and SP 3698 are modelled today. Step 3 is done only when, for each of the roughly ten other cards with credits (Platinum 1009, SP 7154, Business Gold, BBP, Brilliant, Delta Gold, Bilt Obsidian, United Quest, United Explorer, Strata Premier):
+  1. its credits match the current terms (amount per period, reset frequency, calendar or card year, the anniversary where it matters);
+  2. each credit paid as a statement credit has its match text, so uses count themselves from synced transactions, and the rest are marked "Log by hand";
+  3. 2026 uses are backfilled by running the match over this year's transactions, and Omer checks the list card by card. This is how the three modelled cards were built. Without it, every unused-looking credit shows as open, as in the gallery's stress scenario.
+
+  No extra "unchecked card" state in the UI; finishing step 3 is the safeguard. After that, by-hand credits (Uber Cash, DoorDash) stay right only if they're marked used, from the strip or from Benefits.
 - `SpendChallenge.start_date`, `activation_date` and `end_date`, and the existing challenge progress in `core/challenges_helpers.py` (`lap_spend`, `progress_target`, `remaining_spend`).
 - A read endpoint for the strip (credits and challenges for one scope, with the "Next" credit) is a build-time decision; the gallery computed it all in the browser.
