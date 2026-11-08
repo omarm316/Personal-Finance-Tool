@@ -12,7 +12,7 @@ const ALL12=[1,2,3,4,5,6,7,8,9,10,11,12];
 const TODAY={y:2026,m:11,d:8};
 const YEARS=[2025,2026,2027];
 // Preview state that survives re-renders. OV holds budgets changed in the preview; nothing is saved anywhere.
-const S={y:2026,m:10,view:'month',editing:false,edits:{},inline:null,detail:null,open:{},yearEdit:false,yedits:{},rowEd:null,paste:null,menu:false,toast:'',blank:{},focus:null};
+const S={y:2026,m:10,view:'month',editing:false,edits:{},inline:null,detail:null,open:{},yearEdit:false,yedits:{},rowEd:null,paste:null,menu:false,toast:'',blank:{},focus:null,cf:null,unlock:false};
 // PEND holds changes waiting for Save when cells don't save one by one.
 const OV={},PEND={};
 let LAST=null,M0=null,TT=0;
@@ -147,7 +147,13 @@ function bar(u,p){
 const miniBar=(u,p)=>`<span class="mb"><i class="${u.inc?'inc':u.over?'over':''}" style="width:${Math.min(Math.max(u.pct,0),1)*100}%"></i>${p&&p.todayMark&&S.view==='month'&&isCur(S.y,S.m)?`<s style="left:${(TODAY.d/lastDay(S.y,S.m)*100).toFixed(1)}%" title="Even pace for today"></s>`:''}</span>`;
 // A budget cell that edits like a spreadsheet: it shows whole dollars, and the plain number while it has focus.
 // col and row drive the keys: Tab and Shift+Tab walk the cells in order, Enter and the arrows move by column and row.
+const isPast=(y,m)=>y<TODAY.y||(y===TODAY.y&&m<TODAY.m);
+const isLocked=(y,m)=>!S.unlock&&isPast(y,m);
+const LOCK='<svg class="lk" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+const lockSw=()=>`<button type="button" class="tg ${S.unlock?'':'on'}" data-act="unlock" role="switch" aria-checked="${!S.unlock}"><i></i>Past months locked</button>`;
 function sheetCell(k,m,o){
+  // A locked cell is plain text: not in the Tab order, and pasting passes over it.
+  if(isLocked(S.y,m))return `<span class="lkc" title="${esc((o.fx||o.label)+' · past month, locked')}">${esc(o.show)}</span>`;
   return `<input class="sc ${o.cls||''} ${isPend(S.y,k,m)?'pend':''}" data-g="${o.g}" data-sk="${esc(k)}" data-sm="${m}" data-col="${o.col}" data-row="${esc(o.row)}" data-show="${esc(o.show)}" data-raw="${o.raw}" data-fx="${esc(o.fx||o.label)}" data-fxs="${esc(o.fxs||'')}" value="${esc(o.show)}" placeholder="${o.ph==null?'–':o.ph}" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(o.label)}" title="${esc(o.title||o.label)}">`;
 }
 // Sheet numbers: "$1,200", "1,200", or accounting (the $ sits at the cell's left edge, credits in brackets).
@@ -161,7 +167,9 @@ function sx(v,p,o={}){
 // Accounting puts a $ at the left edge of any cell that shows a figure.
 const hv=(p,t)=>p.numFmt==='acct'&&t?'hv':'';
 // Heat map color: white on budget, green under and red over, by how far this cell is from its own budget.
+const cfOn=p=>S.cf===null?p.cfStart!==false:S.cf;
 function heatBg(b,a,inc,p,m){
+  if(!cfOn(p))return '';
   const y=S.y;if(m&&isFuture(y,m))return '';
   if(!(b>0)){if(inc||a<=.5)return '';return p.heatNoBudget==='red'?'background:color-mix(in srgb,var(--hr) 80%,var(--surface))':p.heatNoBudget==='grey'?'background:var(--hgrey)':''}
   let r=a/b;if(m&&isCur(y,m)&&p.heatNow==='pace')r=a/(b*TODAY.d/lastDay(y,m));
@@ -224,7 +232,7 @@ function colsOf(p){
 const W={budget:'var(--wb)',actbar:'var(--wab)',actual:'var(--wa)',var:'var(--wv)',pct:'var(--wp)',bar:'minmax(var(--wbar),1.6fr)'};
 const tpl=p=>`minmax(var(--wn),1.15fr) ${colsOf(p).map(c=>W[c]).join(' ')}`;
 function headLabel(c,p){
-  if(c==='budget')return `${MON[S.m-1]} budget`;
+  if(c==='budget')return `${MON[S.m-1]} budget${p.editMonth==='click'&&isLocked(S.y,S.m)?LOCK:''}`;
   if(c==='var')return p.rowStyle==='ledger'?'Difference':p.varStyle==='words'?'Left':p.varStyle==='pct'?'% used':'Variance';
   return{actual:'Actual',actbar:'Actual',pct:'% used',bar:'Progress'}[c];
 }
@@ -424,7 +432,7 @@ function ytdHtml(p){
 }
 function editYearGrid(p){
   const y=S.y,sp=p.gridSpent||'hover';
-  const head=`<div class="yr head"><span class="yn">Category</span>${MON.map((l,i)=>`<span class="${isCur(y,i+1)?'cur':''}">${l}</span>`).join('')}<span class="ytot">Total</span></div>`;
+  const head=`<div class="yr head"><span class="yn">Category</span>${MON.map((l,i)=>`<span class="${isCur(y,i+1)?'cur':''} ${isLocked(y,i+1)?'lkh':''}">${l}${isLocked(y,i+1)?LOCK:''}</span>`).join('')}<span class="ytot">Total</span></div>`;
   const row=(label,k,cls='')=>{let tot=0,ta=0;
     const cells=ALL12.map(m=>{const b=getB(y,k,m),a=getA(y,k,m),show=b?sx(b,p):'',spent=Math.abs(a)>=.5?m2(a):'nothing';tot+=b;ta+=a;
       return `<span class="scw ${isCur(y,m)?'cur':''} ${hv(p,show)}">${sheetCell(k,m,{show,raw:fv(b),label:`${k}, ${MON[m-1]} budget`,title:sp==='hover'?`${k}, ${MON[m-1]}: budget ${b?m2(b):'none'} · spent ${spent}`:undefined,fx:`${k} · ${MON[m-1]} ${y} budget`,fxs:`Spent ${spent}`,g:'grid',col:m,row:k,ph:''})}${sp==='line'?`<small class="act" title="Spent in ${MON[m-1]}">${Math.abs(a)>=.5?sx(a,p,{credit:true}):'&nbsp;'}</small>`:''}</span>`}).join('');
@@ -562,12 +570,14 @@ function toolbar(p,where){
   const keys=`${where==='month'?'Tab moves down the column':'Tab moves right, then to the start of the next row'} · Enter ${p.enterKey==='down'?'moves down':'saves'}`;
   if(where==='month'){
     if(p.header==='current')L.push(picker(p));
-    if(p.editMonth==='click')L.push(`<span class="note">Click a budget and type · ${keys}</span>`);
+    if(p.editMonth==='click'&&hasData(S.y)&&isPast(S.y,S.m)){L.push(lockSw(),`<span class="note">${S.unlock?`Click a budget and type · ${keys}`:`${mlab(S.y,S.m)} is past, so its budgets are locked`}</span>`)}
+    else if(p.editMonth==='click')L.push(`<span class="note">Click a budget and type · ${keys}</span>`);
     else if(S.editing&&p.editMonth==='column')L.push(`<span class="note">Editing ${mlab(S.y,S.m)}</span>`);
   }else{
     if(p.yearBudget==='switch'&&p.editYear==='grid')L.push(`<div class="und sw" role="group" aria-label="Show in the grid"><button type="button" data-ymode="spent" class="${S.yearEdit?'':'on'}">Spent</button><button type="button" data-ymode="budget" class="${S.yearEdit?'on':''}">Budgets</button></div>`);
+    if(grid&&S.y<=TODAY.y)L.push(lockSw());
     if(grid)L.push(`<span class="note">${S.y} budgets${p.gridSpent==='row'?' (grey rows: spent)':p.gridSpent==='line'?' (small figures: spent)':' (hover a cell for its spending)'} · ${keys}${batch?'':' · each cell saves as you leave it'}</span>`);
-    else if(p.yearStyle==='heat')L.push(`<span class="note">${p.heatEdit==='edit'?'Click a month to change its budget · ':p.heatEdit==='panel'?'Click a month to open the category · ':''}White is on budget, green under, red over</span>`);
+    else if(p.yearStyle==='heat'){const on=cfOn(p);L.push(`<button type="button" class="tg ${on?'on':''}" data-act="cf" role="switch" aria-checked="${on}"><i></i>Conditional formatting</button>`,p.heatEdit==='edit'&&S.y<=TODAY.y?lockSw():'',`<span class="note">${p.heatEdit==='edit'?'Click a month to change its budget':p.heatEdit==='panel'?'Click a month to open the category':''}${on?`${p.heatEdit==='none'?'':' · '}White is on budget, green under, red over`:''}</span>`)}
     else if(p.yearStyle==='ytd')L.push(`<span class="note">Through ${mlab(S.y,S.m)}</span>`);
     else L.push('<span class="note">Click any cell to edit inline · Enter to save</span>');
   }
@@ -633,7 +643,7 @@ function page(p){
 /* ── Actions on preview state ─────────────────────────────── */
 function copyPrev(){
   const prev=S.y-1,pt=M0.d.targets[prev]||{};let n=0;
-  Object.entries(pt).forEach(([c,ms])=>Object.entries(ms).forEach(([m,v])=>{if(v>0){setB(S.y,c,Number(m),v);n++}}));
+  Object.entries(pt).forEach(([c,ms])=>Object.entries(ms).forEach(([m,v])=>{if(v>0&&!isLocked(S.y,Number(m))){setB(S.y,c,Number(m),v);n++}}));
   return n?`Copied from ${prev}`:`No targets found in ${prev}`;
 }
 function start(kind){
@@ -658,6 +668,7 @@ Gallery.define({
       {id:'hair',label:'The app\'s fainter hairline'},
     ]},
     {id:'rowH',label:'Row height',type:'slider',min:18,max:32,step:1,default:22,unit:'px'},
+    {id:'cellPad',label:'Padding inside cells',type:'slider',min:0,max:12,step:1,default:5,unit:'px'},
     {id:'numFmt',label:'Numbers',type:'choice',options:[
       {id:'dollar',label:'$1,200'},
       {id:'plain',label:'1,200, no dollar sign'},
@@ -684,6 +695,7 @@ Gallery.define({
     ]},
    ]},
    {id:'year',label:'Year view: the heat map',open:true,controls:[
+    {id:'cfStart',label:'Conditional formatting starts on (the switch above the sheet turns it off and on)',type:'toggle',default:true},
     {id:'heatScale',label:'Color scale',type:'choice',options:[
       {id:'smooth',label:'Smooth red, white, green',hint:'White on budget; deeper green the further under, deeper red the further over. Whole dollars, no percent.'},
       {id:'steps',label:'Four steps',hint:'White when close to budget, then light, medium and full color.'},
@@ -709,6 +721,7 @@ Gallery.define({
     ]},
    ]},
    {id:'sheet',label:'Editing like a spreadsheet',open:true,controls:[
+    {id:'lockPast',label:'Past months',type:'choice',locked:true,options:[{id:'locked',label:'Locked for editing; a switch above the grid unlocks them'}]},
     {id:'monthCells',label:'Budget column in the Month view',type:'choice',options:[
       {id:'excel',label:'Spreadsheet cells: thin borders, no padding'},
       {id:'plain',label:'Plain until hovered (round 2)'},
@@ -806,7 +819,7 @@ Gallery.define({
       if(a==='copy')return toast(copyPrev());
       if(a==='paste'){S.paste={text:''};return rr()}
       if(a==='pclose'){S.paste=null;return rr()}
-      if(a==='psave'){const{rows}=parsePaste(S.paste.text);let n=0;rows.forEach(r=>r.v.forEach((v,i)=>{if(v!=null){setB(S.y,r.cat,i+1,v);n++}}));S.paste=null;return toast(n?`Imported ${n} targets`:'Nothing to import')}
+      if(a==='psave'){const{rows}=parsePaste(S.paste.text);let n=0,sk=0;rows.forEach(r=>r.v.forEach((v,i)=>{if(v==null)return;if(isLocked(S.y,i+1)){sk++;return}setB(S.y,r.cat,i+1,v);n++}));S.paste=null;return toast(n?`Imported ${n} targets${sk?`; ${sk} in past months skipped (locked)`:''}`:sk?'Nothing imported: those months are locked':'Nothing to import')}
       if(a==='yedit'){if(p.views!=='one')S.view='annual';S.yearEdit=true;S.yedits={};S.detail=null;return rr()}
       if(a==='ycancel'){S.yearEdit=false;S.yedits={};return rr()}
       if(a==='ysave'){Object.entries(S.yedits).forEach(([km,v])=>{const i=km.lastIndexOf('|'),n=parseFloat(v);if(!isNaN(n)&&n>=0)setKey(km.slice(0,i),S.y,Number(km.slice(i+1)),n)});S.yedits={};S.yearEdit=false;return toast('Annual targets saved')}
@@ -817,6 +830,8 @@ Gallery.define({
       if(a==='bsave'){const n=pendCount();savePend();if(S.yearEdit&&p.yearBudget==='tab')S.yearEdit=false;return toast(`Saved ${n} ${n===1?'budget':'budgets'}`)}
       if(a==='bcancel'){clearPend();return toast('Changes discarded')}
       if(a==='ydone'){S.yearEdit=false;return rr()}
+      if(a==='cf'){S.cf=!cfOn(p);return rr()}
+      if(a==='unlock'){S.unlock=!S.unlock;return rr()}
     };
     app.addEventListener('click',e=>{
       if(e.target.closest('input,select,textarea,label'))return;
@@ -1368,6 +1383,37 @@ Gallery.define({
 #pv[data-monthCells=excel] .lst .r>.c-budget input.sc{max-width:none;width:calc(100% + 16px);height:100%;margin:0 -8px;padding:0 8px;border:0;border-radius:0;color:var(--tx2)}
 #pv[data-monthCells=excel] .lst .r>.c-budget input.sc:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--sel) 45%,transparent)}
 #pv[data-monthCells=excel] .lst .r>.c-budget input.sc:focus{outline:2px solid var(--sel);outline-offset:-2px;color:var(--tx)}
+/* Round 2c: padding inside the sheet's cells; the layout stays the same */
+#pv{--c-cellPad:5px}
+#pv .xl{--cpy:var(--c-cellPad);--cpx:calc(var(--c-cellPad) + 4px)}
+#pv .xl .yr{grid-template-columns:minmax(150px,1.3fr) repeat(12,minmax(0,1fr)) minmax(80px,1.1fr)}
+#pv .xl .yr>span{height:auto;min-height:var(--c-rowH);padding:var(--cpy) var(--cpx);line-height:1.3}
+#pv .xl .yr>span.yn{padding:var(--cpy) calc(var(--cpx) + 2px)}
+#pv .xl .yr>span.yc.hm{padding:var(--cpy) var(--cpx)}
+#pv .xl .yr>span.yc.hm:has(>input.sc),#pv .xl .yr.sh>span.scw{padding:0}
+#pv .xl input.sc,#pv .xl .yc.hm input.sc.hc{height:auto;align-self:stretch;padding:var(--cpy) var(--cpx) var(--cpy) 2px;line-height:1.3}
+#pv .xl .yr.sh.l2 input.sc{height:auto}
+#pv .xl .yr.sh .act{padding:0 var(--cpx) var(--cpy)}
+#pv .xl .yr.head>span{height:auto;min-height:calc(var(--c-rowH) + 2px)}
+#pv .xl .sec{height:auto;min-height:var(--c-rowH);padding:var(--cpy) calc(var(--cpx) + 2px)}
+#pv .xl .hv::before,#pv .xl .scw.hv::before{left:var(--cpx)}
+/* Conditional formatting switch */
+#pv .tg{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--tx2)}
+#pv .tg i{width:28px;height:16px;border-radius:9px;background:color-mix(in srgb,var(--tx3) 35%,transparent);position:relative;transition:background .15s;flex:none}
+#pv .tg i::after{content:'';position:absolute;left:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.25);transition:left .15s}
+#pv .tg.on i{background:var(--sel)}
+#pv .tg.on i::after{left:14px}
+#pv .tg.on{color:var(--tx)}
+@media (prefers-reduced-motion:reduce){#pv .tg i,#pv .tg i::after{transition:none}}
+/* Locked past months */
+#pv .lk{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;margin-left:4px;vertical-align:-1px;opacity:.65;flex:none}
+#pv .lkc{display:flex;align-items:center;justify-content:flex-end;width:100%;min-width:0;color:var(--tx2);cursor:default}
+#pv .xl .scw>.lkc{align-self:stretch;padding:var(--cpy) var(--cpx);background:color-mix(in srgb,var(--tx3) 7%,var(--surface));color:var(--tx3)}
+#pv .xl .yr.head>span.lkh{color:var(--tx3)}
+#pv .xl .yc.hm .lkc{color:inherit}
+#pv .r .c-budget .lkc{color:var(--tx3)}
+#pv[data-monthCells=excel] .lst .r>.c-budget:has(>.lkc){background:color-mix(in srgb,var(--tx3) 6%,var(--surface))}
+#pv .db-c>.lkc{border:1px solid var(--gl);padding:3px 6px;font-size:12.5px;color:var(--tx3);background:color-mix(in srgb,var(--tx3) 6%,var(--surface))}
 #pv .toast{position:sticky;bottom:18px;justify-self:center;background:var(--tx);color:var(--surface);padding:9px 16px;border-radius:9px;font-size:13px;z-index:60;max-width:90%;box-shadow:0 8px 24px rgba(15,23,42,.2)}
 `
 });
