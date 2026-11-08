@@ -26,21 +26,15 @@ from plaid.exceptions import ApiException as PlaidApiException
 from plaid_integration import setup_plaid_from_env
 
 from core.accounts_helpers import (
-    _account_hash, _assign_content_hash, _content_base_hash,
+    _assign_content_hash, _content_base_hash,
     _ensure_cards_for_new_accounts, _refresh_current_month_snapshot,
     _sign_plaid_balance, get_account_balance,
 )
 from core.points_engine import _lock_points_for_transaction, _resolve_merchant_csc, infer_points_category
 from core.categories import active_names, known_or_unclassified
+from core.plaid_accounts import link_plaid_accounts, retire_emptied_items
 
 logger = logging.getLogger('moresheth')
-
-PLAID_TYPE_FALLBACK = {
-    'depository':  'checking',
-    'credit':      'credit card',
-    'investment':  'investment',
-    'loan':        'loan',
-}
 
 _PLAID_PFC_MAP: dict[str, tuple[str, str]] = {
     'INCOME':                    ('Work',            'Income'),
@@ -436,51 +430,20 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
         if not item:
             return
         if clear_cursor:
-            # Re-fetch accounts from Plaid so nothing gets silently skipped
+            # Full re-download: match Plaid's account list first so every
+            # transaction lands on the right row (see core/plaid_accounts.py).
+            # If the accounts can't be matched, stop rather than re-download
+            # onto unmatched rows.
+            accounts = plaid.get_accounts(item.access_token)
+            outcome = link_plaid_accounts(db, item, accounts)
+            retire_emptied_items(db, outcome)
+            db.commit()
+            logger.info(f"[sync] {item.institution_name}: {len(accounts)} account(s) matched, "
+                        f"{len(outcome.created)} new")
             try:
-                accounts = plaid.get_accounts(item.access_token)
-                newly_created_accounts = []
-                for a in accounts:
-                    raw_subtype  = (a.get('subtype') or '').lower().strip()
-                    raw_type     = (a.get('type') or '').lower().strip()
-                    account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
-
-                    existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
-
-                    # Fallback dedup for re-linked institutions
-                    if not existing and a.get('mask'):
-                        existing = (db.query(Account)
-                            .join(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
-                            .filter(
-                                Account.mask == a['mask'],
-                                Account.account_type == account_type,
-                                PlaidItem.institution_name == item.institution_name,
-                            ).first())
-
-                    if existing:
-                        existing.plaid_account_id = a['account_id']
-                        existing.plaid_item_id    = item_id
-                        existing.is_active        = True
-                    else:
-                        new_acct = Account(
-                            plaid_account_id=a['account_id'],
-                            plaid_item_id=item_id,
-                            account_name=f"{a['name']} {a.get('mask','') or ''}".strip(),
-                            account_type=account_type,
-                            official_name=a.get('official_name'),
-                            mask=a.get('mask'),
-                            is_active=True,
-                        )
-                        db.add(new_acct)
-                        newly_created_accounts.append(new_acct)
-                db.commit()
-                logger.info(f"[sync] {item.institution_name}: {len(accounts)} account(s) reconciled")
-                try:
-                    _ensure_cards_for_new_accounts(db, newly_created_accounts, item.institution_name)
-                except Exception as card_err:
-                    logger.warning(f"[sync] auto Card-row creation failed for {item_id}: {card_err}")
-            except Exception as acc_err:
-                logger.error(f"[sync] account refresh failed for {item_id}: {acc_err}")
+                _ensure_cards_for_new_accounts(db, outcome.created, item.institution_name)
+            except Exception as card_err:
+                logger.warning(f"[sync] auto Card-row creation failed for {item_id}: {card_err}")
             item.cursor = None
             db.commit()
         added = await _sync_item(item, plaid, db)

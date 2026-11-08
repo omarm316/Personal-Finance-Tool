@@ -81,9 +81,12 @@ export function usePlaidLink(toast,onSuccess){
   const handleLinkSuccess=async(public_token,afterOAuth)=>{
     try{
       const r=await apiFetch('/plaid/exchange-token',{method:'POST',body:JSON.stringify({public_token})});
-      setLinkSummary({accounts:r.accounts||[],transactions_synced:r.transactions_synced||0});
+      setLinkSummary({accounts:r.accounts||[],retired:r.retired_connections||[],transactions_synced:r.transactions_synced||0});
       if(afterOAuth)window.history.replaceState({},'','/');
-    }catch(e){toast('Failed to link: '+(e.message||e),'error');}
+    }catch(e){
+      toast('Not linked: '+(e.message||e),'error');
+      if(afterOAuth)window.history.replaceState({},'','/');
+    }
   };
 
   /* Handle OAuth return — bank redirects back to /plaid/oauth-return */
@@ -117,8 +120,10 @@ export function usePlaidLink(toast,onSuccess){
 
   /* Post-link summary modal */
   const summaryModal=linkSummary&&(()=>{
-    const matchedCount=linkSummary.accounts.filter(a=>a.status==='matched').length;
-    const createdCount=linkSummary.accounts.length-matchedCount;
+    const kept=a=>a.status==='matched'||a.status==='relinked';
+    const matchedCount=linkSummary.accounts.filter(kept).length;
+    const createdCount=linkSummary.accounts.filter(a=>a.status==='created').length;
+    const trackedCount=linkSummary.accounts.filter(a=>a.status==='already_tracked').length;
     const hasNew=createdCount>0;
     return(
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
@@ -129,13 +134,20 @@ export function usePlaidLink(toast,onSuccess){
             {matchedCount>0&&<span>{matchedCount} account{matchedCount!==1?'s':''} matched to existing history</span>}
             {matchedCount>0&&hasNew&&<span style={{margin:'0 6px'}}>·</span>}
             {hasNew&&<span>{createdCount} new account{createdCount!==1?'s':''} created</span>}
+            {trackedCount>0&&(matchedCount>0||hasNew)&&<span style={{margin:'0 6px'}}>·</span>}
+            {trackedCount>0&&<span>{trackedCount} already synced by another connection</span>}
           </div>
+          {linkSummary.retired&&linkSummary.retired.length>0&&<div style={{fontSize:12,color:'var(--text-muted)',marginBottom:12}}>
+            Replaced the old connection{linkSummary.retired.length!==1?'s':''}: {linkSummary.retired.join(', ')}
+          </div>}
           {/* Account list */}
           {linkSummary.accounts.map((a,i)=>(
             <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 0',borderBottom:'1px solid var(--border)'}}>
               <span style={{fontWeight:500,fontSize:13,color:'var(--text)'}}>{a.name}{a.mask?` ••${a.mask}`:''}</span>
-              {a.status==='matched'
+              {kept(a)
                 ?<span style={{background:'rgba(52,211,153,0.12)',color:'var(--green)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>✓ History preserved</span>
+                :a.status==='already_tracked'
+                ?<span style={{background:'var(--bg)',color:'var(--text-muted)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}} title={a.tracked_by?`Synced by ${a.tracked_by}`:''}>Already synced</span>
                 :<span style={{background:'rgba(96,165,250,0.12)',color:'var(--blue)',borderRadius:6,padding:'2px 10px',fontSize:11,fontWeight:500,flexShrink:0,marginLeft:12}}>+ New</span>
               }
             </div>

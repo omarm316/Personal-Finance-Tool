@@ -18,15 +18,15 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from database import get_db, Account, Loan, PlaidItem, Transaction, TransactionSplit
 from plaid_integration import setup_plaid_from_env
 
-from core.accounts_helpers import _account_hash, _ensure_cards_for_new_accounts, _sign_plaid_balance, rebuild_monthly_snapshots
+from core.accounts_helpers import _ensure_cards_for_new_accounts, rebuild_monthly_snapshots
 from core.app_helpers import _frontend_index
-from core.plaid_sync import PLAID_TYPE_FALLBACK, _sync_item, _sync_item_background
+from core.plaid_accounts import AUTH_ERROR_CODES, link_plaid_accounts, retire_emptied_items
+from core.plaid_sync import _sync_item, _sync_item_background
 
 logger = logging.getLogger('moresheth')
 
@@ -90,32 +90,52 @@ async def create_update_link_token(item_id: str, request: Request, db: Session =
 async def plaid_update_complete(item_id: str, background_tasks: BackgroundTasks,
                                 db: Session = Depends(get_db)):
     """
-    Called after a successful Plaid Link update-mode flow.
-    Clears the stored error, marks the item healthy, and kicks off a fresh sync.
-    No public_token exchange is needed — the access_token is unchanged.
+    Finish a Link update-mode flow on an existing connection: Reconnect (log in
+    again) or + Add Account (share more cards). No public_token exchange; the
+    item and its access_token stay the same.
 
-    clear_cursor=True is required here (not just for error-recovery): update
-    mode is also how newly-selected accounts (account_selection_enabled) get
-    added to an existing item, and only the clear_cursor branch of
-    _sync_item_background reconciles Plaid's account list into new `Account`
-    rows. Without it, a newly-added account has no `Account` row and every
-    one of its transactions is silently skipped by `_sync_item` (no matching
-    account_id).
+    Plaid's account list is matched to ours here (core/plaid_accounts.py), so
+    the reply can say which accounts kept their history and which are new, even
+    when the bank handed out new account IDs. A full re-download then runs in
+    the background and lands on the matched rows.
     """
     item = db.query(PlaidItem).filter_by(item_id=item_id, is_active=True).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    item.last_error_code    = None
-    item.last_error_message = None
-    item.last_error_at      = None
-    db.commit()
+    try:
+        plaid = setup_plaid_from_env()
+        accounts = plaid.get_accounts(item.access_token)
+        outcome = link_plaid_accounts(db, item, accounts)
+        retire_emptied_items(db, outcome)
+        item.last_error_code    = None
+        item.last_error_message = None
+        item.last_error_at      = None
+        db.commit()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        db.rollback()
+        raise HTTPException(status_code=500,
+                            detail=f"Plaid accepted the login, but the accounts could not be read: {e}")
+    try:
+        _ensure_cards_for_new_accounts(db, outcome.created, item.institution_name)
+    except Exception as card_err:
+        logger.warning(f"[update-complete] auto Card-row creation failed: {card_err}")
     background_tasks.add_task(_sync_item_background, item_id, True)
     return {"message": f"{item.institution_name} reconnected — sync started",
-            "institution_name": item.institution_name}
+            "institution_name": item.institution_name,
+            "accounts": outcome.results,
+            "not_returned": outcome.not_returned}
 
 @router.post("/api/plaid/exchange-token")
 async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends(get_db)):
-    """Exchange a Plaid public token for access token, create accounts, and sync transactions."""
+    """
+    Add a connection: exchange Link's public token, match its accounts to ours
+    (core/plaid_accounts.py), then sync transactions.
+
+    A login that is already connected and working is refused (409) and the
+    new duplicate is removed at Plaid: fix a broken connection with Reconnect,
+    add a card with + Add Account, both on the existing bank's row.
+    """
     try:
         plaid        = setup_plaid_from_env()
         tokens       = plaid.exchange_public_token(data.public_token)
@@ -123,8 +143,7 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         item_id      = tokens['item_id']
         accounts     = plaid.get_accounts(access_token)
 
-        # Create or update PlaidItem
-        # Fetch institution info once — name (display) + institution_id (immutable, used for matching)
+        # Institution name (display) + institution_id (immutable, used for matching)
         inst_info = plaid.get_institution_info(access_token) or {}
         inst_name = inst_info.get('name') or (accounts[0]['name'].split(' ')[0] if accounts else 'Unknown')
         inst_id   = inst_info.get('institution_id')
@@ -134,7 +153,6 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
             plaid_item.access_token = access_token
             plaid_item.is_active    = True
             plaid_item.updated_at   = datetime.utcnow()
-            # Always refresh canonical institution name and id from Plaid
             plaid_item.institution_name = inst_name
             if inst_id:
                 plaid_item.institution_id = inst_id
@@ -147,151 +165,32 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
             )
             plaid_item.access_token = access_token
             db.add(plaid_item)
-
         db.flush()
 
-        # ---------------------------------------------------------------------------
-        # Account adoption — 4-step priority chain (most-reliable → least)
-        #
-        #  Step 1: persistent_account_id — stable across ALL re-links (Plaid-issued)
-        #  Step 2: plaid_account_id      — same connection token reused (no re-link)
-        #  Step 3: institution+mask+type — fallback for institutions without persistent IDs
-        #  Step 4: no match             — create new account
-        #
-        # On adoption (steps 1-3): write plaid_account_id, plaid_item_id, persistent_account_id
-        # and clear any stale holder of the same plaid_account_id first (UNIQUE safety).
-        # ---------------------------------------------------------------------------
-        account_results = []
-        newly_created_accounts = []
+        outcome = link_plaid_accounts(db, plaid_item, accounts)
 
-        for a in accounts:
-            # Prefer subtype (checking, savings, credit card) over type (depository, credit)
-            raw_subtype  = (a.get('subtype') or '').lower().strip()
-            raw_type     = (a.get('type') or '').lower().strip()
-            account_type = raw_subtype or PLAID_TYPE_FALLBACK.get(raw_type, raw_type) or 'other'
+        duplicate_of = outcome.duplicate_of
+        if duplicate_of and duplicate_of != item_id:
+            existing = db.query(PlaidItem).filter_by(item_id=duplicate_of).first()
+            existing_name = existing.institution_name if existing else inst_name
+            db.rollback()
+            try:
+                plaid.remove_item(access_token)
+            except Exception as rm_err:
+                logger.warning(f"[exchange-token] could not remove duplicate item {item_id}: {rm_err}")
+            raise HTTPException(status_code=409, detail=(
+                f"This login is already connected as {existing_name}. "
+                f"Use Reconnect or + Add Account on that bank in Settings instead."
+            ))
 
-            # Pre-compute the account_hash for this Plaid account using the
-            # FRESH institution_id from Plaid (always reliable at exchange time).
-            computed_hash = _account_hash(inst_id or '', a.get('mask') or '', account_type)
-
-            existing = None
-
-            # Step 1: match by persistent_account_id (survives every re-link, Plaid-issued)
-            if a.get('persistent_account_id'):
-                existing = (db.query(Account)
-                    .filter(Account.persistent_account_id == a['persistent_account_id'],
-                            Account.is_active == True)
-                    .order_by(Account.id)
-                    .first())
-
-            # Step 2: match by current plaid_account_id (same token, no re-link needed)
-            if not existing:
-                existing = db.query(Account).filter_by(plaid_account_id=a['account_id']).first()
-
-            # Step 2.5: match by account_hash — the primary re-link survivor key.
-            # CRITICAL: only match UNLINKED accounts (plaid_account_id IS NULL).
-            # If we matched a live account, we'd overwrite its Plaid ID, stealing
-            # it from the account it belongs to. This is what caused the Amex 1008
-            # collision: three cards share the same hash, so without this guard the
-            # second and third would clobber the first.
-            if not existing and inst_id and a.get('mask'):
-                existing = (db.query(Account)
-                    .filter(Account.account_hash == computed_hash,
-                            Account.is_active == True,
-                            Account.plaid_account_id == None)   # unlinked only
-                    .order_by(Account.id)
-                    .first())
-
-            # Step 3: institution+mask+type JOIN — fallback for pre-hash accounts.
-            # Same guard: only unlinked accounts are candidates.
-            if not existing and a.get('mask'):
-                base_filters = [
-                    Account.mask == a['mask'],
-                    Account.account_type == account_type,
-                    Account.is_active == True,
-                    Account.plaid_account_id == None,   # unlinked only
-                ]
-                if plaid_item.institution_id:
-                    inst_match = or_(
-                        PlaidItem.institution_id == plaid_item.institution_id,
-                        and_(
-                            Account.plaid_item_id == None,
-                            Account.institution_id == plaid_item.institution_id,
-                        ),
-                    )
-                else:
-                    inst_match = or_(
-                        PlaidItem.institution_name == plaid_item.institution_name,
-                        Account.plaid_item_id == None,
-                    )
-                existing = (db.query(Account)
-                    .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
-                    .filter(*base_filters, inst_match)
-                    .order_by(Account.id)
-                    .first())
-
-            if existing:
-                # UNIQUE safety: clear any OTHER row that already holds this plaid_account_id
-                db.query(Account).filter(
-                    Account.plaid_account_id == a['account_id'],
-                    Account.id != existing.id,
-                ).update({'plaid_account_id': None}, synchronize_session=False)
-                db.flush()
-
-                # Adopt: update Plaid IDs so future transactions flow to the right account
-                existing.plaid_account_id = a['account_id']
-                existing.plaid_item_id    = item_id
-                existing.is_active        = True
-                if a.get('persistent_account_id'):
-                    existing.persistent_account_id = a['persistent_account_id']
-                if plaid_item.institution_id:
-                    existing.institution_id = plaid_item.institution_id
-                # Always refresh the account_hash — keeps it current
-                existing.account_hash = computed_hash
-
-                account_results.append({
-                    "name": existing.account_name,
-                    "mask": existing.mask,
-                    "status": "matched",
-                    "account_id": existing.id,
-                })
-            else:
-                # Step 4: create new account
-                # Use Plaid's current balance as the anchor so the balance engine
-                # can compute accurate history immediately without a manual snapshot.
-                plaid_balance = _sign_plaid_balance(a.get('balance'), raw_type)
-                new_acct = Account(
-                    plaid_account_id=a['account_id'],
-                    persistent_account_id=a.get('persistent_account_id'),
-                    institution_id=inst_id,
-                    account_hash=computed_hash,
-                    plaid_item_id=item_id,
-                    account_name=f"{a['name']} {a.get('mask','')}".strip(),
-                    account_type=account_type,
-                    official_name=a.get('official_name'),
-                    mask=a.get('mask'),
-                    is_active=True,
-                    starting_balance=plaid_balance or 0,
-                    start_date=None,  # Legacy model: offset + all txns
-                )
-                db.add(new_acct)
-                db.flush()
-                newly_created_accounts.append(new_acct)
-
-                account_results.append({
-                    "name": new_acct.account_name,
-                    "mask": new_acct.mask,
-                    "status": "created",
-                    "account_id": new_acct.id,
-                })
-
+        retired = retire_emptied_items(db, outcome)
         # Commit accounts first so sync failures don't lose the account link
         db.commit()
 
         # Auto-create the Card row each brand-new credit-card Account needs
         # (see B18) — failure here shouldn't block the account link/sync above.
         try:
-            _ensure_cards_for_new_accounts(db, newly_created_accounts, plaid_item.institution_name)
+            _ensure_cards_for_new_accounts(db, outcome.created, plaid_item.institution_name)
         except Exception as card_err:
             logger.warning(f"[exchange-token] auto Card-row creation failed: {card_err}")
 
@@ -327,11 +226,14 @@ async def exchange_public_token(data: PublicTokenExchange, db: Session = Depends
         return {
             "message": msg,
             "item_id": item_id,
-            "accounts": account_results,        # per-account outcome for post-link modal
+            "accounts": outcome.results,        # per-account outcome for post-link modal
+            "retired_connections": retired,     # old connections whose accounts moved here
             "accounts_linked": len(accounts),   # kept for backward compat
             "transactions_synced": synced,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback; traceback.print_exc()
         db.rollback()
@@ -356,11 +258,6 @@ async def sync_all_transactions(background_tasks: BackgroundTasks, db: Session =
 
     Returns per-item status so the UI can report which accounts need attention.
     """
-    AUTH_ERROR_CODES = {
-        'ITEM_LOGIN_REQUIRED', 'INVALID_CREDENTIALS', 'INVALID_ACCESS_TOKEN',
-        'USER_PERMISSION_REVOKED', 'ITEM_NOT_FOUND', 'ACCESS_NOT_GRANTED',
-    }
-
     items = db.query(PlaidItem).filter_by(is_active=True).all()
     if not items:
         return {"message": "No connected accounts.", "items_queued": 0,

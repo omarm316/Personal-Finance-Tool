@@ -20,10 +20,15 @@ export function BankRow({item,toast,onRenamed,onSynced}){
         token:link_token,
         onSuccess:async()=>{
           try{
-            await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
-            toast(`✓ ${item.institution_name} — syncing accounts…`);
+            const r=await apiFetch(`/plaid/update-complete/${item.item_id}`,{method:'POST'});
+            const accts=r.accounts||[];
+            const kept=accts.filter(a=>a.status==='matched'||a.status==='relinked').length;
+            const added=accts.filter(a=>a.status==='created').map(a=>a.name);
+            let msg=`✓ ${item.institution_name}: ${kept} account${kept!==1?'s':''} kept their history`;
+            if(added.length)msg+=` · new: ${added.join(', ')}`;
+            toast(msg+' — syncing…');
             setTimeout(()=>onSynced&&onSynced(),15000);
-          }catch(e){toast('Linked, but sync failed to start','error');}
+          }catch(e){toast(`${item.institution_name}: ${e.message||e}`,'error');}
           finally{setReconnecting(false);}
         },
         onExit:()=>setReconnecting(false),
@@ -116,7 +121,7 @@ export function BankRow({item,toast,onRenamed,onSynced}){
               </div>
               <div style={{fontSize:13,color:'var(--text-secondary)', lineHeight:1.5}}>
                 {item.last_error_code==='ITEM_LOGIN_REQUIRED'
-                  ?`${item.institution_name}'s OAuth consent expired (~90-day limit). Click Reconnect to re-authenticate in place — no data is lost.`
+                  ?`${item.institution_name} needs you to log in again. Click Reconnect and log in; the accounts and their history stay as they are.`
                   :item.last_error_message||'Plaid returned an error during the last sync attempt.'
                 }
               </div>

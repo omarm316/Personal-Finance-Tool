@@ -1,12 +1,31 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-11-05
+> Last updated: 2026-11-08
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-11-08 — Bank of America sync outage; Plaid connection flows fixed
+
+- **Outage (B42):** both Bank of America logins have been `ITEM_LOGIN_REQUIRED` since 2026-10-17 (Plaid's last good update Oct 15), so the five BofA accounts have no data after Oct 15. No consent expiry date on either item. Sync-all skips them; only Reconnect fixes it. **Waiting on Omer.**
+- **B41's cause, found while checking how a reconnect would go:** `_sync_item_background(clear_cursor=True)`, which update mode (Reconnect and + Add Account) runs, matched Plaid accounts on `plaid_account_id` alone. Its last-4 fallback compared Plaid's lower-case `credit card` / `checking` with the stored Title Case, so it never matched in Postgres. Amex hands out new account IDs on re-consent, so each + Add Account on Amex made new rows for cards we had (168-173 in August, 176 and 177 on Nov 8), and the full re-download copied their history onto them (the content-hash match is per account).
+- **Fix:** `core/plaid_accounts.py` `link_plaid_accounts()` is now the only account matcher. Callers: `POST /api/plaid/exchange-token` (add a connection), `POST /api/plaid/update-complete/{item_id}` (Reconnect and + Add Account), and `_sync_item_background(clear_cursor=True)` (force resync, reset-and-resync, and the re-download after update-complete). Order per Plaid account:
+  1. same `plaid_account_id`;
+  2. same `persistent_account_id`;
+  3. same card under a new ID: same bank, last 4 and type, on a row whose own ID is no longer live (missing from Plaid's list for this item, unlinked, or on an item that is off or needs a login). Taken when official names agree (oldest row if several), or when it's the only candidate and a name is missing. Different names never match, so a new card sharing a last 4 with a closed one (Amex 1008) gets its own row;
+  4. already synced by another working login at the same bank (same last 4, type and name, e.g. a joint account): left there, not added twice;
+  5. otherwise a new row (type stored Title Case, offset 0).
+- **Add a connection:** a login whose accounts are all already synced by one working connection is refused with 409 and removed at Plaid (`PlaidService.remove_item`). If the old connection needs a login, the new one takes its accounts and the old one is switched off locally (`retire_emptied_items`; still at Plaid until removed in Settings).
+- **Reconnect / + Add Account:** `update-complete` now matches synchronously and returns each account's outcome (`matched`, `relinked`, `created`, `already_tracked`) plus `not_returned` (rows Plaid no longer lists, left untouched); the toast names any new accounts. The background re-download then lands on the matched rows. If the accounts can't be read during a re-download, the sync stops with the error instead of downloading onto unmatched rows.
+- **Smaller fixes:** Check Health (`/api/plaid/item-status`) returned 500 whenever a bank was broken (Plaid's error enums weren't JSON-serializable); now plain strings, confirmed read-only against both BofA items. The health panel told you to use + Connect Bank for a broken login; it now says Reconnect. The bank row's message no longer claims a 90-day OAuth expiry. New accounts from exchange-token used to start with Plaid's current balance as the legacy offset, which counted the balance twice once history arrived; they now start at 0 like the update-mode path.
+- **Not changed:** the transaction sync itself, and the manual 🔧 Recover endpoint.
+- **Tests:** `tests/test_plaid_accounts.py` (17): the three flows, Amex reissued IDs, a closed card sharing a last 4, joint accounts, Amex 1000 on two logins, running twice, an end-to-end reissued-ID re-download with no duplicate rows, the 409 route and the update-complete route. Full suite 130 passed. Settings › Bank Links checked in the browser against a throwaway SQLite database.
+- **Next:** Omer reconnects both BofA rows; then a read-only check that no BofA accounts were created and Oct 15 onward arrived. B41's cleanup of the existing Amex duplicates stays parked.
 
 ---
 

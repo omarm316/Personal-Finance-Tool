@@ -655,7 +655,7 @@ export function SettingsPage({banks,onConnectBank,toast,onBanksChanged,onCategor
                     </div>
                     {r.error?.display_message&&<div style={{marginTop:4,marginLeft:24,fontSize:11,color:'var(--red)'}}>{r.error.display_message}</div>}
                     {hasInternalErr&&<div style={{marginTop:4,marginLeft:24,fontSize:11,color:'var(--amber)'}}>{r.internal_error_message}</div>}
-                    {needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ Reconnect required — use "+ Connect Bank" to re-link this institution.</div>}
+                    {needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ Log in again — use Reconnect on this bank's row below, not + Connect Bank.</div>}
                     {expiring&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ OAuth consent is expiring soon — re-link soon to keep syncing.</div>}
                     {hasInternalErr&&!needsRelink&&<div style={{marginTop:6,marginLeft:24,fontSize:12,color:'var(--amber)',fontWeight:500}}>⚠️ Our sync has a stored error for this account. A new sync attempt will clear it if Plaid is healthy.</div>}
                   </div>

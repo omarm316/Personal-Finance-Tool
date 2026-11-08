@@ -17,6 +17,7 @@ from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.item_get_request import ItemGetRequest
+from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 import plaid
 from plaid.api_client import ApiClient
@@ -159,10 +160,16 @@ class PlaidClient:
             err = item.get('error')
             error_info = None
             if err:
+                # Plaid returns enum objects here (e.g. PlaidErrorType); turn them
+                # into plain strings or the JSON response fails with a 500.
+                def _plain(v):
+                    if v is None:
+                        return None
+                    return str(getattr(v, 'value', v))
                 error_info = {
-                    'error_type': getattr(err, 'error_type', None) or str(err.get('error_type', '')),
-                    'error_code': getattr(err, 'error_code', None) or str(err.get('error_code', '')),
-                    'display_message': getattr(err, 'display_message', None) or err.get('display_message'),
+                    'error_type': _plain(err.get('error_type')),
+                    'error_code': _plain(err.get('error_code')),
+                    'display_message': _plain(err.get('display_message')),
                 }
 
             # Extract transaction sync timestamps
@@ -188,6 +195,10 @@ class PlaidClient:
             }
         except Exception as e:
             return {'ok': False, 'error': {'error_code': 'CLIENT_ERROR', 'display_message': str(e)}}
+
+    def remove_item(self, access_token: str) -> None:
+        """Remove an Item at Plaid (ends its access token and its billing)."""
+        self.client.item_remove(ItemRemoveRequest(access_token=access_token))
 
     def exchange_public_token(self, public_token: str) -> Dict[str, str]:
         """
