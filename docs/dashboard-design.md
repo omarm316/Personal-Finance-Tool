@@ -1,7 +1,7 @@
 # Dashboard page design
 
-Chosen with the design gallery (rounds 1-4, 2026-11-03 to 2026-11-05). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
-Source spec: `mockups/design-gallery/dashboard.spec.js` (id `dashboard-final-r4`). Final rendering with real figures: https://claude.ai/artifact/PA8pANhJV9Z213UyqFEfPh
+Chosen with the design gallery (rounds 1-4, 2026-11-03 to 2026-11-05). On 2026-11-07 Omer removed the insights card, moved the three charts above the budget card, and asked for those three cards to be the same height. Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Source spec: `mockups/design-gallery/dashboard.spec.js` (id `dashboard-final-r6`). Final rendering with real figures: https://claude.ai/artifact/PA8pANhJV9Z213UyqFEfPh
 Replaces today's `frontend/src/pages/DashboardPage.jsx` layout. The aim from round 1: fewer raw figures, more plain statements of what changed and what needs a look.
 Example figures below are October 2026, pulled 2026-11-04 after the two-level category migration.
 
@@ -12,36 +12,28 @@ Example figures below are October 2026, pulled 2026-11-04 after the two-level ca
 
 ## Page order, top to bottom
 1. Summary figures (full width)
-2. Insights (full width)
+2. One row of three panels: Month pace, Spending trend, Where the money went
 3. Budget performance (full width)
-4. One row of three panels: Month pace, Spending trend, Where the money went
 
-When a category's detail panel is open, it sits between the budget card and the row of three.
+When a category's detail panel is open, it sits under the budget card, at the bottom of the page.
 
 **Panels per row:** three at full width, two when the content area is narrower than 1150px, and one under 860px. Wide panels always span the row.
 
-**Left off the page:** biggest changes, recent transactions, largest purchases, top merchants, savings rate, cash cushion, spending by day, net worth panel, rewards balances. Their gallery designs stay in the spec in case one comes back.
+**The row of three is level:** Month pace, Spending trend and Where the money went share one height, set by the tallest of them (320px in October, 301px in Year to date). The spending chart stretches to fill its card (never under 200px), the gauge sits centred in the space under the pace headline, and the credits note sits at the foot of Where the money went. At two per row, the two cards on a row match and Where the money went sits on the row below.
+
+**Left off the page:** insights (removed 2026-11-07), biggest changes, recent transactions, largest purchases, top merchants, savings rate, cash cushion, spending by day, net worth panel, rewards balances. Their gallery designs stay in the spec in case one comes back.
 
 ## Shared rules for every figure
 - **Period:** the selected month, or January 1 through the selected month in Year to date. When the selected month is the current one, it runs through today.
 - **Comparisons:** a month in progress compares with the same days of last month. Year to date compares with the same span of last year.
 - **Excluded categories:** budget-side figures leave out `Transfer` and `Work`, since `Work` is the income bucket. `Unclassified` shows as `Other`.
-- **Top-level categories (decided in round 4):** rows store the most specific category. The budget card, the insights that read budgets, and where the money went all count at the top level of the category tree (Settings › Categories). A category with no parent is its own top level. A budget or spending booked on the top level itself counts toward that top level.
+- **Top-level categories (decided in round 4):** rows store the most specific category. The budget card and where the money went both count at the top level of the category tree (Settings › Categories). A category with no parent is its own top level. A budget or spending booked on the top level itself counts toward that top level.
 - **No dollar value per point:** nothing on the page shows an assumed value per point. Rewards are not on the page.
 
 ## Summary figures
 - **Net worth hero, on the left:** the value comes first with the label under it. Below them are a 12-month sparkline and the change since the first month shown (for example "−$13,112.01 since Nov 2025").
 - **2×2 grid, on the right:** Checking & Savings, Income, Expenses and Net Cash Flow. Each shows the value first and the label under it.
 - **Change line:** Income, Expenses and Net Cash Flow carry a colored arrow with the percent change and "vs. last month" (or "vs. last year" in Year to date). Lower expenses count as green. Checking & Savings shows a dash because it is a balance.
-
-## Insights
-One full-width panel with the period label at the top right. It holds four sentences, laid out in two columns (one column when the panel is under 640px). Each row has a bold figure in the tone's color, then the sentence. Fixed order:
-1. **Change in spending:** "Spending down from September: $10,498.71 against $22,886.02." The figure is ▲/▼ with the percent (red when up, green when down). A month in progress adds "(same days)". In Year to date it shows the monthly average instead.
-2. **Furthest over budget:** the top level with the largest dollar overrun, plus a count of the other over-budget top levels: "Groceries ran $4,969.52 over its $1,200.00 budget. 5 more categories are over too." The figure is "+$5.0k" in red. When nothing is over: "✓ Every budgeted category is within budget." in green.
-3. **Share of income kept:** "Kept 63% of what came in: $18,176.23 of $28,674.94." Green when positive. When income is negative: "Spent $X more than came in." in red. With no income: "No income recorded in this period yet."
-4. **Spending with no budget:** spending in top levels with no budget anywhere in them, in amber, naming the top three with "and N more" ("Went to categories with no budget: Other."). A subcategory with no budget of its own is covered by its top level's budget, so Airlines does not count here when Travel has one. The row is hidden when there are none.
-
-Every figure is plain arithmetic on the period's rows. There is no ranking or inference to maintain.
 
 ## Budget performance
 - **Card header:** the title and the period label. Under it sits a total line: "Total spent $10,498.71 of $9,265.00 budgeted".
@@ -68,12 +60,12 @@ Every figure is plain arithmetic on the period's rows. There is no ranking or in
 
 ## Where the money went
 - **What it counts:** gross spending by top-level category for the period, excluding `Transfer` and `Work`.
-- **This month's bar:** one stacked bar, 28px high. The 8 largest top levels are named in fixed colors (blue, teal, amber, pink, violet, sky, green, orange), with the rest grouped in grey as "N more categories". In October the 8 named cover all but $32.39.
-- **Last month's bar:** sits underneath, about 17px high, on the same scale as this month's bar, so bar length compares totals. It uses the same color per top level in this month's order, with anything else in grey. Labels "Oct" / "Sep" sit at the left and totals ("$16k" / "$30k") at the right. The note under it reads "September underneath, on the same scale." A month in progress compares the same days. In Year to date only this period's bar shows.
+- **This month's bar:** one stacked bar, 28px high. The 5 largest top levels are named in fixed colors (blue, teal, amber, pink, violet), with the rest grouped in grey as "N more categories". This was 8 until 2026-11-07; it came down to 5 so the card is no taller than the other two. In October the 5 named cover 87%, and "4 more categories" holds $2,068.97.
+- **Last month's bar:** sits underneath, about 17px high, on the same scale as this month's bar, so bar length compares totals. It uses the same color per top level in this month's order, with anything else in grey. Labels "Oct" / "Sep" sit at the left and totals ("$16k" / "$30k") at the right. A finished month has no note under the bars. A month in progress compares the same days and says so: "Same days of October underneath." In Year to date only this period's bar shows, with no note.
 - **Legend:** a list with a color square, the name, the percent of spending and the amount.
-- **Credits note:** top levels that net to a credit can't be a slice. When there are any, a note says so: "Gross spending. $5,331.99 of net credits (Business, Financial) are left out, so this is more than the budget card's total."
+- **Credits note:** top levels that net to a credit can't be a slice. When there are any, one line at the foot of the card says so: "Leaves out $5,331.99 of net credits (Business, Financial)." Hovering it adds that this is gross spending, so it is more than the budget card's total.
 
 ## Open questions for the build
 - **B25:** in Year to date the Expenses figure and the budget card's total differ by the $299 of `Work` expenses. Decide on one basis or add a footnote.
 - **B36:** the house is bucketed as "Other Assets" in net worth. The figure is right; only the label is affected.
-- Today's page reads `/api/stats`, budgets and transactions. Insights, pace and where-the-money-went need per-category totals for the period and the comparison period, rolled up to top level (`/api/budget/actuals` already returns `top_levels` and `/api/stats` returns `by_top_level`). Decide while building whether the browser computes them from the period's rows or a small endpoint returns them.
+- Today's page reads `/api/stats`, budgets and transactions. Month pace and where the money went need per-category totals for the period and the comparison period, rolled up to top level (`/api/budget/actuals` already returns `top_levels` and `/api/stats` returns `by_top_level`). Decide while building whether the browser computes them from the period's rows or a small endpoint returns them.

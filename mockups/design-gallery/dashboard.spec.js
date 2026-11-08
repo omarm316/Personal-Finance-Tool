@@ -141,8 +141,8 @@ function smooth(p){
   let s=`M${xs[0]},${ys[0]}`;for(let i=0;i<n-1;i++){const dx=(xs[i+1]-xs[i])/3;s+=` C${xs[i]+dx},${ys[i]+m[i]*dx} ${xs[i+1]-dx},${ys[i+1]-m[i+1]*dx} ${xs[i+1]},${ys[i+1]}`}
   return s;
 }
-function drawTrend(W,picks,c,d){
-  const A=agg(d),H=200,P={t:22,r:16,b:26,l:16},cw=W-P.l-P.r,chh=H-P.t-P.b,ch=picks.chart,labels=picks.pointLabels;
+function drawTrend(W,picks,c,d,HH){
+  const A=agg(d),H=HH||200,P={t:22,r:16,b:26,l:16},cw=W-P.l-P.r,chh=H-P.t-P.b,ch=picks.chart,labels=picks.pointLabels;
   const y=(v,mx)=>P.t+chh-(Math.max(v,0)/mx)*chh,base=P.t+chh;
   let g=[0,.25,.5,.75,1].map(f=>`<line class="grid" x1="${P.l}" x2="${W-P.r}" y1="${P.t+(1-f)*chh}" y2="${P.t+(1-f)*chh}"/>`).join('');
   if(ch==='pace'){
@@ -374,7 +374,9 @@ function where(picks,c,d){
   const all=Object.entries(catSpend(d,c.start,c.end,lv)),E=all.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),tot=E.reduce((s,x)=>s+x[1],0),N=picks.whereN;
   // Categories that net to a credit (refunds, business reimbursements) can't be a slice; say so, since the total then differs from the budget card's.
   const cr=all.filter(([,v])=>v<0).sort((a,b)=>a[1]-b[1]),crT=-cr.reduce((s,x)=>s+x[1],0);
-  const crNote=crT>=1?`<p class="mut wnote">Gross spending. ${m2(crT)} of net credits (${cr.slice(0,2).map(x=>LAST.h.esc(x[0])).join(', ')}${cr.length>2?'…':''}) are left out, so this is more than the budget card's total.</p>`:'';
+  const crList=`${cr.slice(0,2).map(x=>LAST.h.esc(x[0])).join(', ')}${cr.length>2?'…':''}`;
+  const crNote=crT<1?'':picks.evenRow?`<p class="mut wnote" title="Gross spending, so this is more than the budget card's total.">Leaves out ${m2(crT)} of net credits (${crList}).</p>`
+    :`<p class="mut wnote">Gross spending. ${m2(crT)} of net credits (${crList}) are left out, so this is more than the budget card's total.</p>`;
   const it=E.slice(0,N).map(([k,v],i)=>({k,v,col:CATC[i%CATC.length]})),rest=E.slice(N).reduce((s,x)=>s+x[1],0),rn=E.length-N;
   if(rest>0)it.push({k:`${rn} more ${rn===1?'category':'categories'}`,v:rest,col:'#94A3B8',rest:true});
   const e=LAST.h.esc,pc=v=>tot>0?Math.round(v/tot*100)+'%':'—',H=picks.whereH;
@@ -389,8 +391,8 @@ function where(picks,c,d){
     const mx=Math.max(tot,ptot)||1;
     bars=`<div class="wb2"><div class="wb-r"><span>${MON[c.M-1]}</span><div><div class="wbar" style="height:${H}px;width:${tot/mx*100}%">${it.map(x=>seg(x,tot)).join('')}</div></div><b>${k1(tot)}</b></div>
       <div class="wb-r prev"><span>${MON[pm-1]}</span><div><div class="wbar" style="height:${Math.max(Math.round(H*.6),8)}px;width:${ptot/mx*100}%">${pit.map(x=>seg(x,ptot)).join('')}</div></div><b>${k1(ptot)}</b></div></div>
-      <p class="mut wb-n">${mc.pName}${mc.partial?', same days,':''} underneath, on the same scale.</p>`;
-  }else bars=`<div class="wbar" style="height:${H}px">${it.map(x=>seg(x,tot)).join('')}</div>`+(picks.wherePrev?'<p class="mut wb-n">Last month\'s bar shows in the monthly view.</p>':'');
+      ${picks.evenRow?(mc.partial?`<p class="mut wb-n">Same days of ${mc.pName} underneath.</p>`:''):`<p class="mut wb-n">${mc.pName}${mc.partial?', same days,':''} underneath, on the same scale.</p>`}`;
+  }else bars=`<div class="wbar" style="height:${H}px">${it.map(x=>seg(x,tot)).join('')}</div>`+(picks.wherePrev&&!picks.evenRow?'<p class="mut wb-n">Last month\'s bar shows in the monthly view.</p>':'');
   let legend;
   if(picks.whereLegend==='chips')legend=`<div class="wchips">${it.map(x=>`<span class="wc" title="${e(x.k)}: ${m2(x.v)}"><i style="background:${x.col}"></i>${e(x.k)}<em>${pc(x.v)}</em></span>`).join('')}</div>`;
   else if(picks.whereLegend==='top3'){const t3=it.filter(x=>!x.rest).slice(0,3),more=it.slice(t3.length);
@@ -451,26 +453,30 @@ function nav(){
 }
 
 function page(picks,d){
-  // Round 2 settled the panels: summary figures, insights, month pace, spending chart, where the money went, budget.
-  const c=ctx(d),ins=insights(picks,c,d),pc=pace(picks,c),tr=trend(picks,c),wh=where(picks,c,d),bu=budget(picks,c,d),a=picks.arr;
+  // Round 2 settled the panels; 2026-11-07 removed insights and moved pace, chart and where above the budget card.
+  const a=picks.arr,c=ctx(d),ins=a==='pacefirst'?'':insights(picks,c,d),pc=pace(picks,c),tr=trend(picks,c),wh=where(picks,c,d),bu=budget(picks,c,d);
   const body=a==='side'?`<div class="split"><div class="col">${tr}${bu}</div><div class="col">${ins}${pc}${wh}</div></div>`
     :`<div class="flow">${a==='budhigh'?ins+bu+pc+tr+wh:ins+pc+tr+wh+bu}</div>`;
   return `<div class="app">${nav()}<div class="main">${header(picks,c)}${kpis(picks,c,d)}${body}</div></div>`;
 }
 
 Gallery.define({
-  id:'dashboard-final-r4',
+  id:'dashboard-final-r6',
   name:'Dashboard, final design',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'round4',label:'Decided in round 4',open:true,controls:[
+   {id:'nov7',label:'Changed 2026-11-07',open:true,controls:[
+    {id:'panels',label:'Panels shown',type:'choice',locked:true,options:[{id:'five',label:'Summary figures, month pace, spending chart, where the money went, budget'}]},
+    {id:'panelsOff',label:'Left off',type:'choice',locked:true,options:[{id:'rest',label:'Insights, biggest changes, recent transactions, largest purchases, top merchants, savings rate, cash cushion, spending by day, net worth, rewards'}]},
+    {id:'arr',label:'Where the panels sit',type:'choice',locked:true,options:[{id:'pacefirst',label:'Month pace, spending chart and where the money went above the budget card'}]},
+    {id:'evenRow',label:'Those three cards the same height',type:'toggle',locked:true,default:true},
+    {id:'whereN',label:'Categories named in where the money went',type:'slider',locked:true,min:4,max:8,step:1,default:5},
+   ]},
+   {id:'round4',label:'Decided in round 4',open:false,controls:[
     {id:'budGroup',label:'Budget card',type:'choice',locked:true,options:[{id:'inside',label:'Top-level tiles with their categories inside'}]},
     {id:'whereGroup',label:'Where the money went',type:'choice',locked:true,options:[{id:'top',label:'By top level'}]},
    ]},
    {id:'round3',label:'Decided in round 3',open:false,controls:[
-    {id:'arr',label:'Where the panels sit',type:'choice',locked:true,options:[{id:'budhigh',label:'Budget card above the charts'}]},
-    {id:'insLook',label:'Insights look',type:'choice',locked:true,options:[{id:'two',label:'Two columns'}]},
-    ...INS.map(([k,l,on])=>({id:'ins_'+k,label:'Insight: '+l,type:'toggle',locked:true,default:on})),
     {id:'gaugeStyle',label:'Gauge',type:'choice',locked:true,options:[{id:'arc',label:'Filled arc'}]},
     {id:'gaugeFig',label:'Figure in the middle',type:'choice',locked:true,options:[{id:'dollars',label:'Dollars left, or how far over'}]},
     {id:'whereLegend',label:'Where the money went legend',type:'choice',locked:true,options:[{id:'list',label:'List with percent and amount'}]},
@@ -480,13 +486,9 @@ Gallery.define({
     {id:'chartAvg',label:'Average line on the chart',type:'toggle',locked:true,default:false},
    ]},
    {id:'round2',label:'Decided in round 2',open:false,controls:[
-    {id:'panels',label:'Panels shown',type:'choice',locked:true,options:[{id:'six',label:'Summary figures, insights, month pace, spending chart, where the money went, budget'}]},
-    {id:'panelsOff',label:'Left off',type:'choice',locked:true,options:[{id:'rest',label:'Biggest changes, recent transactions, largest purchases, top merchants, savings rate, cash cushion, spending by day, net worth, rewards'}]},
     {id:'cols',label:'Panels per row',type:'choice',locked:true,options:[{id:'three',label:'Three'}]},
-    {id:'insStyle',label:'Insights style',type:'choice',locked:true,options:[{id:'list',label:'Sentences in one panel'}]},
     {id:'paceStyle',label:'Month pace style',type:'choice',locked:true,options:[{id:'gauge',label:'Half-circle gauge'}]},
     {id:'whereStyle',label:'Where the money went style',type:'choice',locked:true,options:[{id:'bar',label:'One stacked bar'}]},
-    {id:'whereN',label:'Categories named',type:'slider',locked:true,min:4,max:8,step:1,default:8},
     {id:'barPalette',label:'Bar colors',type:'choice',locked:true,options:[{id:'blue',label:'Blue, amber, red',swatches:['#2563EB','#F59E0B','#EF4444']}]},
     {id:'fill',label:'Fill strength',type:'slider',locked:true,min:.2,max:1,step:.05,default:.5},
     {id:'tileFig',label:'Figure on each tile',type:'choice',locked:true,options:[{id:'left',label:'Left to spend, or how far over'}]},
@@ -536,8 +538,8 @@ Gallery.define({
     root.querySelectorAll('[data-cat]').forEach(el=>{const go=()=>{S.detail=S.detail===el.dataset.cat?null:el.dataset.cat;rr()};el.onclick=e=>{e.stopPropagation();go()};el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();go()}}});
     root.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{S.detail=null;rr()});
     // Charts are drawn at their real width so text stays at its true size.
-    const draw=()=>{root.querySelectorAll('[data-chart]').forEach(el=>{const W=Math.max(Math.round(el.clientWidth),240);if(el.dataset.w==String(W))return;el.dataset.w=W;
-      el.innerHTML=el.dataset.chart==='nw'?drawNW(W,picks,LAST.d):drawTrend(W,picks,ctx(LAST.d),LAST.d);
+    const draw=()=>{root.querySelectorAll('[data-chart]').forEach(el=>{const W=Math.max(Math.round(el.clientWidth),240),Hh=el.dataset.chart==='trend'&&picks.evenRow?Math.max(Math.round(el.clientHeight),200):0,key=W+'x'+Hh;if(el.dataset.w===key)return;el.dataset.w=key;
+      el.innerHTML=el.dataset.chart==='nw'?drawNW(W,picks,LAST.d):drawTrend(W,picks,ctx(LAST.d),LAST.d,Hh);
       el.querySelectorAll('[data-ym]').forEach(r=>r.onclick=()=>{const[y,m]=r.dataset.ym.split('-').map(Number);if(y===2026&&m<=TODAY.m){S.ym=r.dataset.ym;rr()}})})};
     draw();
     if(window.__dRO)window.__dRO.disconnect();
@@ -966,6 +968,12 @@ Gallery.define({
 /* Round 3: where the money went */
 #pv .wbar{margin:4px 0 14px}
 #pv .wb2{display:grid;gap:8px;margin:4px 0 6px}
+/* 2026-11-07: pace, chart and where level with each other */
+#pv[data-arr=pacefirst] .p-trend .chart{position:relative;flex:1 1 0;min-height:200px}
+#pv[data-arr=pacefirst] .p-trend .chart svg{position:absolute;left:0;top:0}
+#pv[data-arr=pacefirst] .p-pace .gauge{margin:auto}
+#pv[data-arr=pacefirst] .p-where .wb2{margin-bottom:14px}
+#pv[data-arr=pacefirst] .p-where .wnote{margin:auto 0 0;padding-top:12px}
 #pv .wb-r{display:grid;grid-template-columns:30px minmax(0,1fr) 44px;gap:10px;align-items:center;font-size:12px}
 #pv .wb-r span{color:var(--tx2);font-weight:600}
 #pv .wb-r b{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
