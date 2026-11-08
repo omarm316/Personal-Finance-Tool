@@ -122,6 +122,28 @@ Icons replace the row ⋯ menu (round 4). They are bare icons, faint on every ro
 | Points by hand / back to the card's figure | `PATCH /api/transactions/{id}` with `points_earn_override`, or `clear_points_earn_override: true` |
 | Spender | `PATCH /api/transactions/{id}` with `spender` |
 
+## Where this meets the other Cards and Transactions designs
+
+Checked 2026-11-07 against the Actions strip (`docs/cards-actions-design.md`), the points ledger (`PLAN.md` "Cards points ledger", round 1) and the Transactions page (`docs/transactions-design.md`, built in `75e50d9`).
+
+- **Agreed already:**
+  - Exclude is the same `is_excluded` flag everywhere. The Transactions page hides excluded rows behind its Excluded chip; the Card page keeps them in the list, dimmed, as today's Card page does.
+  - Both pages save a merchant rule by default (a tick box here, "Save as a rule for this merchant" there). Rules are global.
+  - Challenges at risk read `core/challenges_helpers.py`. It counts purchases only from 2027 and skips excluded rows, the same rule as this table's Spend.
+  - Log credit use and the strip's mark-used flow both write uses to the step 3 benefits model, as `docs/cards-card-design.md` describes.
+- **Kinds differ from the Transactions page:**
+  - The Transactions page's Kind dropdown offers all eight kinds on any row (`KINDS` in `frontend/src/lib/txnView.js`). This table offers only the kinds that fit the amount.
+  - Fix: `PATCH /api/transactions/{id}` refuses a kind that doesn't fit the sign, and both pages list the same kinds by sign. Payment and Adjustment stay available where the engine already set them.
+  - The names differ too: "Person to person" there, "P2P" here (the Type column is narrow).
+- **Benefits matching (step 3) and this table's edits:**
+  - Auto-tracked credit uses come from statement-credit match text over synced rows, and the Type and Exclude edits here touch those same rows.
+  - Proposed rule for the matcher: match by text whatever the row's type, and skip excluded rows. Skipping excluded rows also skips rows the sync soft-deleted, which carry the same flag.
+  - So changing a Resy credit's type keeps its use, and an excluded duplicate isn't counted twice.
+- **The points ledger and fixes to old rows:**
+  - The ledger counts card points per statement from locked `points_earned`. Every edit here on a 2027 row changes those figures: category, type, a rule's recalculation, points by hand, Exclude.
+  - A balance check logs the difference as an adjustment. So fixing a row from before the last check counts the change twice, until the next check logs it back.
+  - To decide with the ledger's round 2: let the next check absorb it, which needs nothing built, or have this table warn when a fix reaches back before the program's last balance check.
+
 ## Open items (also in BACKLOG.md)
 
 1. **A kind rule ignores the amount's sign.** A `purchase` rule applies to that merchant's refunds too, making them purchases that take back nothing. A `refund` rule on a charge is just as wrong. Fix: `_resolve_kind` should read a purchase rule on money back as a refund, and a refund rule on a charge as a purchase.
