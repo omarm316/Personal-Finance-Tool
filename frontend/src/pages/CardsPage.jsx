@@ -5,6 +5,7 @@ import {SearchCreateSelect} from '../components/SearchCreateSelect';
 import {apiFetch} from '../lib/api';
 import {AccountCardDetailPage} from './AccountCardDetailPage';
 import {EcosystemDetailPage} from './EcosystemDetailPage';
+import '../styles/cloud.css';
 
 export function CardsPage({toast,refreshKey}){
   // Theme toggle mutates document.documentElement's data-theme attribute
@@ -27,6 +28,28 @@ export function CardsPage({toast,refreshKey}){
   const[selectedAccount,setSelectedAccount]=useState(null);
   const[pendingChallengeFilter,setPendingChallengeFilter]=useState(null); // {start,end,name} — set when navigating in via a challenge card
   const[selectedEcosystem,setSelectedEcosystem]=useState(null); // {id,name}
+  // The points ledger (docs/cards-ledger-design.md), from its start date: balance
+  // checks on the tiles, the Jan 1 reminder and challenge bonuses waiting to post.
+  const[ledgerInfo,setLedgerInfo]=useState(null);
+  const[bonusUndo,setBonusUndo]=useState({});
+  const loadLedgerInfo=useCallback(()=>apiFetch('/points-ledger').then(setLedgerInfo).catch(()=>setLedgerInfo(null)),[]);
+  useEffect(()=>{loadLedgerInfo();},[loadLedgerInfo,refreshKey]);
+  const ledgerOn=!!ledgerInfo?.active;
+  const ledgerByEco=useMemo(()=>Object.fromEntries((ledgerInfo?.programs||[]).map(p=>[p.ecosystem_id,p])),[ledgerInfo]);
+  const dropUndo=id=>setBonusUndo(u=>{const n={...u};delete n[id];return n;});
+  const bonusFor=ch=>{
+    if(!ledgerOn)return null;
+    for(const p of ledgerInfo.programs){
+      if(p.pending_bonus_challenges.includes(ch.id))return{state:'waiting',onMark:async()=>{
+        try{await apiFetch(`/challenges/${ch.id}/bonus-posted`,{method:'POST',body:'{}'});setBonusUndo(u=>({...u,[ch.id]:true}));setTimeout(()=>dropUndo(ch.id),5000);loadLedgerInfo();loadEarnSummary(earnPeriod,earnYear);}
+        catch(e){toast(e.message,'error');}}};
+      const posted=(p.posted_bonus||[]).find(b=>b.challenge_id===ch.id);
+      if(posted){const[,m,d]=posted.date.split('-');return{state:'posted',date:`${Number(m)}/${Number(d)}`,undo:!!bonusUndo[ch.id],onUndo:async()=>{
+        try{await apiFetch(`/challenges/${ch.id}/bonus-posted`,{method:'DELETE'});dropUndo(ch.id);toast('Bonus back to waiting');loadLedgerInfo();loadEarnSummary(earnPeriod,earnYear);}
+        catch(e){toast(e.message,'error');}}};}
+    }
+    return null;
+  };
   const[suggestions,setSuggestions]=useState([]);
   const[linking,setLinking]=useState({});
   const[tab,setTab]=useState('accounts'); // 'accounts' | 'swipe' | 'cards'
@@ -408,6 +431,20 @@ export function CardsPage({toast,refreshKey}){
               const cashTotal=earnData.cash_back.total+(earnData.ecosystems.filter(e=>e.is_cash_back).reduce((s,e)=>s+e.est_value,0));
               return(
                 <>
+                  {/* Jan 1 reminder: every opening balance is set on its program's own ledger. */}
+                  {ledgerOn&&ledgerInfo.opening_set<ledgerInfo.opening_needed&&(
+                    <div className="cloud" style={{display:'flex',alignItems:'center',gap:'12px 18px',flexWrap:'wrap',padding:'14px 16px',marginBottom:16,borderRadius:13,
+                      border:'1px solid color-mix(in srgb,var(--c-ac) 35%,var(--c-line))',background:'color-mix(in srgb,var(--c-ac) 5%,var(--c-surface))'}}>
+                      <div style={{display:'grid',gap:4,flex:1,minWidth:240}}>
+                        <b style={{fontFamily:'var(--c-fh)',fontWeight:600,fontSize:15}}>Start the points ledger</b>
+                        <span style={{fontSize:12.5,color:'var(--c-tx2)'}}>Set each program’s {new Date(ledgerInfo.start+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} balance on its own ledger. Still to set:</span>
+                        <span style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:4}}>
+                          {ledgerInfo.programs.filter(p=>p.unset.length).map(p=>(
+                            <button type="button" key={p.ecosystem_id} className="c-fb" onClick={()=>setSelectedEcosystem({id:p.ecosystem_id,name:p.name})}>{p.name}</button>))}
+                        </span>
+                      </div>
+                      <span style={{fontSize:12.5,color:'var(--c-tx2)',fontWeight:500}}>{ledgerInfo.opening_set} of {ledgerInfo.opening_needed} set</span>
+                    </div>)}
                   {/* ── Ecosystem Grid — logo-forward tiles, sized down (2026-07-26)
                       so more fit per row/without vertical scroll now that Capital
                       One/Atmos/Bilt bring the ecosystem count past what the old
@@ -416,6 +453,9 @@ export function CardsPage({toast,refreshKey}){
                     {pointsEcos.map(eco=>{
                       const col=ecoColor(eco.name);
                       const logo=ecoLogo(eco.name);
+                      const lp=ledgerOn?ledgerByEco[eco.id]:null;
+                      const unset=lp&&!lp.has_opening;
+                      const stale=lp&&lp.has_opening&&lp.stale.length>0;
                       return(
                         <div key={eco.id}
                           style={{padding:'16px 14px 14px',borderRadius:14,minHeight:140,
@@ -427,6 +467,8 @@ export function CardsPage({toast,refreshKey}){
                           onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='var(--shadow)';e.currentTarget.style.borderColor='var(--border)';}}>
                           <div style={{position:'absolute',top:-36,right:-36,width:120,height:120,borderRadius:'50%',
                             background:`radial-gradient(circle, ${col} 0%, transparent 70%)`,opacity:0.16,pointerEvents:'none'}}/>
+                          {stale&&<span title={`Balance not checked in 60 days: ${lp.stale.join(', ')}`} aria-label={`Balance not checked in 60 days: ${lp.stale.join(', ')}`}
+                            style={{position:'absolute',top:10,right:10,width:9,height:9,borderRadius:'50%',background:'#F59E0B',boxShadow:'0 0 0 3px rgba(245,158,11,.22)'}}/>}
                           {logo
                             ?<img src={logo} alt={eco.name} style={{height:56,maxWidth:'100%',objectFit:'contain',objectPosition:'left center',position:'relative',marginBottom:8}}
                                 onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block';}}/>
@@ -434,8 +476,9 @@ export function CardsPage({toast,refreshKey}){
                           <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',position:'relative',marginBottom:8,display:logo?'none':'block'}}>{eco.name}</div>
                           <div style={{position:'relative',display:'flex',alignItems:'flex-end',justifyContent:'space-between'}}>
                             <div>
-                              <div style={{fontSize:21,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.4px',lineHeight:1,color:'var(--blue-primary)'}}>{(eco.current_balance??eco.points_earned).toLocaleString()}</div>
-                              {eco.current_balance!=null&&<div style={{fontSize:10,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:4,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
+                              <div style={{fontSize:21,fontWeight:300,fontFamily:'Plus Jakarta Sans',letterSpacing:'-0.4px',lineHeight:1,color:'var(--blue-primary)'}}>{unset?'—':(eco.current_balance??eco.points_earned).toLocaleString()}</div>
+                              {unset&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:4,fontWeight:300}}>Not set</div>}
+                              {!unset&&eco.current_balance!=null&&<div style={{fontSize:10,color:eco.points_earned>=0?'var(--green)':'var(--red)',marginTop:4,fontWeight:300}}>{eco.points_earned>=0?'+':''}{eco.points_earned.toLocaleString()} {earnPeriod.toUpperCase()}</div>}
                               {!!eco.pending_balance&&<div style={{fontSize:10,color:'var(--amber)',marginTop:2,fontWeight:300}}>{Math.round(eco.pending_balance).toLocaleString()} pending</div>}
                             </div>
                             <div style={{color:'var(--text-muted)',fontSize:14,opacity:0.4}}>›</div>
@@ -559,7 +602,7 @@ export function CardsPage({toast,refreshKey}){
                     <div>
                       <div style={{fontSize:10,fontWeight:500,color:'var(--text-muted)',letterSpacing:1.5,textTransform:'uppercase',marginBottom:12}}>Active Challenges</div>
                       <div className="grid-auto-sm" style={{gap:10}}>
-                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch} onClick={()=>openChallenge(ch)}/>)}
+                        {earnData.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch} bonus={bonusFor(ch)} onClick={()=>openChallenge(ch)}/>)}
                       </div>
                     </div>
                   )}

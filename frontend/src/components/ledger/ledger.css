@@ -1,0 +1,93 @@
+/* Points ledger (docs/cards-ledger-design.md). Scoped to .cloud.lgr, the Cloud look. */
+.cloud.lgr { margin-bottom: 16px; min-width: 0; }
+.cloud.lgr h2 { font-size: 12px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--c-tx3); margin: 0; }
+.cloud .lgr-sh { display: flex; justify-content: space-between; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.cloud .lgr-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.cloud .lgr-pn { padding: 18px; min-width: 0; }
+.cloud .lgr-pn .mut, .cloud .lgr-t .mut { color: var(--c-tx3); font-size: 12px; }
+.cloud .up { color: var(--c-good); }
+.cloud .neg { color: var(--c-bad); }
+
+/* Ledger cards */
+.cloud .lgr-people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 15px; }
+.cloud .lgr-p { background: var(--c-raised); border-radius: 10px; padding: 18px; min-width: 0; display: flex; flex-direction: column; }
+.cloud .lgr-p.tot { background: var(--c-ac-soft); }
+.cloud .lgr-ph { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; }
+.cloud .lgr-ph b { font-weight: 500; color: var(--c-tx2); }
+.cloud .lgr-dot { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--c-tx3); cursor: default; }
+.cloud .lgr-dot i { width: 8px; height: 8px; border-radius: 50%; background: var(--c-tx3); opacity: .5; }
+.cloud .lgr-dot.ok i { background: var(--c-good); opacity: 1; }
+.cloud .lgr-dot.gap i { background: #F59E0B; opacity: 1; }
+.cloud .lgr-cur { font-size: 25px; font-weight: 600; margin: 3px 0 10px; text-align: left; display: block; }
+.cloud button.lgr-fig { display: inline-flex; align-items: baseline; gap: 6px; align-self: flex-start; border-radius: 6px; }
+.cloud button.lgr-fig i { font-style: normal; font-size: 13px; color: var(--c-ac); opacity: 0; transition: opacity .12s; }
+.cloud button.lgr-fig:hover { text-decoration: underline dotted var(--c-ac); text-underline-offset: 5px; }
+.cloud button.lgr-fig:hover i, .cloud button.lgr-fig:focus-visible i { opacity: 1; }
+.cloud .lgr-p dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; font-size: 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.cloud .lgr-p dt { color: var(--c-tx3); }
+.cloud .lgr-p dd { margin: 0; text-align: right; }
+.cloud .lgr-o { display: flex; gap: 4px; justify-content: flex-end; align-items: center; }
+.cloud .lgr-oe { color: var(--c-ac); font-size: 11.5px; width: 16px; opacity: 0; }
+.cloud .lgr-p:hover .lgr-oe, .cloud .lgr-oe:focus-visible { opacity: 1; }
+.cloud .lgr-set { align-self: flex-start; margin-top: 12px; }
+.cloud .lgr-warn { margin: 14px 0 0; padding: 9px 12px; border-radius: 8px; background: var(--c-warnbg); font-size: 12.5px; color: var(--c-tx2); }
+.cloud .lgr-warn b { font-weight: 600; color: var(--c-tx); }
+
+/* Activity */
+.cloud .lgr-rs { display: flex; gap: 30px; flex-wrap: wrap; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--c-line); }
+.cloud .lgr-rs div { display: grid; gap: 2px; }
+.cloud .lgr-rs span { font-size: 11px; color: var(--c-tx3); }
+.cloud .lgr-rs b { font-size: 17px; font-weight: 600; }
+.cloud .lgr-chips { display: flex; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.cloud .lgr-chips > span { display: flex; gap: 6px; flex-wrap: wrap; }
+.cloud .lgr-tw { min-width: 0; overflow-x: auto; }
+.cloud table.lgr-t { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--c-tx); }
+.cloud .lgr-t th { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--c-tx3); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--c-line); white-space: nowrap; }
+.cloud .lgr-t td { padding: 7px 8px; border-bottom: 1px solid var(--c-line); white-space: nowrap; vertical-align: middle; }
+.cloud .lgr-t tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--c-tx) 2.5%, transparent); }
+.cloud .lgr-t tr.pend td { background: color-mix(in srgb, #F59E0B 8%, transparent) !important; }
+.cloud .lgr-t .n { text-align: right; width: 1%; }
+.cloud .lgr-t th.n { text-align: right; }
+.cloud .lgr-t .d { color: var(--c-tx2); width: 1%; }
+.cloud .lgr-t .bal { color: var(--c-tx2); }
+.cloud .lgr-t .b { font-weight: 600; }
+.cloud .lgr-t .cd { width: 1%; color: var(--c-tx2); }
+.cloud .lgr-t td.ds { width: 22%; max-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.cloud .lgr-t td.dt { width: 34%; max-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--c-tx3); font-size: 12px; }
+.cloud .lgr-t .ac { width: 1%; text-align: right; }
+.cloud .lgr-ed { opacity: 0; transition: opacity .12s; }
+.cloud .lgr-t tr:hover .lgr-ed, .cloud .lgr-ed:focus-visible { opacity: 1; }
+@media (hover: none) { .cloud .lgr-ed { opacity: 1; } }
+.cloud .lgr-card { display: inline-flex; align-items: center; gap: 7px; }
+.cloud .lgr-art { width: 30px; aspect-ratio: 1000 / 630; border-radius: 3px; overflow: hidden; flex: none; background: linear-gradient(135deg, #475569, #1e293b); box-shadow: 0 1px 3px rgba(0, 0, 0, .3); display: block; }
+.cloud .lgr-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cloud .lgr-tp { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+.cloud .lgr-tp.g-e { background: var(--c-ac-soft); color: var(--c-ac); }
+.cloud .lgr-tp.g-a { background: color-mix(in srgb, #7C3AED 13%, transparent); color: #6D28D9; }
+.cloud .lgr-tp.g-r { background: color-mix(in srgb, #F59E0B 18%, transparent); color: #92400E; }
+.cloud .lgr-tp.g-t { background: color-mix(in srgb, #14B8A6 16%, transparent); color: #0F766E; }
+.cloud .lgr-tp.g-o { background: color-mix(in srgb, var(--c-tx) 9%, transparent); color: var(--c-tx2); }
+[data-theme="dark"] .cloud .lgr-tp.g-a { color: #C4B5FD; }
+[data-theme="dark"] .cloud .lgr-tp.g-r { color: #FCD34D; }
+[data-theme="dark"] .cloud .lgr-tp.g-t { color: #5EEAD4; }
+.cloud .lgr-oc { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 700; color: #fff; background: #2563EB; }
+.cloud .lgr-oc.p-1 { background: #7C3AED; }
+.cloud .lgr-oc.p-2 { background: #0F766E; }
+.cloud .lgr-oc.no { background: #D97706; }
+
+/* Side panels */
+.cloud .lgr-lead { margin: 0; font-size: 13px; color: var(--c-tx2); }
+.cloud .lgr-lead b { color: var(--c-tx); font-weight: 600; }
+.cloud .lgr-big { font-family: var(--c-fh); font-size: 20px !important; font-weight: 600; padding: 8px 10px !important; font-variant-numeric: tabular-nums; }
+.cloud .lgr-g3 { display: flex; gap: 22px; }
+.cloud .lgr-g3 > div { display: grid; gap: 1px; }
+.cloud .lgr-g3 small { font-size: 10.5px; color: var(--c-tx3); }
+.cloud .lgr-g3 b { font-size: 17px; font-weight: 600; }
+.cloud .lgr-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.cloud .lgr-row .c-fld { flex: 0 0 150px; }
+.cloud .lgr-row .c-fld.grow { flex: 1 1 180px; }
+.cloud .lgr-seg { display: inline-flex; border: 1px solid var(--c-line); border-radius: 9px; padding: 2px; gap: 2px; justify-self: start; }
+.cloud .lgr-seg button { padding: 5px 12px; border-radius: 7px; font-size: 12.5px; color: var(--c-tx2); }
+.cloud .lgr-seg button.on { background: var(--c-ac); color: var(--c-ac-fg); font-weight: 600; }
+.cloud .c-spb .mut { margin: 0; font-size: 12px; color: var(--c-tx3); }
+.cloud .c-spb .mut b { color: var(--c-tx); }

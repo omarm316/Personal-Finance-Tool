@@ -1,6 +1,6 @@
 # Cards: Points ledger and adjustments
 
-Chosen with the design gallery (rounds 1 and 2, 2026-11-07 to 2026-11-10). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1 and 2, 2026-11-07 to 2026-11-10). Desktop approved and built on 2026-11-10; it turns on by itself on the ledger's start date (see "Built" at the end). Phone design is a separate, later exercise.
 Gallery: https://claude.ai/artifact/FCaxUkP6VeKYb6jGmKnDg2, source spec `mockups/design-gallery/cards-ledger.spec.js` (id `cards-ledger-final`, every choice locked). Inherits the look and page order in `docs/cards-ecosystem-design.md` and `docs/cards-portfolio-design.md`. It replaces that doc's starting-balance buttons and Activity timeline.
 
 Built in Cards step 3 (program balances), before 2027-01-01, so the opening balances can be entered on that day.
@@ -119,3 +119,13 @@ All three open as a side panel on the right, like benefit editing on the Card pa
   - Six cards have no statement close day (Business Gold, Strata Premier, Bilt, AA Platinum Select, Double Cash, Atmos Summit), so they'd get month lines.
   - Amex Platinum and Blue Business Plus both carry 1008 as their last four in the app (so does a Hilton Honors card). Check the real numbers so the Card column tells them apart; the card art helps meanwhile.
 - **Later, not in this design:** phone layouts, expiration dates for points, and transfer-bonus history.
+
+## Built (2026-11-10)
+- **Where:** `core/points_ledger.py` (engine), `routers/points_ledger.py` (routes), `frontend/src/components/ledger/` (ledger cards, Activity table, side panels), `frontend/src/components/ui/SidePanel.jsx`. Tests: `tests/test_points_ledger.py`.
+- **When it shows:** from the start date in `POINTS_LEDGER_START` (default 2027-01-01). Until then the Ecosystem page keeps its older ledger, and the routes that write refuse with 409.
+- **Inside today's Ecosystem page** for now: the ledger cards take the old Balance Ledger's place, and the Activity table replaces the Redemptions, Transfers and Adjustments sections. The step 4 page reuses the same components.
+- **Not yet as designed:**
+  - + Redemption, + Transfer and + Between us still open today's centered windows.
+  - Transfers can only be deleted, as today.
+  - A waiting bonus is dated today, because when a challenge was met isn't stored.
+

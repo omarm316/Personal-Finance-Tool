@@ -1,4 +1,6 @@
-export function ChallengeCard({ch,onClick}){
+/* bonus (from the points ledger, docs/cards-ledger-design.md): a met challenge
+   whose points bonus waits to be marked posted, or was just marked (Undo for 5 s). */
+export function ChallengeCard({ch,onClick,bonus}){
   const progress=ch.progress_pct||0;
   // Repeatable challenges stay "isThreshold" (still show the lap progress bar)
   // even once the first occurrence is unlocked, as long as more can still be earned.
@@ -50,6 +52,13 @@ export function ChallengeCard({ch,onClick}){
         <span style={{fontWeight:400,fontFamily:'Plus Jakarta Sans',fontSize:16,color:'var(--blue-primary)'}}>+{ch.bonus_amount}x</span>
         {ch.category_names?.length>0&&<span style={{color:'var(--text-muted)',marginLeft:6}}>on {ch.category_names.join(', ')}</span>}
         {ch.spend_cap&&!hasCapProgress&&<span style={{color:'var(--text-muted)',marginLeft:6}}>· ${(ch.current_spend||0).toLocaleString(undefined,{maximumFractionDigits:0})} / ${ch.spend_cap.toLocaleString(undefined,{maximumFractionDigits:0})}</span>}
+      </div>}
+      {bonus&&<div style={{marginTop:8,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}} onClick={e=>e.stopPropagation()}>
+        {bonus.state==='waiting'
+          ?<><span style={{fontSize:11.5,fontWeight:600,color:'#B45309'}}>Bonus waiting to post</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={bonus.onMark}>Mark posted</button></>
+          :<><span style={{fontSize:11.5,fontWeight:600,color:'var(--green)'}}>✓ Bonus posted {bonus.date}</span>
+            {bonus.undo&&<button type="button" className="btn btn-ghost btn-sm" onClick={bonus.onUndo}>Undo</button>}</>}
       </div>}
     </div>
   );

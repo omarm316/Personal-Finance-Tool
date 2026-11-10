@@ -3,6 +3,7 @@ import {ChallengeCard} from '../components/ChallengeCard';
 import {SearchCreateSelect} from '../components/SearchCreateSelect';
 import {apiFetch} from '../lib/api';
 import {fmt} from '../lib/format';
+import {usePointsLedger,LedgerCards,LedgerActivity,LedgerPanels} from '../components/ledger/PointsLedger';
 
 export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,onSelectAccount,toast}){
   const[data,setData]=useState(null);
@@ -42,6 +43,33 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
     catch(e){toast('Failed to load ecosystem data','error');}
     finally{setLoading(false);}
   },[ecoId,isCashBack]);
+
+  /* ── The points ledger (docs/cards-ledger-design.md), from its start date
+       (2027-01-01). Until then this page keeps the older ledger below. ── */
+  const ledgerOn=!!data?.ledger_active&&!isCashBack;
+  const lg=usePointsLedger(ledgerOn?ecoId:null,{reloadKey:data,toast});
+  const[bonusUndo,setBonusUndo]=useState({});
+  const dropUndo=id=>setBonusUndo(u=>{const n={...u};delete n[id];return n;});
+  const markBonus=async ch=>{
+    try{lg.setL(await apiFetch(`/challenges/${ch.id}/bonus-posted`,{method:'POST',body:'{}'}));
+      setBonusUndo(u=>({...u,[ch.id]:true}));setTimeout(()=>dropUndo(ch.id),5000);}
+    catch(e){toast(e.message,'error');}
+  };
+  const undoBonus=async ch=>{
+    try{lg.setL(await apiFetch(`/challenges/${ch.id}/bonus-posted`,{method:'DELETE'}));dropUndo(ch.id);toast('Bonus back to waiting');}
+    catch(e){toast(e.message,'error');}
+  };
+  const bonusFor=ch=>{
+    if(!ledgerOn||!lg.L)return null;
+    const e=lg.L.entries.find(x=>x.kind==='bonus'&&x.challenge_id===ch.id);
+    if(!e)return null;
+    const[,m,d]=e.date.split('-');
+    return e.status==='pending'
+      ?{state:'waiting',onMark:()=>markBonus(ch)}
+      :{state:'posted',date:`${Number(m)}/${Number(d)}`,undo:!!bonusUndo[ch.id],onUndo:()=>undoBonus(ch)};
+  };
+  const heroBalance=ledgerOn&&lg.L?lg.L.total.current:data?.current_balance;
+  const heroPending=ledgerOn&&lg.L?lg.L.total.pending_cards+lg.L.total.pending_bonus:data?.pending_balance;
 
   /* ── Balance snapshots — "Starting Balance" is the earliest one (editable,
        with its date); any later ones are "Corrections". The most recent one
@@ -495,12 +523,12 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
                   {isCashBack?'Cash back earned':'Current balance · posted'}
                 </div>
                 <div style={{fontFamily:'Outfit',fontWeight:600,fontSize:38,color:'#fff',letterSpacing:'-1px',lineHeight:1}}>
-                  {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:data.current_balance.toLocaleString()}
+                  {isCashBack?`$${data.est_value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:Math.round(heroBalance||0).toLocaleString()}
                 </div>
-                {!isCashBack&&data.pending_balance>0&&
+                {!isCashBack&&heroPending>0&&
                   <div style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,color:'#FCD34D',marginTop:7,fontWeight:600}}>
                     <span style={{width:5,height:5,borderRadius:'50%',background:'#FCD34D'}}/>
-                    {Math.round(data.pending_balance).toLocaleString()} pending — posts after next statement close
+                    {Math.round(heroPending).toLocaleString()} pending — posts after next statement close
                   </div>}
               </div>
               <div style={{textAlign:'right'}}>
@@ -522,7 +550,8 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
               Current Balance. A "Sent to other"/"Received from other" pair
               nets to zero in the Shared column since it never creates or
               destroys points, just moves them between our two buckets. */}
-          {!isCashBack&&data.balance_by_person&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
+          {ledgerOn&&<LedgerCards lg={lg} onBetween={openNewPersonTransfer} onOpenCard={onSelectAccount}/>}
+          {!isCashBack&&!ledgerOn&&data.balance_by_person&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:8}}>
               <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Balance Ledger</div>
               {people.length>1&&<button type="button" className="btn btn-ghost btn-sm" onClick={openNewPersonTransfer}>+ Transfer between us</button>}
@@ -748,12 +777,19 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
           {data.active_challenges.length>0&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginBottom:16}}>
             <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Active Challenges</div>
             <div className="grid-auto-sm">
-              {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch}/>)}
+              {data.active_challenges.map(ch=><ChallengeCard key={ch.id} ch={ch} bonus={bonusFor(ch)}/>)}
             </div>
           </div>}
 
+          {ledgerOn&&<LedgerActivity lg={lg}
+            onRedemption={openNewRedemption} onTransfer={()=>openNewTransfer('out')} onBetween={openNewPersonTransfer}
+            onEditRedemption={id=>{const r=data.redemptions.find(x=>x.id===id);if(r)openEditRedemption(r);}}
+            onEditBetween={id=>{const pt=(data.person_transfers||[]).find(x=>x.id===id);if(pt)openEditPersonTransfer(pt);}}
+            onDeleteTransfer={deleteTransfer}/>}
+          {ledgerOn&&<LedgerPanels lg={lg} ecoId={ecoId} ecoName={ecoName} legacy={data.legacy_balance_by_person} toast={toast}/>}
+
           {/* Redemptions */}
-          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
+          {!isCashBack&&!ledgerOn&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Redemptions</div>
               <button type="button" className="btn btn-primary btn-sm" onClick={openNewRedemption}>+ Add Redemption</button>
@@ -793,7 +829,7 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
           </div>}
 
           {/* Transfers — value-neutral point movement, kept separate from Redemptions */}
-          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+          {!isCashBack&&!ledgerOn&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Transfers</div>
               <div style={{display:'flex',gap:8}}>
@@ -836,7 +872,7 @@ export function EcosystemDetailPage({ecoId,ecoName,initPeriod,initYear,onBack,on
               Transfers (which represent real events) and from a balance
               snapshot (which resets the baseline). For small drift you don't
               want to spend time tracing to a specific cause. */}
-          {!isCashBack&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
+          {!isCashBack&&!ledgerOn&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:20,marginTop:16}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px'}}>Adjustments</div>
               <button type="button" className="btn btn-primary btn-sm" onClick={openNewAdjustment}>+ Add Adjustment</button>

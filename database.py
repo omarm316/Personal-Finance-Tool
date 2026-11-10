@@ -816,6 +816,13 @@ class PointsAdjustment(Base):
     notes           = Column(Text, nullable=True)
     # Whose balance this nudges — nullable/blank means shared/unattributed.
     person          = Column(String(100), nullable=True)
+    # The points ledger from 2027 (docs/cards-ledger-design.md): one reason from
+    # core.points_ledger.REASONS. A balance check is reason "Balance adjustment"
+    # with the figure the program showed in reported_balance. A challenge bonus
+    # marked posted carries its challenge_id (pending until this row exists).
+    reason           = Column(String(40), nullable=True)
+    reported_balance = Column(Float, nullable=True)
+    challenge_id     = Column(Integer, nullable=True, index=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
 
     ecosystem = relationship('PointsEcosystem', foreign_keys=[ecosystem_id])
@@ -1316,6 +1323,9 @@ def run_migrations(engine):
         ],
         'points_adjustments': [
             ('person', 'VARCHAR(100)'),
+            ('reason', 'VARCHAR(40)'),
+            ('reported_balance', 'FLOAT'),
+            ('challenge_id', 'INTEGER'),
         ],
     }
 

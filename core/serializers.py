@@ -297,6 +297,9 @@ def _serialize_adjustment(a: PointsAdjustment) -> dict:
         'description': a.description,
         'notes': a.notes,
         'person': a.person,
+        'reason': a.reason,
+        'reported_balance': a.reported_balance,
+        'challenge_id': a.challenge_id,
     }
 def _serialize_transfer_ratio(tr: TransferRatio) -> dict:
     return {

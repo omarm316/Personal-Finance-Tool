@@ -1589,6 +1589,11 @@ async def cards_earn_summary(
 
     # ── shape output ─────────────────────────────────────────────────────────
     ecosystems_out = []
+    # From the points ledger's start (2027-01-01) balances come from the ledger
+    # (core/points_ledger.py, docs/cards-ledger-design.md); before it, the older math below.
+    from core.points_ledger import all_programs, ledger_active
+    _ledger_by_eco = ({p['ecosystem_id']: p for p in all_programs(db)['programs']}
+                      if ledger_active() else None)
     for eco_id, data in eco_totals.items():
         eco = ecosystems_map.get(eco_id)
         if not eco:
@@ -1647,6 +1652,9 @@ async def cards_earn_summary(
             )
             current_balance = bal['current_balance']
             pending_balance = bal['pending_balance']
+        if _ledger_by_eco is not None and eco_id in _ledger_by_eco:
+            current_balance = _ledger_by_eco[eco_id]['balance']
+            pending_balance = _ledger_by_eco[eco_id]['pending']
 
         ecosystems_out.append({
             'id':            eco_id,
@@ -2186,6 +2194,18 @@ async def ecosystem_earn_detail(
     baseline_date = _date.fromisoformat(_bal['balance_as_of']) if _bal['balance_as_of'] else None
     balance_breakdown = _bal['balance_breakdown']
     balance_by_person = _bal['balance_by_person']
+    # From the points ledger's start the header's figures come from the ledger
+    # (docs/cards-ledger-design.md); the page's ledger section reads /ledger itself.
+    from core.points_ledger import ledger_active, program_ledger
+    _ledger_on = ledger_active() and not eco.is_cash_back
+    # The older math's figure per person, shown as a hint when an opening balance is entered.
+    legacy_balance_by_person = {p: b.get('current_balance') for p, b in (balance_by_person or {}).items()}
+    if _ledger_on:
+        _lg = program_ledger(db, eco_id)
+        current_balance = _lg['total']['current']
+        pending_balance = _lg['total']['pending_cards'] + _lg['total']['pending_bonus']
+        balance_by_person = {p: {'current_balance': b['current'], 'starting_balance': b['opening']}
+                             for p, b in _lg['balances'].items()}
 
     if not eco_accts:
         return {
@@ -2198,6 +2218,8 @@ async def ecosystem_earn_detail(
             'balance_as_of': baseline_date.isoformat() if baseline_date else None,
             'balance_breakdown': balance_breakdown,
             'balance_by_person': balance_by_person,
+            'ledger_active': _ledger_on,
+            'legacy_balance_by_person': legacy_balance_by_person,
             'known_people': known_people,
             'person_transfers': person_transfers_out,
             'by_category': [], 'by_card': [], 'active_challenges': [],
@@ -2349,6 +2371,8 @@ async def ecosystem_earn_detail(
         'balance_as_of': baseline_date.isoformat() if baseline_date else None,
         'balance_breakdown': balance_breakdown,
         'balance_by_person': balance_by_person,
+        'ledger_active': _ledger_on,
+        'legacy_balance_by_person': legacy_balance_by_person,
         'known_people': known_people,
         'person_transfers': person_transfers_out,
         'by_category':   by_cat_out,
@@ -2670,14 +2694,22 @@ async def create_points_adjustment(eco_id: int, data: dict = Body(...), db: Sess
     eco = db.query(PointsEcosystem).filter_by(id=eco_id).first()
     if not eco:
         raise HTTPException(status_code=404, detail="Ecosystem not found")
+    from core.points_ledger import REASONS, ledger_start
+    reason = data.get('reason') or None
+    if reason is not None and reason not in REASONS:
+        raise HTTPException(status_code=400, detail=f"Unknown reason: {reason}")
+    if reason is not None and _date.fromisoformat(data['adjustment_date']) < ledger_start():
+        raise HTTPException(status_code=409, detail=f"The points ledger starts on {ledger_start().isoformat()}.")
     try:
         a = PointsAdjustment(
             ecosystem_id    = eco_id,
             points_delta    = float(data['points_delta']),
             adjustment_date = _date.fromisoformat(data['adjustment_date']),
-            description     = data['description'],
+            # The ledger's form has a reason and an optional note instead of a description.
+            description     = data.get('description') or data.get('notes') or reason or 'Adjustment',
             notes           = data.get('notes'),
             person          = data.get('person') or None,
+            reason          = reason,
         )
         db.add(a)
         db.commit()
@@ -2704,6 +2736,11 @@ async def update_points_adjustment(adjustment_id: int, data: dict = Body(...), d
     for field in ('notes', 'person'):
         if field in data:
             setattr(a, field, data[field] or None)
+    if 'reason' in data:
+        from core.points_ledger import REASONS
+        if data['reason'] and data['reason'] not in REASONS:
+            raise HTTPException(status_code=400, detail=f"Unknown reason: {data['reason']}")
+        a.reason = data['reason'] or None
     db.commit()
     db.refresh(a)
     return _serialize_adjustment(a)
@@ -3789,6 +3826,7 @@ import uuid as _uuid
 # the time that import executes, or the module would bind the stale None
 # permanently.
 # ---------------------------------------------------------------------------
+from routers.points_ledger import router as points_ledger_router
 from routers.misc import router as misc_router
 from routers.loans import router as loans_router
 from routers.cash_flow import router as cash_flow_router
@@ -3816,6 +3854,7 @@ app.include_router(admin_router)
 app.include_router(accounts_router)
 app.include_router(earning_router)
 app.include_router(categories_router)
+app.include_router(points_ledger_router)
 
 
 
