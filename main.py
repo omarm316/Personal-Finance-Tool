@@ -364,6 +364,19 @@ async def startup_event():
 
         # Product catalog is seeded by seed_card_products() above — no Excel import needed
 
+        # Benefits: fill the per-period model from the legacy fields, date old
+        # uses, and the one-time catalog fixes (core/benefits.py backfill).
+        try:
+            from core.benefits import backfill as _benefits_backfill
+            n = _benefits_backfill(session)
+            if any(n.values()):
+                logger.info(f"Benefits backfill: {n}")
+        except Exception as ben_err:
+            session.rollback()
+            logger.warning(f"benefits backfill failed: {ben_err}")
+            import traceback
+            traceback.print_exc()
+
         # 2027 earning engine: merchant category tree, brands and earn rules
         # every startup; the merchant rule list only the first time.
         try:
@@ -1118,6 +1131,16 @@ async def cards_portfolio(db: Session = Depends(get_db)):
         last = _calendar.monthrange(ny, nm)[1]
         return _date(ny, nm, min(d, last))
 
+    # Benefits for every card in one pass (core/benefits.py): this year's credit
+    # value and what's still usable, on the same basis.
+    from core.benefits import for_cards as _benefits_for_cards
+    try:
+        _ben_by_card = _benefits_for_cards(db, list(card_by_account.values()))
+    except Exception:
+        logger.exception('benefits for earn-summary failed')
+        db.rollback()
+        _ben_by_card = {}
+
     cards_out = []
     total_annual_fees = 0.0
     total_annual_credits = 0.0
@@ -1163,25 +1186,17 @@ async def cards_portfolio(db: Session = Depends(get_db)):
         benefit_total = 0.0
         benefit_remaining = 0.0
         benefits_list: list[dict] = []
-        if product and card:
-            try:
-                for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
-                    cycle = _current_cycle(b.reset_frequency or 'annual')
-                    usage = db.query(BenefitUsage).filter_by(
-                        benefit_id=b.id, card_id=card.id, cycle=cycle
-                    ).first()
-                    ser = _serialize_benefit(b, usage)
-                    benefits_list.append({
-                        'name': ser['benefit_name'],
-                        'amount': ser['amount'],
-                        'remaining': ser['remaining'],
-                        'pct_used': ser['pct_used'],
-                    })
-                    benefit_total += b.amount or 0.0
-                    benefit_remaining += ser['remaining']
-            except Exception:
-                logger.exception('Unexpected error — rolling back')
-                db.rollback()
+        _bp = _ben_by_card.get(card.id) if (product and card) else None
+        if _bp:
+            for x in _bp['benefits']:
+                benefits_list.append({
+                    'name': x['name'],
+                    'amount': x['year_value'],
+                    'remaining': x['year_left'],
+                    'pct_used': round(x['year_used'] / x['year_value'] * 100, 1) if x['year_value'] else 0.0,
+                })
+            benefit_total = _bp['totals']['value']
+            benefit_remaining = _bp['totals']['left']
         total_annual_credits += benefit_total
         total_annual_credits_remaining += benefit_remaining
 
@@ -3208,146 +3223,7 @@ async def recalc_challenge(challenge_id: int, db: Session = Depends(get_db)):
 
 
 
-@app.get("/api/cards/{card_id}/benefits")
-async def get_card_benefits(card_id: int, db: Session = Depends(get_db)):
-    """All benefits for the product linked to this card, with current-cycle usage.
-
-    'periodic' benefits with a sub-annual reset_frequency (monthly/quarterly/
-    semi-annual) also get a `cycles` array — every period in the current year
-    with its used/unused state — so the frontend can render a checkbox grid
-    instead of a single current-cycle progress bar. 'by_use' benefits and
-    annual/calendar_year ones get no `cycles` (single-instance treatment).
-    """
-    card = db.query(Card).filter_by(id=card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Card not found")
-    if not card.product_id:
-        return []
-    benefits = (db.query(CardBenefit)
-                  .filter_by(product_id=card.product_id)
-                  .order_by(CardBenefit.amount.desc(), CardBenefit.benefit_name)
-                  .all())
-    result = []
-    for b in benefits:
-        frequency = b.reset_frequency or 'annual'
-        cycle = _current_cycle(frequency)
-        usage = db.query(BenefitUsage).filter_by(
-            benefit_id=b.id, card_id=card_id, cycle=cycle
-        ).first()
-        ser = _serialize_benefit(b, usage)
-        if (b.tracking_type or 'periodic') == 'periodic' and frequency in ('monthly', 'quarterly', 'semi-annual'):
-            from datetime import date as _date
-            year = _date.today().year
-            cycles = _cycles_for_year(frequency, year)
-            usages_by_cycle = {
-                u.cycle: u for u in db.query(BenefitUsage).filter(
-                    BenefitUsage.benefit_id == b.id,
-                    BenefitUsage.card_id == card_id,
-                    BenefitUsage.cycle.in_(cycles),
-                ).all()
-            }
-            ser['cycles'] = [{
-                'cycle': c,
-                'used': bool(usages_by_cycle.get(c) and usages_by_cycle[c].amount_used > 0),
-                'amount_used': usages_by_cycle[c].amount_used if usages_by_cycle.get(c) else 0,
-                'usage_id': usages_by_cycle[c].id if usages_by_cycle.get(c) else None,
-            } for c in cycles]
-        result.append(ser)
-    return result
-
-
-@app.post("/api/card-products/{product_id}/benefits")
-async def create_benefit(product_id: int, body: dict, db: Session = Depends(get_db)):
-    prod = db.query(CardProduct).filter_by(id=product_id).first()
-    if not prod:
-        raise HTTPException(status_code=404, detail="Card product not found")
-    b = CardBenefit(
-        product_id=product_id,
-        benefit_name=(body.get('benefit_name') or '').strip(),
-        amount=float(body.get('amount') or 0),
-        reset_frequency=body.get('reset_frequency') or 'annual',
-        trigger_category=body.get('trigger_category') or None,
-        notes=body.get('notes') or None,
-        tracking_type=body.get('tracking_type') or 'periodic',
-    )
-    if not b.benefit_name:
-        raise HTTPException(status_code=400, detail="benefit_name is required")
-    db.add(b)
-    db.commit()
-    db.refresh(b)
-    return _serialize_benefit(b, None)
-
-
-@app.patch("/api/benefits/{benefit_id}")
-async def update_benefit(benefit_id: int, body: dict, db: Session = Depends(get_db)):
-    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail="Benefit not found")
-    if 'benefit_name' in body:
-        b.benefit_name = (body['benefit_name'] or '').strip()
-    if 'amount' in body:
-        b.amount = float(body['amount'] or 0)
-    if 'reset_frequency' in body:
-        b.reset_frequency = body['reset_frequency'] or 'annual'
-    if 'trigger_category' in body:
-        b.trigger_category = body['trigger_category'] or None
-    if 'notes' in body:
-        b.notes = body['notes'] or None
-    if 'tracking_type' in body:
-        b.tracking_type = body['tracking_type'] or 'periodic'
-    db.commit()
-    cycle = _current_cycle(b.reset_frequency or 'annual')
-    usage = db.query(BenefitUsage).filter_by(benefit_id=b.id, cycle=cycle).first()
-    return _serialize_benefit(b, usage)
-
-
-@app.delete("/api/benefits/{benefit_id}")
-async def delete_benefit(benefit_id: int, db: Session = Depends(get_db)):
-    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail="Benefit not found")
-    db.delete(b)
-    db.commit()
-    return {"deleted": True}
-
-
-@app.put("/api/benefits/{benefit_id}/usage")
-async def upsert_benefit_usage(benefit_id: int, body: dict, db: Session = Depends(get_db)):
-    """Create or update usage for a benefit in the current (or specified) cycle."""
-    b = db.query(CardBenefit).filter_by(id=benefit_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail="Benefit not found")
-    card_id    = body.get('card_id')
-    cycle      = body.get('cycle') or _current_cycle(b.reset_frequency or 'annual')
-    amt_used   = float(body.get('amount_used', 0))
-    confirmed  = bool(body.get('confirmed', True))
-    notes      = body.get('notes') or None
-    usage = db.query(BenefitUsage).filter_by(
-        benefit_id=benefit_id, card_id=card_id, cycle=cycle
-    ).first()
-    if usage:
-        usage.amount_used = amt_used
-        usage.confirmed   = confirmed
-        usage.notes       = notes
-    else:
-        usage = BenefitUsage(
-            benefit_id=benefit_id, card_id=card_id, cycle=cycle,
-            amount_used=amt_used, confirmed=confirmed, notes=notes,
-        )
-        db.add(usage)
-    db.commit()
-    db.refresh(usage)
-    return _serialize_benefit(b, usage)
-
-
-@app.delete("/api/benefit-usage/{usage_id}")
-async def delete_benefit_usage(usage_id: int, db: Session = Depends(get_db)):
-    u = db.query(BenefitUsage).filter_by(id=usage_id).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="Usage record not found")
-    db.delete(u)
-    db.commit()
-    return {"deleted": True}
+# The benefit routes moved to routers/benefits.py (2026-11-10).
 
 
 # ---------------------------------------------------------------------------
@@ -3827,6 +3703,7 @@ import uuid as _uuid
 # permanently.
 # ---------------------------------------------------------------------------
 from routers.points_ledger import router as points_ledger_router
+from routers.benefits import router as benefits_router
 from routers.misc import router as misc_router
 from routers.loans import router as loans_router
 from routers.cash_flow import router as cash_flow_router
@@ -3855,6 +3732,7 @@ app.include_router(accounts_router)
 app.include_router(earning_router)
 app.include_router(categories_router)
 app.include_router(points_ledger_router)
+app.include_router(benefits_router)
 
 
 

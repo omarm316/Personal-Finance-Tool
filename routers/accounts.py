@@ -381,15 +381,13 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         monthly_spend.append({'month': f"{int(yr)}-{int(mo):02d}", 'amount': round(abs(total or 0), 2)})
 
     # Benefits
+    # This year's credits, on the Card page's model (core/benefits.py); the
+    # Card page itself reads /api/cards/{id}/benefits.
     benefits = []
     if product and card:
         try:
-            for b in sorted(product.benefits, key=lambda x: -(x.amount or 0)):
-                cycle = _current_cycle(b.reset_frequency or 'annual')
-                usage = db.query(BenefitUsage).filter_by(
-                    benefit_id=b.id, card_id=card.id, cycle=cycle
-                ).first()
-                benefits.append(_serialize_benefit(b, usage))
+            from core.benefits import for_card as _benefits_for_card
+            benefits = _benefits_for_card(db, card)['benefits']
         except Exception:
             benefits = []
             db.rollback()

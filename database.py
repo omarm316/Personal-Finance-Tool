@@ -597,20 +597,32 @@ class CardBenefit(Base):
     trigger_category = Column(String(100), nullable=True)      # Spending category that triggers the credit (if any)
     notes = Column(Text, nullable=True)
     tracking_type = Column(String(20), default='periodic')     # "periodic" (usage tracker) or "by_use" (no cadence)
+    # The model the Card page uses (docs/cards-card-design.md, core/benefits.py).
+    # reset_frequency and tracking_type above are legacy; startup fills these from them once.
+    cadence = Column(String(20))       # monthly | quarterly | semiannual | annual | multi_year | per_use
+    year_type = Column(String(10))     # calendar | card (the card's anniversary, from Card.issue_date)
+    every_years = Column(Float)        # multi_year only, e.g. 4 for Global Entry
+    match_text = Column(String(200))   # statement credits containing this are auto-tracked; '' = log by hand
+    remind = Column(Boolean)           # remind 7 days before an unused credit resets (stored; nothing sends yet)
 
     product = relationship("CardProduct", back_populates="benefits")
     usage = relationship("BenefitUsage", back_populates="benefit", cascade="all, delete-orphan")
 
 
 class BenefitUsage(Base):
-    """Tracks per-cycle usage of a card benefit."""
+    """One use of a card benefit, logged in the app: by hand, or from the purchase
+    it paid for (transaction_id). Statement credits are not stored here; they are
+    matched live from transactions (core/benefits.py). Rows from before
+    2026-11-10 were one total per cycle; startup dated each at its cycle's start."""
     __tablename__ = 'benefit_usage'
 
     id = Column(Integer, primary_key=True)
     benefit_id = Column(Integer, ForeignKey('card_benefits.id', ondelete='CASCADE'), nullable=False)
     card_id = Column(Integer, ForeignKey('cards.id', ondelete='CASCADE'), nullable=True)  # Which physical card used it
-    cycle = Column(String(20), nullable=False)                 # "2026", "2026-H1", "2026-03" depending on frequency
-    amount_used = Column(Float, default=0)                     # How much of the benefit has been used
+    cycle = Column(String(20), nullable=False)                 # Legacy period key ("2026", "2026-H1", "2026-03"); new rows store the period start
+    amount_used = Column(Float, default=0)                     # The amount of this use
+    use_date = Column(Date)                                    # The day it was used; decides its period
+    transaction_id = Column(Integer, index=True)               # The purchase this use paid for (Log credit use)
     confirmed = Column(Boolean, default=False)                 # User-confirmed usage
     notes = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1304,12 +1316,19 @@ def run_migrations(engine):
             ('trigger_category', 'VARCHAR(100)'),
             ('notes',            'TEXT'),
             ('tracking_type',    'VARCHAR(20)'),  # no default — NULL means "needs classifying", see backfill below
+            ('cadence',          'VARCHAR(20)'),
+            ('year_type',        'VARCHAR(10)'),
+            ('every_years',      'FLOAT'),
+            ('match_text',       'VARCHAR(200)'),
+            ('remind',           'BOOLEAN'),
         ],
         'benefit_usage': [
             ('card_id',    'INTEGER'),
             ('confirmed',  'BOOLEAN DEFAULT FALSE'),
             ('notes',      'TEXT'),
             ('updated_at', 'TIMESTAMP DEFAULT NOW()'),
+            ('use_date',   'DATE'),
+            ('transaction_id', 'INTEGER'),
         ],
         'redemptions': [
             ('person', 'VARCHAR(100)'),
@@ -1928,14 +1947,20 @@ def seed_card_products(session):
          {"_base": 1, "Amazon": 4, "Groceries": 1, "Dining": 1, "Gas Stations": 1}),
 
         ("amex_platinum", "Amex Platinum", "Amex MR", "active", 695, [
-            ("$200 Airline Fee Credit", 200, "calendar_year", "Airlines"),
-            ("$200 Hotel Credit (FHR/THC)", 200, "calendar_year", "Hotels"),
-            ("$200 Uber Cash", 200, "annual", "Rideshare: Uber"),
-            ("$155 Walmart+ Credit", 155, "annual", "Walmart"),
-            ("$240 Digital Entertainment", 240, "annual", None),
-            ("$189 CLEAR Plus Credit", 189, "annual", None),
-            ("$100 Saks Credit", 100, "annual", None),
-            ("Global Entry/TSA PreCheck", 100, "every_4.5_years", None),
+            # 2026 credits (statements and terms checked 2026-11-10; Saks ended June 30, 2026).
+            # Production got these through core/benefits.py backfill(), with match texts.
+            ("Hotel credit", 300, "semi-annual", "Hotels"),
+            ("Resy dining credit", 100, "quarterly", "Dining"),
+            ("lululemon credit", 75, "quarterly", None),
+            ("Digital entertainment credit", 25, "monthly", None),
+            ("Uber Cash", 15, "monthly", "Rideshare: Uber"),
+            ("Walmart+ credit", 12.95, "monthly", "Walmart"),
+            ("Equinox credit", 300, "annual", None),
+            ("CLEAR Plus credit", 209, "annual", None),
+            ("Airline fee credit", 200, "annual", "Airlines"),
+            ("Uber One credit", 120, "annual", None),
+            ("Oura Ring credit", 200, "annual", None),
+            ("Global Entry or TSA PreCheck credit", 120, "every_4_years", None),
             ("Centurion Lounge Access", 0, "annual", None),
         ], {"_base": 1, "Airlines": 4, "Amex Travel Hotels": 4}),
         # 5x flights (direct or Amex Travel, $500K/yr cap not enforced) and 5x
@@ -2361,36 +2386,25 @@ def seed_card_products(session):
                     multiplier=additional, is_base_rate=False, reward_type='fixed',
                 ))
 
-        # Refresh benefits only if the seed defines any (preserves manually-added ones
-        # when benefits list is empty — use explicit None sentinel if you want to clear).
-        # Upsert-by-name rather than delete-and-recreate: this function runs on every
-        # startup, and CardBenefit.id is referenced by BenefitUsage (cascade-deletes on
-        # remove) and by the frontend — deleting-and-recreating wiped usage history and
-        # handed out new ids every restart.
-        if benefits:
-            existing_by_name = {
-                b.benefit_name: b for b in
-                session.query(CardBenefit).filter_by(product_id=product.id).all()
-            }
+        # Benefits are seeded only into a product that has none yet. After that
+        # the database owns them: the Card page edits, adds and deletes benefits
+        # (2026-11-10), and this function runs on every startup, so writing the
+        # seed's figures back (as it did until then) would undo every edit and
+        # bring back every deleted benefit. Fix a seeded product's benefits in
+        # the app, or with a one-time step in core/benefits.py backfill().
+        if benefits and not session.query(CardBenefit).filter_by(product_id=product.id).first():
             for ben_tuple in benefits:
                 ben_name, amount, frequency, trigger = ben_tuple[:4]
                 ben_notes = ben_tuple[4] if len(ben_tuple) > 4 else None
-                existing = existing_by_name.get(ben_name)
-                if existing:
-                    existing.amount = amount
-                    existing.reset_frequency = frequency
-                    existing.trigger_category = trigger
-                    existing.notes = ben_notes
-                else:
-                    session.add(CardBenefit(
-                        product_id=product.id,
-                        benefit_name=ben_name,
-                        amount=amount,
-                        reset_frequency=frequency,
-                        trigger_category=trigger,
-                        notes=ben_notes,
-                        tracking_type=_infer_tracking_type(ben_name, frequency),
-                    ))
+                session.add(CardBenefit(
+                    product_id=product.id,
+                    benefit_name=ben_name,
+                    amount=amount,
+                    reset_frequency=frequency,
+                    trigger_category=trigger,
+                    notes=ben_notes,
+                    tracking_type=_infer_tracking_type(ben_name, frequency),
+                ))
 
     session.commit()
     print(f"Card products seeded: {session.query(CardProduct).count()} products in catalog")

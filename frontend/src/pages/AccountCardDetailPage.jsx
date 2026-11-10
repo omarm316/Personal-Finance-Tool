@@ -4,6 +4,7 @@ import {SkeletonTable} from '../components/SkeletonTable';
 import {apiFetch} from '../lib/api';
 import {TXN_TYPES} from '../lib/constants';
 import {fmt,fmtDate} from '../lib/format';
+import {useCardBenefits,ExpiringCredits,BenefitsPanel,LogCreditUse,LinkedMark} from '../components/benefits/Benefits';
 
 export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFilter}){
   const[d,setD]=useState(null);
@@ -64,17 +65,10 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
   const[assigningMerchant,setAssigningMerchant]=useState(null);
   const[assignCscVal,setAssignCscVal]=useState('');
   const[assignLoading,setAssignLoading]=useState(false);
-  // Benefits state
-  const[cardBenefits,setCardBenefits]=useState([]);
-  const[benefitsLoading,setBenefitsLoading]=useState(false);
-  const[showBenefitModal,setShowBenefitModal]=useState(false);
-  const[editingBenefitId,setEditingBenefitId]=useState(null);
-  const[benefitForm,setBenefitForm]=useState({benefit_name:'',amount:'',reset_frequency:'annual',tracking_type:'periodic',trigger_category:'',notes:''});
-  const[logUsageFor,setLogUsageFor]=useState(null);   // benefit id currently being logged
-  const[logUsageAmt,setLogUsageAmt]=useState('');
-  const[logUsageNotes,setLogUsageNotes]=useState('');
-  const[benefitSaving,setBenefitSaving]=useState(false);
-  const[togglingCycle,setTogglingCycle]=useState(null);   // benefit id currently mid-toggle (disables its grid)
+  // Benefits (core/benefits.py via /api/cards/{id}/benefits; components/benefits)
+  const[lcTxn,setLcTxn]=useState(null);   // the purchase row open in Log credit use
+  const benefitsRef=useRef(null);
+  const ben=useCardBenefits(d?.card?.id,{toast,reloadKey:txns});   // reloads after row edits (Exclude, type)
   // Card product change + history state
   const[allCardProducts,setAllCardProducts]=useState([]);
   const[productHistory,setProductHistory]=useState([]);
@@ -353,13 +347,6 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
     apiFetch('/points-categories').then(cats=>setPointsCategories(cats)).catch(()=>{});
   },[]);
 
-  const loadBenefits=async(cardId)=>{
-    if(!cardId)return;
-    setBenefitsLoading(true);
-    try{const r=await apiFetch(`/cards/${cardId}/benefits`);setCardBenefits(r);}
-    catch(e){toast('Failed to load benefits','error');}
-    finally{setBenefitsLoading(false);}
-  };
   // Card product change + history — lets a card's linked product be swapped
   // (e.g. issuer product-changes Bonvoy Boundless → Ritz-Carlton) while
   // keeping the same account/card and all its transaction history. Past
@@ -391,83 +378,11 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
     }catch(e){toast('Change failed: '+(e?.message||''),'error');}
     finally{setChangingProduct(false);}
   };
-  const saveBenefit=async()=>{
-    if(!benefitForm.benefit_name.trim()){toast('Benefit name required','error');return;}
-    if(!d?.product?.id){toast('No product linked to this card','error');return;}
-    setBenefitSaving(true);
-    try{
-      if(editingBenefitId){
-        await apiFetch(`/benefits/${editingBenefitId}`,{method:'PATCH',body:JSON.stringify({...benefitForm,amount:parseFloat(benefitForm.amount)||0})});
-      }else{
-        await apiFetch(`/card-products/${d.product.id}/benefits`,{method:'POST',body:JSON.stringify({...benefitForm,amount:parseFloat(benefitForm.amount)||0})});
-      }
-      setShowBenefitModal(false);
-      loadBenefits(d.card.id);
-    }catch(e){toast('Save failed: '+(e?.message||''),'error');}
-    finally{setBenefitSaving(false);}
-  };
-  const deleteBenefit=async(id,name)=>{
-    if(!window.confirm(`Delete benefit "${name}"?`))return;
-    try{
-      await apiFetch(`/benefits/${id}`,{method:'DELETE'});
-      setCardBenefits(prev=>prev.filter(b=>b.id!==id));
-    }catch(e){toast('Delete failed: '+(e?.message||''),'error');}
-  };
-  const logUsage=async(benefitId,amtStr,notes)=>{
-    const amt=parseFloat(amtStr);
-    if(isNaN(amt)||amt<0){toast('Enter a valid amount','error');return;}
-    setBenefitSaving(true);
-    try{
-      await apiFetch(`/benefits/${benefitId}/usage`,{method:'PUT',body:JSON.stringify({
-        card_id:d.card.id, amount_used:amt, confirmed:true, notes:notes||null,
-      })});
-      setLogUsageFor(null);setLogUsageAmt('');setLogUsageNotes('');
-      loadBenefits(d.card.id);
-    }catch(e){toast('Failed: '+(e?.message||''),'error');}
-    finally{setBenefitSaving(false);}
-  };
-  const clearUsage=async(usageId,benefitId)=>{
-    if(!window.confirm('Clear usage for this benefit?'))return;
-    try{
-      await apiFetch(`/benefit-usage/${usageId}`,{method:'DELETE'});
-      loadBenefits(d.card.id);
-    }catch(e){toast('Failed: '+(e?.message||''),'error');}
-  };
-  // One-click toggle for a single period in a periodic benefit's usage grid —
-  // marks the full amount used, or un-marks by deleting the usage row.
-  const toggleBenefitCycle=async(b,cy)=>{
-    setTogglingCycle(`${b.id}`);
-    try{
-      if(cy.used&&cy.usage_id){
-        await apiFetch(`/benefit-usage/${cy.usage_id}`,{method:'DELETE'});
-      }else{
-        await apiFetch(`/benefits/${b.id}/usage`,{method:'PUT',body:JSON.stringify({
-          card_id:d.card.id, cycle:cy.cycle, amount_used:b.amount, confirmed:true,
-        })});
-      }
-      loadBenefits(d.card.id);
-    }catch(e){toast('Failed: '+(e?.message||''),'error');}
-    finally{setTogglingCycle(null);}
-  };
-  const nextResetLabel=(freq)=>{
-    const now=new Date();const y=now.getFullYear();const mo=now.getMonth()+1;
-    const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    if(freq==='monthly'){const ld=new Date(y,mo,0).getDate();return`${mn[mo-1]} ${ld}`;}
-    if(freq==='quarterly'){const qe=Math.ceil(mo/3)*3;const ld=new Date(y,qe,0).getDate();return`${mn[qe-1]} ${ld}`;}
-    if(freq==='semi-annual'){return mo<=6?`Jun 30`:`Dec 31`;}
-    return`Dec 31, ${y}`;
-  };
-  const annualValue=(b)=>{
-    if(!b.amount)return 0;
-    const f=b.reset_frequency;
-    return f==='monthly'?b.amount*12:f==='quarterly'?b.amount*4:f==='semi-annual'?b.amount*2:b.amount;
-  };
-
   useEffect(()=>{load();},[accountId]);
   useEffect(()=>{if(d)load(spendPeriod,true);},[spendPeriod]);
   // When card detail loads, load challenges + benefits for this card
   useEffect(()=>{
-    if(d?.card?.id){loadChallenges(d.card.id);loadBenefits(d.card.id);loadProductHistory(d.card.id);}
+    if(d?.card?.id){loadChallenges(d.card.id);loadProductHistory(d.card.id);}
   },[d?.card?.id]);
   // Full product catalog, for the Change Product picker
   useEffect(()=>{
@@ -757,69 +672,6 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
     </div>
   );
 
-  const BenefitModal=showBenefitModal&&(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div className="card" style={{width:440,maxWidth:'94vw',padding:0}}>
-        <div style={{padding:'18px 24px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div style={{fontSize:16,fontWeight:400}}>{editingBenefitId?'Edit Benefit':'Add Benefit'}</div>
-          <button type="button" onClick={()=>setShowBenefitModal(false)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'var(--text-muted)'}}>×</button>
-        </div>
-        <div style={{padding:'18px 24px',display:'flex',flexDirection:'column',gap:12}}>
-          {[
-            {label:'Benefit Name *',key:'benefit_name',type:'text',placeholder:'e.g. Airline Credit'},
-            {label:'Amount ($)',key:'amount',type:'number',placeholder:'0 for non-monetary perks'},
-          ].map(({label,key,type,placeholder})=>(
-            <div key={key}>
-              <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>{label}</label>
-              <input type={type} value={benefitForm[key]} onChange={e=>setBenefitForm(f=>({...f,[key]:e.target.value}))}
-                placeholder={placeholder}
-                style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',boxSizing:'border-box'}}/>
-            </div>
-          ))}
-          <div>
-            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Reset Frequency</label>
-            <select value={benefitForm.reset_frequency} onChange={e=>setBenefitForm(f=>({...f,reset_frequency:e.target.value}))}
-              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
-              <option value='annual'>Annual (Jan 1 – Dec 31)</option>
-              <option value='calendar_year'>Calendar Year (same as annual)</option>
-              <option value='semi-annual'>Semi-Annual (Jan–Jun / Jul–Dec)</option>
-              <option value='quarterly'>Quarterly</option>
-              <option value='monthly'>Monthly</option>
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Tracking Type</label>
-            <select value={benefitForm.tracking_type} onChange={e=>setBenefitForm(f=>({...f,tracking_type:e.target.value}))}
-              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
-              <option value='periodic'>Periodic — use-it-or-lose-it each cycle (gets a usage tracker)</option>
-              <option value='by_use'>By Use — doesn't expire on a cadence (e.g. Global Entry, per-stay credit)</option>
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Trigger Category <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
-            <select value={benefitForm.trigger_category} onChange={e=>setBenefitForm(f=>({...f,trigger_category:e.target.value}))}
-              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)'}}>
-              <option value=''>None — any spend / manual</option>
-              {allCscs.map(c=><option key={c.name||c} value={c.name||c}>{c.name||c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:12,fontWeight:500,display:'block',marginBottom:4}}>Notes <span style={{fontWeight:400,color:'var(--text-muted)'}}>optional</span></label>
-            <textarea value={benefitForm.notes} onChange={e=>setBenefitForm(f=>({...f,notes:e.target.value}))}
-              rows={2} placeholder='e.g. Book via Amex Travel portal'
-              style={{width:'100%',fontSize:13,padding:'7px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',resize:'vertical',boxSizing:'border-box'}}/>
-          </div>
-        </div>
-        <div style={{padding:'12px 24px 18px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)'}}>
-          <button type="button" className="btn btn-ghost" onClick={()=>setShowBenefitModal(false)}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={saveBenefit} disabled={benefitSaving}>
-            {benefitSaving?'Saving…':editingBenefitId?'Save Changes':'Add Benefit'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
   const ChangeProductModal=showChangeProductModal&&(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center'}}>
       <div className="card" style={{width:440,maxWidth:'94vw',padding:0}}>
@@ -861,7 +713,8 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
   return(
     <div style={{width:'100%'}}>
       {ChallengeModal}
-      {BenefitModal}
+      {lcTxn&&ben.B&&<LogCreditUse t={lcTxn} cardId={d.card.id} B={ben.B} toast={toast}
+        onClose={()=>setLcTxn(null)} onSaved={b=>{ben.setB(b);setLcTxn(null);}}/>}
       {ChangeProductModal}
       {DeleteConfirm}
       {/* Hero */}
@@ -925,6 +778,10 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
         <div style={{fontSize:14,fontWeight:500,color:'var(--amber)',marginBottom:4}}>No Card Product Linked</div>
         <div style={{fontSize:13,color:'var(--amber)'}}>Link this account to a card product to see earning rates, benefits, and point valuations. Use the "Link Product" button above, or go back and use the product dropdown.</div>
       </div>}
+
+      {/* Expiring credits (docs/cards-card-design.md): open credits that reset within 60 days. */}
+      {d?.card?.id&&ben.B&&ben.B.benefits.length>0&&<ExpiringCredits B={ben.B} setB={ben.setB} cardId={d.card.id} toast={toast}
+        onToBenefits={()=>benefitsRef.current&&benefitsRef.current.scrollIntoView({block:'start',behavior:'smooth'})}/>}
 
       {(c||p)&&<div className="grid-4" style={{marginBottom:24}}>
         {/* Annual Fee — nets against 'Fees & Interest'-categorized credits for the
@@ -1106,141 +963,9 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
         </div>
       </div>}
 
-      {/* Benefits & Credits — dollar-value credits and certificates only.
-           Earn-rate bonuses (e.g. "5x Rotating") and items with no dollar value
-           are excluded here; they belong in Spend Challenges instead. */}
-      <div className="card" style={{padding:20,marginBottom:24}}>
-        {(()=>{
-          // Filter to actual dollar credits: must have a $1+ amount and must not
-          // look like an earn-rate multiplier (e.g. "5x", "3x on Dining").
-          const isCreditBenefit=b=>(b.amount||0)>=1&&!/^\d+(\.\d+)?x\b/i.test(b.benefit_name||'');
-          const creditBenefits=cardBenefits.filter(isCreditBenefit);
-          return(<>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-          <div>
-            <div style={{fontSize:15,fontWeight:500}}>Benefits &amp; Credits</div>
-            {creditBenefits.length>0&&(()=>{
-              const totalAnnual=creditBenefits.reduce((s,b)=>s+annualValue(b),0);
-              const totalUsed=creditBenefits.reduce((s,b)=>s+(b.amount_used||0),0);
-              const totalRemaining=creditBenefits.reduce((s,b)=>s+(b.remaining>0?b.remaining:0),0);
-              return<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
-                ${totalAnnual.toLocaleString()} annual value · <span style={{color:'var(--green)',fontWeight:500}}>${totalUsed.toLocaleString(undefined,{maximumFractionDigits:0})} used</span> · ${totalRemaining.toLocaleString(undefined,{maximumFractionDigits:0})} remaining
-              </div>;
-            })()}
-          </div>
-          {d?.product?.id&&<button type="button" className="btn btn-ghost" style={{fontSize:12}}
-            onClick={()=>{setEditingBenefitId(null);setBenefitForm({benefit_name:'',amount:'',reset_frequency:'annual',tracking_type:'periodic',trigger_category:'',notes:''});setShowBenefitModal(true);}}>
-            + Add Benefit
-          </button>}
-        </div>
-        {benefitsLoading
-          ?<div style={{padding:20,textAlign:'center'}}><div className="spinner"/></div>
-          :creditBenefits.length===0
-            ?<div style={{padding:'12px 0',color:'var(--text-muted)',fontSize:13,textAlign:'center'}}>
-                No benefits configured.{d?.product?.id&&<span> Click <strong>+ Add Benefit</strong> to add one.</span>}
-              </div>
-            :<div style={{display:'flex',flexDirection:'column',gap:10}}>
-              {creditBenefits.map(b=>{
-                const isLogging=logUsageFor===b.id;
-                const fullyUsed=b.amount>0&&b.amount_used>=b.amount;
-                const hasUsage=b.amount_used>0;
-                const statusColor=fullyUsed?'#15803d':hasUsage?'#b45309':'var(--text-muted)';
-                const statusIcon=fullyUsed?'✅':hasUsage?'🟡':'⬜';
-                const freqLabel={annual:'/ year',calendar_year:'/ year','semi-annual':'/ half-year',quarterly:'/ quarter',monthly:'/ month'}[b.reset_frequency]||'/ year';
-                return(
-                  <div key={b.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',background:fullyUsed?'rgba(52,211,153,0.06)':'var(--surface)'}}>
-                    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8,marginBottom:8}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                          <span style={{fontWeight:500,fontSize:14}}>{b.benefit_name}</span>
-                          {b.amount>0&&<span style={{fontSize:13,fontFamily:'Plus Jakarta Sans',color:'var(--green)',fontWeight:400}}>${b.amount.toLocaleString()}</span>}
-                          <span style={{fontSize:11,color:'var(--text-muted)'}}>{freqLabel}</span>
-                          {b.trigger_category&&<span style={{fontSize:10,padding:'1px 6px',background:'var(--violet-soft)',color:'var(--violet)',borderRadius:4}}>{b.trigger_category}</span>}
-                        </div>
-                        {b.notes&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{b.notes}</div>}
-                      </div>
-                      <div style={{display:'flex',gap:4,flexShrink:0}}>
-                        <button type="button" onClick={()=>{setEditingBenefitId(b.id);setBenefitForm({benefit_name:b.benefit_name,amount:String(b.amount),reset_frequency:b.reset_frequency,tracking_type:b.tracking_type||'periodic',trigger_category:b.trigger_category||'',notes:b.notes||''});setShowBenefitModal(true);}}
-                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>✎</button>
-                        <button type="button" onClick={()=>deleteBenefit(b.id,b.benefit_name)}
-                          style={{fontSize:10,padding:'2px 7px',borderRadius:4,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>×</button>
-                      </div>
-                    </div>
-                    {b.amount>0&&b.cycles&&(()=>{
-                      const cycleLabels=b.reset_frequency==='monthly'
-                        ?['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-                        :b.reset_frequency==='quarterly'?['Q1','Q2','Q3','Q4']:['H1','H2'];
-                      const usedCount=b.cycles.filter(c=>c.used).length;
-                      const isToggling=togglingCycle===`${b.id}`;
-                      return(
-                        <div style={{marginBottom:8}}>
-                          <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:5}}>
-                            <span style={{color:'var(--text-muted)',fontWeight:500}}>{usedCount} of {b.cycles.length} used this year</span>
-                          </div>
-                          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-                            {b.cycles.map((cy,i)=>(
-                              <button key={cy.cycle} type="button" disabled={isToggling}
-                                onClick={()=>toggleBenefitCycle(b,cy)}
-                                title={cy.used?`Used — click to un-mark`:`Click to mark used ($${b.amount})`}
-                                style={{fontSize:10,fontWeight:500,padding:'4px 0',width:32,borderRadius:5,cursor:isToggling?'wait':'pointer',
-                                  border:cy.used?'1px solid #16a34a':'1px solid var(--border)',
-                                  background:cy.used?'rgba(52,211,153,0.15)':'var(--bg)',
-                                  color:cy.used?'#15803d':'var(--text-muted)'}}>
-                                {cy.used?'✓':cycleLabels[i]}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    {b.amount>0&&!b.cycles&&(
-                      <div style={{marginBottom:8}}>
-                        <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
-                          <span style={{color:statusColor,fontWeight:500}}>{statusIcon} {hasUsage?`$${b.amount_used.toLocaleString(undefined,{maximumFractionDigits:0})} used`:'Unused'}</span>
-                          {b.tracking_type!=='by_use'&&<span style={{color:'var(--text-muted)'}}>Resets {nextResetLabel(b.reset_frequency)}</span>}
-                        </div>
-                        <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
-                          <div style={{height:'100%',width:`${Math.min(100,b.pct_used)}%`,background:fullyUsed?'#16a34a':'var(--blue-primary)',borderRadius:3,transition:'width 0.4s ease'}}/>
-                        </div>
-                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2,textAlign:'right'}}>
-                          {b.pct_used}% of ${b.amount.toLocaleString()} · {b.remaining>0?`$${b.remaining.toLocaleString(undefined,{maximumFractionDigits:0})} remaining`:'Fully used 🎉'}
-                        </div>
-                      </div>
-                    )}
-                    {!b.cycles&&(isLogging?(
-                      <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',marginTop:4}}>
-                        <span style={{fontSize:12,color:'var(--text-muted)'}}>$</span>
-                        <input autoFocus type="number" min="0" step="0.01" value={logUsageAmt} onChange={e=>setLogUsageAmt(e.target.value)}
-                          placeholder="Amount used" style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',width:110}}/>
-                        <input type="text" value={logUsageNotes} onChange={e=>setLogUsageNotes(e.target.value)}
-                          placeholder="Notes (optional)" style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text-primary)',flex:1,minWidth:120}}/>
-                        <button type="button" onClick={()=>logUsage(b.id,logUsageAmt,logUsageNotes)} disabled={benefitSaving}
-                          style={{fontSize:12,padding:'4px 10px',borderRadius:5,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer',fontWeight:500}}>
-                          {benefitSaving?'…':'Save'}
-                        </button>
-                        <button type="button" onClick={()=>{setLogUsageFor(null);setLogUsageAmt('');setLogUsageNotes('');}}
-                          style={{fontSize:12,padding:'4px 8px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer'}}>Cancel</button>
-                      </div>
-                    ):(
-                      <div style={{display:'flex',gap:6,marginTop:4}}>
-                        <button type="button" onClick={()=>{setLogUsageFor(b.id);setLogUsageAmt(b.amount>0?String(b.amount_used||''):'');setLogUsageNotes('');}}
-                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-primary)',cursor:'pointer',fontWeight:500}}>
-                          {hasUsage?'Update Usage':'Log Usage'}
-                        </button>
-                        {b.usage_id&&<button type="button" onClick={()=>clearUsage(b.usage_id,b.id)}
-                          style={{fontSize:11,padding:'3px 10px',borderRadius:5,border:'1px solid rgba(248,113,113,0.3)',background:'none',color:'var(--red)',cursor:'pointer'}}>
-                          Clear
-                        </button>}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-        }
-          </>);
-        })()}
-      </div>
+      {/* Benefits and credits (docs/cards-card-design.md): per-period model,
+           statement-credit tracking, period detail and the edit side panel. */}
+      {d?.card?.id&&<BenefitsPanel B={ben.B} setB={ben.setB} cardId={d.card.id} productId={d?.product?.id} toast={toast} sectionRef={benefitsRef}/>}
 
       {/* Spend Challenges */}
       {c&&<div className="card" style={{padding:20,marginBottom:24}}>
@@ -1547,7 +1272,7 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
                         <th style={{padding:'6px 10px 8px',textAlign:'left',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Type</th>
                         {_th('amount','Amount','right')}
                         {_th('pts','Est. Pts','right')}
-                        <th style={{padding:'6px 10px 8px',textAlign:'center',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Exclude</th>
+                        <th style={{padding:'6px 10px 8px',textAlign:'center',fontSize:11,fontWeight:500,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.4px',whiteSpace:'nowrap'}}>Actions</th>
                       </tr>
                     );
                   })()}
@@ -1567,7 +1292,7 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
                           <input type="checkbox" checked={selectedTxnIds.has(t.id)} onChange={()=>toggleTxnSelected(t.id)}/>
                         </td>
                         <td style={{padding:'8px 10px',fontSize:12,color:'var(--text-muted)',fontFamily:'Plus Jakarta Sans',whiteSpace:'nowrap'}}>{mm}/{dd}</td>
-                        <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                        <td style={{padding:'8px 10px',fontSize:13,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}<LinkedMark links={ben.B?.linked_purchases?.[String(t.id)]}/></td>
                         <td style={{padding:'8px 10px',minWidth:140}}>
                           {isEditing?(
                             <div style={{display:'flex',gap:4,alignItems:'center'}}>
@@ -1658,7 +1383,10 @@ export function AccountCardDetailPage({accountId,onBack,toast,initialChallengeFi
                             </span>
                           )}
                         </td>
-                        <td style={{padding:'8px 10px',textAlign:'center'}}>
+                        <td style={{padding:'8px 10px',textAlign:'center',whiteSpace:'nowrap'}}>
+                          {t.amount<0&&ben.B&&ben.B.benefits.length>0&&<button type="button" title="Log credit use…" aria-label={`Log credit use for ${t.description}`}
+                            onClick={()=>{if(ben.B.linked_purchases?.[String(t.id)]){toast(`${t.description} is already linked to a credit`,'info');return;}setLcTxn(t);}}
+                            style={{fontSize:11,padding:'3px 8px',borderRadius:5,border:'1px solid var(--border)',background:'none',color:'var(--text-muted)',cursor:'pointer',fontWeight:500,marginRight:6}}>$ Credit</button>}
                           <button type="button" onClick={()=>toggleExcludeTxn(t)} disabled={excludingId===t.id}
                             title={t.is_excluded?'Include — resume earning points and SUB spend credit':'Exclude — zero points, no SUB spend credit'}
                             style={{fontSize:11,padding:'3px 9px',borderRadius:5,border:'1px solid '+(t.is_excluded?'var(--green)':'var(--border)'),
