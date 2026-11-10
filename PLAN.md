@@ -1,12 +1,31 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-11-08
+> Last updated: 2026-11-10
 
 ---
 
 > Session writeups through 2026-07-26 are archived in
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
+
+---
+
+## Session 2026-11-10 — B41 fixed and cleaned up
+
+Omer gave the go-ahead on the 2026-11-09 finding (below).
+- **Fix (`6d72101`):** `check_history_owners()` in `core/plaid_accounts.py`, called by `_sync_item` on every full download before rows are written. For each Plaid account with 5+ incoming rows, the active row at the same bank, last 4 and type holding at least 80% of them takes the Plaid ID (an emptied new row and its card are switched off). If another row holds 20% or more and the result is unclear, that account's rows are held back, the cursor stays empty and the connection shows `ACCOUNT_MATCH_UNCLEAR` until it is sorted out. It never takes a row that another working login syncs. Tests 166 passed.
+- **Cleanup (production, one transaction after a dry run):** 360 copies on 176 and 177 deleted, their live Plaid transaction IDs moved to the twins on 137 and 138; 9 real repeats moved to 137 (card 7) and 138 (card 1), points relocked; 137 and 138 carry the live Plaid account IDs; 176, 177 and cards 46, 47 switched off. Backup and script in the side-session notes folder.
+- **Next for Omer:** the CWT $8,823.39 category (Travel, or Work if reimbursed); + Add Account on American Express (Omer) to bring back BBP 1008, Hilton Honors 1008 and HY Savings 1820. After the next Amex sync, check the 137 and 138 balance gaps in `balance_observations`.
+
+---
+
+## Session 2026-11-09 — B41 investigated (read-only)
+
+Full finding, the month table, the proposed fix and the cleanup are in BACKLOG.md ("B41 finding"). Nothing was changed in production.
+- **Real duplicates:** 361 rows, all on accounts 176 and 177, which the Nov 8 Amex + Add Account created. 176 is **Platinum 1008 (137)** under a new Plaid ID that Plaid names "Blue Business Plus Card" (as in August, B31), not BBP. 177 is Hilton Aspire 2007 (138). They double-count $47,782.37 of net expenses from Dec 2025 to Nov 2026, $23,444.06 of it in September.
+- **Not duplicates:** the same-account repeats on Bilt 8961 and Business Gold 1000, plus 9 extras on 176 and 177 (20 rows). These are real repeat charges that the sync before `cb4e4cd` had folded together, given back by the Nov 8 full re-downloads. Each card's gap with Plaid's balance confirms it to the cent. The CWT $8,823.39 is a real charge on the new Business Platinum 1007.
+- **Gap in the 2026-11-08 matcher:** its step 3a matches by official name, so it would hand the reissued Platinum ID to BBP (135). The proposal is a content check on full re-downloads.
+- **Waiting on Omer:** go-ahead for the fix and the cleanup (merge 176 into 137 and 177 into 138), the CWT category, and adding BBP 1008, Hilton Honors 1008 and HY Savings 1820 back (Plaid stopped listing them on Nov 8), which should wait until the fix is in.
 
 ---
 
@@ -1195,5 +1214,5 @@ Same method as the Dashboard and Transactions: design gallery first, desktop onl
   - Month view: top levels start closed, open, or open when something inside is over budget; a top level's own row shows its name again or "General".
 - **Round 2 revised 2026-11-08** (same link, spec id still `budgets-r2` so picks in progress carry over). Omer: "spreadsheet" means a grid that looks like Excel cells, with thin borders and no padding, and it should free up room on the screen; the Annual view needs it most. The heat map and the Edit Year grid are now drawn as one Excel-style sheet: 1px gridlines, no cell padding, 22px rows, and the whole year fits on one screen at desktop width. New choices: column headers (Excel grey cells or small capitals), gridline color, row height, numbers ($1,200, 1,200, or accounting with the $ at the left edge and credits in brackets), total rows (a line above and a double line below, or grey), the selected cell's box (Excel green or app blue), frozen month headers, an Excel-style formula bar naming the selected cell, what sits above the sheet (one line of year totals, the four cards, or nothing), and sheet width (page margins or edge to edge). Also: the Month view's budget column as bordered cells; the year's budgets on a third option, Excel-style sheet tabs (Spent, Budgets) under the grid; and spending in the budgets sheet on hover, as a grey row under each category, or as a second line.
 - **Round 2 additions (2026-11-08), layout unchanged:** a "Conditional formatting" switch above the Spent sheet turns the heat-map colors off and on (the gallery's `cfStart` sets where it starts); padding inside the sheet's cells (slider, default 5px top and bottom, 9px at the sides; rows about 27px, whole year still fits); and, per Omer, **past months are locked for editing by default**. Budgets for months before the current one (and every month of a past year) show as shaded, read-only cells with a lock on the column header. Tab and pasting pass over them, and the Paste from Excel window and Copy from last year skip them. A "Past months locked" switch above the grid unlocks them. This applies in the budgets sheet, the heat map's editable cells, the Month view's budget column (a past month shows "October 2026 is past, so its budgets are locked") and the side panel's 12-month row.
-- **Data note (2026-11-08):** an Amex re-link that day added accounts 176 ("Blue Business Plus Card 1008", 177 rows) and 177 ("Hilton Honors Aspire Card 2007", 193 rows). About 95% of their rows are twins of rows on the existing Amex BBP 1008 and Hilton Aspire 2007 accounts. That is the cause behind B41. The gallery data leaves out accounts 176 and 177. Business Platinum 1007 (account 175) is new and stays in; its $8,823.39 CWT charge (2026-10-28) is uncategorized and shows under Other, so October now reads $19,953.10 spent.
+- **Data note (2026-11-08):** an Amex re-link that day added accounts 176 ("Blue Business Plus Card 1008", 177 rows) and 177 ("Hilton Honors Aspire Card 2007", 193 rows). About 95% of their rows are twins of rows on the existing Amex Platinum 1008 (not BBP, despite 176's name; corrected 2026-11-09) and Hilton Aspire 2007 accounts. That is the cause behind B41. The gallery data leaves out accounts 176 and 177. Business Platinum 1007 (account 175) is new and stays in; its $8,823.39 CWT charge (2026-10-28) is uncategorized and shows under Other, so October now reads $19,953.10 spent.
 - Waiting on round 2 picks.
