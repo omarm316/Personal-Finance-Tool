@@ -338,6 +338,126 @@ def test_full_redownload_after_new_ids_adds_no_duplicates(db_session):
     assert db_session.query(Account).filter_by(mask="1008", is_active=True).count() == 3
 
 
+# ── History check on full re-downloads (B41, Nov 8 2026) ─────────────────────
+
+_PLAT_HISTORY = [  # (day, amount stored, description)
+    (datetime(2026, 8, 10), -37.87, "AIR FRANCE"),
+    (datetime(2026, 8, 12), -14.50, "RESY CREDIT"),
+    (datetime(2026, 8, 20), -220.00, "SAKS FIFTH AVENUE"),
+    (datetime(2026, 9, 3), -61.12, "LULULEMON"),
+    (datetime(2026, 9, 15), -3.00, "NYCT PAYGO"),
+    (datetime(2026, 10, 1), 6892.64, "AUTOPAY PAYMENT - THANK YOU"),
+]
+
+
+def _stored(db, acct, pid, day, amount, desc):
+    db.add(Transaction(
+        plaid_transaction_id=pid, account_id=acct.id, date=day,
+        year=day.year, month=day.month, day=day.day, amount=amount,
+        description_raw=desc, description_clean=desc.title(), action="Expense",
+        category_auto="Shopping", needs_review=False,
+        content_hash=_assign_content_hash(db, acct.id, day, amount, desc),
+    ))
+    db.commit()
+
+
+def _incoming(plaid_acct, rows, prefix):
+    return [{"plaid_transaction_id": f"{prefix}-{i}", "plaid_account_id": plaid_acct,
+             "date": d, "amount": -amt, "description_raw": desc,
+             "merchant_name": None, "pending": False}
+            for i, (d, amt, desc) in enumerate(rows)]
+
+
+def _full_sync(db, item, added):
+    item.cursor = None
+    db.commit()
+    return asyncio.run(_sync_item(item, _FakePlaid({
+        "added": added, "modified": [], "removed": [], "next_cursor": "c-next",
+    }), db))
+
+
+def test_reissued_id_named_after_a_sibling_card_lands_on_the_right_row(db_session):
+    """Amex reissued Platinum 1008 under the name "Blue Business Plus Card"."""
+    item, rows = _amex_omer(db_session)
+    plat, bbp = rows["plat"], rows["bbp"]
+    for i, r in enumerate(_PLAT_HISTORY):
+        _stored(db_session, plat, f"old-plat-{i}", *r)
+    _stored(db_session, bbp, "old-bbp-0", datetime(2026, 9, 9), -42.00, "OFFICE DEPOT")
+
+    # The name step hands the reissued Platinum ID to BBP.
+    out = link_plaid_accounts(db_session, item, [_pa("plat-new", "1008", "Blue Business Plus Card")])
+    db_session.commit()
+    assert out.results[0]["account_id"] == bbp.id
+
+    repeat = (datetime(2026, 8, 10), -37.87, "AIR FRANCE")   # a real second ticket
+    added = _full_sync(db_session, item, _incoming("plat-new", _PLAT_HISTORY + [repeat], "p"))
+
+    db_session.refresh(plat); db_session.refresh(bbp)
+    assert plat.plaid_account_id == "plat-new" and plat.is_active
+    assert bbp.plaid_account_id is None and bbp.is_active   # keeps its own rows
+    assert added == 1                                       # only the real repeat
+    assert db_session.query(Transaction).filter_by(account_id=plat.id).count() == 7
+    assert db_session.query(Transaction).filter_by(account_id=bbp.id).count() == 1
+    assert item.cursor == "c-next" and item.last_error_code is None
+
+
+def test_history_on_a_new_empty_row_moves_back_and_the_empty_row_is_switched_off(db_session):
+    """What the old code did on Nov 8: a new row 176 for Platinum 1008."""
+    from database import Card
+    item, rows = _amex_omer(db_session)
+    plat = rows["plat"]
+    for i, r in enumerate(_PLAT_HISTORY):
+        _stored(db_session, plat, f"old-plat-{i}", *r)
+    copy = _acct(db_session, item, "plat-new", "1008", "Blue Business Plus Card",
+                 name="Blue Business Plus Card 1008")
+    card = Card(card_id="Blue Business Plus Card 1008", account_id=copy.id, is_active=True)
+    db_session.add(card); db_session.commit()
+
+    added = _full_sync(db_session, item, _incoming("plat-new", _PLAT_HISTORY, "p"))
+
+    db_session.refresh(plat); db_session.refresh(copy); db_session.refresh(card)
+    assert added == 0
+    assert plat.plaid_account_id == "plat-new"
+    assert not copy.is_active and copy.plaid_account_id is None and not card.is_active
+    assert db_session.query(Transaction).filter_by(account_id=copy.id).count() == 0
+    assert {t.plaid_transaction_id for t in
+            db_session.query(Transaction).filter_by(account_id=plat.id)} == {f"p-{i}" for i in range(6)}
+
+
+def test_history_split_between_two_rows_is_held_back_and_flagged(db_session):
+    item, rows = _amex_omer(db_session)
+    plat, hilton = rows["plat"], rows["hilton"]
+    for i, r in enumerate(_PLAT_HISTORY[:3]):
+        _stored(db_session, plat, f"old-plat-{i}", *r)
+    for i, r in enumerate(_PLAT_HISTORY[3:]):
+        _stored(db_session, hilton, f"old-hh-{i}", *r)
+    copy = _acct(db_session, item, "plat-new", "1008", "Blue Business Plus Card", name="New 1008")
+
+    added = _full_sync(db_session, item, _incoming("plat-new", _PLAT_HISTORY, "p"))
+
+    db_session.refresh(copy)
+    assert added == 0
+    assert db_session.query(Transaction).filter_by(account_id=copy.id).count() == 0
+    assert copy.plaid_account_id == "plat-new"        # nothing moved
+    assert item.last_error_code == "ACCOUNT_MATCH_UNCLEAR" and item.cursor is None
+    assert "New 1008" in item.last_error_message
+
+
+def test_a_new_card_with_its_own_history_is_left_alone(db_session):
+    item, rows = _amex_omer(db_session)
+    for i, r in enumerate(_PLAT_HISTORY):
+        _stored(db_session, rows["plat"], f"old-plat-{i}", *r)
+    new = _acct(db_session, item, "biz-plat", "1007", "Business Platinum Card")
+    fresh = [(datetime(2026, 10, 28), -8823.39, "CWT US LLC")] + [
+        (datetime(2026, 10, d), -6.00 * d, f"MERCHANT {d}") for d in range(1, 6)]
+
+    added = _full_sync(db_session, item, _incoming("biz-plat", fresh, "b"))
+
+    db_session.refresh(new)
+    assert added == 6 and new.plaid_account_id == "biz-plat" and new.is_active
+    assert item.last_error_code is None
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 class _RoutePlaid:

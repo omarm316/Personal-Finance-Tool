@@ -318,3 +318,165 @@ def retire_emptied_items(db: Session, outcome: LinkOutcome) -> list:
             names.append(old.institution_name)
             logger.info(f"[link] {old.institution_name}: switched off — its accounts moved to the new connection")
     return names
+
+
+# ── History check on full re-downloads (B41) ─────────────────────────────────
+#
+# The matcher above decides from what Plaid says about an account (IDs, last 4,
+# type, official name). On 2026-11-08 Amex reissued the Platinum 1008 ID under
+# the name "Blue Business Plus Card", and the old code made new rows for it and
+# for Aspire 2007; the full re-download then copied 361 rows of history onto
+# them. The name step above would now send that ID to BBP 1008 instead, which
+# is the same mistake on a different row.
+#
+# So before a full re-download writes anything, look at the history itself:
+# whichever row at this bank with the same last 4 and type already holds most
+# of the incoming rows is the account they belong to.
+
+HISTORY_HELD = 'ACCOUNT_MATCH_UNCLEAR'   # PlaidItem.last_error_code while rows are held back
+_MIN_ROWS = 5        # fewer incoming rows than this: too little to judge
+_OWNS = 0.80         # share of incoming rows a row must hold to take the Plaid ID
+_SOME = 0.20         # share that makes another row a real contender
+
+
+@dataclass
+class HistoryCheck:
+    moved: list = field(default_factory=list)   # {'plaid_account_id', 'from', 'to'}
+    held: set = field(default_factory=set)      # Plaid account IDs whose rows are not written
+    notes: list = field(default_factory=list)   # one line per held account, for the UI
+
+
+def check_history_owners(db: Session, item: PlaidItem, added: list) -> HistoryCheck:
+    """
+    `added` is Plaid's full-download `added` list for `item`. For each Plaid
+    account in it, score every active row at this bank with the same last 4
+    and type by how many incoming rows it already holds (same Plaid
+    transaction ID, or same date, amount and description). Then:
+      - the current row holds the most, or there is too little to judge: nothing;
+      - another row holds at least 80% and the current one under 20%: the Plaid
+        ID moves there (the current row is switched off if it holds no rows);
+      - otherwise another row holds a real share: that account's rows are held
+        back and the connection is flagged, so nothing is copied.
+    Flushes; the caller commits.
+    """
+    from collections import Counter
+    from database import Card, Transaction
+    from core.accounts_helpers import _content_base_hash
+
+    out = HistoryCheck()
+    groups: dict = {}
+    for t in added:
+        if not t.get('pending'):
+            groups.setdefault(t['plaid_account_id'], []).append(t)
+    if not groups:
+        return out
+
+    q = (db.query(Account)
+         .outerjoin(PlaidItem, Account.plaid_item_id == PlaidItem.item_id)
+         .filter(Account.is_active == True))
+    if item.institution_id:
+        q = q.filter(or_(Account.institution_id == item.institution_id,
+                         PlaidItem.institution_id == item.institution_id))
+    else:
+        q = q.filter(PlaidItem.institution_name == item.institution_name)
+    bank = q.order_by(Account.id).all()
+
+    hashes_cache: dict = {}
+    pids_cache: dict = {}
+
+    def held_hashes(acc_id):
+        if acc_id not in hashes_cache:
+            rows = (db.query(Transaction.content_hash)
+                    .filter(Transaction.account_id == acc_id,
+                            Transaction.content_hash != None).all())
+            hashes_cache[acc_id] = Counter(h.rsplit('-', 1)[0] for (h,) in rows)
+        return hashes_cache[acc_id]
+
+    def held_pids(acc_id):
+        if acc_id not in pids_cache:
+            rows = (db.query(Transaction.plaid_transaction_id)
+                    .filter(Transaction.account_id == acc_id,
+                            Transaction.plaid_transaction_id != None).all())
+            pids_cache[acc_id] = {p for (p,) in rows}
+        return pids_cache[acc_id]
+
+    def score(acc, rows):
+        left = Counter(held_hashes(acc.id))
+        pids = held_pids(acc.id)
+        n = 0
+        for t in rows:
+            if t['plaid_transaction_id'] in pids:
+                n += 1
+                continue
+            h = _content_base_hash(acc.id, t['date'], -t['amount'], t['description_raw'])
+            if left[h] > 0:
+                left[h] -= 1
+                n += 1
+        return n
+
+    def live_elsewhere(acc):
+        """Synced right now by another working connection (e.g. a joint account)."""
+        if not acc.plaid_account_id or not acc.plaid_item_id or acc.plaid_item_id == item.item_id:
+            return False
+        other = db.query(PlaidItem).filter_by(item_id=acc.plaid_item_id).first()
+        return bool(other and other.is_active and other.last_error_code not in AUTH_ERROR_CODES)
+
+    plans = {}   # plaid account ID → (current, owner)
+    for pid, rows in groups.items():
+        current = db.query(Account).filter_by(plaid_account_id=pid).first()
+        if not current or len(rows) < _MIN_ROWS:
+            continue
+        cands = [a for a in bank if a.id != current.id and a.mask and a.mask == current.mask
+                 and (a.account_type or '').lower() == (current.account_type or '').lower()]
+        if not cands:
+            continue
+        n = len(rows)
+        mine = score(current, rows)
+        best, best_n = None, -1
+        for a in cands:
+            s = score(a, rows)
+            if s > best_n:
+                best, best_n = a, s
+        if best_n <= mine or best_n < _SOME * n:
+            continue
+        if best_n >= _OWNS * n and mine < _SOME * n and not live_elsewhere(best) \
+                and best.plaid_account_id not in groups:
+            plans[pid] = (current, best)
+        else:
+            out.held.add(pid)
+            out.notes.append(f"{current.account_name}: {best_n} of {n} incoming rows are already on "
+                             f"{best.account_name}")
+
+    # Two Plaid accounts claiming the same row: hold both.
+    targets = Counter(owner.id for _, owner in plans.values())
+    for pid, (current, owner) in list(plans.items()):
+        if targets[owner.id] > 1:
+            del plans[pid]
+            out.held.add(pid)
+            out.notes.append(f"{current.account_name}: more than one Plaid account matches "
+                             f"{owner.account_name}")
+
+    for pid, (current, owner) in plans.items():
+        persistent = current.persistent_account_id
+        current.plaid_account_id = None        # plaid_account_id is unique: free it first
+        current.persistent_account_id = None
+        db.flush()
+        owner.plaid_account_id = pid
+        owner.plaid_item_id = item.item_id
+        if item.institution_id:
+            owner.institution_id = item.institution_id
+        if persistent:
+            owner.persistent_account_id = persistent
+        owner.account_hash = current.account_hash
+        if not db.query(Transaction.id).filter(Transaction.account_id == current.id).first():
+            current.is_active = False
+            for card in db.query(Card).filter_by(account_id=current.id).all():
+                if not db.query(Transaction.id).filter(Transaction.card_id == card.id).first():
+                    card.is_active = False
+        db.flush()
+        out.moved.append({'plaid_account_id': pid, 'from': current.id, 'to': owner.id})
+        logger.warning(f"[link] {item.institution_name}: history for {current.account_name} is already on "
+                       f"{owner.account_name}; Plaid ID moved there")
+    for note in out.notes:
+        logger.warning(f"[link] {item.institution_name}: held back — {note}")
+    return out

@@ -32,7 +32,9 @@ from core.accounts_helpers import (
 )
 from core.points_engine import _lock_points_for_transaction, _resolve_merchant_csc, infer_points_category
 from core.categories import active_names, known_or_unclassified
-from core.plaid_accounts import link_plaid_accounts, retire_emptied_items
+from core.plaid_accounts import (
+    HISTORY_HELD, check_history_owners, link_plaid_accounts, retire_emptied_items,
+)
 
 logger = logging.getLogger('moresheth')
 
@@ -130,7 +132,18 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     removed_plaid_ids = set(result.get('removed', []))
     full_download = cursor is None
 
+    # Full re-download: make sure each card's history lands on the row that
+    # already holds it, and hold back any account where that is unclear (B41).
+    history = None
+    if full_download and getattr(plaid_item, 'item_id', None):
+        history = check_history_owners(db, plaid_item, result['added'])
+        db.commit()
+    held = 0
+
     for txn_data in result['added']:
+        if history and txn_data.get('plaid_account_id') in history.held:
+            held += 1
+            continue
         sp = db.begin_nested()  # savepoint — so a single-row failure only rolls back that row
         try:
             existing = db.query(Transaction).filter_by(
@@ -336,6 +349,8 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
 
     if skipped:
         logger.info(f"[sync] {plaid_item.institution_name}: {skipped} transaction(s) skipped — no matching account")
+    if held:
+        logger.warning(f"[sync] {plaid_item.institution_name}: {held} transaction(s) held back — account match unclear")
     if errors:
         logger.error(f"[sync] {plaid_item.institution_name}: {errors} transaction(s) failed to write")
 
@@ -408,8 +423,22 @@ async def _sync_item(plaid_item: PlaidItem, plaid, db: Session) -> int:
     if locked_skipped:
         logger.info(f"[sync] {plaid_item.institution_name}: {locked_skipped} locked transaction(s) NOT removed — review manually")
 
-    # Store cursor — use None instead of empty string for clean state
-    plaid_item.cursor         = result['next_cursor'] or None
+    # Store cursor — use None instead of empty string for clean state.
+    # While rows are held back the cursor stays empty, so the next sync is a
+    # full download again and the check runs again.
+    if history and history.held:
+        plaid_item.cursor             = None
+        plaid_item.last_error_code    = HISTORY_HELD
+        plaid_item.last_error_message = (
+            "Some history was not imported because it matches more than one account: "
+            + "; ".join(history.notes))
+        plaid_item.last_error_at      = datetime.utcnow()
+    else:
+        plaid_item.cursor = result['next_cursor'] or None
+        if history is not None and getattr(plaid_item, 'last_error_code', None) == HISTORY_HELD:
+            plaid_item.last_error_code    = None
+            plaid_item.last_error_message = None
+            plaid_item.last_error_at      = None
     plaid_item.last_synced_at = datetime.utcnow()
     try:
         db.commit()
@@ -448,8 +477,9 @@ async def _sync_item_background(item_id: str, clear_cursor: bool = False):
             db.commit()
         added = await _sync_item(item, plaid, db)
         logger.info(f"[sync] {item.institution_name}: {added} transaction(s) added")
-        # Clear any previous error now that sync succeeded
-        if item.last_error_code:
+        # Clear any previous error now that sync succeeded (_sync_item sets
+        # and clears HISTORY_HELD itself)
+        if item.last_error_code and item.last_error_code != HISTORY_HELD:
             item.last_error_code    = None
             item.last_error_message = None
             item.last_error_at      = None
