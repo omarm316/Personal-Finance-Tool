@@ -15,7 +15,20 @@
 Omer gave the go-ahead on the 2026-11-09 finding (below).
 - **Fix (`6d72101`):** `check_history_owners()` in `core/plaid_accounts.py`, called by `_sync_item` on every full download before rows are written. For each Plaid account with 5+ incoming rows, the active row at the same bank, last 4 and type holding at least 80% of them takes the Plaid ID (an emptied new row and its card are switched off). If another row holds 20% or more and the result is unclear, that account's rows are held back, the cursor stays empty and the connection shows `ACCOUNT_MATCH_UNCLEAR` until it is sorted out. It never takes a row that another working login syncs. Tests 166 passed.
 - **Cleanup (production, one transaction after a dry run):** 360 copies on 176 and 177 deleted, their live Plaid transaction IDs moved to the twins on 137 and 138; 9 real repeats moved to 137 (card 7) and 138 (card 1), points relocked; 137 and 138 carry the live Plaid account IDs; 176, 177 and cards 46, 47 switched off. Backup and script in the side-session notes folder.
-- **Next for Omer:** the CWT $8,823.39 category (Travel, or Work if reimbursed); + Add Account on American Express (Omer) to bring back BBP 1008, Hilton Honors 1008 and HY Savings 1820. After the next Amex sync, check the 137 and 138 balance gaps in `balance_observations`.
+- **Second pass (same day, Omer's go-ahead):** checked against Plaid's live list.
+  - BBP 1008 (135) and Hilton Honors 1008 (136) were still listed by Plaid under new IDs nothing held, so their rows were being skipped; both now hold their live account and transaction IDs.
+  - 47 copies left by the August re-links deleted: 22 on BBP ($5,823.94, Jan–Jun) and 25 on Aspire ($1,187.68, Dec–Jun).
+  - 2 missing BBP charges added through `_sync_item` (Adidas $40, Feb 9; BH Backup $15, Sep 10); BBP's starting balance changed from −$40 to 0.
+  - BBP, Hilton Honors and Aspire now equal Plaid's balances to the cent, and all six Amex (Omer) accounts match Plaid's list row for row.
+  - Details in BACKLOG.md, "B41 finding" › "Second pass".
+- **Budget months after both passes:**
+  - December 2025 to June 2026 have no duplicates left.
+  - October reads $25,051.90. That's $19,957.30 after the duplicate cleanup, plus $5,094.60 of CARDCENTER deposits on Chase Checking 8997 that were tagged GCB on Nov 10 and no longer offset spending.
+  - August and September moved the same way: GCB tags (Nike, Fanatics, Kings, CARDCENTER) and the review edits that day.
+- **Next for Omer:**
+  - The CWT $8,823.39 category (Travel, or Work if reimbursed).
+  - + Add Account on American Express (Omer) for HY Savings 1820 only, selecting every account.
+  - Whether to set Platinum 1008's starting balance to −$11,366.14. It's $203.48 off Plaid now, from an old anchor, and its rows match Plaid exactly.
 
 ---
 
