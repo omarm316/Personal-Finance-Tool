@@ -14,7 +14,7 @@ const dd=(a,b)=>Math.round((Date.parse(b)-Date.parse(a))/864e5);
 const light=(bg,s,r,l,t,t2,t3)=>({'--bg':bg,'--surface':s,'--raised':r,'--line':l,'--tx':t,'--tx2':t2,'--tx3':t3,'--ac':'#2563EB','--ac-fg':'#fff','--ac-soft':'color-mix(in srgb,#2563EB 10%,transparent)','--good':'#047857','--warn':'#B45309','--bad':'#B91C1C'});
 const JAN1='2027-01-01',NOOWN='No owner';
 const REASONS=[['Stay or flight',1,'Points from a hotel stay or a flight'],['Sign-up bonus',1,'A bonus with no challenge in the app'],['Referral',1,'For referring someone'],['Promotion',1,'An offer, a promo or a goodwill credit'],['Points expired',-1,'Points the program took away'],['Balance check',0,'A difference found when checking the balance'],['Other',0,'Anything else; say what in the note']];
-const KIND={open:'Opening',earn:'Card points',bonus:'Adjustment',red:'Redemption',xout:'Transfer',xin:'Transfer',adj:'Adjustment',check:'Adjustment',p2p:'Between us'};
+const KIND={open:'Opening',earn:'Purchases',bonus:'Adjustment',red:'Redemption',xout:'Transfer',xin:'Transfer',adj:'Adjustment',check:'Adjustment',p2p:'Between us'};
 const RANK={open:0,earn:1,check:3};
 const rname=(r,p)=>r==='Balance check'&&p&&p.checkName==='adjustment'?'Balance adjustment':r;
 const stripS=t=>(t||'').replace(/^Sample:\s*/,'');
@@ -144,7 +144,7 @@ function challenges(p,d,h,L){const e=prog(p,d);if(!e.challenges.length)return ''
   return `<section data-region="bonus"><h2>Active challenges <span class="ct">${e.challenges.length}</span></h2><div class="ch-grid">${body}<button type="button" class="ch-add" aria-label="Add a challenge"><span>+</span></button></div></section>`;}
 
 /* ---------- Ecosystem: activity, a table with one line per entry ---------- */
-const TYPE={open:'Opening',earn:'Card points',red:'Redemption',xout:'Transfer out',xin:'Transfer in',p2p:'Between us',adj:'Adjustment',check:'Adjustment',bonus:'Adjustment'};
+const TYPE={open:'Opening',earn:'Purchases',red:'Redemption',xout:'Transfer out',xin:'Transfer in',p2p:'Between us',adj:'Adjustment',check:'Adjustment',bonus:'Adjustment'};
 const TGRP={open:'o',earn:'e',red:'r',xout:'t',xin:'t',p2p:'t',adj:'a',check:'a',bonus:'a'};
 const reasonOf=x=>x.kind==='check'?'Balance check':x.kind==='bonus'?(x.reason||'Sign-up bonus'):x.kind==='adj'?(x.reason||'Other'):'';
 const fd=(s,p)=>{const[y,m,dd]=s.split('-');return p.dateFmt==='mon'?`${MON[m-1]} ${Number(dd)}`:`${Number(m)}/${Number(dd)}`};
@@ -153,7 +153,7 @@ function descOf(x,p){const k=x.kind;
   if(k==='adj'||k==='check'||k==='bonus')return rname(reasonOf(x),p);
   if(k==='open')return 'Opening balance';
   if(p.descOther==='kind')return TYPE[k];
-  if(k==='earn')return x.merged?'Month of statements':x.monthly?'Month of charges':'Statement';
+  if(k==='earn')return x.merged?'Month of statements':x.monthly?'Month of charges':'Statement close';
   if(k==='red')return 'Redemption';
   return stripS(x.title);}
 function detailOf(x,p){const k=x.kind,kind=p.descOther==='kind';
@@ -186,7 +186,7 @@ function activity(p,d,h,L){const e=prog(p,d),jan=p.moment==='jan1';
   // Balances come from the whole ledger, so hiding card lines never changes a figure.
   const full=L.map(x=>({...x}));runBalances(full,scope);const B=new Map(full.map(x=>[x.id,x]));
   const D=displayList(p,L);D.forEach(x=>{const s=B.get(x.lastId||x.id);if(s){x.pb=s.pb;x.pa=s.pa;x.sb=s.sb;x.sa=s.sa}});
-  const chips=['',...(p.cardLines!=='none'?['Card points']:[]),'Redemption','Transfer','Adjustment','Between us'];
+  const chips=['',...(p.cardLines!=='none'?['Purchases']:[]),'Redemption','Transfer','Adjustment','Between us'];
   if(S.kf&&!chips.includes(S.kf))S.kf='';
   const V=D.filter(x=>(!scope||x.person===scope)&&(!S.kf||KIND[x.kind]===S.kf));
   const desc=(a,b)=>-order(a,b);
@@ -290,8 +290,8 @@ function syncPicks(p,d){const key=p.screen+'|'+p.page;
 function newAdj(p,d){const e=prog(p,d);return {person:e?e.people[0]:'Omer',reason:'Stay or flight',sign:1,raw:'',note:''};}
 
 Gallery.define({
-  id:'cards-ledger-r2',
-  name:'Cards: Points ledger and adjustments, round 2',
+  id:'cards-ledger-final',
+  name:'Cards: Points ledger and adjustments, final',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'Screen to look at (not a design choice)',open:true,controls:[
@@ -310,34 +310,13 @@ Gallery.define({
       {id:'jan1enter',label:'Jan 1, 2027: entering an opening balance',hint:'The window from Set opening balance on the Hilton Honors ledger.'},
     ]},
    ]},
-   {id:'r2',label:'Open: the Activity table after your note',open:true,controls:[
-    {id:'descOther',label:'Description on lines that aren’t adjustments',type:'choice',options:[
-      {id:'what',label:'What happened, in a few words',hint:'Statement, Redemption, To Hilton Honors, From Amex MR, Omer to Daniella, Opening balance. Adjustments show their reason.'},
-      {id:'kind',label:'The type again',hint:'Card points, Redemption, Transfer out, Between us. The partner program moves to Details.'},
-    ]},
-    {id:'checkName',label:'Name for the gap a balance check logs',type:'choice',options:[
-      {id:'check',label:'Balance check'},
-      {id:'adjustment',label:'Balance adjustment',hint:'Also the ledger row (Balance adjustments) and the reason list.'},
-    ]},
-    {id:'cardLook',label:'Card column',type:'choice',options:[
-      {id:'mask',label:'Last four only, …7154',hint:'Hover shows the card’s name. Watch Amex MR: Platinum and Blue Business Plus both end in 1008 in the app.'},
-      {id:'art',label:'Small card art, then …7154',hint:'Tells the two …1008 cards apart at a glance.'},
-    ]},
-    {id:'cardPos',label:'Where the Card column sits',type:'choice',options:[
-      {id:'afterType',label:'After Type'},
-      {id:'afterDate',label:'After Date'},
-      {id:'beforeOwner',label:'Before Owner'},
-    ]},
-   ]},
-   {id:'r2b',label:'Open: two loose ends',open:true,controls:[
-    {id:'janBanner',label:'Jan 1 reminder on Portfolio',type:'choice',options:[
-      {id:'links',label:'A banner listing the programs still to set',hint:'Each name opens that program’s page. See it on “Jan 1, 2027: Portfolio before any balance is entered”.'},
-      {id:'none',label:'No reminder'},
-    ]},
-    {id:'lateFix',label:'A card-points fix from before the last balance check',type:'choice',options:[
-      {id:'absorb',label:'The next check absorbs it',hint:'A category, type, points-by-hand or Exclude fix on the Card page can change a statement the last check already settled. The ledger is then off by that amount until the next check logs it back. Nothing to build.'},
-      {id:'warn',label:'The Card page warns before saving',hint:'For example: “This changes a statement from before your Oct 31 balance check. The ledger will show +200 too many until your next check.”'},
-    ]},
+   {id:'r2',label:'Decided: round 2 picks',open:false,controls:[
+    {id:'descOther',label:'Description on lines that aren’t adjustments',type:'choice',locked:true,options:[{id:'what',label:'What happened, in a few words'}]},
+    {id:'checkName',label:'Name for the gap a balance check logs',type:'choice',locked:true,options:[{id:'adjustment',label:'Balance adjustment'}]},
+    {id:'cardLook',label:'Card column',type:'choice',locked:true,options:[{id:'art',label:'Small card art, then …7154'}]},
+    {id:'cardPos',label:'Where the Card column sits',type:'choice',locked:true,options:[{id:'afterDate',label:'After Date'}]},
+    {id:'janBanner',label:'Jan 1 reminder on Portfolio',type:'choice',locked:true,options:[{id:'links',label:'A banner listing the programs still to set'}]},
+    {id:'lateFix',label:'A card-points fix from before the last balance check',type:'choice',locked:true,options:[{id:'absorb',label:'The next check absorbs it'}]},
    ]},
    {id:'r1',label:'Decided: round 1 picks',open:false,controls:[
     {id:'adjRows',label:'Ledger rows on each card',type:'choice',locked:true,options:[{id:'reason',label:'A row per reason'}]},
@@ -368,11 +347,12 @@ Gallery.define({
     {id:'gridHint',label:'Beside each grid cell',type:'choice',locked:true,options:[{id:'app',label:'The app’s own figure, now shown in the opening-balance window'}]},
     {id:'tileCheck',label:'Balance check on the Portfolio tile',type:'choice',locked:true,options:[{id:'dot',label:'Amber dot when not checked in 60 days'}]},
    ]},
-   {id:'settled',label:'Settled in chat and your notes, 2026-11-07',open:false,controls:[
+   {id:'settled',label:'Settled in chat and your notes, 2026-11-07 to 11-10',open:false,controls:[
     {id:'anchor',label:'Balance check',type:'choice',locked:true,options:[{id:'gap',label:'One anchor on Jan 1, 2027; each check logs the gap as an adjustment'}]},
     {id:'other',label:'Points from outside card spend',type:'choice',locked:true,options:[{id:'reason',label:'An adjustment with a reason from a fixed list'}]},
     {id:'bonusModel',label:'Challenge bonuses',type:'choice',locked:true,options:[{id:'pending',label:'Added as pending when the challenge is met; you mark them posted'}]},
     {id:'actTable',label:'Activity',type:'choice',locked:true,options:[{id:'table',label:'A table, one line per entry: Date, Type, Description, Owner and Points in their own columns'}]},
+    {id:'purchases',label:'Card points at a statement close (note on round 2)',type:'choice',locked:true,options:[{id:'note',label:'Type says Purchases; Description says Statement close'}]},
     {id:'cardCol',label:'Card and Description (note on round 1)',type:'choice',locked:true,options:[{id:'note',label:'A Card column shown as …7154 with no card name; the Description says what the line is (the reason, for adjustments), so there is no Reason column'}]},
    ]},
    {id:'decided',label:'Decided in the Cards galleries',open:false,controls:[

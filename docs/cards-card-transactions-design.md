@@ -143,6 +143,7 @@ Checked 2026-11-07 against the Actions strip (`docs/cards-actions-design.md`), t
   - The ledger counts card points per statement from locked `points_earned`. Every edit here on a 2027 row changes those figures: category, type, a rule's recalculation, points by hand, Exclude.
   - A balance check logs the difference as an adjustment. So fixing a row from before the last check counts the change twice, until the next check logs it back.
   - To decide with the ledger's round 2: let the next check absorb it, which needs nothing built, or have this table warn when a fix reaches back before the program's last balance check.
+  - **Decided 2026-11-10 (ledger round 2): the next check absorbs it.** Nothing is built here; see `docs/cards-ledger-design.md`.
 
 ## Open items (also in BACKLOG.md)
 

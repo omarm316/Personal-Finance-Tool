@@ -7,11 +7,11 @@ Source spec: `mockups/design-gallery/cards-ecosystem.spec.js`. Inherits the look
 - **Layout:** one column, in this order: header, balance ledger, points by category, your cards, active challenges, activity. The Actions strip (chosen 2026-11-07, `docs/cards-actions-design.md`) goes between the header and the balance ledger, filtered to the program's cards.
 - **Getting back:** breadcrumb (Cards > Portfolio > program), beside the period selector.
 - **Header:** balance strip with the logo, posted balance, each person's balance, pending, earned this period and a card fan. Pending is its own figure and shows 0 rather than disappearing, so the strip keeps the same shape on every program.
-- **Balance ledger:** one card per person with the Total card first. Rows that are all zero are hidden. Starting-balance buttons sit below the cards, and "+ Transfer between us" sits in the section heading. The column is named Total.
+- **Balance ledger:** one card per person with the Total card first. Rows that are all zero are hidden. Starting-balance buttons sit below the cards, and "+ Transfer between us" sits in the section heading. The column is named Total. Superseded in part on 2026-11-10 by `docs/cards-ledger-design.md`: a row per adjustment reason, opening balance edited with ✎ on its row, a balance checked by clicking it, and no buttons below the cards.
 - **Points by category:** bars.
 - **Your cards:** row with arrows, whole cards only, 175px target width, same as Portfolio.
 - **Challenges:** same as Portfolio: one circle with dollars to go, Archive on hover when complete, dashed "+" card.
-- **Activity:** one timeline with filter chips (All, Redemption, Transfer, Adjustment, Between us). One add button per type sits in the section heading, opposite the title. The realized value summary sits above the filters and uses real redemptions only.
+- **Activity:** one timeline with filter chips (All, Redemption, Transfer, Adjustment, Between us). One add button per type sits in the section heading, opposite the title. The realized value summary sits above the filters and uses real redemptions only. From 2026-11-10 the timeline is a table with one line per entry (Date, Card, Type, Description, Details, Owner, Points, Balance, Status) and a Purchases chip: see `docs/cards-ledger-design.md`.
 
 Each person's balance appears in both the header and the ledger cards; Omer chose this knowingly.
 
