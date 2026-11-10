@@ -29,7 +29,8 @@
   - `link_plaid_accounts` step 3c: when a new login replaces a connection that is off or needs a login, the only candidate with that last 4 and type is taken even if the bank renamed the account (OAuth data may name accounts differently). Two candidates, or a working connection, still never match on a different name. Three tests added (20 in the file; suite 133 passed).
   - `frontend/src/lib/plaidLink.js`: Link errors are no longer swallowed. Reconnect with `INSTITUTION_NO_LONGER_SUPPORTED` says to use + Connect Bank; other errors show Plaid's message.
   - OAuth return (`/plaid/oauth-return`) now reopens Link with the same link token it started with, saved in localStorage before Link opens (Plaid requires this), and finishes a reconnect through update-complete instead of exchange-token. Before, it always made a new-connection token, which breaks the redirect flow whenever a bank sends the user back to the page (phones).
-- **Next:** Omer connects Bank of America again with + Connect Bank, once per login, selecting every account; then a read-only check that no BofA accounts were created, the old connections are switched off, and Oct 15 onward arrived. B41's cleanup of the existing Amex duplicates stays parked.
+- **2026-11-10, + Connect Bank fails too:** logging Link's events on production, choosing Bank of America ends in `INSTITUTION_REGISTRATION_REQUIRED` before any login page: the Plaid app isn't registered for Bank of America's OAuth. Not a code problem; the new toast shows Plaid's message.
+- **Next:** Omer gets Bank of America enabled in the Plaid Dashboard (Activity › Status › OAuth institutions), then connects it again with + Connect Bank, once per login, selecting every account; then a read-only check that no BofA accounts were created, the old connections are switched off, and Oct 15 onward arrived. B41's cleanup of the existing Amex duplicates stays parked.
 
 ---
 
