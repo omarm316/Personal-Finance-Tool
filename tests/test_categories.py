@@ -218,6 +218,9 @@ class TestTransactions:
         assert actuals['categories']['Airlines'] == {'3': 300.0}
         detail = client.get('/api/stats/detail', params={'category': 'Travel', 'year': 2026}).json()
         assert detail['count'] == 2 and detail['total'] == 500.0
+        # The Dashboard's detail list shows each row's own category and its account
+        assert sorted(r['category'] for r in detail['rows']) == ['Airlines', 'Hotels']
+        assert all(r['account'] == checking_account.account_name and 'merchant' in r for r in detail['rows'])
 
     def test_budget_target_needs_a_known_category(self, client, tree):
         assert client.post('/api/budget/targets', json={'year': 2026, 'month': 1, 'category': 'Nope', 'amount': 5}).status_code == 400

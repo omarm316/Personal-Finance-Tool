@@ -1,0 +1,160 @@
+/* Dashboard, desktop (docs/dashboard-design.md). Scoped to .dbp; colors come
+   from styles/cloud.css. Bars: blue under 80%, amber 80-99%, red at 100%+,
+   fill strength 0.5. */
+.dbp {
+  --p: calc(16px * var(--c-density));
+  --gap: calc(12px * var(--c-density));
+  --b-ok: var(--c-ac); --b-near: #F59E0B; --b-over: #EF4444; --fill: .5;
+  display: grid; gap: calc(20px * var(--c-density)); align-content: start; min-width: 0;
+  container-type: inline-size; container-name: dbp;
+}
+.dbp h1, .dbp h2 { margin: 0; }
+.dbp h2 { font-size: 12px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--c-tx3); }
+.dbp .db-loading { margin: 8px 0; }
+.dbp .db-pad { padding: 20px; margin: 0; }
+
+/* Header: one slim boxed bar */
+.dbp .db-hdr { display: flex; justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 18px; }
+.dbp .db-hdr h1 { font-size: 16px; font-weight: 600; }
+.dbp .db-hdr-r { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
+.dbp .db-und { display: flex; gap: 16px; }
+.dbp .db-und button { padding: 6px 0; border-bottom: 2px solid transparent; color: var(--c-tx3); font-size: 12.5px; }
+.dbp .db-und button.on { color: var(--c-ac); border-color: var(--c-ac); font-weight: 600; }
+.dbp .db-step { display: flex; align-items: center; gap: 4px; }
+.dbp .db-step b { font-family: var(--c-fh); font-weight: 500; font-size: 14px; min-width: 118px; text-align: center; }
+.dbp .db-step button { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--c-line); font-size: 16px; line-height: 1; color: var(--c-tx2); }
+.dbp .db-step button:not(:disabled):hover { border-color: var(--c-ac); color: var(--c-ac); }
+.dbp .db-step button:disabled { opacity: .35; }
+
+/* Summary figures: net worth hero, then a 2x2 grid. Value first, label under it. */
+.dbp .db-kpis { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--gap); }
+.dbp .db-hero { padding: calc(var(--p) * 1.2); display: grid; gap: 10px; align-content: start; }
+.dbp .db-hero-g { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
+.dbp .db-cell { padding: var(--p); }
+.dbp .db-kv { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dbp .db-kn { font-size: 24px; font-weight: 600; white-space: nowrap; }
+.dbp .db-hero .db-kn { font-size: 34px; }
+.dbp .db-kv.hl .db-kn { color: var(--c-ac); }
+.dbp .db-kl { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--c-tx3); }
+.dbp .db-ksub { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.dbp .db-chg { font-size: 11px; font-weight: 600; }
+.dbp .db-spark { width: 100%; height: 46px; display: block; }
+.dbp .db-spark path { fill: none; stroke: var(--c-ac); stroke-width: 2; }
+
+/* The row of three: pace, trend and where share one height, set by the tallest */
+.dbp .db-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
+.dbp .db-panel { padding: var(--p); display: flex; flex-direction: column; min-width: 0; }
+.dbp .db-ph { display: flex; justify-content: space-between; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 12px; min-height: 26px; }
+
+/* Month pace */
+.dbp .db-pace-h { font-family: var(--c-fh); font-size: 16px; font-weight: 500; margin: 0 0 3px; }
+.dbp .db-pace-h b { font-weight: 600; }
+.dbp .db-pace-s { font-size: 12px; color: var(--c-tx3); margin: 0 0 6px; }
+.dbp .db-gauge { width: 100%; max-width: 300px; margin: auto; display: block; }
+.dbp .g-bg { fill: none; stroke: var(--c-raised); stroke-width: 18; }
+.dbp .g-fg { fill: none; stroke: color-mix(in srgb, var(--c-ac) 70%, transparent); stroke-width: 18; }
+.dbp .g-fg.over { stroke: color-mix(in srgb, var(--b-over) 70%, transparent); }
+.dbp .g-tk { stroke: var(--c-tx); stroke-width: 2; }
+.dbp .g-td { stroke: var(--c-ac); stroke-width: 2; stroke-dasharray: 3 2; }
+.dbp .g-v { font-family: var(--c-fh); font-size: 26px; font-weight: 600; fill: var(--c-tx); }
+.dbp .g-v.bad { fill: var(--c-bad); }
+.dbp .db-tx { font-size: 10.5px; fill: var(--c-tx3); font-weight: 500; }
+.dbp .db-tx.on { fill: var(--c-ac); font-weight: 700; }
+
+/* Spending trend: the chart fills the card's spare height */
+.dbp .db-chart { position: relative; flex: 1 1 0; min-height: 200px; width: 100%; }
+.dbp .db-chart svg { position: absolute; left: 0; top: 0; display: block; }
+.dbp .db-grid { stroke: var(--c-line); stroke-width: 1; }
+.dbp .db-area { fill: url(#dbArea); }
+.dbp .st0 { stop-color: var(--c-ac); stop-opacity: .16; }
+.dbp .st1 { stop-color: var(--c-ac); stop-opacity: 0; }
+.dbp .db-ln { fill: none; stroke: var(--c-ac); stroke-width: 2.5; stroke-linecap: round; }
+.dbp .db-dot { fill: var(--c-ac); stroke: var(--c-surface); stroke-width: 2; }
+.dbp .db-tl { font-size: 10.5px; fill: var(--c-tx2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dbp .db-tl.strong { fill: var(--c-tx); font-size: 11.5px; }
+.dbp .db-hit { fill: transparent; cursor: pointer; }
+.dbp .db-hit:hover { fill: color-mix(in srgb, var(--c-ac) 6%, transparent); }
+.dbp .db-hint { margin: 6px 0 0; font-size: 11px; color: var(--c-tx3); }
+
+/* Where the money went */
+.dbp .db-wb2 { display: grid; gap: 8px; margin: 4px 0 14px; }
+.dbp .db-wb-r { display: grid; grid-template-columns: 30px minmax(0, 1fr) 44px; gap: 10px; align-items: center; font-size: 12px; }
+.dbp .db-wb-r span { color: var(--c-tx2); font-weight: 600; }
+.dbp .db-wb-r b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dbp .db-wb-r.prev { opacity: .75; }
+.dbp .db-wb-r.prev span, .dbp .db-wb-r.prev b { color: var(--c-tx3); font-weight: 500; }
+.dbp .db-wbar { display: flex; border-radius: 6px; overflow: hidden; gap: 2px; min-width: 2px; }
+.dbp .db-wbar.solo { margin: 4px 0 14px; }
+.dbp .db-wbar i { display: block; height: 100%; }
+.dbp .db-wb-n { margin: -6px 0 14px; }
+.dbp .db-wl { display: grid; gap: 7px; min-width: 0; }
+.dbp .db-wl-r { display: grid; grid-template-columns: 10px minmax(0, 1fr) 40px 88px; gap: 8px; align-items: center; font-size: 12.5px; }
+.dbp .db-wl-r i { width: 10px; height: 10px; border-radius: 3px; }
+.dbp .db-wl-r span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbp .db-wl-r em { font-style: normal; color: var(--c-tx3); text-align: right; font-variant-numeric: tabular-nums; }
+.dbp .db-wl-r b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dbp .db-wnote { margin: auto 0 0; padding-top: 12px; line-height: 1.5; }
+
+/* Budget performance: one tile per top level, its categories inside */
+.dbp .db-bud { min-width: 0; }
+.dbp .db-bud-h { padding: var(--p) calc(var(--p) * 1.25); margin: 0; border-bottom: 1px solid var(--c-line); }
+.dbp .db-btot { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: var(--p) calc(var(--p) * 1.25) 4px; }
+.dbp .db-btot span:first-child { font-size: 12.5px; color: var(--c-tx2); }
+.dbp .db-btot .c-val { font-size: 22px; }
+.dbp .db-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-items: start; gap: var(--gap); padding: var(--gap) calc(var(--p) * 1.25) calc(var(--p) * 1.25); }
+.dbp .db-ti { padding: 12px; border: 1px solid var(--c-line); border-radius: calc(var(--c-radius) * .75); display: grid; gap: 7px; cursor: pointer; background: var(--c-surface); min-width: 0; }
+.dbp .db-ti:hover { border-color: color-mix(in srgb, var(--c-ac) 40%, var(--c-line)); }
+.dbp .db-ti.on { border-color: var(--c-ac); background: var(--c-ac-soft); }
+.dbp .db-ti-h { display: flex; justify-content: space-between; gap: 8px; }
+.dbp .db-ti-h b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbp .db-tf { font-weight: 600; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dbp .db-bt { position: relative; height: 24px; border-radius: 6px; overflow: hidden; background: var(--c-line); border: 1px solid var(--c-line); display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; }
+.dbp .db-bt i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--b-ok); opacity: var(--fill); }
+.dbp .db-bt.near i { background: var(--b-near); opacity: calc(var(--fill) + .08); }
+.dbp .db-bt.over i { background: var(--b-over); opacity: calc(var(--fill) + .12); }
+.dbp .db-bt s { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--c-tx) 16%, transparent); }
+.dbp .db-bt > span { position: relative; font-size: 10.5px; font-weight: 700; color: var(--c-tx2); font-variant-numeric: tabular-nums; }
+.dbp .db-bt > span.c-bad { color: var(--c-bad); }
+.dbp .db-bt > span.nob { font-weight: 500; font-size: 9.5px; color: var(--c-tx3); }
+.dbp .db-kids { display: grid; gap: 2px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--c-line); }
+.dbp .db-kid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 8px; align-items: baseline; padding: 5px 6px; margin: 0 -6px; border-radius: 7px; font-size: 12px; }
+.dbp .db-kid:hover { background: var(--c-raised); }
+.dbp .db-kid.on { background: var(--c-ac-soft); }
+.dbp .db-kid span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c-tx2); }
+.dbp .db-kid b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dbp .db-kid small { font-size: 10.5px; color: var(--c-tx3); white-space: nowrap; }
+.dbp .db-kid-t { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--c-line); overflow: hidden; display: block; }
+.dbp .db-kid-t em { display: block; height: 100%; background: var(--b-ok); opacity: calc(var(--fill) + .25); }
+.dbp .db-kid-t.near em { background: var(--b-near); }
+.dbp .db-kid-t.over em { background: var(--b-over); }
+
+/* Category detail, under the budget card */
+.dbp .db-det { overflow: hidden; }
+.dbp .db-det-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px calc(var(--p) * 1.25); border-bottom: 1px solid var(--c-line); }
+.dbp .db-det-h > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dbp .db-det-h b { font-size: 15px; font-weight: 600; }
+.dbp .db-det-k { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px calc(var(--p) * 1.25); border-bottom: 1px solid var(--c-line); font-size: 12px; color: var(--c-tx3); background: var(--c-raised); }
+.dbp .db-det-k b { color: var(--c-tx); font-weight: 600; }
+.dbp .db-det-k em { font-style: normal; font-weight: 600; color: var(--c-tx2); font-variant-numeric: tabular-nums; }
+.dbp .db-det-k em.c-bad { color: var(--c-bad); }
+.dbp .db-det-k em.c-good { color: var(--c-good); }
+.dbp .db-det-l { max-height: 380px; overflow-y: auto; }
+.dbp .db-dr { display: grid; grid-template-columns: 50px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px calc(var(--p) * 1.25); border-bottom: 1px solid var(--c-line); }
+.dbp .db-rd { color: var(--c-tx3); font-size: 12.5px; white-space: nowrap; }
+.dbp .db-rn { min-width: 0; display: grid; gap: 2px; }
+.dbp .db-rn b { font-weight: 500; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbp .db-rn span { font-size: 11.5px; color: var(--c-tx3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dbp .db-amt { font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.dbp .db-more { padding: 11px calc(var(--p) * 1.25); }
+
+/* Narrower content areas. The sidebar is still there, so the row of three
+   holds down to 980px (the gallery, with a top bar, used 1150px). */
+@container dbp (max-width: 980px) {
+  .dbp .db-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container dbp (max-width: 760px) {
+  .dbp .db-kpis { grid-template-columns: minmax(0, 1fr); }
+}
+@container dbp (max-width: 680px) {
+  .dbp .db-row { grid-template-columns: minmax(0, 1fr); }
+}

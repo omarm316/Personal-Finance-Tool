@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db, Account, Category, PlannedPurchase, Transaction, TransactionSplit
 from core.constants import TRANSACTION_TYPES, BUDGET_TYPES, BALANCE_TYPES
@@ -154,10 +154,11 @@ async def get_stats_detail(
     """
     Return individual transactions (and split line items) that contribute to a
     given category's total in /api/stats — useful for debugging overstatement.
-    A top level includes its sub-categories.
+    A top level includes its sub-categories. Each row also carries the merchant
+    and account name, which the Dashboard's detail list shows.
     """
     wanted = with_children(category, parent_map(db))
-    query = db.query(Transaction).filter(
+    query = db.query(Transaction).options(joinedload(Transaction.account)).filter(
         Transaction.is_excluded != True,  # noqa: E712
         Transaction.is_gcb != True,       # noqa: E712
         Transaction.gcb_tagged != True,   # noqa: E712
@@ -201,9 +202,12 @@ async def get_stats_detail(
                 rows.append({
                     "id": t.id, "date": str(t.date)[:10],
                     "description": t.description_clean or t.description_raw,
+                    "merchant": t.merchant_name,
+                    "account": t.account.account_name if t.account else None,
                     "action": t.action, "is_split": True,
                     "split_description": s.description,
                     "split_category": cat,
+                    "category": cat,
                     "split_amount": s.amount, "contrib": round(contrib, 2),
                 })
         else:
@@ -215,7 +219,10 @@ async def get_stats_detail(
             rows.append({
                 "id": t.id, "date": str(t.date)[:10],
                 "description": t.description_clean or t.description_raw,
+                "merchant": t.merchant_name,
+                "account": t.account.account_name if t.account else None,
                 "action": t.action, "is_split": False,
+                "category": cat,
                 "amount": t.amount, "contrib": round(contrib, 2),
             })
 

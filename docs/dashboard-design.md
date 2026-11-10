@@ -1,6 +1,6 @@
 # Dashboard page design
 
-Chosen with the design gallery (rounds 1-4, 2026-11-03 to 2026-11-05). On 2026-11-07 Omer removed the insights card, moved the three charts above the budget card, and asked for those three cards to be the same height. Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1-4, 2026-11-03 to 2026-11-05). On 2026-11-07 Omer removed the insights card, moved the three charts above the budget card, and asked for those three cards to be the same height. Desktop approved and **built 2026-11-08** (see Build notes at the end). Phone design is a separate, later exercise; phones keep the earlier layout until then.
 Source spec: `mockups/design-gallery/dashboard.spec.js` (id `dashboard-final-r6`). Final rendering with real figures: https://claude.ai/artifact/PA8pANhJV9Z213UyqFEfPh
 Replaces today's `frontend/src/pages/DashboardPage.jsx` layout. The aim from round 1: fewer raw figures, more plain statements of what changed and what needs a look.
 Example figures below are October 2026, pulled 2026-11-04 after the two-level category migration.
@@ -65,7 +65,22 @@ When a category's detail panel is open, it sits under the budget card, at the bo
 - **Legend:** a list with a color square, the name, the percent of spending and the amount.
 - **Credits note:** top levels that net to a credit can't be a slice. When there are any, one line at the foot of the card says so: "Leaves out $5,331.99 of net credits (Business, Financial)." Hovering it adds that this is gross spending, so it is more than the budget card's total.
 
-## Open questions for the build
+## Still open
 - **B25:** in Year to date the Expenses figure and the budget card's total differ by the $299 of `Work` expenses. Decide on one basis or add a footnote.
 - **B36:** the house is bucketed as "Other Assets" in net worth. The figure is right; only the label is affected.
-- Today's page reads `/api/stats`, budgets and transactions. Month pace and where the money went need per-category totals for the period and the comparison period, rolled up to top level (`/api/budget/actuals` already returns `top_levels` and `/api/stats` returns `by_top_level`). Decide while building whether the browser computes them from the period's rows or a small endpoint returns them.
+
+## Build notes (2026-11-08)
+- **Files:** `frontend/src/pages/DashboardPage.jsx` (desktop; under 768px it renders `DashboardPhonePage.jsx`, the earlier layout unchanged), `pages/dashboard.css` (scoped to `.dbp`, colors from `styles/cloud.css`, so dark mode gets the Cloud dark neutrals), and `lib/dashData.js` (every figure: period dates, budget rows, top-level groups, pace, the 6-month trend, where the money went).
+- **Where the figures come from:** the browser computes them from existing endpoints; no new endpoint.
+  - Summary: `/api/net-worth` (value; Checking & Savings is its "Cash & Savings" bucket) and `/api/net-worth/timeline?months=12` (sparkline and "since" figure); Income, Expenses and Net Cash Flow from `/api/stats` for the period and its comparison.
+  - Budget card, pace and trend: `/api/budget/targets` and `/api/budget/actuals` for the selected year, plus last year's actuals when the 6 months reach back.
+  - Where the money went: `/api/stats` `by_category` for the period and its comparison, rolled up to top level in the browser (so a month in progress compares the same days).
+  - Detail list: `/api/stats/detail` for the top level, filtered to the clicked category. The endpoint now also returns each row's `category`, `merchant` and `account`. Other also asks for Unclassified, since Unclassified shows as Other.
+- **Small calls made while building:**
+  - The month stepper runs from January two years back (the Transactions page's year range) to the current month, instead of stopping at January of this year as in the gallery.
+  - The row of three stays three across down to a 980px content area, goes two across below that, and one across under 680px. The gallery used 1150px and 860px, but it had a top bar; the app still has the sidebar, so at a 1280px window the content area is about 1,140px. The summary figures stack under 760px.
+  - Opening a detail list scrolls it into view, since it now sits at the bottom of the page.
+  - "N more in Transactions →" opens the Transactions page; it can't yet pass the category and period through.
+  - Navigation is still the sidebar; the top bar is an app-wide change of its own.
+- **Checked** against a SQLite copy of production (copied inside a read-only transaction; nothing written to production): October, November (in progress, with the Today mark and "Same days of October underneath."), September and Year to date; tile, row and keyboard clicks, closing by ✕ and by clicking again, the panel following the period; trend clicks; the stepper limits; light and dark; 1600, 1280 and 1024px windows; the phone layout. Every detail total matched its tile. Tests: 113 passed, plus a check on the new detail fields.
+- **Figures moved since the gallery:** the 2026-11-08 sync added rows to October (B41), so October now reads $20,103.68 spent, not $10,498.71.
