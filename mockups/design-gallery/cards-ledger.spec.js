@@ -16,6 +16,8 @@ const JAN1='2027-01-01',NOOWN='No owner';
 const REASONS=[['Stay or flight',1,'Points from a hotel stay or a flight'],['Sign-up bonus',1,'A bonus with no challenge in the app'],['Referral',1,'For referring someone'],['Promotion',1,'An offer, a promo or a goodwill credit'],['Points expired',-1,'Points the program took away'],['Balance check',0,'A difference found when checking the balance'],['Other',0,'Anything else; say what in the note']];
 const KIND={open:'Opening',earn:'Card points',bonus:'Adjustment',red:'Redemption',xout:'Transfer',xin:'Transfer',adj:'Adjustment',check:'Adjustment',p2p:'Between us'};
 const RANK={open:0,earn:1,check:3};
+const rname=(r,p)=>r==='Balance check'&&p&&p.checkName==='adjustment'?'Balance adjustment':r;
+const stripS=t=>(t||'').replace(/^Sample:\s*/,'');
 
 /* ---------- Preview state (lives across re-renders) ---------- */
 const S={win:null,pw:null,pp:null,pm:null,kf:'',pf:'',posted:{},undo:null,box:null,exp:null,added:{},openSet:{},ck:{},adj:null,grid:{},toast:'',uid:0};
@@ -77,9 +79,11 @@ function portfolio(p,d,h){
     const dot=p.tileCheck==='dot'&&!jan&&stale?`<i class="t-dot" title="${chk?'Last checked more than 60 days ago':'Balance not checked yet'}" aria-label="${chk?'Last checked more than 60 days ago':'Balance not checked yet'}"></i>`:'';
     return `<div class="e-tile sf">${dot}${logo(r.name,r.logo,h)}<div class="e-b"><b class="val">${bal==null?'—':f(bal)}</b><div class="meta">${bal==null?'<span class="mut">Not set</span>':`<span class="${earned>0?'up':'mut'}">+${f(earned)} ${d.period}</span>${pend>0?`<span class="pend">${f(pend)} pending</span>`:''}`}</div>${line}</div></div>`}).join('');
   const banner=gridOn(p)&&p.gridOpen==='banner'&&jan&&!all?`<div class="ob sf"><div class="ob-t"><b>Start the points ledger</b><span>Enter the balance each program shows today, Jan 1, 2027. From here the app adds card points, bonuses and everything you log.</span></div><span class="ob-n">${gc.n} of ${gc.of} set</span><button type="button" class="btn pri" data-act="grid">Enter balances</button></div>`:'';
+  const unsetProgs=d.grid.filter(r=>Object.entries(r.people).some(([x,P])=>P.card&&S.openSet[r.name+'|'+x]==null));
+  const banner2=!gridOn(p)&&p.janBanner==='links'&&jan&&!all?`<div class="ob sf"><div class="ob-t"><b>Start the points ledger</b><span>Set each program’s Jan 1, 2027 balance on its own ledger. Still to set:</span><span class="ob-l">${unsetProgs.map(r=>`<button type="button" class="chip" data-act="go-prog" data-name="${esc(r.name)}">${esc(r.name)}</button>`).join('')}</span></div><span class="ob-n">${gc.n} of ${gc.of} set</span></div>`:'';
   const hbtn=gridOn(p)&&(p.gridOpen==='heading'||(p.gridOpen==='banner'&&(!jan||all)))?`<button type="button" class="btn-g" data-act="grid">Opening balances</button>`:'';
   const inl=S.win&&S.win.t==='grid'&&p.winStyle==='inline'?gridWin(p,d,h):'';
-  return `${banner}${p.gridOpen==='banner'?inl:''}<section><div class="s-head"><h2>Rewards programs</h2>${hbtn}</div>${p.gridOpen!=='banner'?inl:''}<div class="e-tiles">${tiles}<div class="e-tile sf"><span class="mono"><i>$</i><span>Cash Back</span></span><div class="e-b"><b class="val good">$${(d.cashBack||0).toFixed(2)}</b><div class="meta"><span class="mut">earned ${d.period}</span></div></div></div></div></section><section><p class="emp sf pn">Your cards and Active challenges sit here as approved; not repeated in this gallery.</p></section>`;}
+  return `${banner}${banner2}${p.gridOpen==='banner'?inl:''}<section><div class="s-head"><h2>Rewards programs</h2>${hbtn}</div>${p.gridOpen!=='banner'?inl:''}<div class="e-tiles">${tiles}<div class="e-tile sf"><span class="mono"><i>$</i><span>Cash Back</span></span><div class="e-b"><b class="val good">$${(d.cashBack||0).toFixed(2)}</b><div class="meta"><span class="mut">earned ${d.period}</span></div></div></div></div></section><section><p class="emp sf pn">Your cards and Active challenges sit here as approved; not repeated in this gallery.</p></section>`;}
 
 /* ---------- Ecosystem: header ---------- */
 function fan(e,h){const cs=e.cards.filter(c=>c.key).slice(0,3),more=e.cards.length-cs.length;return `<div class="fan">${cs.map(c=>`<span class="fc" style="background:linear-gradient(135deg,${grad(e.name)})"><img src="${h.img('card_'+c.key)}" alt=""></span>`).join('')}${more>0?`<span class="fc more">+${more}</span>`:''}</div>`;}
@@ -97,7 +101,7 @@ function ledgerRows(p,L,people){
   let R;
   if(p.adjRows==='groups')R=[['Earned on cards',s=>s.earn],['Pending, not yet posted',s=>-(s.earnPend+(bp?s.bonusPend:0))],['Other points in',s=>s.xin+s.inn+Object.entries(s.adj).filter(([k,v])=>k!=='Balance check'&&v>0).reduce((t,[,v])=>t+v,0)+(bp?s.bonusPend:0)],['Points out',s=>s.red+s.xout+s.out+Object.entries(s.adj).filter(([k,v])=>k!=='Balance check'&&v<0).reduce((t,[,v])=>t+v,0)],['Balance checks',s=>s.adj['Balance check']||0]];
   else{R=[...base,['Redeemed',s=>s.red],['Transferred out',s=>s.xout],['Transferred in',s=>s.xin]];
-    if(p.adjRows==='reason')REASONS.forEach(([r])=>R.push([r==='Balance check'?'Balance checks':r,s=>s.adj[r]||0]));
+    if(p.adjRows==='reason')REASONS.forEach(([r])=>R.push([r==='Balance check'?rname(r,p)+'s':r,s=>s.adj[r]||0]));
     else R.push(['Adjusted',s=>s.adjAll]);
     R.push(['Sent to other',s=>s.out],['Received from other',s=>s.inn]);}
   return R.filter(r=>any(r[1]));}
@@ -145,14 +149,24 @@ const TGRP={open:'o',earn:'e',red:'r',xout:'t',xin:'t',p2p:'t',adj:'a',check:'a'
 const reasonOf=x=>x.kind==='check'?'Balance check':x.kind==='bonus'?(x.reason||'Sign-up bonus'):x.kind==='adj'?(x.reason||'Other'):'';
 const fd=(s,p)=>{const[y,m,dd]=s.split('-');return p.dateFmt==='mon'?`${MON[m-1]} ${Number(dd)}`:`${Number(m)}/${Number(dd)}`};
 const isSample=x=>!!(x.sample||/^Sample:/.test(x.title||''));
-function descOf(x){if(x.kind==='earn')return x.cardName||x.title;if(x.kind==='check')return 'Balance check';if(x.kind==='open')return 'Opening balance';return (x.title||'').replace(/^Sample:\s*/,'');}
-function detailOf(x,p){const k=x.kind;
+function descOf(x,p){const k=x.kind;
+  if(k==='adj'||k==='check'||k==='bonus')return rname(reasonOf(x),p);
+  if(k==='open')return 'Opening balance';
+  if(p.descOther==='kind')return TYPE[k];
+  if(k==='earn')return x.merged?'Month of statements':x.monthly?'Month of charges':'Statement';
+  if(k==='red')return 'Redemption';
+  return stripS(x.title);}
+function detailOf(x,p){const k=x.kind,kind=p.descOther==='kind';
   if(k==='earn'){
     if(x.merged)return `${x.cnt} statement${x.cnt===1?'':'s'} in ${MONL[Number(x.date.slice(5,7))-1]}, ${x.n} charges`;
     if(x.monthly)return `${MONL[Number(x.to.slice(5,7))-1]} charges (${x.n}); no statement close day set, so counted as charged`;
-    return `Statement ${fd(x.from,p)} to ${fd(x.to,p)}, ${x.n} charge${x.n===1?'':'s'}${x.pre?` (${x.pre} from before the start)`:''}${x.status==='pending'?`; posts ${fd(x.date,p)}`:''}`;}
+    return `${fd(x.from,p)} to ${fd(x.to,p)}, ${x.n} charge${x.n===1?'':'s'}${x.pre?` (${x.pre} from before the start)`:''}${x.status==='pending'?`; posts ${fd(x.date,p)}`:''}`;}
   if(k==='check')return (x.pts?`Program showed ${f(x.pa)}, the app had ${f(x.pb)}`:`Matched the program at ${f(x.pa)}`)+(x.note?`. ${x.note}`:'');
-  if(k==='bonus')return x.status==='pending'?`${x.sub}; waiting for you to mark it posted`:`${x.sub}; marked posted ${fd(x.date,p)}`;
+  if(k==='bonus')return `${stripS(x.title)}. ${x.sub}; ${x.status==='pending'?'waiting for you to mark it posted':`marked posted ${fd(x.date,p)}`}`;
+  if(k==='red')return `${stripS(x.title)}; ${x.sub}`;
+  if(k==='xout'||k==='xin')return kind?`${stripS(x.title)}: ${x.sub}`:x.sub;
+  if(k==='p2p')return kind?stripS(x.title):'Same program, nets to zero';
+  if(k==='adj'){const t=stripS(x.title);return t&&t!==x.reason?t:(x.sub||'');}
   return x.sub||'';}
 function displayList(p,L){
   let D=L.map(x=>({...x}));
@@ -164,7 +178,7 @@ function displayList(p,L){
   if(p.pendShow==='hidden')D=D.filter(x=>x.status!=='pending');
   return D;}
 function markCtl(p,x){
-  if(S.box===x.id)return `<span class="mk-box"><span class="mk-l">Mark ${esc(descOf(x))} posted</span><label>Posted on<input type="date" data-mk-date value="${today(p)}"></label><label>Points<input data-mk-pts inputmode="numeric" value="${f(x.pts)}"></label><span class="mk-b"><button type="button" class="btn sm" data-act="mark-cancel">Cancel</button><button type="button" class="btn sm pri" data-act="mark-save" data-id="${x.id}">Save</button></span></span>`;
+  if(S.box===x.id)return `<span class="mk-box"><span class="mk-l">Mark ${esc(descOf(x,p))} posted</span><label>Posted on<input type="date" data-mk-date value="${today(p)}"></label><label>Points<input data-mk-pts inputmode="numeric" value="${f(x.pts)}"></label><span class="mk-b"><button type="button" class="btn sm" data-act="mark-cancel">Cancel</button><button type="button" class="btn sm pri" data-act="mark-save" data-id="${x.id}">Save</button></span></span>`;
   return `<button type="button" class="btn sm pri mk" data-act="mark" data-id="${x.id}">Mark posted</button>`;}
 const undoCtl=x=>`<span class="mk-undo"><button type="button" class="btn sm" data-act="undo" data-id="${x.id}">Undo</button><span class="tm"></span></span>`;
 function activity(p,d,h,L){const e=prog(p,d),jan=p.moment==='jan1';
@@ -177,13 +191,16 @@ function activity(p,d,h,L){const e=prog(p,d),jan=p.moment==='jan1';
   const V=D.filter(x=>(!scope||x.person===scope)&&(!S.kf||KIND[x.kind]===S.kf));
   const desc=(a,b)=>-order(a,b);
   const rows=p.pendShow==='top'?[...V.filter(x=>x.status==='pending').sort(order),...V.filter(x=>x.status!=='pending').sort(desc)]:V.sort(desc);
-  const showOwner=!scope,rc=p.typeCol==='reasonCol',io=p.ptsCols==='inout',dc=p.detail==='col',st=p.pendShow==='status',bal=p.runBal,ex=p.detail==='expand';
-  const cols=[['Date','d'],['Type',''],...(rc?[['Reason','']]:[]),['Description','ds'],...(dc?[['Details','dt']]:[]),...(showOwner?[['Owner','']]:[]),...(io?[['In','n'],['Out','n']]:[['Points','n']]),...(bal?[[scope?'Balance':'Balance, total','n']]:[]),...(st?[['Status','']]:[]),['','ac']];
+  const showOwner=!scope,rc=false,io=p.ptsCols==='inout',dc=p.detail==='col',st=p.pendShow==='status',bal=p.runBal,ex=p.detail==='expand';
+  const cp=p.cardPos,C=[['Card','cd']],cols=[['Date','d'],...(cp==='afterDate'?C:[]),['Type',''],...(cp==='afterType'?C:[]),['Description','ds'],...(dc?[['Details','dt']]:[]),...(cp==='beforeOwner'?C:[]),...(showOwner?[['Owner','']]:[]),...(io?[['In','n'],['Out','n']]:[['Points','n']]),...(bal?[[scope?'Balance':'Balance, total','n']]:[]),...(st?[['Status','']]:[]),['','ac']];
   const red=L.filter(x=>x.kind==='red'),rp=-red.reduce((t,x)=>t+x.pts,0),rcash=red.reduce((t,x)=>t+(parseFloat((x.sub||'').replace(/[^0-9.]/g,''))||0),0);
   const stats=rp?`<div class="r-st"><div><span>Points redeemed</span><b class="val">${f(rp)}</b></div><div><span>Cash value realized</span><b class="val">$${rcash.toFixed(2)}</b></div><div><span>Realized ¢ per point</span><b class="val">${(rcash/rp*100).toFixed(2)}¢</b></div></div>`:'';
   const chipH=`<div class="a-chips"><span class="cg">${chips.map(c=>`<button type="button" class="chip ${S.kf===c?'on':''}" data-kf="${c}">${c||'All'}</button>`).join('')}</span>${p.histPerson==='chips'&&e.people.length>1?`<span class="cg pg">${['',...e.people].map(x=>`<button type="button" class="chip ${S.pf===x?'on':''}" data-pf="${esc(x)}">${x?esc(x):'Everyone'}</button>`).join('')}</span>`:''}</div>`;
   const ledgerNote=p.histPerson==='ledger'?`<p class="a-note">${scope?`Showing ${esc(scope)} only. <button type="button" class="lnk" data-pf="">Show everyone</button>`:'Click a person’s ledger card to show only their lines.'}</p>`:'';
-  const typeCell=x=>{const t=rc?TYPE[x.kind]:(reasonOf(x)||TYPE[x.kind]);return `<td>${p.typeLook==='pill'?`<span class="tp g-${TGRP[x.kind]}">${esc(t)}</span>`:esc(t)}</td>`};
+  const cardCell=x=>{const m=x.cardName?x.cardName.split(' ').pop():'';if(!m)return '<td class="cd"></td>';
+    const art=p.cardLook==='art'?`<span class="ca" style="background:linear-gradient(135deg,${grad(e.name)})">${x.card?`<img src="${h.img('card_'+x.card)}" alt="">`:''}</span>`:'';
+    return `<td class="cd" title="${esc(x.cardName)}"><span class="cd-i">${art}…${esc(m)}</span></td>`};
+  const typeCell=x=>{const t=TYPE[x.kind];return `<td>${p.typeLook==='pill'?`<span class="tp g-${TGRP[x.kind]}">${esc(t)}</span>`:esc(t)}</td>`};
   const ownerCell=x=>{if(!x.person)return '<td></td>';const no=x.person===NOOWN;
     if(p.ownerLook==='chip')return `<td><span class="oc ${no?'no':'p-'+Math.max(0,e.people.indexOf(x.person))}" title="${esc(x.person)}" aria-label="${esc(x.person)}">${no?'?':esc(x.person[0])}</span></td>`;
     return `<td class="${no?'pend':''}">${esc(x.person)}</td>`};
@@ -194,14 +211,14 @@ function activity(p,d,h,L){const e=prog(p,d),jan=p.moment==='jan1';
     return `<td class="n ${pend?'pend':cl(v)}">${sg(v)}</td>`};
   const dateCell=x=>p.pendShow==='top'&&x.status==='pending'?`<td class="d pend b">${x.kind==='bonus'?'To confirm':'Posts '+fd(x.date,p)}</td>`:`<td class="d">${fd(x.date,p)}</td>`;
   const descCell=x=>{const dt2=detailOf(x,p),tip=p.detail==='hover'&&dt2?`<span class="tip" tabindex="0" aria-label="${esc(dt2)}">ⓘ<span role="tooltip">${esc(dt2)}</span></span>`:'';
-    return `<td class="ds"><span class="ds-i">${isSample(x)?'<span class="smp">Sample</span>':''}<span class="ds-t" title="${esc(descOf(x))}">${esc(descOf(x))}</span>${tip}</span></td>`};
+    return `<td class="ds"><span class="ds-i">${isSample(x)?'<span class="smp">Sample</span>':''}<span class="ds-t" title="${esc(descOf(x,p))}">${esc(descOf(x,p))}</span>${tip}</span></td>`};
   const statusCell=x=>x.status!=='pending'?'<td class="mut">Posted</td>':`<td class="pend b">${x.kind==='bonus'?'To confirm':'Pending'}</td>`;
   const actCell=x=>{let a='';
     if(x.status==='pending'&&x.kind==='bonus'&&p.bonusWhere!=='challenge'&&S.box!==x.id)a=markCtl(p,x);
     else if(S.undo&&S.undo.id===x.id)a=undoCtl(x);
     else if(x.status!=='pending')a=`<span class="ev-a"><button type="button" class="btn-g sm">Edit</button></span>`;
     return `<td class="ac">${a}${ex?`<span class="chev ${S.exp===x.id?'open':''}" aria-hidden="true">›</span>`:''}</td>`};
-  const row=x=>{const open=ex&&S.exp===x.id;let r=`<tr class="${x.status==='pending'?'is-pend':''} ${ex?'exr':''} ${open?'open':''}" ${ex?`data-exp="${x.id}" tabindex="0" aria-expanded="${open}"`:''}>${dateCell(x)}${typeCell(x)}${rc?`<td>${esc(reasonOf(x))}</td>`:''}${descCell(x)}${dc?`<td class="dt" title="${esc(detailOf(x,p))}">${esc(detailOf(x,p))}</td>`:''}${showOwner?ownerCell(x):''}${ptsCells(x)}${bal?`<td class="n bal">${x.status==='pending'||x.sa==null?'':f(x.sa)}</td>`:''}${st?statusCell(x):''}${actCell(x)}</tr>`;
+  const row=x=>{const open=ex&&S.exp===x.id;let r=`<tr class="${x.status==='pending'?'is-pend':''} ${ex?'exr':''} ${open?'open':''}" ${ex?`data-exp="${x.id}" tabindex="0" aria-expanded="${open}"`:''}>${dateCell(x)}${cp==='afterDate'?cardCell(x):''}${typeCell(x)}${cp==='afterType'?cardCell(x):''}${descCell(x)}${dc?`<td class="dt" title="${esc(detailOf(x,p))}">${esc(detailOf(x,p))}</td>`:''}${cp==='beforeOwner'?cardCell(x):''}${showOwner?ownerCell(x):''}${ptsCells(x)}${bal?`<td class="n bal">${x.status==='pending'||x.sa==null?'':f(x.sa)}</td>`:''}${st?statusCell(x):''}${actCell(x)}</tr>`;
     if(open)r+=`<tr class="exd"><td colspan="${cols.length}">${esc(detailOf(x,p))}</td></tr>`;
     if(S.box===x.id)r+=`<tr class="exd"><td colspan="${cols.length}">${markCtl(p,x)}</td></tr>`;
     return r};
@@ -218,10 +235,10 @@ function gapHtml(p,app,v){if(v===''||v==null||isNaN(v))return `<span class="mut"
   if(p.gapShow==='figures')return `<span class="g3"><span><small>App</small><b>${f(app)}</b></span><span><small>Program</small><b>${f(v)}</b></span><span><small>Difference</small><b class="${cl(g)}">${g?sg(g):'±0'}</b></span></span>`;
   if(p.gapShow==='after')return g?`<span>Balance <b>${f(app)}</b> → <b>${f(v)}</b> <b class="${cl(g)}">(${sg(g)})</b></span>`:`<span>Balance stays <b>${f(app)}</b>. Matches.</span>`;
   return g?`<span>The program has <b class="${cl(g)}">${f(Math.abs(g))} ${g>0?'more':'fewer'}</b>. Saving logs <b>${sg(g)}</b> as a balance check.</span>`:`<span class="good">Matches. Saving records the check with no change.</span>`;}
-const reasonOpts=(sel,only)=>REASONS.filter(r=>!only||only(r)).map(([r])=>`<option ${r===sel?'selected':''}>${r}</option>`).join('');
+const reasonOpts=(sel,only,p)=>REASONS.filter(r=>!only||only(r)).map(([r])=>`<option value="${r}" ${r===sel?'selected':''}>${rname(r,p)}</option>`).join('');
 function checkWin(p,d,h,L){const e=prog(p,d),who=S.win.person?[S.win.person]:e.people,T=today(p);
   const inner=who.map(x=>{const s=sums(L,x),v=S.ck[x];
-    const reason=p.gapReason==='pick'?`<label class="fld">Log the difference as<select data-ckr="${esc(x)}">${reasonOpts('Balance check')}</select></label>`:
+    const reason=p.gapReason==='pick'?`<label class="fld">Log the difference as<select data-ckr="${esc(x)}">${reasonOpts('Balance check',null,p)}</select></label>`:
       p.gapReason==='split'?`<div class="split"><span class="fl-l">Explain part of it (optional)</span><div class="sp-r"><select aria-label="Reason">${reasonOpts('Stay or flight',r=>r[0]!=='Balance check')}</select><input aria-label="Points" inputmode="numeric" placeholder="Points"></div><button type="button" class="lnk">+ Add a part</button><small class="mut">Whatever is left is logged as a balance check.</small></div>`:'';
     return `<div class="ck"><div class="ck-h"><b>${esc(x)}</b><span>The app has <b>${f(s.cur)}</b> posted${s.earnPend?`; ${f(s.earnPend)} pending isn’t included`:''}.</span></div><label class="fld">The program shows<input class="big-in" data-ck="${esc(x)}" data-app="${s.cur}" inputmode="numeric" autocomplete="off" value="${v!=null?esc(v):''}" placeholder="As the program shows it"></label><div class="ck-gap" data-ckgap="${esc(x)}">${gapHtml(p,s.cur,v===''||v==null?null:Number(String(v).replace(/[,\s]/g,'')))}</div>${reason}</div>`}).join('');
   const meta=`<div class="frow"><label class="fld">Checked on<input type="date" value="${T}"></label><label class="fld grow">Note (optional)<input placeholder="Where you looked, anything odd"></label></div><p class="hint">Programs show posted points only, so the app compares its posted figure.</p>`;
@@ -231,7 +248,7 @@ function adjWin(p,d,h){const e=prog(p,d),A=S.adj,T=today(p),R=REASONS.find(r=>r[
   let rs;
   if(p.reasonPick==='chips')rs=`<div class="fld"><span class="fl-l">Reason</span><div class="rchips">${REASONS.map(([r])=>`<button type="button" class="chip ${A.reason===r?'on':''}" data-adj-reason="${r}">${r}</button>`).join('')}</div></div>`;
   else if(p.reasonPick==='list')rs=`<div class="fld"><span class="fl-l">Reason</span><div class="rlist">${REASONS.map(([r,,t])=>`<label class="${A.reason===r?'on':''}"><input type="radio" name="adj-r" ${A.reason===r?'checked':''} data-adj-reason="${r}"><b>${r}</b><small>${t}</small></label>`).join('')}</div></div>`;
-  else rs=`<label class="fld">Reason<select data-adj-rsel>${reasonOpts(A.reason)}</select></label>`;
+  else rs=`<label class="fld">Reason<select data-adj-rsel>${reasonOpts(A.reason,null,p)}</select></label>`;
   const sign=A.sign;let pts;
   if(p.sign==='signed')pts=`<label class="fld">Points<input class="big-in" data-adj-pts inputmode="numeric" value="${esc(A.raw||'')}" placeholder="5000 or −2100"></label>`;
   else if(p.sign==='buttons')pts=`<div class="fld"><span class="fl-l">Points</span><div class="seg"><button type="button" class="${sign>0?'on':''}" data-adj-sign="1">Add points</button><button type="button" class="${sign<0?'on':''}" data-adj-sign="-1">Remove points</button></div><input class="big-in" data-adj-pts inputmode="numeric" value="${esc(A.raw||'')}" placeholder="Points" aria-label="Points"></div>`;
@@ -239,7 +256,7 @@ function adjWin(p,d,h){const e=prog(p,d),A=S.adj,T=today(p),R=REASONS.find(r=>r[
   const inner=`${ppl}${rs}${pts}<div class="frow"><label class="fld">Date<input type="date" value="${T}"></label><label class="fld grow">Note (optional)<input data-adj-note value="${esc(A.note||'')}" placeholder="${A.reason==='Stay or flight'?'Hotel, nights, booking':'Anything worth remembering'}"></label></div>`;
   return shell(p,`Add adjustment · ${e.name}`,inner,`<button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn pri" data-act="save-adj">Save</button>`);}
 function openWin(p,d,h,L){const e=prog(p,d),x=S.win.person||e.people[0],k=e.name+'|'+x,cur=S.openSet[k]!=null?S.openSet[k]:(L.find(y=>y.kind==='open'&&y.person===x)||{}).pts;
-  const inner=`<label class="fld">${esc(x)}’s balance on Jan 1, 2027<input class="big-in" data-open-v inputmode="numeric" autocomplete="off" value="${cur!=null?f(cur):''}" placeholder="As the program shows it"></label><p class="hint">The posted balance the program shows on Jan 1. Card points, bonuses and everything you log are added from there.</p>`;
+  const inner=`<label class="fld">${esc(x)}’s balance on Jan 1, 2027<input class="big-in" data-open-v inputmode="numeric" autocomplete="off" value="${cur!=null?f(cur):''}" placeholder="As the program shows it"></label>${(()=>{const r=d.grid.find(g=>g.name===e.name),a=r&&r.people[x]?r.people[x].app:null;return a!=null?`<p class="hint">The app’s own figure today: <b>${f(a)}</b>. It was never checked, so use the program’s figure.</p>`:''})()}<p class="hint">The posted balance the program shows on Jan 1. Card points, bonuses and everything you log are added from there.</p>`;
   return shell(p,`Opening balance · ${e.name}`,inner,`<button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn pri" data-act="save-open" data-person="${esc(x)}">Save</button>`);}
 function gridWin(p,d,h){const ppl=['Omer','Daniella'];
   const cell=(r,x)=>{const P=r.people[x],k=r.name+'|'+x,v=S.grid[k]!=null?S.grid[k]:S.openSet[k]!=null?f(S.openSet[k]):'';
@@ -273,8 +290,8 @@ function syncPicks(p,d){const key=p.screen+'|'+p.page;
 function newAdj(p,d){const e=prog(p,d);return {person:e?e.people[0]:'Omer',reason:'Stay or flight',sign:1,raw:'',note:''};}
 
 Gallery.define({
-  id:'cards-ledger-r1b',
-  name:'Cards: Points ledger and adjustments, round 1 (revised)',
+  id:'cards-ledger-r2',
+  name:'Cards: Points ledger and adjustments, round 2',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'],
   groups:[
    {id:'see',label:'Screen to look at (not a design choice)',open:true,controls:[
@@ -290,163 +307,73 @@ Gallery.define({
       {id:'portfolio',label:'Portfolio',hint:'The program tiles.'},
       {id:'jan1port',label:'Jan 1, 2027: Portfolio before any balance is entered',hint:'The ledger’s first day.'},
       {id:'jan1prog',label:'Jan 1, 2027: Hilton Honors before its balance is entered'},
-      {id:'jan1enter',label:'Jan 1, 2027: entering the opening balances',hint:'The grid on Portfolio, or one program’s window, depending on your pick under Opening balances.'},
+      {id:'jan1enter',label:'Jan 1, 2027: entering an opening balance',hint:'The window from Set opening balance on the Hilton Honors ledger.'},
     ]},
    ]},
-   {id:'ledger',label:'Balance ledger',open:true,controls:[
-    {id:'adjRows',label:'Rows on each card',type:'choice',options:[
-      {id:'one',label:'One Adjusted row',current:true,hint:'Today’s rows: earned, pending, redeemed, transfers, adjusted, between you.'},
-      {id:'reason',label:'A row per reason',hint:'Stay or flight, Sign-up bonus, Referral, Promotion, Points expired, Balance checks, Other; empty ones hidden.'},
-      {id:'groups',label:'Four groups',hint:'Earned on cards, Other points in, Points out, Balance checks.'},
+   {id:'r2',label:'Open: the Activity table after your note',open:true,controls:[
+    {id:'descOther',label:'Description on lines that aren’t adjustments',type:'choice',options:[
+      {id:'what',label:'What happened, in a few words',hint:'Statement, Redemption, To Hilton Honors, From Amex MR, Omer to Daniella, Opening balance. Adjustments show their reason.'},
+      {id:'kind',label:'The type again',hint:'Card points, Redemption, Transfer out, Between us. The partner program moves to Details.'},
     ]},
-    {id:'bonusRow',label:'A bonus waiting to post, on the card',type:'choice',options:[
-      {id:'own',label:'Its own line, not in the balance'},
-      {id:'pending',label:'Inside Earned and Pending',hint:'Counted like card points that haven’t posted.'},
-      {id:'none',label:'Not on the ledger card'},
+    {id:'checkName',label:'Name for the gap a balance check logs',type:'choice',options:[
+      {id:'check',label:'Balance check'},
+      {id:'adjustment',label:'Balance adjustment',hint:'Also the ledger row (Balance adjustments) and the reason list.'},
     ]},
-    {id:'checkLine',label:'Last balance check',type:'choice',options:[
-      {id:'off',label:'Not shown',current:true},
-      {id:'line',label:'A line under the balance',hint:'“Checked Oct 31, 7 days ago, matched”. Amber when it found a gap.'},
-      {id:'dot',label:'Dot and date by the name',hint:'Green matched, amber gap, grey never. Hover for the sentence.'},
+    {id:'cardLook',label:'Card column',type:'choice',options:[
+      {id:'mask',label:'Last four only, …7154',hint:'Hover shows the card’s name. Watch Amex MR: Platinum and Blue Business Plus both end in 1008 in the app.'},
+      {id:'art',label:'Small card art, then …7154',hint:'Tells the two …1008 cards apart at a glance.'},
     ]},
-    {id:'checkBtn',label:'Where Check balance starts',type:'choice',options:[
-      {id:'below',label:'Buttons below the cards',current:true,hint:'Where today’s “+ Add Correction” sits.'},
-      {id:'card',label:'Inside each person’s card'},
-      {id:'head',label:'One button in the heading',hint:'One window for both of you.'},
-      {id:'figure',label:'Click the balance itself',hint:'The figure shows ✎ on hover.'},
-    ]},
-    {id:'openBtn',label:'Editing an opening balance later',type:'choice',options:[
-      {id:'below',label:'Button below the cards',current:true},
-      {id:'row',label:'✎ on the Opening balance row'},
-    ]},
-    {id:'noOwner',label:'Points from a card with no owner',type:'choice',options:[
-      {id:'warn',label:'A warning line under the cards',current:true,hint:'With a link to set the owner. Counted in Total only.'},
-      {id:'card',label:'Its own “No owner” card'},
+    {id:'cardPos',label:'Where the Card column sits',type:'choice',options:[
+      {id:'afterType',label:'After Type'},
+      {id:'afterDate',label:'After Date'},
+      {id:'beforeOwner',label:'Before Owner'},
     ]},
    ]},
-   {id:'hdr',label:'Header strip',open:false,controls:[
-    {id:'hdrPend',label:'Pending figure',type:'choice',options:[
-      {id:'cards',label:'Card points only',current:true},
-      {id:'both',label:'Card points and bonuses waiting'},
-      {id:'split',label:'Two figures',hint:'Pending from cards, and Bonus to confirm.'},
+   {id:'r2b',label:'Open: two loose ends',open:true,controls:[
+    {id:'janBanner',label:'Jan 1 reminder on Portfolio',type:'choice',options:[
+      {id:'links',label:'A banner listing the programs still to set',hint:'Each name opens that program’s page. See it on “Jan 1, 2027: Portfolio before any balance is entered”.'},
+      {id:'none',label:'No reminder'},
+    ]},
+    {id:'lateFix',label:'A card-points fix from before the last balance check',type:'choice',options:[
+      {id:'absorb',label:'The next check absorbs it',hint:'A category, type, points-by-hand or Exclude fix on the Card page can change a statement the last check already settled. The ledger is then off by that amount until the next check logs it back. Nothing to build.'},
+      {id:'warn',label:'The Card page warns before saving',hint:'For example: “This changes a statement from before your Oct 31 balance check. The ledger will show +200 too many until your next check.”'},
     ]},
    ]},
-   {id:'history',label:'Activity table',open:true,controls:[
-    {id:'cardLines',label:'Card points in the table',type:'choice',options:[
-      {id:'none',label:'Not listed',current:true,hint:'Only the Earned row on the ledger card.'},
-      {id:'statement',label:'One line per statement',hint:'How programs post them. Cards with no close day get one line per month.'},
-      {id:'month',label:'One line per card per month'},
-    ]},
-    {id:'typeCol',label:'Adjustment reason',type:'choice',options:[
-      {id:'reasonCol',label:'Its own Reason column',hint:'Type says Adjustment; Reason says Stay or flight, Balance check, and so on.'},
-      {id:'inType',label:'In the Type column',hint:'Type says Stay or flight, Balance check, and so on. One column fewer.'},
-    ]},
-    {id:'typeLook',label:'Type look',type:'choice',options:[
-      {id:'text',label:'Plain text'},
-      {id:'pill',label:'Colored tag'},
-    ]},
-    {id:'detail',label:'Details (statement dates, transfer ratio, check figures)',type:'choice',options:[
-      {id:'col',label:'Their own column'},
-      {id:'hover',label:'ⓘ after the description, on hover'},
-      {id:'expand',label:'Click a row to open them under it'},
-      {id:'none',label:'Not shown'},
-    ]},
-    {id:'ptsCols',label:'Points',type:'choice',options:[
-      {id:'signed',label:'One column with + and −'},
-      {id:'inout',label:'In and Out columns'},
-    ]},
-    {id:'pendShow',label:'Pending lines',type:'choice',options:[
-      {id:'status',label:'A Status column',hint:'Posted, Pending, or To confirm for a bonus; lines in date order.'},
-      {id:'top',label:'At the top, tinted',hint:'The Date column says “Posts 11/12” or “To confirm”.'},
-      {id:'hidden',label:'Not listed',hint:'A bonus can then only be marked posted on its challenge.'},
-    ]},
-    {id:'ownerLook',label:'Owner column',type:'choice',options:[
-      {id:'name',label:'Name'},
-      {id:'chip',label:'Initial in a circle'},
-    ]},
-    {id:'histPerson',label:'Showing one owner’s lines',type:'choice',options:[
-      {id:'col',label:'No filter, the Owner column only',current:true},
-      {id:'chips',label:'Owner chips beside the type chips'},
-      {id:'ledger',label:'Click a person’s ledger card'},
-    ]},
-    {id:'dateFmt',label:'Date',type:'choice',options:[
-      {id:'slash',label:'10/31, as on Transactions'},
-      {id:'mon',label:'Oct 31'},
-    ]},
-    {id:'runBal',label:'Balance column (balance after each line)',type:'toggle',default:false},
-   ]},
-   {id:'check',label:'Check balance window',open:true,controls:[
-    {id:'gapShow',label:'How the difference reads',type:'choice',options:[
-      {id:'sentence',label:'A sentence',hint:'“The program has 212 more. Saving logs +212 as a balance check.”'},
-      {id:'figures',label:'Three figures',hint:'App, Program, Difference.'},
-      {id:'after',label:'Before and after',hint:'“Balance 81,688 → 81,900 (+212)”.'},
-    ]},
-    {id:'gapReason',label:'What the difference is logged as',type:'choice',options:[
-      {id:'fixed',label:'Always a balance check'},
-      {id:'pick',label:'Pick a reason, Balance check first'},
-      {id:'split',label:'Explain part, the rest is a balance check'},
-    ]},
-   ]},
-   {id:'adjust',label:'Adjustment window',open:true,controls:[
-    {id:'reasonPick',label:'Choosing the reason',type:'choice',options:[
-      {id:'select',label:'Dropdown'},
-      {id:'chips',label:'Chips'},
-      {id:'list',label:'List with a line each'},
-    ]},
-    {id:'sign',label:'Adding or removing points',type:'choice',options:[
-      {id:'signed',label:'Type a signed number',current:true,hint:'Today’s form: −2100 removes.'},
-      {id:'auto',label:'Sign follows the reason',hint:'Expired is −, the rest +; a +/− button flips it.'},
-      {id:'buttons',label:'Add points or Remove points'},
-    ]},
-   ]},
-   {id:'windows',label:'Windows',open:false,controls:[
-    {id:'winStyle',label:'Check balance, adjustment and opening balances open in',type:'choice',options:[
-      {id:'modal',label:'A window in the middle',current:true},
-      {id:'drawer',label:'A side panel',hint:'Like benefit editing on the Card page.'},
-      {id:'inline',label:'Under the section, in the page'},
-    ]},
-   ]},
-   {id:'bonus',label:'Challenge bonuses',open:true,controls:[
-    {id:'bonusWhere',label:'Where you mark a bonus posted',type:'choice',options:[
-      {id:'history',label:'Its pending line in Activity'},
-      {id:'challenge',label:'On the challenge card'},
-      {id:'both',label:'Both'},
-    ]},
-    {id:'markFlow',label:'Marking it posted',type:'choice',options:[
-      {id:'undo',label:'One click, Undo for 5 seconds',hint:'Posted today, like marking a credit used.'},
-      {id:'box',label:'A small box with the date and points',hint:'For a bonus that posted on another day or for a different amount.'},
-      {id:'now',label:'One click, fix the date later with Edit'},
-    ]},
-   ]},
-   {id:'opening',label:'Opening balances, Jan 1, 2027',open:true,controls:[
-    {id:'openWhere',label:'Where you enter them',type:'choice',options:[
-      {id:'program',label:'On each program’s ledger',current:true},
-      {id:'grid',label:'One grid of every program',hint:'Opened from Portfolio; edits like a spreadsheet.'},
-      {id:'both',label:'Both'},
-    ]},
-    {id:'gridOpen',label:'Opening the grid',type:'choice',options:[
-      {id:'banner',label:'Banner on Portfolio until all are set',hint:'Afterwards an Opening balances button in the programs heading.'},
-      {id:'heading',label:'Button in the programs heading'},
-      {id:'menu',label:'In a ⋯ menu in the header bar'},
-    ]},
-    {id:'gridHint',label:'Beside each grid cell',type:'choice',options:[
-      {id:'blank',label:'Nothing'},
-      {id:'app',label:'The app’s own figure today'},
-      {id:'last',label:'The last checked figure, where one exists'},
-    ]},
-   ]},
-   {id:'tiles',label:'Portfolio program tiles',open:false,controls:[
-    {id:'tileCheck',label:'Balance check on the tile',type:'choice',options:[
-      {id:'none',label:'Not shown',current:true},
-      {id:'line',label:'“Checked 7d ago” line'},
-      {id:'dot',label:'Amber dot when not checked in 60 days'},
-    ]},
+   {id:'r1',label:'Decided: round 1 picks',open:false,controls:[
+    {id:'adjRows',label:'Ledger rows on each card',type:'choice',locked:true,options:[{id:'reason',label:'A row per reason'}]},
+    {id:'bonusRow',label:'A bonus waiting to post, on the card',type:'choice',locked:true,options:[{id:'pending',label:'Inside Earned and Pending'}]},
+    {id:'checkLine',label:'Last balance check',type:'choice',locked:true,options:[{id:'dot',label:'Dot and date by the name'}]},
+    {id:'checkBtn',label:'Where Check balance starts',type:'choice',locked:true,options:[{id:'figure',label:'Click the balance itself'}]},
+    {id:'openBtn',label:'Editing an opening balance later',type:'choice',locked:true,options:[{id:'row',label:'✎ on the Opening balance row'}]},
+    {id:'noOwner',label:'Points from a card with no owner',type:'choice',locked:true,options:[{id:'warn',label:'A warning line under the cards'}]},
+    {id:'hdrPend',label:'Header Pending figure',type:'choice',locked:true,options:[{id:'both',label:'Card points and bonuses waiting'}]},
+    {id:'cardLines',label:'Card points in the table',type:'choice',locked:true,options:[{id:'statement',label:'One line per statement'}]},
+    {id:'typeLook',label:'Type look',type:'choice',locked:true,options:[{id:'pill',label:'Colored tag'}]},
+    {id:'detail',label:'Details',type:'choice',locked:true,options:[{id:'col',label:'Their own column'}]},
+    {id:'ptsCols',label:'Points',type:'choice',locked:true,options:[{id:'signed',label:'One column with + and −'}]},
+    {id:'pendShow',label:'Pending lines',type:'choice',locked:true,options:[{id:'status',label:'A Status column'}]},
+    {id:'ownerLook',label:'Owner column',type:'choice',locked:true,options:[{id:'chip',label:'Initial in a circle'}]},
+    {id:'histPerson',label:'Showing one owner’s lines',type:'choice',locked:true,options:[{id:'chips',label:'Owner chips beside the type chips'}]},
+    {id:'dateFmt',label:'Date',type:'choice',locked:true,options:[{id:'slash',label:'10/31, as on Transactions'}]},
+    {id:'runBal',label:'Balance column',type:'toggle',locked:true,default:true},
+    {id:'gapShow',label:'Check balance: the difference',type:'choice',locked:true,options:[{id:'figures',label:'Three figures'}]},
+    {id:'gapReason',label:'Check balance: logged as',type:'choice',locked:true,options:[{id:'fixed',label:'Always a balance check'}]},
+    {id:'reasonPick',label:'Adjustment: choosing the reason',type:'choice',locked:true,options:[{id:'select',label:'Dropdown'}]},
+    {id:'sign',label:'Adjustment: adding or removing points',type:'choice',locked:true,options:[{id:'signed',label:'Type a signed number'}]},
+    {id:'winStyle',label:'Windows open in',type:'choice',locked:true,options:[{id:'drawer',label:'A side panel'}]},
+    {id:'bonusWhere',label:'Where you mark a bonus posted',type:'choice',locked:true,options:[{id:'challenge',label:'On the challenge card'}]},
+    {id:'markFlow',label:'Marking it posted',type:'choice',locked:true,options:[{id:'undo',label:'One click, Undo for 5 seconds'}]},
+    {id:'openWhere',label:'Where opening balances are entered',type:'choice',locked:true,options:[{id:'program',label:'On each program’s ledger'}]},
+    {id:'gridOpen',label:'Opening the grid',type:'choice',locked:true,options:[{id:'banner',label:'Not used: balances go on each ledger (see the Jan 1 reminder above)'}]},
+    {id:'gridHint',label:'Beside each grid cell',type:'choice',locked:true,options:[{id:'app',label:'The app’s own figure, now shown in the opening-balance window'}]},
+    {id:'tileCheck',label:'Balance check on the Portfolio tile',type:'choice',locked:true,options:[{id:'dot',label:'Amber dot when not checked in 60 days'}]},
    ]},
    {id:'settled',label:'Settled in chat and your notes, 2026-11-07',open:false,controls:[
     {id:'anchor',label:'Balance check',type:'choice',locked:true,options:[{id:'gap',label:'One anchor on Jan 1, 2027; each check logs the gap as an adjustment'}]},
     {id:'other',label:'Points from outside card spend',type:'choice',locked:true,options:[{id:'reason',label:'An adjustment with a reason from a fixed list'}]},
     {id:'bonusModel',label:'Challenge bonuses',type:'choice',locked:true,options:[{id:'pending',label:'Added as pending when the challenge is met; you mark them posted'}]},
     {id:'actTable',label:'Activity',type:'choice',locked:true,options:[{id:'table',label:'A table, one line per entry: Date, Type, Description, Owner and Points in their own columns'}]},
+    {id:'cardCol',label:'Card and Description (note on round 1)',type:'choice',locked:true,options:[{id:'note',label:'A Card column shown as …7154 with no card name; the Description says what the line is (the reason, for adjustments), so there is no Reason column'}]},
    ]},
    {id:'decided',label:'Decided in the Cards galleries',open:false,controls:[
     {id:'scheme',label:'Color scheme',type:'choice',locked:true,options:[{id:'cloud',label:'Cloud',tokens:light('#EEF2F7','#FFFFFF','#F5F8FB','rgba(15,23,42,.1)','#0F172A','#475569','#6B7A8F')}]},
@@ -497,6 +424,7 @@ Gallery.define({
       if(a==='grid'){S.win={t:'grid'};S.grid={};return rr()}
       if(a==='go-port')return toast('Opens Portfolio, where the opening-balance grid lives.');
       if(a==='owner')return toast('Opens the card’s details to set whose card it is.');
+      if(a==='go-prog')return toast(`Opens the ${b.dataset.name} page; set the balance there with Set opening balance.`);
       if(a==='save-check'){let n=0,msg=[];
         Object.entries(S.ck).forEach(([x,v])=>{if(v===''||v==null)return;const val=num(v);if(isNaN(val))return;const g=Math.round(val-sums(L,x).cur);
           const rsel=app.querySelector(`[data-ckr="${CSS.escape(x)}"]`),reason=rsel?rsel.value:'Balance check';
@@ -689,6 +617,10 @@ Gallery.define({
 #pv .at.with-dt td.ds{width:24%}
 #pv .ds-i{display:flex;align-items:center;gap:6px;min-width:0}
 #pv .ds-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+#pv .at td.cd{width:1%;color:var(--tx2)}
+#pv .cd-i{display:inline-flex;align-items:center;gap:7px}
+#pv .ca{width:30px;aspect-ratio:1000/630;border-radius:3px;overflow:hidden;flex:none;box-shadow:0 1px 3px rgba(0,0,0,.3);display:block}#pv .ca img{width:100%;height:100%;object-fit:cover;display:block}
+#pv .ob-l{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 #pv .at td.dt{width:30%;max-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--tx3);font-size:12px}
 #pv .smp{flex:none;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--tx3);border:1px solid var(--line);border-radius:4px;padding:0 4px;line-height:15px}
 #pv .tip{position:relative;flex:none;color:var(--tx3);cursor:help;font-size:12.5px;line-height:1}
