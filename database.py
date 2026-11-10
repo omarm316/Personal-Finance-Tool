@@ -675,6 +675,9 @@ class SpendChallenge(Base):
     bonus_unlocked  = Column(Boolean, default=False)
 
     is_active       = Column(Boolean, default=True)
+    # Archive on a completed challenge's card (docs/cards-portfolio-design.md):
+    # it leaves the challenge grid for "Show archived" under it.
+    is_archived     = Column(Boolean, default=False)
     notes           = Column(Text, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
 
@@ -1295,6 +1298,7 @@ def run_migrations(engine):
         ],
         'spend_challenges': [
             ('activation_date',  'DATE'),
+            ('is_archived',      'BOOLEAN DEFAULT FALSE'),
             ('name',             "VARCHAR(200) DEFAULT ''"),
             ('challenge_type',   "VARCHAR(30) DEFAULT 'sub'"),
             ('bonus_type',       "VARCHAR(20) DEFAULT 'flat'"),

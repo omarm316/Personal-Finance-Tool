@@ -1,6 +1,6 @@
 # Cards: Card page transactions table
 
-Chosen with the design gallery in four rounds (2026-11-05 to 2026-11-07). Omer approved this desktop design on 2026-11-07, and the row icons in round 4 the same day; it is not built yet. The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
+Chosen with the design gallery in four rounds (2026-11-05 to 2026-11-07). Omer approved this desktop design on 2026-11-07, and the row icons in round 4 the same day. Built 2026-11-10 in Cards step 5 (`frontend/src/pages/cards/CardTxnTable.jsx`; see `docs/cards-card-design.md`, "Page built"). The Card page is built last, after the benefits data model (CLAUDE.md, Cards step 4). Phone design is a separate, later exercise.
 
 - **Gallery:** https://claude.ai/artifact/Td3kGZkHsEvw7YvkVX5sQa.
 - **Source spec:** `mockups/design-gallery/cards-card-transactions.spec.js` (id `cards-card-tx-final`).
@@ -147,8 +147,9 @@ Checked 2026-11-07 against the Actions strip (`docs/cards-actions-design.md`), t
 
 ## Open items (also in BACKLOG.md)
 
-1. **A kind rule ignores the amount's sign.** A `purchase` rule applies to that merchant's refunds too, making them purchases that take back nothing. A `refund` rule on a charge is just as wrong. Fix: `_resolve_kind` should read a purchase rule on money back as a refund, and a refund rule on a charge as a purchase.
-2. **A draft-rule preview for the live count.** `POST /api/earning/recalculate` previews only the saved rules. The tick box needs an endpoint that takes a draft rule (pattern, match type, category or type) and returns the matching rows and the change in points, writing nothing. Rows fixed by hand (`classification_source = 'manual'`) aren't reclassified by rules, so the count leaves them out.
+1. ~~**A kind rule ignores the amount's sign.**~~ Fixed 2026-11-10 in `_resolve_kind`. A `purchase` rule applies to that merchant's refunds too, making them purchases that take back nothing. A `refund` rule on a charge is just as wrong. Fix: `_resolve_kind` should read a purchase rule on money back as a refund, and a refund rule on a charge as a purchase.
+2. ~~**A draft-rule preview for the live count.**~~ Built 2026-11-10: `POST /api/merchant-rules/preview` (same body as a rule) returns the matches, the rows that would change and the change in points, writing nothing. Without a category or type it counts matches only. The list shows it for the row's category and updates as you hover another one. `POST /api/earning/recalculate` previews only the saved rules. The tick box needs an endpoint that takes a draft rule (pattern, match type, category or type) and returns the matching rows and the change in points, writing nothing. Rows fixed by hand (`classification_source = 'manual'`) aren't reclassified by rules, so the count leaves them out.
 3. **Pending charges:** the sync skips them today. Showing them needs the sync to store pending rows apart and replace each one when it posts.
-4. **Column width:** the main column is about 656px at the gallery's width. With Spender and Type always shown, merchant names truncate early; check at build.
-5. **The banner's annual-fee tile** nets the personal category Fees & Interest. Move it to the fee and credit types (existing BACKLOG item).
+4. **Column width** (checked at build: at a 1440px window the main column is about 780px; merchant names still truncate, with the bank text on hover): the main column is about 656px at the gallery's width. With Spender and Type always shown, merchant names truncate early; check at build.
+5. ~~**The banner's annual-fee tile** nets the personal category Fees & Interest.~~ Moved to the Fee and Credit types on 2026-11-10.
+6. **Kinds by sign:** `PATCH /api/transactions/{id}` now refuses a kind that doesn't fit the amount (2026-11-10). The Transactions page's Kind dropdown still offers all eight; list the same kinds there in its own session.

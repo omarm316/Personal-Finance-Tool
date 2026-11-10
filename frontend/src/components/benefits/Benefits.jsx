@@ -183,10 +183,12 @@ function PeriodDetail({x,p,today,cardId,onSaved,onClose,toast}){
   </div>);
 }
 
-export function BenefitsPanel({B,setB,cardId,productId,toast,sectionRef}){
+export function BenefitsPanel({B,setB,cardId,productId,toast,sectionRef,addRequest}){
   const[open,setOpen]=useState(null);       // {id, j, focusAdd}
   const[menu,setMenu]=useState(null);       // {id, el}
   const[edit,setEdit]=useState(null);       // benefit or {} for new
+  // The Card page's ⋯ menu opens Add benefit by bumping addRequest.
+  useEffect(()=>{if(addRequest)setEdit({});},[addRequest]);
   const[del,setDel]=useState(null);
   if(!B)return null;
   const byId=Object.fromEntries(B.benefits.map(x=>[x.id,x]));

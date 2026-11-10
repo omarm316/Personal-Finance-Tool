@@ -684,7 +684,7 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Card not found")
     allowed = ["card_name", "last_four", "statement_close_day", "payment_due_day",
                "credit_limit", "plaid_account_id", "account_id", "payment_account_id",
-               "is_active", "notes", "annual_fee", "primary_user", "issue_date"]
+               "is_active", "notes", "annual_fee", "primary_user", "issue_date", "close_date"]
     for k, v in updates.items():
         if k not in allowed:
             continue
@@ -696,6 +696,9 @@ async def update_card(card_id: int, updates: dict, db: Session = Depends(get_db)
             # separate anniversary field). Accepts a plain "YYYY-MM-DD" from
             # the date input.
             card.issue_date = datetime.fromisoformat(v) if v else None
+        elif k == 'close_date':
+            # Mark card as closed (Card page ⋯ menu) sends is_active false with it.
+            card.close_date = datetime.fromisoformat(v) if v else None
         else:
             setattr(card, k, v)
     db.commit()
@@ -1725,6 +1728,11 @@ async def cards_earn_summary(
                 ser['card_name']  = card_obj.card_name
                 ser['last_four']  = card_obj.last_four
                 ser['account_id'] = card_obj.account_id
+                # For the rebuilt Cards pages: card art, scope and whose card it is.
+                ser['product_key'] = pprod.product_key if pprod else None
+                ser['ecosystem_id'] = eid
+                ser['person'] = card_obj.primary_user
+                ser['this_card_id'] = card_obj.id
                 active_challenges_out.append(ser)
     except Exception:
         logger.exception('Unexpected error — rolling back')
@@ -3160,9 +3168,9 @@ async def update_challenge(challenge_id: int, data: dict = Body(...), db: Sessio
     c = db.query(SpendChallenge).filter_by(id=challenge_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    for field in ('name', 'challenge_type', 'bonus_type', 'notes', 'is_active'):
+    for field in ('name', 'challenge_type', 'bonus_type', 'notes', 'is_active', 'is_archived'):
         if field in data:
-            setattr(c, field, data[field])
+            setattr(c, field, bool(data[field]) if field == 'is_archived' else data[field])
     for field in ('bonus_amount', 'spend_cap', 'spend_threshold'):
         if field in data:
             setattr(c, field, float(data[field]) if data[field] is not None else None)
@@ -3704,6 +3712,7 @@ import uuid as _uuid
 # ---------------------------------------------------------------------------
 from routers.points_ledger import router as points_ledger_router
 from routers.benefits import router as benefits_router
+from routers.cards_pages import router as cards_pages_router
 from routers.misc import router as misc_router
 from routers.loans import router as loans_router
 from routers.cash_flow import router as cash_flow_router
@@ -3733,6 +3742,7 @@ app.include_router(earning_router)
 app.include_router(categories_router)
 app.include_router(points_ledger_router)
 app.include_router(benefits_router)
+app.include_router(cards_pages_router)
 
 
 

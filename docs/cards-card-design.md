@@ -1,6 +1,6 @@
 # Cards: Card page design
 
-Chosen with the design gallery (rounds 1-8, 2026-11-02 to 2026-11-03). Desktop approved. Benefits, Expiring credits and Log credit use were built on 2026-11-10 (see "Benefits built" at the end); the rest of the page is built in Cards step 5. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1-8, 2026-11-02 to 2026-11-03). Desktop approved. Benefits, Expiring credits and Log credit use were built on 2026-11-10 (see "Benefits built"); the rest of the page was built the same day in Cards step 5 (see "Page built" and "Card menu flows" at the end). Phone design is a separate, later exercise.
 Source spec: `mockups/design-gallery/cards-card.spec.js`. Inherits the look in `docs/cards-portfolio-design.md`.
 
 - **Look:** Cloud color scheme, brand blue accent, Outfit + Plus Jakarta, 13px corners, 1.25 spacing, top navigation bar.
@@ -59,3 +59,25 @@ Cards step 4. Live in today's Card page now: Expiring credits sits under the ban
   - Log credit use is a "$ Credit" button in the row's Actions column, since today's table has no row menu.
   - By hand until their statement text is seen: Platinum's airline fee, Walmart+, Uber One, Oura and Global Entry credits, Aspire's resort and flight credits, and most United and Business Gold Walmart+ credits.
   - Other products' terms weren't re-checked. Some catalog rows are discounts rather than credits (AAdvantage's $125 flight discount, Atmos's Lounge+ discount), so they show as yearly credits until they are edited.
+
+## Card menu flows (designed while building, 2026-11-10)
+The gallery left the flows behind the ⋯ menu undesigned. They reuse the benefit editing side panel: on the right, closed only by Cancel, ×, or their own button. Code: `frontend/src/components/cards/CardPanels.jsx`.
+- **Change product:** "Now: <product>", a New product list (every product but the current one, by name), From (defaults to today) and one line: charges before the date keep their points, charges from it earn at the new product's rates and the card shows its benefits. Button: Change product (Link product when none is linked). Uses `POST /api/cards/{id}/change-product`.
+- **Product history:** a list, newest first, each product with "Mar 25, 2026 to today" and a dot (filled for the current one), then "Each charge keeps the points of the product it was made on." Footer: Change product… on the left (opens that panel), Done.
+- **Edit card details:** Card name and Last four; Cardholder (a list of names, No owner, or Add a name…) with a hint that points with no spender count toward the cardholder; Opened on and Annual fee, with a hint that the fee and card-year credits follow the opening date; Credit limit, Statement closes (day) and Payment due (day); Notes; the bank account it's linked to, read-only. Save uses `PATCH /api/cards/{id}`.
+- **Add a benefit:** opens the Benefits panel's own Add benefit side panel and scrolls to Benefits.
+- **Add a challenge** (also the dashed "+" card): Name; Kind (sign-up bonus, spend $X for a bonus rate, bonus rate up to a cap, rotating category up to a cap, yearly threshold); Starts, Ends, Activated, with a hint that spend counts from the later of start and activation; Bonus (points, points per dollar, statement credit, a reward) and its amount; the cap or the spend to reach and how many times it repeats, as the kind needs; categories it counts (none ticked counts every purchase); other cards it also counts on; Only spend by; Notes. Clicking a challenge card on the Card page opens the same panel as Edit challenge, with a progress line, "Show its transactions" (sets the table to the challenge's dates) and Delete, which asks once more in place.
+- **Mark card as closed** (red in the menu): a red-edged box naming the card and saying it leaves Portfolio, its program's page and the Actions strip, and its credits and challenges stop counting; Closed on (defaults to today); a line that its transactions, points and history stay and Card Management still lists it under Show inactive. The red Mark as closed button sends `is_active: false` and `close_date`, then returns to Portfolio.
+
+## Page built (2026-11-10)
+Cards step 5, desktop only (`frontend/src/pages/cards/CardDesktop.jsx`, the table in `CardTxnTable.jsx` and `cardtx.css`); phones keep `AccountCardDetailPage.jsx`.
+- **Header:** breadcrumb (Cards > Portfolio > program > card) beside MTD, QTD and YTD. The card's figures come from `/api/accounts/{id}/card-detail`, which covers the current year only, so there's no year picker here.
+- **Banner:** program gradient, product name with the white ⋯ circle, the account and owner line, card art, current balance on its own line, then Earned this period, Annual fee, Credit limit, Statement closes and Payment due, then utilization.
+  - **Annual fee, net only:** fees charged less statement credits received in the current card year, by transaction type (Credit and Fee; history uses the same types the table shows). Until now it netted the personal category Fees & Interest. Platinum 1008 reads $495 net on the production copy ($895 fee, $400 credits); Platinum 1009 reads −$442 net.
+- **Shared row:** challenge cards take 270px each, then a 112px dashed "+" (200px when the card has none); Expiring credits fills the rest on one line, the "+N more in Benefits" card 112px.
+- **Earnings:** category, bar, rate, spend, points; most points first; categories in the product's earning table with no points this period stay grayed with their rate; All other purchases last. From 2027 rows group by merchant category with the rate locked on the row.
+- **Not yet as designed:**
+  - Pending charges: the sync still skips them, so the table has no Pending divider.
+  - A type changed by hand has no ✎ (the app doesn't store the engine's own type); a category changed by hand does.
+  - ↺'s tooltip says "Back to the card's figure" without the figure, which isn't stored once points are set by hand.
+  - Earnings still lists base-rate categories that earned points as their own 1x rows, and shows negative points (BACKLOG).

@@ -125,7 +125,7 @@ All three open as a side panel on the right, like benefit editing on the Card pa
 - **When it shows:** from the start date in `POINTS_LEDGER_START` (default 2027-01-01). Until then the Ecosystem page keeps its older ledger, and the routes that write refuse with 409.
 - **Inside today's Ecosystem page** for now: the ledger cards take the old Balance Ledger's place, and the Activity table replaces the Redemptions, Transfers and Adjustments sections. The step 4 page reuses the same components.
 - **Not yet as designed:**
-  - + Redemption, + Transfer and + Between us still open today's centered windows.
+  - ~~+ Redemption, + Transfer and + Between us still open today's centered windows.~~ On desktop they open side panels from 2026-11-10 (Cards step 5, `components/cards/ProgramPanels.jsx`); phones keep the windows.
   - Transfers can only be deleted, as today.
   - A waiting bonus is dated today, because when a challenge was met isn't stored.
 

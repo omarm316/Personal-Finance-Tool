@@ -1,6 +1,6 @@
 # Cards: Actions strip (Portfolio and Ecosystem)
 
-Chosen with the design gallery (round 1, 2026-11-07; brief written 2026-11-05). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (round 1, 2026-11-07; brief written 2026-11-05). Desktop approved; built 2026-11-10 (Cards step 5, see "Built" at the end). Phone design is a separate, later exercise.
 Gallery: https://claude.ai/artifact/UMrPe1TgDKxY4byEWpMEGq, source spec `mockups/design-gallery/cards-actions.spec.js` (id `cards-actions-final`, every choice locked). Inherits the look in `docs/cards-portfolio-design.md` and the expiring-credit card in `docs/cards-card-design.md`.
 
 Built together with the Portfolio and Ecosystem pages (Cards step 4), after the benefits data model (step 3), so it never shows wrong amounts.
@@ -68,3 +68,9 @@ Annual fee coming due, payment due day, the earning engine's review list of unkn
   No extra "unchecked card" state in the UI; finishing step 3 is the safeguard. After that, by-hand credits (Uber Cash, DoorDash) stay right only if they're marked used, from the strip or from Benefits.
 - `SpendChallenge.start_date`, `activation_date` and `end_date`, and the existing challenge progress in `core/challenges_helpers.py` (`lap_spend`, `progress_target`, `remaining_spend`).
 - A read endpoint for the strip (credits and challenges for one scope, with the "Next" credit) is a build-time decision; the gallery computed it all in the browser.
+
+## Built (2026-11-10)
+- **Read endpoint:** `GET /api/cards/actions` (optional `ecosystem_id`), in `core/card_actions.py` and `routers/cards_pages.py`. It returns the credits (current period open, resetting within 60 days, with the card, owner, art and the period's length for the arc), the challenges at risk, every in-window challenge with `at_risk`, `done`, `days_left` and `span`, and the Next credit. `GET /api/benefits/expiring` is unchanged.
+- **At risk:** active, not done, not archived, with a spend target, and either ending within 30 days or behind pace (spent less than the target times the share of the window gone, the window starting at the later of start and activation).
+- **Front end:** `ActionsStrip` in `frontend/src/components/cards/CardsCommon.jsx`. Each row fits as many 240px items as one line holds; when more wait, a 112px "+N more" card closes the row and expands it in place. Mark used, Undo, the 5-second bar, the fade and the next item sliding in work as on the Card page.
+- **Seen on the production copy (Nov 10):** 44 credits ($4,336.84) and 4 challenges at risk on Portfolio: Atmos Ascent 5707's companion certificate, Prime Visa 6639's $100 off $750, and Freedom Flex 5780's Q4 categories, which is behind pace; and, on the copy only, a test challenge. Most credits are by-hand ones that haven't been marked used, as the "Depends on" note above warned.

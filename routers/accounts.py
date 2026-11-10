@@ -36,6 +36,7 @@ from core.challenges_helpers import (
 )
 from core.plaid_sync import _sync_item_background
 from core.points_engine import calc_earn_rate
+from core.earn_engine import uses_new_engine
 from core.categories import parent_map, with_children
 from core.serializers import serialize_account, _serialize_benefit
 
@@ -340,15 +341,22 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     for t in window_txns:
         if t.action != 'Expense':
             continue
-        label = t.points_category or 'Other'
-        entry = cat_agg.setdefault(label, {'amount': 0.0, 'count': 0, 'points': 0.0})
+        # From 2027 the earning engine groups by merchant category, and the
+        # rate is the one locked on the row (core/earn_engine.py).
+        new = uses_new_engine(t.date)
+        if new and t.txn_kind not in (None, 'purchase', 'refund'):
+            continue
+        label = (t.merchant_category if new else t.points_category) or 'Other'
+        entry = cat_agg.setdefault(label, {'amount': 0.0, 'count': 0, 'points': 0.0, 'rate_2027': None})
         entry['amount'] += -t.amount   # expenses negative, returns positive → net spend
         entry['count'] += 1
         entry['points'] += t.points_earned or 0  # locked at write time
+        if new and t.txn_kind == 'purchase' and t.points_earn_rate:
+            entry['rate_2027'] = max(entry['rate_2027'] or 0, t.points_earn_rate)
 
     for label, agg in cat_agg.items():
         amt  = round(max(0.0, agg['amount']), 2)  # net spend ≥ 0 for display
-        rate = calc_earn_rate(bonus_by_name, base_rate, None if label == 'Other' else label, cat_parent_map)
+        rate = agg['rate_2027'] or calc_earn_rate(bonus_by_name, base_rate, None if label == 'Other' else label, cat_parent_map)
         pts  = round(agg['points'])
         spending_by_category.append({
             'category': label,
@@ -397,10 +405,9 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
     if card and card.credit_limit and balance:
         utilization = round(abs(balance) / card.credit_limit * 100, 1)
 
-    # Annual fee vs. credits — Omer classifies both the fee itself and any
-    # credits he redeems under the general category 'Fees & Interest', so
-    # netting that category within the current fee cycle answers "is this
-    # fee worth it" directly, without a separate credits-tracking scheme.
+    # Annual fee vs. credits within the current fee cycle: the fees charged
+    # less the statement credits received (by transaction type), so the Card
+    # page banner's "net" answers "is this fee worth it".
     annual_fee_summary = None
     if card:
         cycle_start, cycle_end = _annual_fee_cycle_window(card.issue_date)
@@ -414,9 +421,11 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
             )
             .all()
         )
-        fee_cat_txns = [t for t in fee_cat_txns if (t.category_manual or t.category_auto) == 'Fees & Interest']
-        fee_charged = sum(-t.amount for t in fee_cat_txns if t.amount < 0)
-        credits_received = sum(t.amount for t in fee_cat_txns if t.amount > 0)
+        # By transaction type (docs/cards-card-transactions-design.md), not the
+        # personal category: fees charged, against statement credits received.
+        kinds = [(t, t.txn_kind or _display_kind(t)) for t in fee_cat_txns]
+        fee_charged = sum(-t.amount for t, k in kinds if k == 'fee' and t.amount < 0)
+        credits_received = sum(t.amount for t, k in kinds if k == 'credit' and t.amount > 0)
         annual_fee_summary = {
             'fee_charged': round(fee_charged, 2),
             'credits_received': round(credits_received, 2),
@@ -528,6 +537,25 @@ async def account_card_detail(account_id: int, months: int = 3, period: str = No
         'recent_transactions': recent_txns,
     }
 
+def _display_kind(t) -> str:
+    """The type a row shows before the 2027 engine has set txn_kind (history):
+    Purchase, Refund, Credit (statement credits), Fee, Interest or P2P. Display only."""
+    amt = t.amount or 0
+    desc = (t.description_raw or t.description_clean or '').upper()
+    cat = t.category_manual or t.category_auto or ''
+    if t.points_category == 'P2P Payments' or any(k in desc for k in ('VENMO', 'ZELLE', 'CASH APP')):
+        return 'p2p'
+    if amt < 0:
+        if 'INTEREST' in desc:
+            return 'interest'
+        if cat == 'Fees & Interest' or 'ANNUAL FEE' in desc or 'MEMBERSHIP FEE' in desc:
+            return 'fee'
+        return 'purchase'
+    if 'CREDIT' in desc and 'REFUND' not in desc:
+        return 'credit'
+    return 'refund'
+
+
 @router.get("/api/accounts/{account_id}/transactions")
 async def account_transactions(
     account_id: int,
@@ -539,6 +567,7 @@ async def account_transactions(
     action: str = None,
     csc: str = None,
     category: str = None,
+    limit: int = 200,
     db: Session = Depends(get_db),
 ):
     """Filtered transaction list for an account.
@@ -666,7 +695,15 @@ async def account_transactions(
         'earn_rate': t.points_earn_rate or 0,
         'points_earn': round(t.points_earned or 0, 1),
         'points_earn_classification': t.points_earn_classification,
-    } for t in filtered[:200]]
+        # For the rebuilt Card page table (docs/cards-card-transactions-design.md)
+        'description_raw': t.description_raw,
+        'kind': t.txn_kind or _display_kind(t),
+        'merchant_category': t.merchant_category,
+        'brand': t.brand,
+        'classification_source': t.classification_source,
+        'points_overridden': t.points_earn_override is not None,
+        'is_2027': uses_new_engine(t.date),
+    } for t in filtered[:limit]]
 
     return {
         'transactions': rows,
@@ -681,6 +718,7 @@ async def account_transactions(
         },
         'available_cscs': available_cscs,
         'base_rate': base_rate,
+        'total_count': len(filtered),
     }
 
 @router.get("/api/accounts")

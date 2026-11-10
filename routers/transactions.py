@@ -341,6 +341,9 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
     network_lookup = _build_network_lookup(db, [t.account_id])
     return _serialize_txn(t, {t.id: splits} if splits else {}, categorizer, points_lookup, cat_parent_map, network_lookup)
 
+KINDS_BY_SIGN = {'charge': {'purchase', 'fee', 'interest', 'p2p'}, 'back': {'refund', 'credit'}}
+
+
 def _apply_merchant_path_edit(db, t, update) -> bool:
     """Apply merchant path / kind edits for a 2027 row (2027 earning engine).
     Returns True when something changed. The old Merchant Category dropdown
@@ -390,6 +393,13 @@ def _apply_merchant_path_edit(db, t, update) -> bool:
     if kind is not None:
         if kind not in EARNING_KINDS | NON_EARNING_KINDS:
             raise HTTPException(status_code=400, detail=f"Unknown transaction kind '{kind}'")
+        # Only the kinds that fit the amount's sign (payment and adjustment stay
+        # where the engine set them): docs/cards-card-transactions-design.md.
+        fits = KINDS_BY_SIGN['charge' if (t.amount or 0) < 0 else 'back'] | {t.txn_kind}
+        if kind not in fits:
+            raise HTTPException(status_code=400, detail=(
+                f"'{kind}' doesn't fit {'a charge' if (t.amount or 0) < 0 else 'money back'}; "
+                f"pick one of {', '.join(sorted(KINDS_BY_SIGN['charge' if (t.amount or 0) < 0 else 'back']))}"))
         t.txn_kind = kind
     if update.is_foreign is not None:
         t.is_foreign = update.is_foreign

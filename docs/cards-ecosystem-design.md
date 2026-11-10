@@ -1,6 +1,6 @@
 # Cards: Ecosystem page design
 
-Chosen with the design gallery (rounds 1-2, 2026-11-02). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1-2, 2026-11-02). Desktop approved; built 2026-11-10 (Cards step 5, see "Built" at the end). Phone design is a separate, later exercise.
 Source spec: `mockups/design-gallery/cards-ecosystem.spec.js`. Inherits the look in `docs/cards-portfolio-design.md`.
 
 - **Look:** Cloud color scheme, brand blue accent, Outfit + Plus Jakarta, 13px corners, 1.25 spacing, top navigation bar.
@@ -16,3 +16,11 @@ Source spec: `mockups/design-gallery/cards-ecosystem.spec.js`. Inherits the look
 Each person's balance appears in both the header and the ledger cards; Omer chose this knowingly.
 
 Balances shown in the gallery are not correct (see the balance item in `BACKLOG.md`); that is a functionality fix, not a design decision. The activity rows in the gallery are labeled samples.
+
+## Built (2026-11-10)
+Cards step 5, desktop only (`frontend/src/pages/cards/EcosystemDesktop.jsx`); phones keep `EcosystemDetailPage.jsx`.
+- **Header strip:** logo, posted balance, each person's balance, Pending (0 shows), Earned this period and a fan of up to three cards plus "+N". Cash Back shows cash earned instead, with no people or Pending.
+- **Actions strip:** `GET /api/cards/actions?ecosystem_id=…`; Cash Back filters the full list to its cards.
+- **Balance ledger and Activity:** from the points ledger's start date (2027-01-01) they are `LedgerCards` and `LedgerActivity` from `components/ledger/`. Before it, the page shows the older balances in the same look: a card per person with Total first, zero rows hidden, the no-person starting balance as a note, and Set/Edit starting balance buttons below the cards; Activity is a one-line table (Date, Type, Description, Details, Owner, Points) with the type chips and the realized-value summary.
+- **Side panels** (`components/cards/ProgramPanels.jsx`): + Redemption (with Edit and Delete), + Transfer, + Between us (with Edit and Delete), starting balance and adjustments before the ledger starts. They keep today's fields and close only with their buttons. Transfers can still only be deleted.
+- **Your cards:** caption with whose card and this period's points. **Challenges:** the Portfolio grid, filtered to the program; the dashed "+" adds one for a card in it.

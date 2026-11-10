@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from core.earn_engine import (
     POINTS_FRESH_START, POINTS_FRESH_START_DT, forget_earning_cache, rescore_cards,
 )
-from core.merchant_classifier import EARNING_KINDS, NON_EARNING_KINDS
+from core.merchant_classifier import EARNING_KINDS, NON_EARNING_KINDS, RuleEntry, RuleIndex, normalize
 from database import (
     get_db, Brand, Card, CardCategorySelection, CardProduct, EarnRule, MerchantCategory,
     MerchantRule, Transaction,
@@ -141,6 +141,55 @@ async def create_merchant_rule(body: MerchantRuleBody, db: Session = Depends(get
     db.add(r)
     db.commit()
     return _rule_out(r)
+
+
+@router.post("/api/merchant-rules/preview")
+async def preview_merchant_rule(body: MerchantRuleBody, db: Session = Depends(get_db)):
+    """What a draft rule would do, writing nothing (the Card page's rule tick
+    box): how many 2027 charges on any card it matches, how many of those
+    would change, and the change in points. Rows fixed by hand are left out,
+    since rules don't reclassify them."""
+    if not (body.pattern or '').strip():
+        raise HTTPException(status_code=400, detail="pattern is required")
+    r = MerchantRule(match_type='word', source='taught', is_active=True)
+    target = bool(body.merchant_category or body.brand or body.txn_kind)
+    if target:
+        _apply_rule_body(db, r, body)
+    else:   # no category or type picked yet: count the matches only
+        r.pattern = body.pattern.strip()
+        r.match_type = body.match_type if body.match_type in ('word', 'contains') else 'word'
+    entry = RuleEntry(None, normalize(r.pattern), r.match_type or 'word',
+                      body.merchant_category or None, body.brand or None, r.txn_kind or ('purchase' if not target else None))
+    idx = RuleIndex([entry])
+    rows = db.query(Transaction).filter(
+        Transaction.date >= POINTS_FRESH_START_DT, Transaction.card_id.isnot(None),
+    ).all()
+    hit = []
+    for t in rows:
+        if t.classification_source == 'manual':
+            continue
+        path, kind = idx.match(t.merchant_name, t.description_raw)
+        if path or kind:
+            hit.append(t)
+    if not target:
+        return {'matches': len(hit), 'match_ids': [t.id for t in hit], 'changed_ids': [], 'points_delta': 0}
+    before = {t.id: tuple(getattr(t, f) for f in _SNAPSHOT_FIELDS) for t in hit}
+    changed, delta = [], 0.0
+    try:
+        db.add(r)
+        db.flush()
+        forget_earning_cache(db)
+        rescore_cards(db, sorted({t.card_id for t in hit}), reclassify=True)
+        for t in hit:
+            new = tuple(getattr(t, f) for f in _SNAPSHOT_FIELDS)
+            if new != before[t.id]:
+                changed.append(t.id)
+                delta += (new[0] or 0) - (before[t.id][0] or 0)
+    finally:
+        db.rollback()
+        forget_earning_cache(db)
+    return {'matches': len(hit), 'match_ids': [t.id for t in hit], 'changed_ids': changed,
+            'points_delta': round(delta, 2)}
 
 
 @router.patch("/api/merchant-rules/{rule_id}")

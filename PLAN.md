@@ -10,6 +10,17 @@
 
 ---
 
+## Session 2026-11-10 — Cards step 5: Portfolio, Ecosystem and Card pages rebuilt on desktop
+
+The three Cards pages and the Actions strip are built to their approved designs (`docs/cards-portfolio-design.md`, `docs/cards-ecosystem-design.md`, `docs/cards-card-design.md` with `docs/cards-card-transactions-design.md`, `docs/cards-actions-design.md`). Each doc has a "Built" section with the details. Phones keep today's pages.
+- **Frontend:** `pages/CardsPage.jsx` picks `pages/cards/CardsDesktop.jsx` or `CardsPhonePage.jsx` (today's page, renamed; its Swipe Advisor and Card Management tabs also show inside the desktop header). New: `PortfolioDesktop.jsx`, `EcosystemDesktop.jsx`, `CardDesktop.jsx`, `CardTxnTable.jsx` (+ `cardtx.css`) in `pages/cards/`, and `components/cards/` (`CardsCommon.jsx` with the cards row, challenge grid and Actions strip; `CardPanels.jsx`; `ProgramPanels.jsx`; `cards.css`). The step 4 benefits components and the step 3 ledger components are reused as they are; `BenefitsPanel` takes `addRequest` so the ⋯ menu can open Add benefit.
+- **Backend:** `core/card_actions.py` and `routers/cards_pages.py` (`GET /api/cards/wallet`, `GET /api/cards/actions`); `POST /api/merchant-rules/preview` (the draft-rule live count, writes nothing); `spend_challenges.is_archived` (added by `run_migrations`) with Archive through `PATCH /api/challenges/{id}`; `close_date` on `PATCH /api/cards/{id}` for Mark card as closed; the account transactions route returns each row's type, merchant category, brand, hand-set flags and a total count; `_resolve_kind` reads a purchase rule on money back as a refund and a refund rule on a charge as a purchase; `PATCH /api/transactions/{id}` refuses a kind that doesn't fit the amount's sign; the card banner's annual fee nets fees against statement credits by type, not the Fees & Interest category; card-detail groups 2027 earnings by merchant category.
+- **Designed while building:** the ⋯ menu's flows (Change product, Product history, Edit card details, Add a challenge, Mark card as closed) as side panels, written up in `docs/cards-card-design.md`, "Card menu flows". The Ecosystem page's Redemption, Transfer and Between us forms moved into side panels with their fields unchanged (`docs/cards-ledger-design.md`'s first "not yet as designed" item).
+- **Card art:** `static/cards` now holds the gallery's normalized art (480 x 302, 256 colors); 10 products still have none (and 3 open cards have no product); they show the program gradient with the name.
+- **Checked:** 9 new tests (`tests/test_cards_pages.py`; 175 in all, SQLite `DATABASE_URL`). In the browser on a read-only SQLite copy of production (`copy_db.py`; launch configs `cards-api` on 8015, `cards-api-ledger` with `POINTS_LEDGER_START=2026-09-01`, and `cards-web` on 5184), at 1440 x 900 in light and dark: Portfolio (strip with Mark used, Undo and the next credit sliding in; tiles; owner chips; Archive and Show archived; Add a challenge), Chase UR and Hilton (header, older ledger with the no-person note, bars, cards, challenges, Activity, the Redemption panel), Amex MR with the ledger on (Jan 1 banner, Set opening balance, Activity table), and Platinum 1008 (banner, ⋯ menu and its panels, the shared row, a pre-2027 category fix with its rule, Exclude, points by hand with Tab and ↺, three seeded 2027 rows: category list with this card's rates, the live count, a rule with recalculation, the Type list). Side panels stay open on Escape and backdrop clicks. A phone-width window still shows today's page.
+- **Not yet as designed:** no Pending rows (the sync skips them); no ✎ on a type changed by hand; ↺'s tooltip doesn't give the card's figure; Earnings still lists base-rate categories as their own 1x rows. All in BACKLOG.
+- **Seen on the production copy:** the strip holds 44 credits ($4,336.84), mostly by-hand credits not yet marked used, and 3 challenges at risk (Atmos Ascent's companion certificate, Prime Visa's $100 off $750, Freedom Flex's Q4 categories, behind pace).
+
 ## Session 2026-11-10 — B41 fixed and cleaned up
 
 Omer gave the go-ahead on the 2026-11-09 finding (below).
@@ -1081,18 +1092,23 @@ Omer: "let's look closely at the Dashboard page." Read it live at desktop and mo
   scrolling broke app-wide while landscape worked.
 - **`Transaction.date` is a timestamp; most other date columns are `date`.**
   Comparing them in Python is a `TypeError`; SQL coerces silently.
+- **`index.css` styles bare elements and short class names app-wide** (`td`
+  padding 16px and 14px text, uppercase `th`, `tr:hover td`, `.empty`,
+  `.card`, `.main`, `.content`). Cloud-look tables must set their own `td`/`th`
+  size, padding, case and hover, and new class names must be prefixed (a
+  spender cell named `empty` came out 39px tall on the Card page).
 
 ## Cards module layout work (2026-11-02)
 Layout comes first, using the `design-gallery` skill for every page; behavior and code follow. Portfolio desktop is approved (`docs/cards-portfolio-design.md`). Ecosystem desktop is approved (`docs/cards-ecosystem-design.md`). The individual Card page desktop is approved (`docs/cards-card-design.md`, final after round 8 on 2026-11-03: banner ⋯ menu, Expiring credits beside Active challenges, Benefits under Earnings with per-period tracking, simple Log credit use from a transaction row). Galleries cover desktop only; phone design is a separate exercise for each screen, done later.
 
-Not designed yet, by choice: the small flows behind the card ⋯ menu (Change product, Product history, Edit card details, Add a challenge, Mark card as closed); design them when building, reusing the side-panel pattern from benefit editing. Phone layouts come later.
+The small flows behind the card ⋯ menu (Change product, Product history, Edit card details, Add a challenge, Mark card as closed) were designed while building on 2026-11-10, as side panels (`docs/cards-card-design.md`, "Card menu flows"). Phone layouts come later.
 
 Next is functionality (proposed order, 2026-11-03):
 1. ~~Fix the sync bug that drops real same-day repeat charges~~ Done 2026-11-03: the content-hash fallback in `core/plaid_sync.py` now only adopts rows with a dead Plaid ID (`_has_dead_plaid_id`); see BACKLOG "Cards module findings".
 2. Categorization and earning rules from `docs/cards-categorization-rules.md`, with points calculated forward from the fresh-start date, 2027-01-01 (Omer, 2026-11-03), instead of repairing history. **Stage 1 built 2026-11-03** (the 2027 engine; see the session writeup at the top). Still open: terms research for the held cards, the data fixes, the Q1 2027 selections.
 3. Program balances: not before 2027-01-01 (Omer, 2026-11-03). Balance syncing starts from that date, anchored to the balances on it; until then, wrong balances like Hilton's are left as they are. The ledger, balance checks, adjustments, challenge bonuses and opening balances were designed and built on 2026-11-10 (`docs/cards-ledger-design.md`; see "Cards points ledger" below). The ledger turns on by itself on 2027-01-01.
 4. ~~Benefits data model (per-period amounts, uses, purchase links) and Expiring credits.~~ Built 2026-11-10 and live in today's Card page (see "Cards benefits" below).
-5. Build the Portfolio, Ecosystem and Card pages to their design docs. Includes the Actions strip on Portfolio and Ecosystem (`docs/cards-actions-design.md`, final design chosen 2026-11-07, see "Cards Actions strip" below).
+5. ~~Build the Portfolio, Ecosystem and Card pages to their design docs, with the Actions strip on Portfolio and Ecosystem.~~ Built 2026-11-10 on desktop (see the session writeup at the top); phones keep today's pages until their own design.
 Editing a transaction's spender and category waits for step 2. See "Cards module findings" in `BACKLOG.md`.
 
 ## Main page (Dashboard) layout work (2026-11-03)
@@ -1220,7 +1236,7 @@ Cards step 4, built to the approved Card page design (`docs/cards-card-design.md
 - **Checked:** 17 new tests (`tests/test_benefits.py`; 166 in all). In the browser on a SQLite copy of production (`copy_db.py`, read-only; launch configs `benefits-api` on 8014 and `benefits-web` on 5183), these were tried: period detail, Mark fully used on a past month, the edit panel's Save, Expiring credits' Mark used (timing out, then Undo), Log credit use from a Walmart purchase with the "$" mark, and dark and light themes.
 - **Trap:** the catalog seed (`seed_card_products`) now inserts benefits only into a product that has none. To correct a seeded product's benefits, edit them in the app, or add a guarded one-time step to `core/benefits.py` `backfill()`, as the Platinum update does. Changing the seed's list no longer reaches production.
 - **Left for Omer:** mark the by-hand credits he used this year (Uber Cash, Walmart+, Instacart and the like show as missed until then); set match texts as new statement-credit texts appear; tidy catalog rows that are discounts rather than credits.
-- **Next:** step 5, the Portfolio, Ecosystem and Card pages, including the Actions strip, which reads `GET /api/benefits/expiring`.
+- **Next:** ~~step 5~~ built 2026-11-10; the Actions strip reads `GET /api/cards/actions`, which uses the same benefits engine.
 
 ## Budgets page layout work (2026-11-05)
 Same method as the Dashboard and Transactions: design gallery first, desktop only, code after. The Cards look (Cloud, brand blue, Outfit + Plus Jakarta, hairline panels, top bar, underlined controls, 13px corners, 1.25 spacing) and the Dashboard's budget bars (24px, label inside, blue/amber/red at fill 0.5) carry over locked. This is the Budgets half of F13 (grouping by top level).

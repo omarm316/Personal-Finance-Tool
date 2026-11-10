@@ -173,6 +173,13 @@ def _resolve_kind(rule_kind: str | None, t) -> str:
         return 'credit'          # a fee or interest refund
     if rule_kind == 'credit' and amount < 0:
         rule_kind = None         # "CREDIT" in a purchase descriptor isn't a statement credit
+    # A kind rule covers one direction (docs/cards-card-transactions-design.md):
+    # a purchase rule leaves the merchant's money back a refund, and a refund
+    # rule leaves its charges purchases.
+    if rule_kind == 'purchase' and amount > 0:
+        rule_kind = 'refund'
+    elif rule_kind == 'refund' and amount < 0:
+        rule_kind = 'purchase'
     if rule_kind:
         return rule_kind
     desc = (t.description_raw or '').upper()

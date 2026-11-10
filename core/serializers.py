@@ -259,6 +259,7 @@ def _serialize_challenge(c, eco=None, spend_override: float = None):
         'remaining_spend': remaining,
         'status': status,
         'is_active': c.is_active,
+        'is_archived': bool(getattr(c, 'is_archived', False)),
         'notes': c.notes,
         'currency': eco.currency_name if eco else 'Points',
         'your_cpp': eco.your_cpp if eco else 1.0,
