@@ -74,6 +74,19 @@ function setKey(k,y,m,v){if(k.startsWith('g:')){const t=k.slice(2);members(t,y).
 function hints(k){let s=0;for(let i=1;i<=3;i++){const[y,m]=shift(S.y,S.m,-i);s+=actOf(k,y,m)}const[py,pm]=shift(S.y,S.m,-1);return{last:actOf(k,py,pm),avg:Math.round(s/3)}}
 // Which top levels show their categories: what the viewer toggled, else the starting rule.
 function isOpen(g,p){if(S.open[g.cat]!==undefined)return S.open[g.cat];if(p.foldStart==='open')return true;if(p.foldStart==='over')return !!(g.over||(g.kids||[]).some(k=>k.over));return false}
+// With "Other", a top level's budget is the total and its own stored budget is the Other bucket.
+// Typing a total sets Other to the total minus the categories. Changing a category takes from Other,
+// so the total stays put; past zero, Other goes negative (shown red) or the total rises (gallery choice).
+function setBudget(k,m,n,p){
+  const y=S.y,w=p.saveMode==='batch'?setPend:setB;
+  if(p.selfName==='other'){
+    if(k.startsWith('g:')){const t=k.slice(2),subs=members(t,y).filter(c=>c!==t).reduce((s,c)=>s+getB(y,c,m),0);return w(y,t,m,n-subs)}
+    const t=topOf(k);
+    if(t!==k){const d=n-getB(y,k,m);w(y,k,m,n);let o=getB(y,t,m)-d;if(o<0&&p.overflow==='raise')o=Math.max(0,Math.min(getB(y,t,m),o));if(o<0&&p.overflow==='raise')o=0;return w(y,t,m,o)}
+  }
+  if(k.startsWith('g:'))return setKey(k,y,m,n);
+  return w(y,k,m,n);
+}
 const hasData=y=>!!S.blank[y]||names(y,false,false).length>0||names(y,true,false).length>0;
 
 function flags(r){
@@ -107,8 +120,12 @@ function unitsFor(rows,p,G=p.grouping,o=p.order){
   }
   return sortList(groupsOf(rows,p),o).map(g=>{
     if(g.solo&&!top){const r=g.kids[0];return{...r,key:r.cat,ek:r.cat}}
-    g.key='g:'+g.cat;g.ek=top?'g:'+g.cat:null;
-    g.kids=sortList(g.kids,o).map(k=>({...k,key:k.cat,ek:k.covered?null:k.cat}));
+    g.key='g:'+g.cat;g.ek=top||p.selfName==='other'?'g:'+g.cat:null;
+    // Other always shows under a top level, even when nothing sits in it yet (or only when used, per the gallery).
+    if(p.selfName==='other'&&!g.kids.some(k=>k.cat===g.cat))g.kids.push(flags({cat:g.cat,top:g.cat,inc:g.inc,budget:0,actual:0}));
+    if(p.selfName==='other'&&p.otherShow==='used')g.kids=g.kids.filter(k=>k.cat!==g.cat||Math.abs(k.budget)>.004||Math.abs(k.actual)>.004);
+    g.kids=sortList(g.kids,o).map(k=>({...k,key:k.cat,ek:k.covered||(p.selfName==='other'&&k.cat===g.cat)?null:k.cat,oth:p.selfName==='other'&&k.cat===g.cat}));
+    if(p.selfName==='other'&&!g.kids.some(k=>k.cat!==g.cat)){const r=g.kids[0]||g;return{...r,cat:g.cat,top:g.cat,key:g.cat,ek:g.cat,oth:false,isG:false}}
     return g});
 }
 const uKey=u=>u.isG||u.flatTop?'g:'+u.cat:u.cat;
@@ -181,7 +198,7 @@ const editingCtl=p=>S.view==='month'&&((S.editing&&p.editMonth==='column')||p.ed
 function budgetCtl(u,p){
   if(u.isNet)return sg(u.budget,m0);
   const k=u.ek,v=u.budget;
-  if(!k||u.isTot)return v?m0(v):'<span class="mut0">—</span>';
+  if(!k||u.isTot)return v<-.5?`<span class="bad" title="The categories' budgets are more than the total">${m0(v)}</span>`:v?m0(v):'<span class="mut0">—</span>';
   if(S.view==='month'&&S.editing&&p.editMonth==='column'){
     const h=p.hints!=='none'?hints(k):null,val=S.edits[k]!=null?S.edits[k]:fv(v);
     const chips=p.hints==='chips'?`<span class="chips"><button type="button" class="chip" data-chip="${esc(k)}" data-v="${Math.max(0,Math.round(h.last))}">Last mo ${m0(Math.max(0,h.last))}</button><button type="button" class="chip" data-chip="${esc(k)}" data-v="${Math.max(0,h.avg)}">3-mo ${m0(Math.max(0,h.avg))}</button></span>`:'';
@@ -196,8 +213,8 @@ function nameCell(u,p,it){
   const fold=it.grp&&p.grouping==='fold',open=isOpen(u,p)||(S.editing&&p.editMonth==='column'&&S.view==='month');
   const caret=fold?`<button type="button" class="car ${open?'on':''}" data-fold="${esc(u.cat)}" aria-label="${open?'Hide':'Show'} the categories in ${esc(u.cat)}" aria-expanded="${open}">▸</button>`:'';
   const cnt=fold&&!open?`<span class="cnt">${u.kids.length}</span>`:'';
-  const self=it.lvl&&u.cat===u.top&&p.selfName==='general';
-  return `<span class="nm">${caret}<span class="tx">${self?'General':flat?catLabel(u.cat):esc(u.cat)}</span>${cnt}</span>`;
+  const self=it.lvl&&u.cat===u.top&&p.selfName!=='same';
+  return `<span class="nm">${caret}<span class="tx ${self&&p.selfName==='other'?'oth':''}">${self?(p.selfName==='other'?'Other':'General'):flat?catLabel(u.cat):esc(u.cat)}</span>${cnt}</span>`;
 }
 
 /* ── Month view ───────────────────────────────────────────── */
@@ -433,8 +450,9 @@ function ytdHtml(p){
 function editYearGrid(p){
   const y=S.y,sp=p.gridSpent||'hover';
   const head=`<div class="yr head"><span class="yn">Category</span>${MON.map((l,i)=>`<span class="${isCur(y,i+1)?'cur':''} ${isLocked(y,i+1)?'lkh':''}">${l}${isLocked(y,i+1)?LOCK:''}</span>`).join('')}<span class="ytot">Total</span></div>`;
-  const row=(label,k,cls='')=>{let tot=0,ta=0;
-    const cells=ALL12.map(m=>{const b=getB(y,k,m),a=getA(y,k,m),show=b?sx(b,p):'',spent=Math.abs(a)>=.5?m2(a):'nothing';tot+=b;ta+=a;
+  const row=(label,k,cls='',ro=false)=>{let tot=0,ta=0;
+    const cells=ALL12.map(m=>{const b=budgetOf(k,y,m),a=actOf(k,y,m),show=b<-.5?'−'+sx(-b,p):b?sx(b,p):'',spent=Math.abs(a)>=.5?m2(a):'nothing';tot+=b;ta+=a;
+      if(ro)return `<span class="scw ${isCur(y,m)?'cur':''} ${hv(p,show)}"><span class="lkc oth ${b<-.5?'bad':''}" title="Other: the total minus its categories">${show}</span></span>`;
       return `<span class="scw ${isCur(y,m)?'cur':''} ${hv(p,show)}">${sheetCell(k,m,{show,raw:fv(b),label:`${k}, ${MON[m-1]} budget`,title:sp==='hover'?`${k}, ${MON[m-1]}: budget ${b?m2(b):'none'} · spent ${spent}`:undefined,fx:`${k} · ${MON[m-1]} ${y} budget`,fxs:`Spent ${spent}`,g:'grid',col:m,row:k,ph:''})}${sp==='line'?`<small class="act" title="Spent in ${MON[m-1]}">${Math.abs(a)>=.5?sx(a,p,{credit:true}):'&nbsp;'}</small>`:''}</span>`}).join('');
     const t=sx(tot,p,{zero:true});
     const out=`<div class="yr sh gr ${cls} ${sp==='line'?'l2':''}"><span class="yn">${label}</span>${cells}<span class="ytot ${hv(p,t)}">${t}</span></div>`;
@@ -448,8 +466,11 @@ function editYearGrid(p){
   const sect=(label,inc)=>{const rows=rowsFor(y,ALL12,inc,true),out=[`<div class="sec">${label}</div>`];
     [...new Set(rows.map(r=>r.top))].forEach(t=>{const rs=rows.filter(r=>r.top===t);
       if(rs.length===1&&rs[0].cat===t){out.push(row(esc(t),t));return}
-      out.push(sum(esc(t),rs.map(r=>r.cat),'grp'));
-      rs.forEach(r=>out.push(row(r.cat===t&&p.selfName==='general'?'General':esc(r.cat),r.cat,'kid')))});
+      if(!p.selfName==='other'){out.push(sum(esc(t),rs.map(r=>r.cat),'grp'));rs.forEach(r=>out.push(row(r.cat===t&&p.selfName==='general'?'General':esc(r.cat),r.cat,'kid')));return}
+      out.push(row(esc(t),'g:'+t,'grp tgrp'));
+      const self=rs.find(r=>r.cat===t),oth=row('Other',t,'kid othr',true);
+      if(p.otherShow!=='used'||self)out.push(oth);
+      rs.filter(r=>r.cat!==t).forEach(r=>out.push(row(esc(r.cat),r.cat,'kid')))});
     out.push(sum(`Total ${label.toLowerCase()}`,rows.map(r=>r.cat),'tot'));
     return out.join('')};
   return `<div class="yscroll xlw"><div class="yg xl">${head}${sect('Income',true)}${sect('Expenses',false)}</div></div>`;
@@ -654,113 +675,49 @@ function start(kind){
 }
 
 Gallery.define({
-  id:'budgets-r2',
-  name:'Budgets, round 2 (Annual view as a sheet)',
+  id:'budgets-r3',
+  name:'Budgets, round 3',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'xls',label:'Annual view: the sheet',open:true,controls:[
-    {id:'sheetHead',label:'Column headers',type:'choice',options:[
-      {id:'excel',label:'Grey header cells, like Excel'},
-      {id:'labels',label:'Small capitals, like the other pages'},
+   {id:'other',label:'Top-level budgets and Other',open:true,controls:[
+    {id:'overflow',label:'When the categories\' budgets add up to more than the total',type:'choice',options:[
+      {id:'negative',label:'Other goes negative, in red',hint:'The total stays what you typed; the red Other shows the gap.'},
+      {id:'raise',label:'The total rises to cover them',hint:'Other stops at zero.'},
     ]},
-    {id:'gridColor',label:'Gridlines',type:'choice',options:[
-      {id:'excel',label:'Excel grey',swatches:['#D4D4D4']},
-      {id:'hair',label:'The app\'s fainter hairline'},
-    ]},
-    {id:'rowH',label:'Row height',type:'slider',min:18,max:32,step:1,default:22,unit:'px'},
-    {id:'cellPad',label:'Padding inside cells',type:'slider',min:0,max:12,step:1,default:5,unit:'px'},
-    {id:'numFmt',label:'Numbers',type:'choice',options:[
-      {id:'dollar',label:'$1,200'},
-      {id:'plain',label:'1,200, no dollar sign'},
-      {id:'acct',label:'Accounting: $ at the left edge, credits in brackets'},
-    ]},
-    {id:'totalsStyle',label:'Total rows',type:'choice',options:[
-      {id:'acct',label:'Bold, a line above and a double line below'},
-      {id:'grey',label:'Bold on grey'},
-    ]},
-    {id:'selColor',label:'Selected cell',type:'choice',options:[
-      {id:'green',label:'Excel green box',swatches:['#217346']},
-      {id:'blue',label:'The app\'s blue box',swatches:['#2563EB']},
-    ]},
-    {id:'freeze',label:'Keep the month headers in view while scrolling',type:'toggle',default:true},
-    {id:'fxBar',label:'A bar above the sheet naming the selected cell, like Excel\'s formula bar',type:'toggle',default:false},
-    {id:'sheetSummary',label:'Above the sheet',type:'choice',options:[
-      {id:'line',label:'One line of year totals',hint:'Gives the sheet the room the four cards take.'},
-      {id:'cards',label:'The four summary cards, as picked'},
-      {id:'none',label:'Nothing'},
-    ]},
-    {id:'sheetWidth',label:'Sheet width',type:'choice',options:[
-      {id:'margins',label:'Inside the page margins'},
-      {id:'edge',label:'Edge to edge'},
+    {id:'otherShow',label:'The Other row',type:'choice',options:[
+      {id:'always',label:'Under every top level, even at zero'},
+      {id:'used',label:'Only when it has a budget or spending'},
     ]},
    ]},
-   {id:'year',label:'Year view: the heat map',open:true,controls:[
-    {id:'cfStart',label:'Conditional formatting starts on (the switch above the sheet turns it off and on)',type:'toggle',default:true},
-    {id:'heatScale',label:'Color scale',type:'choice',options:[
-      {id:'smooth',label:'Smooth red, white, green',hint:'White on budget; deeper green the further under, deeper red the further over. Whole dollars, no percent.'},
-      {id:'steps',label:'Four steps',hint:'White when close to budget, then light, medium and full color.'},
-    ]},
-    {id:'heatFull',label:'Full color at this far from budget',type:'slider',min:25,max:100,step:5,default:50,unit:'%'},
-    {id:'heatNoBudget',label:'Spending with no budget',type:'choice',options:[
-      {id:'none',label:'No color'},
-      {id:'grey',label:'Grey'},
-      {id:'red',label:'Red, like over budget'},
-    ]},
-    {id:'heatNow',label:'The current month',type:'choice',options:[
-      {id:'full',label:'Against the whole month\'s budget',hint:'Early in a month most cells show green.'},
-      {id:'pace',label:'Against the share of the month gone',hint:'On day 7 of 30, spending 23% of a budget shows white.'},
-    ]},
-    {id:'heatFuture',label:'Months to come',type:'choice',options:[
-      {id:'grey',label:'Their budget, in grey'},
-      {id:'blank',label:'Blank'},
-    ]},
-    {id:'heatEdit',label:'Clicking a month in the heat map',type:'choice',options:[
-      {id:'edit',label:'Changes that month\'s budget in the cell',hint:'The cell shows the budget while you type, then goes back to the amount spent.'},
-      {id:'panel',label:'Opens the category\'s side panel'},
-      {id:'none',label:'Nothing; budgets change in Edit Year'},
-    ]},
-   ]},
-   {id:'sheet',label:'Editing like a spreadsheet',open:true,controls:[
+   {id:'round2',label:'Decided in round 2',open:false,controls:[
+    {id:'sheetHead',label:'Column headers',type:'choice',locked:true,options:[{id:'labels',label:'Small capitals, like the other pages'}]},
+    {id:'gridColor',label:'Gridlines',type:'choice',locked:true,options:[{id:'excel',label:'Excel grey'}]},
+    {id:'rowH',label:'Row height',type:'slider',locked:true,min:0,max:100,step:1,default:28,unit:'px'},
+    {id:'cellPad',label:'Padding inside cells',type:'slider',locked:true,min:0,max:100,step:1,default:7,unit:'px'},
+    {id:'numFmt',label:'Numbers',type:'choice',locked:true,options:[{id:'plain',label:'1,200, no dollar sign'}]},
+    {id:'totalsStyle',label:'Total rows',type:'choice',locked:true,options:[{id:'acct',label:'Bold, a line above and a double line below'}]},
+    {id:'selColor',label:'Selected cell',type:'choice',locked:true,options:[{id:'blue',label:"The app's blue box"}]},
+    {id:'freeze',label:'Keep the month headers in view while scrolling',type:'toggle',locked:true,default:true},
+    {id:'fxBar',label:'Formula bar above the sheet',type:'toggle',locked:true,default:false},
+    {id:'sheetSummary',label:'Above the sheet',type:'choice',locked:true,options:[{id:'cards',label:'The four summary cards'}]},
+    {id:'sheetWidth',label:'Sheet width',type:'choice',locked:true,options:[{id:'margins',label:'Inside the page margins'}]},
+    {id:'cfStart',label:'Conditional formatting starts on',type:'toggle',locked:true,default:true},
+    {id:'heatScale',label:'Color scale',type:'choice',locked:true,options:[{id:'smooth',label:'Smooth red, white, green'}]},
+    {id:'heatFull',label:'Full color at this far from budget',type:'slider',locked:true,min:0,max:100,step:1,default:60,unit:'%'},
+    {id:'heatNoBudget',label:'Spending with no budget',type:'choice',locked:true,options:[{id:'red',label:'Red, like over budget'}]},
+    {id:'heatNow',label:'The current month',type:'choice',locked:true,options:[{id:'full',label:"Against the whole month's budget"}]},
+    {id:'heatFuture',label:'Months to come',type:'choice',locked:true,options:[{id:'grey',label:'Their budget, in grey'}]},
+    {id:'heatEdit',label:'Clicking a month in the heat map',type:'choice',locked:true,options:[{id:'edit',label:"Changes that month's budget in the cell"}]},
     {id:'lockPast',label:'Past months',type:'choice',locked:true,options:[{id:'locked',label:'Locked for editing; a switch above the grid unlocks them'}]},
-    {id:'monthCells',label:'Budget column in the Month view',type:'choice',options:[
-      {id:'excel',label:'Spreadsheet cells: thin borders, no padding'},
-      {id:'plain',label:'Plain until hovered (round 2)'},
-    ]},
-    {id:'enterKey',label:'Enter',type:'choice',options:[
-      {id:'down',label:'Saves and moves down, like Excel'},
-      {id:'stay',label:'Saves and stays'},
-    ]},
-    {id:'saveMode',label:'Saving',type:'choice',options:[
-      {id:'cell',label:'Each cell saves as you leave it'},
-      {id:'batch',label:'Save and Cancel for all changes; changed cells marked'},
-    ]},
-    {id:'pasteMode',label:'Pasting from Excel',type:'choice',options:[
-      {id:'both',label:'Paste window, and straight into the cells'},
-      {id:'cells',label:'Straight into the cells only',hint:'Copy a block in Excel, click the first cell, paste. The Paste from Excel button goes away.'},
-      {id:'window',label:'Paste window only, as today'},
-    ]},
-    {id:'yearBudget',label:'Where the year\'s budgets are edited',type:'choice',options:[
-      {id:'tab',label:'Edit Year tab, as picked'},
-      {id:'switch',label:'Annual view switches between Spent and Budgets',hint:'No separate tab: the switch sits above the grid.'},
-      {id:'sheets',label:'Sheet tabs under the grid, like Excel: Spent and Budgets'},
-    ]},
-    {id:'gridSpent',label:'Spending in the budgets sheet',type:'choice',options:[
-      {id:'hover',label:'On hover only',hint:'Keeps every row one line high.'},
-      {id:'row',label:'A grey row under each category'},
-      {id:'line',label:'A small second line in each cell (round 2)'},
-    ]},
-    {id:'drawerEdit',label:'The category\'s 12 monthly budgets in the side panel',type:'toggle',default:false},
-   ]},
-   {id:'month',label:'Month view',open:true,controls:[
-    {id:'foldStart',label:'Top levels start',type:'choice',options:[
-      {id:'closed',label:'Closed'},
-      {id:'over',label:'Open when something inside is over budget'},
-      {id:'open',label:'Open'},
-    ]},
-    {id:'selfName',label:'A top level\'s own budget row',type:'choice',options:[
-      {id:'same',label:'Its own name again',hint:'Housing ▸ Housing, Utilities, HOA…'},
-      {id:'general',label:'Called "General"',hint:'Housing ▸ General, Utilities, HOA…'},
-    ]},
+    {id:'monthCells',label:'Budget column in the Month view',type:'choice',locked:true,options:[{id:'excel',label:'Spreadsheet cells: thin borders, no padding'}]},
+    {id:'enterKey',label:'Enter',type:'choice',locked:true,options:[{id:'stay',label:'Saves and stays'}]},
+    {id:'saveMode',label:'Saving',type:'choice',locked:true,options:[{id:'cell',label:'Each cell saves as you leave it'}]},
+    {id:'pasteMode',label:'Pasting from Excel',type:'choice',locked:true,options:[{id:'cells',label:'Straight into the cells only'}]},
+    {id:'yearBudget',label:"Where the year's budgets are edited",type:'choice',locked:true,options:[{id:'tab',label:'Edit Year tab'}]},
+    {id:'gridSpent',label:'Spending in the budgets sheet',type:'choice',locked:true,options:[{id:'hover',label:'On hover only'}]},
+    {id:'drawerEdit',label:"The category's 12 monthly budgets in the side panel",type:'toggle',locked:true,default:false},
+    {id:'foldStart',label:'Top levels start',type:'choice',locked:true,options:[{id:'closed',label:'Closed'}]},
+    {id:'selfName',label:"A top level's own budget",type:'choice',locked:true,options:[{id:'other',label:'"Other": the top level holds the total; Other is what its categories don\'t claim'}]},
    ]},
    {id:'round1',label:'Decided in round 1',open:false,controls:[
     {id:'header',label:'Header',type:'choice',locked:true,options:[{id:'bar',label:'Slim bar, like the Dashboard'}]},
@@ -866,7 +823,7 @@ Gallery.define({
     let moving=false;
     const kOf=i=>({g:i.dataset.g,k:i.dataset.sk,m:i.dataset.sm});
     const cellsIn=g=>[...app.querySelectorAll('input.sc')].filter(x=>x.dataset.g===g);
-    const save=(k,m,n)=>(p.saveMode==='batch'?setPend:setB)(S.y,k,m,n);
+    const save=(k,m,n)=>setBudget(k,m,n,p);
     const commitCell=i=>{const raw=i.dataset.raw,v=i.value.trim();if(v===raw)return false;
       const t=v.replace(/[$,\s]/g,''),n=t===''?0:Number(t);
       if(!isFinite(n)||n<0){i.value=raw;return false}
@@ -1414,6 +1371,13 @@ Gallery.define({
 #pv .r .c-budget .lkc{color:var(--tx3)}
 #pv[data-monthCells=excel] .lst .r>.c-budget:has(>.lkc){background:color-mix(in srgb,var(--tx3) 6%,var(--surface))}
 #pv .db-c>.lkc{border:1px solid var(--gl);padding:3px 6px;font-size:12.5px;color:var(--tx3);background:color-mix(in srgb,var(--tx3) 6%,var(--surface))}
+/* Round 3: Other */
+#pv .nm .tx.oth{font-style:italic;color:var(--tx3)}
+#pv .xl .yr.sh.tgrp,#pv .xl .yr.sh.tgrp>.yn{background:var(--raised)}
+#pv .xl .yr.sh.tgrp>span{font-weight:600}
+#pv .xl .yr.othr>.yn{font-style:italic;color:var(--tx3)}
+#pv .xl .scw>.lkc.oth{align-self:stretch;padding:var(--cpy) var(--cpx);color:var(--tx3);font-style:italic}
+#pv .xl .scw>.lkc.oth.bad{color:var(--bad);font-weight:600}
 #pv .toast{position:sticky;bottom:18px;justify-self:center;background:var(--tx);color:var(--surface);padding:9px 16px;border-radius:9px;font-size:13px;z-index:60;max-width:90%;box-shadow:0 8px 24px rgba(15,23,42,.2)}
 `
 });
