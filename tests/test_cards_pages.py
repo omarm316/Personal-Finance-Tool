@@ -156,6 +156,12 @@ class TestActions:
         assert c.is_active is False and c.close_date.date() == TODAY
         assert client.get('/api/cards/actions').json()['at_risk'] == []
         assert client.get('/api/cards/wallet').json() == []
+        # Reopen (Card Management): back on the row and in the strip.
+        assert client.patch(f'/api/cards/{c.id}', json={'is_active': True, 'close_date': None}).status_code == 200
+        db.refresh(c)
+        assert c.is_active is True and c.close_date is None
+        assert len(client.get('/api/cards/wallet').json()) == 1
+        assert len(client.get('/api/cards/actions').json()['at_risk']) == 1
 
 
 # ── Challenge archive ────────────────────────────────────────────────────────

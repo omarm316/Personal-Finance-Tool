@@ -121,7 +121,7 @@ export function CloseCardPanel({card,name,onClose,onSaved,toast}){
   return(<SidePanel label="Mark card as closed" onClose={onClose} footer={<Foot onCancel={onClose} onSave={save} busy={busy} label="Mark as closed" danger/>}>
     <div className="cds-box bad"><b>{name}</b><span>It leaves Portfolio, its program’s page and the Actions strip, and its credits and challenges stop counting.</span></div>
     <label className="c-fld"><span>Closed on</span><input type="date" className="c-inp" value={day} onChange={e=>setDay(e.target.value)} data-autofocus/></label>
-    <p className="cds-mut">Its transactions, points and history stay as they are, and Card Management still lists it under Show inactive.</p>
+    <p className="cds-mut">Its transactions, points and history stay as they are, and Card Management can reopen it (Show inactive, then Reopen).</p>
   </SidePanel>);
 }
 

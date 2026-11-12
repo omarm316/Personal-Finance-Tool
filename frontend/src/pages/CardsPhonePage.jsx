@@ -159,6 +159,11 @@ export function CardsPhonePage({toast,refreshKey,forcedTab}){
     }catch(e){toast('Failed to save','error');}
   };
 
+  const reopen=async(card)=>{
+    try{await apiFetch(`/cards/${card.id}`,{method:'PATCH',body:JSON.stringify({is_active:true,close_date:null})});
+      await load();toast(`${card.card_name||'Card'} reopened`);}
+    catch(e){toast('Could not reopen it','error');}
+  };
   const networkColor={VISA:'#1a1f71',AMEX:'#016FD0',MC:'#EB001B',DISCOVER:'#FF6600'};
 
   // Account detail takes highest priority
@@ -358,7 +363,11 @@ export function CardsPhonePage({toast,refreshKey,forcedTab}){
                           :<span style={{color:'var(--text-muted)',fontSize:11}}>Not linked</span>}
                       </td>
                       <td style={{fontSize:12,color:c.primary_user?'var(--text-primary)':'var(--text-muted)'}}>{c.primary_user||'Shared'}</td>
-                      <td onClick={e=>e.stopPropagation()}><button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button></td>
+                      <td onClick={e=>e.stopPropagation()}><div style={{display:'flex',gap:4}}>
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Edit</button>
+                        {/* A card marked closed (Card page ⋯ menu) comes back here. */}
+                        {!c.is_active&&<button type="button" className="btn btn-sm btn-ghost" onClick={(e)=>{e.stopPropagation();reopen(c);}}>Reopen</button>}
+                      </div></td>
                     </>}
                   </tr>
                 ))}</tbody>
