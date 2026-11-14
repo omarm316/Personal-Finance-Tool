@@ -675,19 +675,13 @@ function start(kind){
 }
 
 Gallery.define({
-  id:'budgets-r3',
-  name:'Budgets, round 3',
+  id:'budgets-final',
+  name:'Budgets, final design',
   fonts:['https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'],
   groups:[
-   {id:'other',label:'Top-level budgets and Other',open:true,controls:[
-    {id:'overflow',label:'When the categories\' budgets add up to more than the total',type:'choice',options:[
-      {id:'negative',label:'Other goes negative, in red',hint:'The total stays what you typed; the red Other shows the gap.'},
-      {id:'raise',label:'The total rises to cover them',hint:'Other stops at zero.'},
-    ]},
-    {id:'otherShow',label:'The Other row',type:'choice',options:[
-      {id:'always',label:'Under every top level, even at zero'},
-      {id:'used',label:'Only when it has a budget or spending'},
-    ]},
+   {id:'round3',label:'Decided in round 3',open:true,controls:[
+    {id:'overflow',label:'When the categories\' budgets add up to more than the total',type:'choice',locked:true,options:[{id:'raise',label:'The total rises to cover them'}]},
+    {id:'otherShow',label:'The Other row',type:'choice',locked:true,options:[{id:'always',label:'Under every top level, even at zero'}]},
    ]},
    {id:'round2',label:'Decided in round 2',open:false,controls:[
     {id:'sheetHead',label:'Column headers',type:'choice',locked:true,options:[{id:'labels',label:'Small capitals, like the other pages'}]},
