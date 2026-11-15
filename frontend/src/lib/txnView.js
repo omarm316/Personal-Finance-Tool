@@ -30,4 +30,12 @@ export const ENRICH_LABEL={llm:'AI',rule:'Rule',override:'Manual override',fallb
 export const FRESH_START='2027-01-01';
 export const is2027=t=>ymd(t.date)>=FRESH_START;
 export const KINDS=[['purchase','Purchase'],['refund','Refund'],['fee','Fee'],['interest','Interest'],['credit','Credit'],['payment','Payment'],['p2p','Person to person'],['adjustment','Adjustment']];
+/* The kinds that fit an amount (PATCH /api/transactions/{id} refuses the rest):
+   a charge is a purchase, fee, interest or P2P; money back is a refund or
+   credit. Payment and Adjustment stay offered only where the engine set them. */
+export const kindsFor=(amount,current)=>{
+  const fit=(amount||0)<0?['purchase','fee','interest','p2p']:['refund','credit'];
+  if(current&&!fit.includes(current))fit.push(current);
+  return KINDS.filter(([k])=>fit.includes(k));
+};
 export const kindLabel=k=>(KINDS.find(x=>x[0]===k)||[null,k])[1];

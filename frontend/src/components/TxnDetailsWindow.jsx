@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {CIcon} from './ui/CIcon';
 import {Window} from './ui/Window';
 import {catLabel} from '../lib/categories';
-import {ENRICH_LABEL,IMPORT_LABEL,is2027,isBudget,KINDS,kindLabel,longDate,signed} from '../lib/txnView';
+import {ENRICH_LABEL,IMPORT_LABEL,is2027,isBudget,kindsFor,kindLabel,longDate,signed} from '../lib/txnView';
 
 const typeOf=t=>t.action_display||t.action;
 const nameOf=t=>t.description_display||t.description_raw||'';
@@ -82,7 +82,7 @@ function CardEarning({t,lists,onSave,toast}){
           {d?(r27
               ?<select className="c-sel" aria-label="Kind" value={d.kind} onChange={e=>setD({...d,kind:e.target.value})}>
                 {!d.kind&&<option value="" disabled>Not set</option>}
-                {KINDS.map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                {kindsFor(t.amount,t.txn_kind).map(([k,l])=><option key={k} value={k}>{l}</option>)}
               </select>
               :<select className="c-sel" aria-label="Kind" {...off}><option>—</option></select>)
             :r27&&t.txn_kind?<b>{kindLabel(t.txn_kind)}</b>:dash}

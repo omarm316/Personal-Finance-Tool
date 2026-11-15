@@ -152,4 +152,4 @@ Checked 2026-11-07 against the Actions strip (`docs/cards-actions-design.md`), t
 3. **Pending charges:** the sync skips them today. Showing them needs the sync to store pending rows apart and replace each one when it posts.
 4. **Column width** (checked at build: at a 1440px window the main column is about 780px; merchant names still truncate, with the bank text on hover): the main column is about 656px at the gallery's width. With Spender and Type always shown, merchant names truncate early; check at build.
 5. ~~**The banner's annual-fee tile** nets the personal category Fees & Interest.~~ Moved to the Fee and Credit types on 2026-11-10.
-6. **Kinds by sign:** `PATCH /api/transactions/{id}` now refuses a kind that doesn't fit the amount (2026-11-10). The Transactions page's Kind dropdown still offers all eight; list the same kinds there in its own session.
+6. **Kinds by sign:** `PATCH /api/transactions/{id}` now refuses a kind that doesn't fit the amount (2026-11-10). The Transactions page's details window lists the same kinds since 2026-11-15 (`kindsFor` in `frontend/src/lib/txnView.js`).
