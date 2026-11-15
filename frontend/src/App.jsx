@@ -133,7 +133,7 @@ export function App(){
           <PullToRefreshIndicator pullY={pullY} ptrState={ptrState}/>
           {page==='dashboard'&&<DashboardPage categories={categories} toast={toast} setPage={setPage} refreshKey={refreshKey}/>}
           {page==='transactions'&&<TransactionsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
-          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast} refreshKey={refreshKey}/>}
+          {page==='budgets'&&<BudgetsPage categories={categories} toast={toast} setPage={setPage} refreshKey={refreshKey}/>}
           {page==='cashflow'&&<DailyBalancesPage toast={toast} refreshKey={refreshKey}/>}
           {page==='cashplanner'&&<CashFlowPage toast={toast} refreshKey={refreshKey}/>}
           {page==='networth'&&<NetWorthPage toast={toast} refreshKey={refreshKey}/>}

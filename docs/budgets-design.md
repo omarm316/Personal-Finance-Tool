@@ -1,6 +1,6 @@
 # Budgets page design
 
-Chosen with the design gallery (rounds 1–3, 2026-11-05 to 2026-11-14). Desktop approved; not yet implemented. Phone design is a separate, later exercise.
+Chosen with the design gallery (rounds 1–3, 2026-11-05 to 2026-11-14). Desktop approved and **built 2026-11-15** (see "Built" at the end). Phone design is a separate, later exercise.
 Source spec: `mockups/design-gallery/budgets.spec.js` (id `budgets-final`). Final rendering with real figures: https://claude.ai/artifact/6HktA4vxaD62hYaYdu8rGV
 Replaces the layout of today's `frontend/src/pages/BudgetsPage.jsx`. This is the Budgets half of F13 (grouping by top level). Behavior stays as today unless a section below says otherwise.
 
@@ -85,5 +85,13 @@ In the Annual view they cover the year: the full-year budget, with actual so far
 
 ## Open for the build
 - **APIs:** `/api/budget/targets` and `/api/budget/actuals` (with `top_levels`) cover the figures. Editing totals needs the write rule above: the total minus the categories goes to the top level's own target, and when categories exceed the total, the top level's own target is 0.
-- **Locking:** past-month locking is a front-end rule. Decide whether the API should also refuse past-month writes unless unlocked.
+- **Locking:** past-month locking is a front-end rule. Decide whether the API should also refuse past-month writes unless unlocked. (Built as a front-end rule only.)
 - **Data:** the gallery used data pulled 2026-11-08 without the duplicate Amex accounts (since cleaned up, B41).
+
+## Built (2026-11-15)
+- **Files:** `frontend/src/pages/BudgetsPage.jsx` picks `pages/budgets/BudgetsDesktop.jsx` or `BudgetsPhonePage.jsx` (today's page, renamed; phones keep it). Desktop: `BudgetsDesktop.jsx` (header, cards, toolbars, saving), `MonthView.jsx`, `YearSheets.jsx` (the heat map and the budgets sheet), `BudgetPanel.jsx`, `budgets.css`. The figures and the Other rule live in `frontend/src/lib/budgetData.js`; the spreadsheet cell is `frontend/src/components/ui/SheetCell.jsx`, ready for other pages' grids.
+- **No API change.** The page applies the Other rule itself (`applyCells`) and writes the category and its top level through `POST /api/budget/targets/bulk`, one request at a time in order. Other rows are never written.
+- **Locking stays a front-end rule.** The API takes past-month writes as before (the open question above, left as is).
+- **Other's spending** is what is booked on the top level itself plus its categories with no budget that month, so such a category's spending shows on its own row and again in Other. The top level's total counts it once.
+- **Side panel:** a column beside the table (as in the gallery), not an overlay; Other rows open it too. "N more in Transactions →" opens the Transactions page.
+- **Checks:** `node docs/budget_model_check.mjs` (15 checks on made-up figures, no database). In the browser on a SQLite copy of production (2025–2026 transactions, categories, budgets): typing a total, a category (Utilities 400 → 600 kept Housing at $1,950 and moved Other from $1,100 to $900), Tab, Shift+Tab, arrows, Enter, Escape, pasting a 2×2 block, locked October and its switch, the heat map's cell edit with its caption, Copy from 2026 into 2027, the side panel, light and dark, and a 1024px window with the panel open (the Month table drops its bars).

@@ -1,7 +1,7 @@
 # Moresheth — Current Plan
 
 > Updated each session. Tracks what we're actively working on and next steps.
-> Last updated: 2026-11-10
+> Last updated: 2026-11-15
 
 ---
 
@@ -9,6 +9,14 @@
 > [docs/archive/PLAN-sessions-through-2026-07-26.md](docs/archive/PLAN-sessions-through-2026-07-26.md).
 
 ---
+
+## Session 2026-11-15 — Budgets page built on desktop
+
+The Budgets page is built to `docs/budgets-design.md` (its "Built" section has the details). Phones keep today's page (`BudgetsPhonePage.jsx`).
+- **Frontend:** `pages/BudgetsPage.jsx` picks `pages/budgets/BudgetsDesktop.jsx`; `MonthView.jsx`, `YearSheets.jsx`, `BudgetPanel.jsx`, `budgets.css`. Figures and the Other rule in `lib/budgetData.js`; the reusable spreadsheet cell in `components/ui/SheetCell.jsx` (Tab, Shift+Tab, arrows, Enter saves and stays, Escape, paste a block from Excel). App passes `setPage` to Budgets for "more in Transactions".
+- **Backend:** none. Edits go through `POST /api/budget/targets/bulk`, queued in order; the page computes Other.
+- **Checked:** `node docs/budget_model_check.mjs` (15 checks). Browser on a SQLite copy of production (launch configs `budgets-api` on 8016, `budgets-web` on 5185; the seed script copied categories, accounts, budgets and 2025–2026 transactions read-only): Month, Annual and Edit Year views, editing, pasting, locking, Copy from 2026 into 2027, the side panel, light and dark, 1024px with the panel open.
+- **Open:** whether the API should refuse past-month writes (front-end rule only for now); phone design.
 
 ## Session 2026-11-10 — Cards step 5: Portfolio, Ecosystem and Card pages rebuilt on desktop
 
