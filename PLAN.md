@@ -39,7 +39,7 @@ Omer gave the go-ahead on the 2026-11-09 finding (below).
 - **Next for Omer:**
   - The CWT $8,823.39 category (Travel, or Work if reimbursed).
   - + Add Account on American Express (Omer) for HY Savings 1820 only, selecting every account.
-  - Whether to set Platinum 1008's starting balance to −$11,366.14. It's $203.48 off Plaid now, from an old anchor, and its rows match Plaid exactly.
+- **2026-11-15:** Platinum 1008's starting balance changed from −$11,569.62 to −$11,366.14 (Omer's go-ahead), so its balance now equals Plaid's −$11.15. Its rows still matched Plaid row for row that day. Snapshots rebuilt.
 
 ---
 
